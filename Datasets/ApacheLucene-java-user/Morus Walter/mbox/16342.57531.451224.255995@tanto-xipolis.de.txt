@@ -1,0 +1,201 @@
+FROM: Morus Walter <morus.wal...@tanto-xipolis.de>
+SUBJECT: Re: Query Parser AND / OR
+DATE: 10 Dec 2003
+
+Hi Dror,
+
+thanks for your answer.
+> > 
+> > I'm having problems understanding query parsers handling of AND and OR
+> > if there's more than one operator.
+> > 
+> > E.g.
+> > a OR b AND c 
+> > gives the same number of hits as
+> > b AND c
+> > (only scores are different)
+> 
+> This would make sense if all the document that have a also have both B
+> and C in them.
+> 
+Then the query should be equivalent to (a OR b) AND c.
+But it isn't. For specific a, b and c I get 766 hits for a OR b AND c
+and 1086 for (a OR b) AND c.
+
+> > 
+> > and 
+> > a AND b OR c AND d
+> > seems to be equivalent to
+> > a AND b AND C AND d
+> > 
+> 
+> That's not what I get. 
+> http://www.fastbuzz.com/search/results.jsp?query=dean+AND+kerry+AND+clark+AND+gephardt&days=
+> returns 479 items
+> but
+> http://www.fastbuzz.com/search/results.jsp?query=dean+AND+kerry+OR+clark+AND+gephardt&days=
+> returns 564 items which indicates that the OR does make a difference.
+> As expcted, you end up getting more items with the OR.
+> 
+Hmm. I was sloppy not specifying the lucene version.
+My tests were on 1.2.
+But I reindex a part of my documents using 1.3rc3 and find the same.
+What version does fastbuzz use?
+
+I wrote s small test programm indexing all documents consisting of
+one or zero occurences of a, b, c and d (ignoring order, so without
+the empty document, that's just 15 docs) and performing some queries
+on it.
+Programm see below, this is what I get:
+
+a OR b AND c -> a +b +c
+      4 documents found
+        a b c
+        a b c d
+        b c
+        b c d
+(a OR b) AND c -> +(a b) +c
+      6 documents found
+        a b c
+        a b c d
+        a c
+        b c
+        a c d
+        b c d
+a OR (b AND c) -> a (+b +c)
+      10 documents found
+        a b c
+        a b c d
+        b c
+        a
+        b c d
+        a b
+        a c
+        a d
+        a b d
+        a c d
+b AND c -> +b +c
+      4 documents found
+        b c
+        a b c
+        b c d
+        a b c d
+a AND b OR c AND d -> +a +b +c +d
+      1 documents found
+        a b c d
+(a AND b) OR (c AND d) -> (+a +b) (+c +d)
+      7 documents found
+        a b c d
+        a b
+        c d
+        a b c
+        a b d
+        a c d
+        b c d
+a AND (b OR c) AND d -> +a +(b c) +d
+      3 documents found
+        a b c d
+        a b d
+        a c d
+((a AND b) OR c) AND d -> +((+a +b) c) +d
+      5 documents found
+        a b c d
+        a b d
+        c d
+        a c d
+        b c d
+a AND (b OR (c AND d)) -> +a +(b (+c +d))
+      5 documents found
+        a b c d
+        a c d
+        a b
+        a b c
+        a b d
+a AND b AND c AND d -> +a +b +c +d
+      1 documents found
+        a b c d
+
+Using 1.3rc3, 1.3rc2 or 1.3rc1; I get the same results with a slightly 
+different order for 1.2.
+
+So I still get the same for 
+a OR b AND c  and  b AND c
+and
+a AND b OR c AND d  and  a AND b AND c AND d
+(note, that the result of the toString method of the query is equal in
+both cases) 
+but different results for any operator grouping, I can think of.
+So to me, the question remains, what does AND and OR mean, if they are
+combined in one expression?
+I can understand all the query results where AND and OR queries are
+explicitly grouped by paranthesis, and the results are, what I expect.
+But the rules for combined AND and OR aren't what I would expect.
+
+greetings
+	Morus
+
+PS: the test program:
+      
+import org.apache.lucene.document.*;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.*;
+import org.apache.lucene.store.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.queryParser.QueryParser;
+
+class LuceneTest 
+{
+    static String[] docs = {
+	"a", "b", "c", "d", 
+	"a b", "a c", "a d", "b c", "b d", "c d", 
+	"a b c", "a b d", "a c d", "b c d", 
+	"a b c d"
+    };
+
+    static String[] queries = {
+	"a OR b AND c",
+	"(a OR b) AND c",
+	"a OR (b AND c)",
+	"b AND c",
+	"a AND b OR c AND d",
+	"(a AND b) OR (c AND d)",
+	"a AND (b OR c) AND d",
+	"((a AND b) OR c) AND d",
+	"a AND (b OR (c AND d))",
+	"a AND b AND c AND d"
+    };
+
+    public static void main(String argv[]) throws Exception {
+	Directory dir = new RAMDirectory();
+	String[] stop = {};
+	Analyzer analyzer = new StandardAnalyzer(stop);
+	
+	IndexWriter writer = new IndexWriter(dir, analyzer, true);
+
+	for ( int i=0; i < docs.length; i++ ) {
+	    Document doc = new Document();
+	    doc.add(Field.Text("text", docs[i]));
+	    writer.addDocument(doc);
+	}
+	writer.close();
+
+	Searcher searcher = new IndexSearcher(dir);
+	for ( int i=0; i < queries.length; i++ ) {
+	    Query query = QueryParser.parse(queries[i], "text", analyzer);
+	    System.out.println(queries[i] + " -> " + query.toString("text"));
+	    Hits hits = searcher.search(query);
+	    System.out.println("      " + hits.length() + " documents found");
+	    for ( int j=0; j < hits.length(); j++ ) {
+		Document doc = hits.doc(j);
+		System.out.println("\t"+doc.get("text"));
+	    }
+	}
+    }
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

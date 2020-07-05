@@ -1,0 +1,168 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Lucene Seaches VS. Relational database Queries
+DATE: 14 Apr 2006
+
+Gentlemen,
+
+A join like operation between Lucene indexes can be done with
+(at least) reasonable performance by using a few standard
+methods from RDB's: sort before going to disk, and cache
+whenever possible. The steps are:
+- query the first Lucene index with the low level search API to get the
+  Lucene doc nrs. (using HitCollector or TermDocs).
+- retrieve the key field values for the second index from the first
+  in doc number order. This step will perform better when
+  there is as less data stored in the first index. This is normally
+  the most performance critical step. (IndexReader.document(n))
+- Sort these key values and use them, again with low level API
+  to get the doc numbers for the second Lucene index.
+  (using TermDocs).
+- Build a Filter for the second index from these doc numbers,
+  this step usually implies some sorting of document numbers,
+  for example by collecting them in a BitSet.
+- Use this filter for a text search in the second index.
+
+On Friday 14 April 2006 00:58, Ananth T. Sarathy wrote:
+> Erick,
+> Don't get me wrong. I agree with you 100 percent on everything you just
+> said, and have been advocating what you are saying. I turned to the forum to
+> get other peoples thoughts on the issue, feeling that my perspective may be
+> a little warped, and wanted to see what the community thinks. I think there
+> is a performance issue with or DB that I have never experienced in any other
+> project I have worked on, which needs someone with more specific domain
+> knowledge to fix.  I think Lucene is fantastic for what we are already using
+> it for (searching contents of HTML, colliding the values of database rows to
+> make them free text searchable). We have been using it for over 2 years, and
+> with very good results (once we got a hang of it).
+> 
+>   I for one think that native language searches are fundamentally different
+> than Discrete Database queries, I am just having a problem trying to explain
+> this to some of the people on my team, and wanted to see if there wer eother
+> POV out there.
+
+The first step above can start from the results of an RDB query.
+Usually, the last text search step is more interactive (fundamentally
+different?) than earlier steps, so a filter is used to cache the join result.
+If the join needs to be changed slightly it is also quite effective to
+cache the retrieved key values from the first index and the retrieved
+fields from the second  index.
+For the last step (and earlier ones), when two successive searches
+retrieve a somewhat overlapping document set, one might also want to
+avoid using  the Hits class, because it only caches results for a single
+search.
+Instead, some LRU caches for retrieved documents and for filters can
+be quite effective. The caches can have the index version in their keys to
+keep things in sync.
+
+Enough RAM should be available so that the indexes can be accessed
+without alternating between them.
+Also the disk head should not do anything else when it is using
+the sorted inputs to minimize the total seek time.
+When the filters start taking too much RAM, have a look here:
+http://issues.apache.org/jira/browse/LUCENE-328
+
+Regards,
+Paul Elschot
+
+
+> 
+> Ananth
+> 
+> On 4/13/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> >
+> > On 4/13/06, Ananth T. Sarathy <ananth.t.sarathy@gmail.com> wrote:
+> > >
+> > > No we do have drop downs selects that would allow for the substitution,
+> > > but
+> > > we also have a free text fields to allow the user to search. That
+> > solution
+> > > would I think work for the DB query replacement, but you would need a
+> > > regular non underscored field to allow for free text.
+> > >
+> > >
+> > Well, as I say, you've solved that problem already. Somewhere, somehow,
+> > you
+> > have to decide what to do with the "free text" data. Somewhere, somehow,
+> > you've got to decide whether "stunt director trainee" means "stunt
+> > director"
+> > + trainee, stunt + "director trainee", or stunt + director + trainee. Or
+> > else you can't form your SQL in the first place. And the query doesn't
+> > produce reasonable results if you *do* form the query.
+> >
+> > If you can form your SQL with distinct "Title = 'blah'" clauses, you can
+> > substitute underscores for spaces in the terms. If you can do that, you
+> > can
+> > ask Lucene to find the terms you indexed with underscores. And if you
+> > can't
+> > form your SQL queries in the first place, the question is irrelevant.
+> >
+> > All that said, perhaps a better question is "why is your SQL slow?".
+> > Relational databases are really good at this sort of thing. Many smart
+> > people have put many, many developer years into making relational
+> > databases
+> > deal with joins efficiently. Assuming you have the proper indexes etc.
+> >
+> > As much as I've been impressed with Lucene, I have to ask whether it's
+> > relevant to your problem. I have no clue what database you're using, how
+> > it's set up, or whether the examples you've given are simplified enough
+> > that
+> > I don't understand what the *real* problem is. But if your issue isn't
+> > really dealing with a full text search, your relational DB should be able
+> > to
+> > handle it, given the proper wherewithal. Have you done "explain plan" or
+> > its
+> > equivalent in your DB? Have you tried adding indexes to avoid full table
+> > scans? In short, have you fully convinced yourself that your RDB can't
+> > handle the problem?
+> >
+> > I'm *extremely* leery of introducing another "moving part" into a product
+> > without fully exhausting the current parts. It's *never* a good thing to
+> > add
+> > a new step into the process unless you can convince yourself that it
+> > solves
+> > more problems than it introduces. You've already alluded to keeping the DB
+> > and the Lucene indexes in synch. I *guarantee* that there will be other
+> > issues that rise up and bite you. *Count* on whatever you think you'll
+> > spend
+> > in introducing Lucene into your mix (say effort X) costing you *at least*
+> > 2X
+> > more time/energy than you think. I'd actually give it a multiplier closer
+> > to
+> > 4X.
+> >
+> > This is NOT a slam on lucene. But developers often miss the bigger
+> > picture.
+> > What processes are you going to put in place to keep the Lucene part of
+> > the
+> > product up to date? How much is it going to cost your company to
+> > troubleshoot the Lucene portion? How many company resources are going to
+> > be
+> > spent answering customer complaints? What is the ongoing maintenance
+> > requirement?
+> >
+> > I like Lucene. I've just persuaded my company to use it in our next
+> > product.
+> > I've been incredibly impressed with it's architeture and implementation.
+> > But
+> > it's a text search engine, and shouldn't be confused with a RDB.
+> > *Assuming*
+> > that the RDB is an integral part of your product, I'd spend a lot of time
+> > making that do what I needed before I'd introduce another moving part.
+> >
+> > All for what it's worth, from an old "C" programmer <G>..
+> >
+> > Best
+> > Erick
+> >
+> >
+> 
+> 
+> --
+> Ananth T Sarathy
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

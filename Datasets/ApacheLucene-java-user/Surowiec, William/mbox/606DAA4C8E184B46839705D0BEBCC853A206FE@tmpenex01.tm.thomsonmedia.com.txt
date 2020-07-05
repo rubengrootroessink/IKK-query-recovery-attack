@@ -1,0 +1,161 @@
+FROM: "Surowiec, William" <William.Surow...@thomsonmedia.com>
+SUBJECT: RE: Date Range support
+DATE: 13 Feb 2004
+
+Tom
+
+(sorry in advance for the long post)
+
+I used to use date fields the way I believe you are. When we upgraded to a
+newer version of Lucene (1.3rc2 I believe), code that used to work ran
+slowly, ate memory, etc. We moved to using DateFilter and a boolean query
+and things went back to running well. 
+
+Try to print out the parsed query, that was most informative (each date, and
+we had different times for a given date, was another expression - ouch.)
+
+I tried to find a small extract of what we do - it does not exist, so here
+is a chopped up version (hopefully the baby did not go out with the bath
+water):
+
+	public Hits getHits(StringBuffer qs, StringBuffer error) throws
+Exception {
+		org.apache.lucene.search.Query q = null;
+
+		qs.delete(0, qs.length());
+		qs.append(prepareQuery());
+
+		if ("(*)".equals(qs.toString().trim())) {
+			error.append("cannot search with just an *");
+		} else
+			try {
+
+				DateFilter filter = null;
+
+				if ((startDate.length() > 6) &&
+(endDate.length() > 6)) {
+					filter =
+						new DateFilter(
+							"issuedate",
+	
+parseAlternateDateFormats(startDate),
+					parseAlternateDateFormats(endDate));
+				} else if (startDate.length() > 6) {
+					filter =
+DateFilter.After("issuedate", 
+ 
+parseAlternateDateFormats(startDate));
+				} else if (endDate.length() > 6) {
+					filter =
+DateFilter.Before("issuedate", 
+                                       parseAlternateDateFormats(endDate));
+				}
+
+				try {
+					if
+("xxxxx".equalsIgnoreCase(publication))
+						q =
+	
+QueryFactory.makeQueryxxx(
+								publication,
+	
+qs.toString(),
+								deal,
+								seller,
+								manager,
+								(String)
+siteSpecific.get("country"),
+								(String)
+siteSpecific.get("collateraltype"),
+								(String)
+siteSpecific.get("assetclass"));
+					else if
+("yyy".equalsIgnoreCase(publication))
+						q =
+	
+QueryFactory.makeQueryyyy(
+								publication,
+	
+qs.toString(),
+								section,
+								category,
+								magazine,
+								pub);
+					else
+						q =
+QueryFactory.makeQuery(publication, qs.toString());
+				} catch (TmQueryQuote e1) {
+					error.delete(0, error.length());
+					error.append(e1.getMessage());
+					return null;
+				}
+
+				if (q != null) {
+					if (filter == null)
+						hits =
+SearcherTM.find(publication, q);
+					else
+						hits =
+SearcherTM.find(publication, q, filter);
+
+				} else
+					error.append(" query is null ");
+			} catch (Exception e) {
+				ByteArrayOutputStream bos = new
+ByteArrayOutputStream();
+				e.printStackTrace(new PrintStream(bos));
+				error.append(bos.toString());
+				throw new RuntimeException(
+					"exception handler " +
+error.toString());
+			} finally {
+				q = null;
+			}
+
+		return hits;
+	}
+
+where the QueryFactory winds up calling a static method like:
+
+	static public Query makeQueryzzz(String publication, String a,
+String ct) {
+		verifyQuoteCount(a);
+		String defaultField =
+AnalyzerFactory.getDefaultField(publication);
+		Analyzer analyzer =
+AnalyzerFactory.getAnalyzer(publication);
+		BooleanQuery bq = new BooleanQuery();
+		try {
+			if (!"".equals(a)) {
+				Query q1 = QueryParser.parse(a,
+defaultField, analyzer);
+				bq.add(q1, true, false);
+			}
+			if (ct.length() > 0)
+				bq.add(
+					QueryParser.parse(ct,
+"level1section", analyzer),
+					true,
+					false);
+			return bq;
+		} catch (org.apache.lucene.queryParser.ParseException e) {
+			ByteArrayOutputStream bos = new
+ByteArrayOutputStream();
+			e.printStackTrace(new PrintStream(bos));
+			throw new RuntimeException(
+				"QueryFactory.makeQuery (" + a + ") " +
+bos.toString());
+		} catch (IllegalArgumentException e) {
+			ByteArrayOutputStream bos = new
+ByteArrayOutputStream();
+			e.printStackTrace(new PrintStream(bos));
+			throw new RuntimeException(
+				"QueryFactory.makeQuery (" + a + ") " +
+bos.toString());
+		}
+	}
+
+"This communication is intended solely for the addressee and is
+confidential and not for third party unauthorized distribution."
+
+

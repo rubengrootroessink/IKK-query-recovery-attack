@@ -1,0 +1,81 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: PhraseQuery and edit distance slightly confusing.
+DATE: 15 Mar 2006
+
+Dawid Weiss wrote:
+> I get the concept implemented in PhraseQuery but isn't calling it an 
+> edit distance a little bit far fetched?
+
+Yes, it should probably be called "edit-distance-like" or something.
+
+> Only the marginal elements 
+> (minimum and maximum distance from their respective query positions) are 
+> taken into account. Consider this example:
+> 
+> phrase:     a  b  c  d
+> term pos:   0  1  2  3
+> 
+> document A: a  c  b  d
+> term pos:   0  1  2  3
+> pos. diff:  0 -1  1  0
+> 
+> => slope = (1 - (-1)) = 2
+> 
+> document B: a  c  b  x  d
+> term pos:   0  1  2  3  4
+> pos. diff:  0 -1  1  -  1
+> 
+> => slope = (1 - (-1) = 2
+> 
+> It's how it is currently implemented, isn't it?
+
+That's correct.
+
+> The scoring difference 
+> (attached example) is different just because "document" lengths are 
+> different, phrases themselves are scored identically even though I 
+> believe B should be penalized. A simple way to do it would be include 
+> phrase length divided by the matching span length...
+
+We could do this by adding more parameters to Similarity.sloppyFreq(). 
+For example, the signature could become:
+
+public float sloppyFreq(int distance, int matchLength);
+
+But what then would the criteria for matching at all be?  Right now it 
+is "distance <= slop", but, with this change, shouldn't it also take 
+into account the match length?
+
+> but I'm guessing 
+> it's implemented like that for a reason, just didn't know what that
+> reason might be ;)
+
+No particularly good reason.  I was looking for a simple single measure 
+that incorporated both out-of-order and insertion.  You argue that, when 
+both are present, the penalty should be higher, which makes good sense. 
+  Right now the penalty is like the maximum error, but the sum of errors 
+in the match might be better.
+
+To implement this, we could sum the absolute values of your "pos. diff" 
+values.  That would give an error value of 2 for document A and 3 for 
+document B, as you desire.  This would have the benefit of not changing 
+the signature of sloppyFreq() and would also still provide a clear 
+criteria for matching:  totalError < slop.  The biggest downside is that 
+it would not be back-compatible: documents which used to match with 
+slop=2 would no longer.  I don't think this is a huge problem, but it 
+does warrant providing an option to restore the old behaviour.
+
+There might be a slight performance impact.  I think we could implement 
+this by simply decrementing and incrementing the totalError each time 
+SloppyPhraseScorer calls nextPosition() or firstPosition().  Does that 
+sound right to you?
+
+Cheers,
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

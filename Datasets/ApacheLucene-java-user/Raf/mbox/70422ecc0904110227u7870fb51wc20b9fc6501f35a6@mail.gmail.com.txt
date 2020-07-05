@@ -1,0 +1,150 @@
+FROM: Raf <r.ventag...@gmail.com>
+SUBJECT: Re: RangeFilter performance problem using MultiReader
+DATE: 11 Apr 2009
+
+Hi Uwe,
+thanks for the clarification.
+I have repeated my tests using a searcher and now the performance on 2.9 are
+very better than those on 2.4.1, especially when the filter extracts a lot
+of docs.
+
+However the same search on the consolidated index is even faster so I have
+now to verify if it is better for us to spend more time in creating indexes
+(i.e. to add the overhead of consolidation) and to have very fast range
+filter searches or to keep our small indexes and to have less fast range
+filter searches.
+
+In any case, I must wait until lucene 2.9 will be officially released,
+before put it on the production environment, so I think I will have to
+consolidate indexes for now.
+
+Thanks a lot for your help,
+Raf
+
+If you are interested, here you can find the new test code and a result
+comparison between 2.4.1 and 2.9:
+
+*RangeFilter searcher test*
+
+@Test
+    public void testRangeFilterSearch() throws IOException, ParseException {
+
+        IndexManager im = SearchObjectsFactory.getIndexManager();
+        IndexReader reader = im.getReader();
+        Searcher searcher = im.getSearcher();
+        Query query = new MatchAllDocsQuery();
+        long timer;
+        Filter filter;
+        TopDocs topDocs;
+        logger.info("Num docs: " + reader.numDocs());
+
+        logger.info("Before creating filter...");
+        timer = System.currentTimeMillis();
+        filter = new RangeFilter("date_doc", "20081001000000",
+"20090131235959", true, true);
+        logger.info("After creating filter..." + (System.currentTimeMillis()
+- timer));
+
+        logger.info("Before search...");
+        timer = System.currentTimeMillis();
+        topDocs = searcher.search(query, filter, 10);
+        logger.info("After search..." + topDocs.totalHits + " " +
+(System.currentTimeMillis() - timer));
+
+        logger.info("Before reading idSet...");
+        timer = System.currentTimeMillis();
+        topDocs = searcher.search(query, filter, 10);
+        logger.info("After search..." + topDocs.totalHits + " " +
+(System.currentTimeMillis() - timer));
+
+        logger.info("Before reading idSet...");
+        timer = System.currentTimeMillis();
+        topDocs = searcher.search(query, filter, 10);
+        logger.info("After search..." + topDocs.totalHits + " " +
+(System.currentTimeMillis() - timer));
+    }
+
+*Test *results*   (Num docs = 2,940,738)  using lucene-core-2.4.1
+
+1 Original index (12 collections * 6 months = 72 indexes)*
+
+1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+     2,179 ms     1,376 ms     1,424 ms
+
+1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+     4,480 ms     3,361 ms     3,316 ms
+
+1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+     8,668 ms     7,621 ms     7,430 ms
+
+
+*2Consolidated index (1 index)*
+
+2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+     512 ms     84 ms     77 ms
+
+2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+     750 ms     186 ms     208 ms
+
+2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+     968 ms     372 ms    345 ms
+
+
+*Test *results*   (Num docs = 2,940,738)  using lucene-core-2.9-dev
+
+1 Original index (12 collections * 6 months = 72 indexes)*
+
+1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+     1,187 ms     273 ms     416 ms
+
+1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+     1,539 ms     764 ms     571 ms
+
+1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+     2,235 ms     1,503 ms     1,260 ms
+
+
+*2 Consolidated index (1 index)*
+
+2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+     385 ms     85 ms     73 ms
+
+2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+     490 ms     208 ms     196 ms
+
+2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+     707 ms     361 ms    317 ms
+
+
+
+On Sat, Apr 11, 2009 at 10:31 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+
+> Ah,
+>
+> Your test code shows why you do not see a speed improve with 2.9:
+> The speed improve in 2.9 is only visible for executing real searches and
+> not
+> getDocIdSet alone on the big MultiReader. The 2.9 search algorithm
+> internally executes getDocIdSet not on the complete index (like you), it
+> executes it for each sub-index and each segment of these subindexes
+> separate. You code executes the filter on the whole index. This is not
+> faster in 2.9.
+>
+> To compare speed, please use real search code (Searcher.search())!
+>
+> Uwe
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+> > -----Original Message-----
+> > From: Raf [mailto:r.ventaglio@gmail.com]
+> > Sent: Saturday, April 11, 2009 9:07 AM
+> > To: java-user@lucene.apache.org
+> > Subject: Re: RangeFilter performance problem using MultiReader
+> >
+>
+

@@ -1,0 +1,80 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: segment exists in external directory yet the MergeScheduler executed the merge in a separate thread
+DATE: 12 Sep 2008
+
+Unfortunately, I think you've hit a bug in Lucene's
+ConcurrentMergeScheduler in 2.3.  I'll open an issue & attach a
+patch.
+
+The bug only happens when you call addIndexesNoOptimize, and one
+simple workaround would be to use SerialMergeScheduler.
+
+I think this is already fixed in trunk (soonish to be 2.4) as a side
+effect of https://issues.apache.org/jira/browse/LUCENE-1335.
+
+In 2.3, merges that involve external segments (which are segments
+folded in by addIndexesNoOptimize) are not supposed to run in a BG
+thread.  This is to prevent addIndexesNoOptimize from returning until
+after all external segments have been carried over (merged or copied)
+into the index, so that if there is an exception (eg disk full),
+addIndexesNoOptimize is able to rollback to the index to the starting
+point.
+
+The primary merge() method of CMS indeed does not BG any external
+merges, but the bug is that when a BG merge finishes it then selects a
+new merge to kick off and that selection is happy to pick an external
+segment.
+
+Mike
+
+Anthony Urso wrote:
+
+> I have implemented a MapReduce job to merge a bunch of Lucene 2.3.2
+> indices together, but the reducers randomly fail with the following
+> unchecked exception after thousands of successful merges:
+>
+> org.apache.lucene.index.MergePolicy$MergeException: segment "_0 exists
+> in external directory yet the MergeScheduler executed the merge in a
+> separate thread
+> 	at  
+> org 
+> .apache 
+> .lucene.index.IndexWriter.copyExternalSegments(IndexWriter.java:2362)
+> 	at  
+> org 
+> .apache 
+> .lucene.index.IndexWriter.addIndexesNoOptimize(IndexWriter.java:2307)
+>
+> Anyone know what would cause such a thing?
+>
+> Here is the relevant code:
+>
+>  IndexWriter writer = new IndexWriter(FSDirectory.getDirectory(name),
+> new StandardAnalyzer());
+>
+>  Directory[] dir = new Directory[1];
+>
+>  for (String p: paths) {
+>    dir[0] = FSDirectory.getDirectory(p);
+>
+>    writer.addIndexesNoOptimize(dir);
+>  }
+>
+>  writer.optimize();
+>
+>  writer.close();
+>
+> Cheers,
+> Anthony
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

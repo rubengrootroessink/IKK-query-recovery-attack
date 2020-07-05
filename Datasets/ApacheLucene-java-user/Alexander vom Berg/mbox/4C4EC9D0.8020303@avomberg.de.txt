@@ -1,0 +1,110 @@
+FROM: Alexander vom Berg <m...@avomberg.de>
+SUBJECT: Re: Structure of .tii-file
+DATE: 27 Jul 2010
+
+Hello Mike,
+
+thanks for your answer!
+I am currently working with Lucene 3.0.1 and except the .tii - file all 
+other descriptions are comprehensible.
+The idea behind the tii/tis file structure is for faster retrieving the 
+correct terms.
+At first I lookup in memory (tii-file) and take the most nearby hit. 
+With this information I can skip to the correct position in the tis-file 
+and scan up to my final hit. I don't exactly understand how this 
+skipping is realized.
+Do I have a direct pointer to the postion on the hard drive? Or how do I 
+find the term without having to much file access? :D
+
+My intention behind this is that I want to run some performance tests on 
+an created index with different block sizes of the hard drive.
+Can I just copy this created index on another drive (with different 
+blocksize) or do I have to generate the hole index again?
+
+Greetings
+Alex
+
+
+Am 21.07.2010 11:13, schrieb Michael McCandless:
+> Best explanation is the source code itself -- it should be correct ;)
+>
+> Look at how SegmentTermsEnum.next is implemented, pre-flex.  (If
+> you're looking @ flex (= trunk), then the format is slightly different
+> and not yet correctly documented (issue is open)).
+>
+> Yes vInt/vLong are the same, except vLong can take up to 9 bytes.  But
+> we look @ the high bit of each byte, and keep reading/shifting bytes
+> as long as that's 1.  It's a rather CPU unfriendly format since that
+> if is usually hard to predict.
+>
+> Each term is delta coded against the last term, ie we only write the
+> changed suffix.  First vInt is suffix start.  Next vInt is suffix end.
+>   Then comes the bytes (UTF8 pre-flex, opaque in flex).  In your case
+> these both look to be 0?  Ie, first term is the empty string.  Next
+> comes the field number as a vInt (pre-flex), but at that point you
+> have -1 (encodes as FF FF FF FF 0F in vInt), which is odd -- field
+> numbers should be positive.  Must be missing something...
+>
+> The deltas are then vLong's, delta coded.
+>
+> Mike
+>
+> On Wed, Jul 21, 2010 at 4:52 AM, Alexander vom Berg<mail@avomberg.de>  wrote:
+>    
+>> Hello everybody,
+>>
+>> I am reading the file format paper and I check it against a created index.
+>> The documentation says:
+>> TermInfoIndex (.tii)-->  TIVersion, IndexTermCount, IndexInterval,
+>> SkipInterval, MaxSkipLevels, TermIndices
+>>
+>> If I look into the .tii-file I see the following:
+>> TIVersion = FF FF FF FC  (4 Bytes)
+>> IndexTermCount = 00 00 00 00 00 00 00 0C = 10  (8 Bytes)
+>> IndexInterval = 00 00 00 80 = 128  (4 Bytes)
+>> SkipInterval = 00 00 00 10 = 16  (4 Bytes)
+>> MaxSkipLevels = 00 00 00 0A = 10 (4 Bytes)
+>> TermIndices = ?????  (? Bytes)
+>>
+>> I looked in two indexes and for both the following byte sequences are equal
+>> (marked bold):
+>> *00 00 FF FF FF FF 0F 00 00 00 18 00* (0B 61 or 0D30 .....)
+>>
+>> Maybe I don't understand the Map with *<TermInfo, IndexDelta>^IndexTermCount
+>> *. How should I calculate the correct byte length?
+>> I assume the IndexDelta with VLong has 8 bytes if the leading bit is 0
+>> (Similar vo VInt or is VLong somewhere described?). TermInfo is explained in
+>> the .tis file section.
+>>
+>> TermIndices   =<TermInfo, IndexDelta>
+>>
+>> =<(Term,DocFreq,FreqDelta,ProxDelta,SkipDelta), IndexDelta>
+>> =<([PrefixLength,Suffix,FieldNum],DocFreq,FreqDelta,ProxDelta,SkipDelta),
+>>          IndexDelta>
+>> =<([        00         ,  00     ,        FF  ],        FF   ,      FF
+>>   ,      FF      ,      0F      ),   00 00 00 18 00 0B 61 6E>
+>>
+>>
+>>
+>> IndexDelta is to large for my small index! Also DocFreq is to large because
+>> I only have 16 documents in total. :(
+>>
+>> Can somebody tell me how to read the bytes correctly from the file? I would
+>> like to find the correct position in the .tis file from .tii data.
+>>
+>> Best regards
+>> Alex
+>>
+>>      
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>    
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

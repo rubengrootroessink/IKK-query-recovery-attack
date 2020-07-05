@@ -1,0 +1,69 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Efficient optimization of large indexes?
+DATE: 5 Aug 2009
+
+On Wed, Aug 5, 2009 at 12:08 PM, Nigel<nigelspleen@gmail.com> wrote:
+> We periodically optimize large indexes (100 - 200gb) by calling
+> IndexWriter.optimize().  It takes a heck of a long time, and I'm wondering
+> if a more efficient solution might be the following:
+>
+> - Create a new empty index on a different filesystem
+> - Set a merge policy for the new index so it puts everything into one giant
+> segment (not sure how to do this off-hand, but I assume it's possible)
+> - Enumerate all documents in the unoptimized index and add them to the new
+> index
+
+Actually IndexWriter must periodically flush, which will always
+create new segments, which will then always require merging.  Ie
+there's no way to just add everything to only one segment in one
+shot.
+
+(Though: addIndexes(IndexReader[]) does one single merge, ie, ignores
+mergeFactor and merges all of the incoming readers at once).
+
+> Having the reads and writes happening on different disks obviously helps.
+> But I don't if merging is inherently a lot more efficient compared to just
+> adding new docs -- if so, that could outweigh the I/O gains.
+
+True, but I'd be surprised if you net/net got better performance
+(since you're paying the indexing cost again).
+
+Merge performance does seem rather slow... I recently profiled it and
+was suprised to find that the merging of terms dict & postings was cpu
+bound, even on a modern CPU (core i7 920) and with 3 merges running
+concurrently.  I think most of the CPU cost comes from the pqueue
+that's used to do the merge sort, plus read/writeVInt.  When Lucene
+[eventually] switches to PForDelta, that should be more CPU friendly.
+
+Also, it's tons of IO because for each merge it must read every single
+byte and write nearly every single byte, so that's ~2X bytes moved.
+Then, if you have more segments in your index than your mergeFactor,
+multiple such merges are needed and you're looking at, at least, 4X
+your index size in net bytes moved.  If you have CFS enabled, it's 8X
+the index size.
+
+Some ideas:
+
+  * Switch to SSD
+
+  * Play w/ mergeFactor; maybe also try different sizes for
+    MERGE_READ_BUFFER_SIZE in IndexWriter (it's private now so you'd
+    have to change the sources, but if something works well, post
+    back!)
+
+  * If possible, make sure you always add the same fields to your
+    docs, in the same order (this results in consistent numbering of
+    field name -> number).  This is very much an unexpected
+    gotchya... the merging of stored fields and term vectors is much,
+    much faster if the field numbers are identical.  LUCENE-1737 is
+    open to fix Lucene so it consistently numbers automatically, but
+    it's somewhat tricky because many places in Lucene assume the
+    field names are densely packed.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

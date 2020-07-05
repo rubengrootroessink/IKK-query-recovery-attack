@@ -1,0 +1,230 @@
+FROM: "Erdman, Jon" <Jon.Erd...@solers.com>
+SUBJECT: Using FSDirectory after a write
+DATE: 21 Jun 2005
+
+I am working on an application that requires indexing of a relatively
+constant stream of data.  All of the documentation that I have read
+seems to indicate that writing to the index will not affect searching,
+but I have run into some problems using FSDirectory in this case.  
+
+ 
+
+It looks like FSDirectory only locks the database for long enough to
+read the segment information and create input streams to the files.  It
+does not try to read the input streams until an actual search occurs,
+after the commit.lock has been released.  If the index is has been
+modified since then the search will result in an IOException as it tries
+to read the input stream to a file that no longer exists.  I have
+included a full sample class below that will reproduce this error.
+
+ 
+
+Our application is currently creating a new FSDirectory instance for
+each search.  This is causing a bottleneck when retrieving the lock and
+loading the segments due to the large number of searches we receive.  Is
+there anyway to reuse a FSDirectory in a safe way?  We have considered
+using RAMDirectory instead but our index can grow too large to store in
+memory.
+
+ 
+
+Thanks,
+
+Jon
+
+ 
+
+ 
+
+package search;
+
+ 
+
+import org.apache.lucene.analysis.Analyzer;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+
+import org.apache.lucene.document.Document;
+
+import org.apache.lucene.document.Field;
+
+import org.apache.lucene.index.IndexWriter;
+
+import org.apache.lucene.queryParser.ParseException;
+
+import org.apache.lucene.queryParser.QueryParser;
+
+import org.apache.lucene.search.Hits;
+
+import org.apache.lucene.search.IndexSearcher;
+
+import org.apache.lucene.search.Query;
+
+import org.apache.lucene.store.Directory;
+
+import org.apache.lucene.store.FSDirectory;
+
+import java.io.IOException;
+
+ 
+
+public class LuceneLockTest {
+
+ 
+
+    public static final String INDEX_DIR =
+"C:\\testIndex\\lucene-index";
+
+ 
+
+    public LuceneLockTest() {
+
+    }
+
+ 
+
+    public static void main(String[] args) throws Exception {
+
+        Directory directory = null;
+
+        Directory ramDir = null;
+
+        try {
+
+            LuceneLockTest test = new LuceneLockTest();
+
+            //initial index
+
+            test.indexArticle("test 1", true);
+
+            directory = test.getFSDirectory(INDEX_DIR, false);
+
+            IndexSearcher is = new IndexSearcher(directory);
+
+            System.out.println("Search 1: ");
+
+            //initial search succeeds
+
+            test.search ("test", is);
+
+            test.indexArticle("test 2", false);
+
+            System.out.println("Search 2: ");
+
+            //search after second index fails with old searcher
+
+            test.search("test", is);
+
+        } finally {
+
+            if (directory != null) {
+
+                directory.close();
+
+            }
+
+        }
+
+    }
+
+ 
+
+    private Directory getFSDirectory(String indexDirectory, boolean
+create) throws IOException {
+
+        return FSDirectory.getDirectory(indexDirectory, create);
+
+    }
+
+ 
+
+    private Directory getRAMDirectory(Directory dir) throws IOException
+{
+
+        return new RAMDirectory(dir);
+
+    }
+
+ 
+
+    public void search(String searchCriteria, IndexSearcher is) throws
+IOException, ParseException {
+
+        Analyzer analyzer = new StandardAnalyzer();
+
+        QueryParser parser = new QueryParser("title", analyzer);
+
+        Query query = parser.parse(searchCriteria);
+
+        Hits hits = is.search(query);
+
+        for (int i = 0; i < hits.length(); i++) {
+
+            Document doc = hits.doc(i);
+
+            System.out.println(doc.getField("title"));
+
+        }
+
+        is.close();
+
+    }
+
+ 
+
+    public void indexArticle(String title, boolean create)
+
+            throws Exception {
+
+        Document document = createDocument(title);
+
+        indexDocument(document, create);
+
+    }
+
+ 
+
+    private void indexDocument(Document document, boolean create) throws
+Exception {
+
+        IndexWriter writer = null;
+
+        Directory directory = null;
+
+        try {
+
+            directory = getFSDirectory(INDEX_DIR, false);
+
+            Analyzer analyzer = new StandardAnalyzer();
+
+            writer = new IndexWriter(directory, analyzer, create);
+
+            writer.addDocument(document);
+
+            //writer.optimize();
+
+        } finally {
+
+            writer.close();
+
+            directory.close();
+
+        }
+
+    }
+
+ 
+
+    private Document createDocument(String title) {
+
+        Document document = new Document();
+
+        document.add(Field.Text("title", title));
+
+        return document;
+
+    }
+
+}
+
+

@@ -1,0 +1,663 @@
+FROM: Gururaja H <guru_h...@yahoo.com>
+SUBJECT: RE: Relevance and ranking ...
+DATE: 21 Dec 2004
+
+Hi Chuck Williams,  Paul Elschot,
+ 
+Thanks so much for the reply.
+ 
+By overriding the coord() as follows, able to get the right order for the example that i gave
+in this thread.
+ 
+public float coord(int overlap, int maxOverlap) {
+    return (float) Math.pow((overlap / (float)maxOverlap), SOME_POWER);
+  }
+
+Using 2.0f for SOME_POWER.
+ 
+As Chuck Williams suggested i am trying more example cases.
+ 
+Thanks, Again.
+ 
+Gururaja
+
+
+Chuck Williams <chuck@manawiz.com> wrote:
+I believe your sole problem is that you need to tone down your
+lengthNorm. Because doc4 is 10 times longer than doc2, its lengthNorm
+is less than 1/3 of that of doc2 (1/sqrt(10) to be precise). This is a
+larger effect than the higher coord factor (1/.8) and the extra matching
+term in doc4.
+
+In your original description, it sounds like you want coord() to
+dominate lengthNorm(), with lengthNorm() just being used as a
+tie-breaker among queries with the same coord().
+
+To achieve this, you need to reduce the impact of the lengthNorm()
+differences, by changing the sqrt() function in the computation of
+lengthNorm to something much flatter. E.g., you might use:
+
+public float lengthNorm(String fieldName, int numTerms) {
+return (float)(1.0 / Math.log10(1000+numTerms));
+}
+
+I'm not sure whether that specific formula will work, but you can find
+one that will by adjusting the base of the logarithm and the additive
+constant (1000 in the example).
+
+Some general things:
+1. You need to reindex when you change the Similarity (it is used for
+indexing and searching -- e.g., the lengthNorm's are computed at index
+time).
+2. Be careful not to overtune your scoring for just one example. Try
+many examples. You won't be able to get it perfect -- the idea is to
+get close to your subjective judgments as frequently as possible.
+3. The idea here is to find a value of lengthNorm() that doesn't
+override coord, but still provides the tie-breaking you are looking for
+(doc2 ahead of doc3).
+
+Chuck
+
+> -----Original Message-----
+> From: Gururaja H [mailto:guru_hr29@yahoo.com]
+> Sent: Sunday, December 19, 2004 10:10 PM
+> To: Lucene Users List
+> Subject: RE: Relevance and ranking ...
+> 
+> Chuck Williams,
+> 
+> Thanks for the reply. Source code and Output are below.
+> 
+> Please give me your inputs.
+> 
+> Default document order i am getting is: Doc#2, Doc#4, Doc#3, Doc#1.
+> Document order needed is: Doc#4, Doc#2, Doc#3, Doc#1.
+> 
+> Let me know, if you need more information.
+> 
+> NOTE: Using Luene "Query" object not BooleanQuery.
+> 
+> Here is the source code:
+> 
+> Searcher searcher = new IndexSearcher("index");
+> 
+> Analyzer analyzer = new StandardAnalyzer();
+> BufferedReader in = new BufferedReader(new
+> InputStreamReader(System.in));
+> System.out.print("Query: ");
+> String line = in.readLine();
+> Query query = QueryParser.parse(line, "contents", analyzer);
+> System.out.println("Searching for: " + query.toString("contents"));
+> Hits hits = searcher.search(query);
+> System.out.println(hits.length() + " total matching documents");
+> for (int i = start; i < hits.length(); i++) {
+> Document doc = hits.doc(i);
+> System.out.print("Score is: "+ hits.score(i));
+> // Use whatever your fields are here:
+> System.out.print(" title:");
+> System.out.print(doc.get("title"));
+> System.out.print(" description:");
+> System.out.println(doc.get("description"));
+> // End of fields
+> System.out.println(searcher.explain(query, hits.id(i)));
+> //System.out.println("Score of the document is:
+"+hits.score(i));
+> String path = doc.get("path");
+> if (path != null) {
+> System.out.println(i + ". " + path);
+> System.out.println("--------------------------");
+> }
+> ---
+> 
+> 
+> Here is the output from the program:
+> 
+> Query: ibm risc tape drive manual
+> 
+> Searching for: ibm risc tape drive manual
+> 
+> 4 total matching documents
+> 
+> Score is: 0.16266039 title:null description:null
+> 
+> 0.16266039 = product of:
+> 
+> 0.20332548 = sum of:
+> 
+> 0.03826245 = weight(contents:ibm in 1), product of:
+> 
+> 0.31521872 = queryWeight(contents:ibm), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.121383816 = fieldWeight(contents:ibm in 1), product of:
+> 
+> 1.0 = tf(termFreq(contents:ibm)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.15625 = fieldNorm(field=contents, doc=1)
+> 
+> 0.06340029 = weight(contents:risc in 1), product of:
+> 
+> 0.40576187 = queryWeight(contents:risc), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.15625 = fieldWeight(contents:risc in 1), product of:
+> 
+> 1.0 = tf(termFreq(contents:risc)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.15625 = fieldNorm(field=contents, doc=1)
+> 
+> 0.06340029 = weight(contents:tape in 1), product of:
+> 
+> 0.40576187 = queryWeight(contents:tape), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.15625 = fieldWeight(contents:tape in 1), product of:
+> 
+> 1.0 = tf(termFreq(contents:tape)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.15625 = fieldNorm(field=contents, doc=1)
+> 
+> 0.03826245 = weight(contents:drive in 1), product of:
+> 
+> 0.31521872 = queryWeight(contents:drive), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.121383816 = fieldWeight(contents:drive in 1), product of:
+> 
+> 1.0 = tf(termFreq(contents:drive)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.15625 = fieldNorm(field=contents, doc=1)
+> 
+> 0.8 = coord(4/5)
+> 
+> 0. C:\tools\lucene-1.4.3\test\docs\doc2.txt
+> 
+> --------------------------
+> 
+> Score is: 0.13477734 title:null description:null
+> 
+> 0.13477734 = sum of:
+> 
+> 0.013391858 = weight(contents:ibm in 3), product of:
+> 
+> 0.31521872 = queryWeight(contents:ibm), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.042484336 = fieldWeight(contents:ibm in 3), product of:
+> 
+> 1.0 = tf(termFreq(contents:ibm)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.0546875 = fieldNorm(field=contents, doc=3)
+> 
+> 0.022190101 = weight(contents:risc in 3), product of:
+> 
+> 0.40576187 = queryWeight(contents:risc), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.0546875 = fieldWeight(contents:risc in 3), product of:
+> 
+> 1.0 = tf(termFreq(contents:risc)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.0546875 = fieldNorm(field=contents, doc=3)
+> 
+> 0.022190101 = weight(contents:tape in 3), product of:
+> 
+> 0.40576187 = queryWeight(contents:tape), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.0546875 = fieldWeight(contents:tape in 3), product of:
+> 
+> 1.0 = tf(termFreq(contents:tape)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.0546875 = fieldNorm(field=contents, doc=3)
+> 
+> 0.013391858 = weight(contents:drive in 3), product of:
+> 
+> 0.31521872 = queryWeight(contents:drive), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.042484336 = fieldWeight(contents:drive in 3), product of:
+> 
+> 1.0 = tf(termFreq(contents:drive)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.0546875 = fieldNorm(field=contents, doc=3)
+> 
+> 0.063613415 = weight(contents:manual in 3), product of:
+> 
+> 0.6870146 = queryWeight(contents:manual), product of:
+> 
+> 1.6931472 = idf(docFreq=1)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.09259398 = fieldWeight(contents:manual in 3), product of:
+> 
+> 1.0 = tf(termFreq(contents:manual)=1)
+> 
+> 1.6931472 = idf(docFreq=1)
+> 
+> 0.0546875 = fieldNorm(field=contents, doc=3)
+> 
+> 1. C:\tools\lucene-1.4.3\test\docs\doc4.txt
+> 
+> --------------------------
+> 
+> Score is: 0.09759624 title:null description:null
+> 
+> 0.09759624 = product of:
+> 
+> 0.1219953 = sum of:
+> 
+> 0.02295747 = weight(contents:ibm in 2), product of:
+> 
+> 0.31521872 = queryWeight(contents:ibm), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.07283029 = fieldWeight(contents:ibm in 2), product of:
+> 
+> 1.0 = tf(termFreq(contents:ibm)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=2)
+> 
+> 0.038040176 = weight(contents:risc in 2), product of:
+> 
+> 0.40576187 = queryWeight(contents:risc), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.09375 = fieldWeight(contents:risc in 2), product of:
+> 
+> 1.0 = tf(termFreq(contents:risc)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=2)
+> 
+> 0.038040176 = weight(contents:tape in 2), product of:
+> 
+> 0.40576187 = queryWeight(contents:tape), product of:
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.09375 = fieldWeight(contents:tape in 2), product of:
+> 
+> 1.0 = tf(termFreq(contents:tape)=1)
+> 
+> 1.0 = idf(docFreq=3)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=2)
+> 
+> 0.02295747 = weight(contents:drive in 2), product of:
+> 
+> 0.31521872 = queryWeight(contents:drive), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.07283029 = fieldWeight(contents:drive in 2), product of:
+> 
+> 1.0 = tf(termFreq(contents:drive)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=2)
+> 
+> 0.8 = coord(4/5)
+> 
+> 2. C:\tools\lucene-1.4.3\test\docs\doc3.txt
+> 
+> --------------------------
+> 
+> Score is: 0.018365977 title:null description:null
+> 
+> 0.018365977 = product of:
+> 
+> 0.04591494 = sum of:
+> 
+> 0.02295747 = weight(contents:ibm in 0), product of:
+> 
+> 0.31521872 = queryWeight(contents:ibm), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.07283029 = fieldWeight(contents:ibm in 0), product of:
+> 
+> 1.0 = tf(termFreq(contents:ibm)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=0)
+> 
+> 0.02295747 = weight(contents:drive in 0), product of:
+> 
+> 0.31521872 = queryWeight(contents:drive), product of:
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.40576187 = queryNorm
+> 
+> 0.07283029 = fieldWeight(contents:drive in 0), product of:
+> 
+> 1.0 = tf(termFreq(contents:drive)=1)
+> 
+> 0.7768564 = idf(docFreq=4)
+> 
+> 0.09375 = fieldNorm(field=contents, doc=0)
+> 
+> 0.4 = coord(2/5)
+> 
+> 3. C:\tools\lucene-1.4.3\test\docs\doc1.txt
+> 
+> --------------------------
+> 
+> 
+> Thanks,
+> Gururaja
+> 
+> Chuck Williams wrote:
+> The coord is the fraction of clauses matched in a BooleanQuery, so
+with
+> your example of a 5-word BooleanQuery, the coord factors should be
+.4,
+> .8, .8, 1.0 respectively for doc1, doc2, doc3 and doc4.
+> 
+> One big issue you've got here is lengthNorm. Doc2 is 1/10 the size
+of
+> doc4, so its lengthNorm is over 3x larger (sqrt(10)). This more than
+> makes up for the difference in coord. In your original post you
+> indicated a desire for a linear lengthNorm, which would actually
+make
+> this problem much worse. You problem need to tone down the
+lengthNorm
+> instead (I turn mine off entirely, at least so far, by fixing it at
+1.0;
+> this is not good in general, but got me past similar problems until
+I
+> can find a good formula). You might try an inverse-log lengthNorm
+with
+> a high base (like the formula for idf I posted earlier).
+> 
+> The other thing that can bite you is the tf and idf computations.
+E.g.,
+> if manual is a more common term than the others, this could cause
+the
+> tf*idf scores on doc2 to more than compensate for the difference in
+> coord, even if you set lengthNorm to be 1.0.
+> 
+> What is happening will be apparent from the explanations. If you
+print
+> these out and post them, I'd be happy to suggest specific formulas.
+> Just use code like this:
+> 
+> IndexSearcher searcher = new IndexSearcher(directory);
+> System.out.println(query);
+> Hits hits = searcher.search(query);
+> for (int i=0; i Document doc = hits.doc(i);
+> System.out.print(hits.score(i));
+> // Use whatever your fields are here:
+> System.out.print(" title:");
+> System.out.print(doc.get("title"));
+> System.out.print(" description:");
+> System.out.println(doc.get("description"));
+> // End of fields
+> System.out.println(searcher.explain(query, hits.id(i)));
+> System.out.println("--------------------------");
+> }
+> 
+> Chuck
+> 
+> > -----Original Message-----
+> > From: Gururaja H [mailto:guru_hr29@yahoo.com]
+> > Sent: Saturday, December 18, 2004 4:56 AM
+> > To: Lucene Users List
+> > Subject: Re: Relevance and ranking ...
+> >
+> > Hi Erik,
+> >
+> > Created my own subclass of Similarity. When i printed the values
+> for
+> > coord() factor
+> > i am getting the same for all the 4 documents. So the value is NOT
+> > getting boosted.
+> > Want to do this. as i want the document that has
+> > e.g., all three terms in a three word query over those that
+contain
+> just
+> > two
+> > of the words.
+> >
+> > Please let me how do i go about doing this ? Please explain the
+> > coordination factor ?
+> >
+> > The default order of document that i get for my example given in
+> this
+> > thread is as follows:
+> > Doc#2
+> > Doc#4
+> > Doc#3
+> > Doc#1
+> >
+> > Any inputs would be help full. Thanks,
+> >
+> > Gururaja
+> >
+> > Erik Hatcher wrote:
+> >
+> > On Dec 17, 2004, at 6:09 AM, Gururaja H wrote:
+> > > Thanks for the reply. Is there any sample code which tells me
+how
+> to
+> > > change these
+> > > coord() factor, overlapping, lenght normalizaiton etc.. ??
+> > > If there are any please provide me.
+> >
+> > Have a look at Lucene's DefaultSimilarity code itself. Use that as
+a
+> > starting point - in fact you should subclass it and only override
+> the
+> > one or two methods you want to tweak.
+> >
+> > There are probably some other examples in Lucene's test cases, or
+> that
+> > have been posted to the list but I don't have handy pointers to
+> them.
+> >
+> > Erik
+> >
+> >
+> > >
+> > > Thanks,
+> > > Gururaja
+> > >
+> > >
+> > > Erik Hatcher wrote:
+> > > The coord() factor of Similarity is what controls a muliplier
+> factor
+> > > for overlapping query terms in a document. The DefaultSimilarity
+> > > already contains factors that allow documents with overlapping
+> terms
+> > to
+> > > get boosted. Is this not working for you? You may also need to
+> adjust
+> > > length normalization factors. Check the javadocs on Similarity
+for
+> > > details on implementing your own formulas. Also become familiar
+> with
+> > > IndexSearcher.explain() and the Explanation so that you can see
+> how
+> > > adjusting things affects the details.
+> > >
+> > > Erik
+> > >
+> > > On Dec 17, 2004, at 3:42 AM, Gururaja H wrote:
+> > >
+> > >> Hi,
+> > >>
+> > >> How to implement the following ? Please provide inputs ....
+> > >>
+> > >>
+> > >> For example, if the search query has 5 terms (ibm, risc, tape,
+> drive,
+> > >> manual) and there are 4 matching documents with the following
+> > >> attributes, then the order should be as described below.
+> > >>
+> > >> Doc#1: contains terms (ibm, drive) and has a total of 100 terms
+> in
+> > the
+> > >> document.
+> > >>
+> > >> Doc#2: contains terms (ibm, risc, tape, drive) and has a total
+of
+> 30
+> > >> terms in the document.
+> > >>
+> > >> Doc#3: contains terms (ibm, risc, tape, drive) and has a total
+of
+> 100
+> > >> terms in the document.
+> > >>
+> > >> Doc#4: contains terms (ibm, risc, tape, drive, manual) and has
+a
+> > total
+> > >> of 300 terms in the document
+> > >>
+> > >> The search results should include all three documents since
+each
+> has
+> > >> one or more of the search terms, however, the order should be
+> > returned
+> > >> as:
+> > >>
+> > >> Doc#4
+> > >>
+> > >> Doc#2
+> > >>
+> > >> Doc#3
+> > >>
+> > >> Doc#1
+> > >>
+> > >> Doc#4 should be first, since of the 5 search terms, it contains
+> all 5.
+> > >>
+> > >> Doc#2 should be second, since it has 4 of the 5 search terms
+and
+> of
+> > >> the number of terms in the document, its ratio is higher than
+> Doc#3
+> > >> (4/30). Doc#3 has 4 of the 5 terms, but its ratio is 4/100.
+> > >>
+> > >> Doc#1 is last since it only has 2 of the 5 terms.
+> > >>
+> > >>
+> > >> ----
+> > >>
+> > >> Thanks,
+> > >> Gururaja
+> > >>
+> > >>
+> > >> __________________________________________________
+> > >> Do You Yahoo!?
+> > >> Tired of spam? Yahoo! Mail has the best spam protection around
+> > >> http://mail.yahoo.com
+> > >
+> > >
+> > >
+>
+---------------------------------------------------------------------
+> > > To unsubscribe, e-mail:
+lucene-user-unsubscribe@jakarta.apache.org
+> > > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> > >
+> > >
+> > >
+> > > ---------------------------------
+> > > Do you Yahoo!?
+> > > Send holiday email and support a worthy cause. Do good.
+> >
+> >
+> >
+>
+---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail:
+lucene-user-help@jakarta.apache.org
+> >
+> >
+> > __________________________________________________
+> > Do You Yahoo!?
+> > Tired of spam? Yahoo! Mail has the best spam protection around
+> > http://mail.yahoo.com
+> 
+>
+---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+> __________________________________________________
+> Do You Yahoo!?
+> Tired of spam? Yahoo! Mail has the best spam protection around
+> http://mail.yahoo.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+__________________________________________________
+Do You Yahoo!?
+Tired of spam?  Yahoo! Mail has the best spam protection around 
+http://mail.yahoo.com 

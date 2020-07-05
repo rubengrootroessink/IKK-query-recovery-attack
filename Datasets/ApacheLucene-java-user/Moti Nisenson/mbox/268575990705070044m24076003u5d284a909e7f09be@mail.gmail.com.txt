@@ -1,0 +1,466 @@
+FROM: "Moti Nisenson" <moti.nisen...@gmail.com>
+SUBJECT: Re: Possible bug in SpanNearQuery
+DATE: 7 May 2007
+
+Paul,
+
+The comment should be moved up into SpanNearQuery itself (as opposed to the
+comments in the package private implementation classes). Still though, that
+comment is inaccurate (regarding overlap - only "exact" overlap is handled).
+Here are some additional tests for SpanNearQuery. They all fail except for
+testNotExactOverlapInOrder, testTermOvelapStartInOrder and
+testTermOverlapEndInOrder (note that the failures for the NotInOrder case
+may be alright. There is no documentation indicating the desired behavior).
+
+
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+
+import junit.framework.TestCase;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.search.spans.Spans;
+import org.apache.lucene.store.RAMDirectory;
+
+public class SpanNearQueryTest extends TestCase {
+
+    private RAMDirectory dir;
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        dir = new RAMDirectory();
+        Document doc = new Document();
+        doc.add(new Field("field", new StringReader("one two two three four
+five")));
+        IndexWriter writer = new IndexWriter(dir, new StandardAnalyzer());
+        writer.addDocument(doc);
+        writer.close();
+    }
+
+    public void testNearQueryInOrder() throws Exception {
+        checkNearQuery(true);
+    }
+
+    public void testNearQueryNotInOrder() throws Exception {
+        checkNearQuery(false);
+    }
+
+    private void checkNearQuery(boolean inOrder) throws Exception {
+        SpanNearQuery query = buildQuery(5, inOrder, "one", "two");
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(2, numSpans);
+    }
+
+    private int countSpans(Spans spans) throws IOException {
+        int numSpans = 0;
+        while (spans.next())
+            numSpans++;
+        return numSpans;
+    }
+
+    public void testMinimalSpanInOrder() throws Exception {
+        checkMinimalSpan(true);
+    }
+
+    public void testMinimalSpanNotInOrder() throws Exception {
+        checkMinimalSpan(false);
+    }
+
+    private void checkMinimalSpan(boolean inOrder) throws Exception {
+        SpanNearQuery query = buildQuery(5, inOrder, "two", "three");
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        boolean firstSpan = true;
+        int firstSlop = -1;
+        int numSpans = 0;
+        while (spans.next()) {
+            numSpans++;
+            if (firstSpan) {
+                firstSlop = spans.end() - spans.start();
+                firstSpan = false;
+            }
+        }
+
+        reader.close();
+
+        assertEquals(1, numSpans);
+        assertEquals(1, firstSlop);
+    }
+
+
+    public void testNotContainingStartInOrder() throws Exception {
+        checkNotContainingStart(true);
+    }
+
+    public void testNotContainingStartNotInOrder() throws Exception {
+        checkNotContainingStart(false);
+    }
+
+    public void testNotContainingEndInOrder() throws Exception {
+        checkNotContainingEnd(true);
+    }
+
+    public void testNotContainingEndNotInOrder() throws Exception {
+        checkNotContainingEnd(false);
+    }
+
+    public void testNotOverlappingInOrder() throws Exception {
+        checkNotOverlapping(true);
+    }
+
+    public void testNotOverlappingNotInOrder() throws Exception {
+        checkNotOverlapping(false);
+    }
+
+    public void testNotExactOverlapInOrder() throws Exception {
+        checkNotExactOverlap(true);
+    }
+
+    public void testNotExactOverlapNotInOrder() throws Exception {
+        checkNotExactOverlap(false);
+    }
+
+
+    private void checkNotContainingEnd(boolean inOrder) throws Exception {
+        SpanNearQuery query1 = buildQuery(5, inOrder, "one", "three");
+        SpanNearQuery query2 = buildQuery(5, inOrder, "two", "three");
+
+        SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {query1,
+query2}, 5, inOrder);
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(0, numSpans);
+    }
+
+    private void checkNotContainingStart(boolean inOrder) throws Exception {
+        SpanNearQuery query1 = buildQuery(5, inOrder, "three", "four");
+        SpanNearQuery query2 = buildQuery(5, inOrder, "three", "five");
+
+        SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {query1,
+query2}, 5, inOrder);
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(0, numSpans);
+    }
+
+    private void checkNotOverlapping(boolean inOrder) throws Exception {
+        SpanNearQuery query1 = buildQuery(5, inOrder, "three", "four");
+        SpanNearQuery query2 = buildQuery(5, inOrder, "four", "five");
+
+        SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {query1,
+query2}, 5, inOrder);
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(0, numSpans);
+    }
+
+    private void checkNotExactOverlap(boolean inOrder) throws Exception {
+        SpanNearQuery query1 = buildQuery(5, inOrder, "three", "four");
+        SpanNearQuery query2 = buildQuery(5, inOrder, "three", "four");
+
+        SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {query1,
+query2}, 5, inOrder);
+
+        IndexReader reader = IndexReader.open(dir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(0, numSpans);
+    }
+
+
+    // for these two tests w2 has the same position as w1
+    public void testTermOverlapStartInOrder() throws Exception {
+        checkTermOverlap("w2", true, "w1", "w2", "w5");
+    }
+    public void testTermOverlapStartNotInOrder() throws Exception {
+        checkTermOverlap("w2", false, "w1", "w2", "w5");
+    }
+
+    // for these two tests w5 has the same position as w4
+    public void testTermOverlapEndInOrder() throws Exception {
+        checkTermOverlap("w5", true, "w1", "w4", "w5");
+    }
+    public void testTermOverlapEndNotInOrder() throws Exception {
+        checkTermOverlap("w5", false, "w1", "w4", "w5");
+    }
+
+
+    private void checkTermOverlap(String term, boolean inOrder, String...
+queryTerms) throws Exception {
+        RAMDirectory tempDir = new RAMDirectory();
+        Document doc = new Document();
+        doc.add(new Field("field", new StringReader("w1 w2 w3 w1 w4 w5")));
+        IndexWriter writer = new IndexWriter(tempDir,
+getPositionAnalyzer(term));
+        writer.addDocument(doc);
+        writer.close();
+
+        SpanNearQuery query = buildQuery(7, inOrder, queryTerms);
+
+        IndexReader reader = IndexReader.open(tempDir);
+        Spans spans = query.getSpans(reader);
+
+        int numSpans = countSpans(spans);
+
+        reader.close();
+
+        assertEquals(0, numSpans);
+    }
+
+
+    private Analyzer getPositionAnalyzer(final String term) {
+        return new Analyzer() {
+
+            @Override
+            public TokenStream tokenStream(String fieldName, Reader reader)
+{
+                return new TokenFilter(new
+StandardAnalyzer().tokenStream(fieldName, reader)) {
+
+                    @Override
+                    public Token next() throws IOException {
+                        Token result = input.next();
+
+                        if (result != null && result.termText
+().equals(term))
+                            result.setPositionIncrement(0);
+
+                        return result;
+                    }
+
+                };
+            }
+
+        };
+    }
+
+    private SpanNearQuery buildQuery(int slop, boolean inOrder, String...
+terms) {
+        SpanQuery[] termQueries = new SpanQuery[terms.length];
+        for (int i = 0; i < termQueries.length; i++)
+            termQueries[i] = new SpanTermQuery(new Term("field", terms[i]));
+
+        return new SpanNearQuery(termQueries, slop, inOrder);
+    }
+
+
+    @Override
+    protected void tearDown() throws Exception {
+        dir = null; // release directory
+        super.tearDown();
+    }
+
+
+
+}
+
+On 5/6/07, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+>
+> Moti,
+>
+> I tried your test and it fails in the way you describe, however, I don't
+> think
+> the test shows a bug.
+>
+> Below is the javadoc comment for the package private class
+> NearSpansOrdered.
+> Would that be sufficient documentation for the ordered case?
+>
+> /** A Spans that is formed from the ordered subspans of a SpanNearQuery
+> * where the subspans do not overlap and have a maximum slop between them.
+> * <p>
+> * The formed spans only contains minimum slop matches.<br>
+> * The matching slop is computed from the distance(s) between
+> * the non overlapping matching Spans.<br>
+> * Successive matches are always formed from the successive Spans
+> * of the SpanNearQuery.
+> * <p>
+> * The formed spans may contain overlaps when the slop is at least 1.
+> * For example, when querying using
+> * <pre>t1 t2 t3</pre>
+> * with slop at least 1, the fragment:
+> * <pre>t1 t2 t1 t3 t2 t3</pre>
+> * matches twice:
+> * <pre>t1 t2 .. t3      </pre>
+> * <pre>      t1 .. t2 t3</pre>
+> */
+>
+> Unfortunately for the unordered case in NearSpansUnordered.java there is
+> no
+> class comment available in the code.
+>
+> You can take a look at the existing span tests here:
+>
+> http://svn.apache.org/viewvc/lucene/java/trunk/src/test/org/apache/lucene/search/spans
+>
+>
+> Regards,
+> Paul Elschot
+>
+>
+>
+> On Sunday 06 May 2007 16:11, Moti Nisenson wrote:
+> > Looking over the implementation of SpanNearQuery I came upon what looked
+> > like a bug. Below is a test which fails due to it. SpanNearQuery doesn't
+> > return all matching spans; once it's found a span it always increments
+> the
+> > span of the clause appearing first in that span (ie. in the example
+> below
+> > the two spans should be "one two" and "one two two" where the second has
+> a
+> > slop of 1 - unfortunately the span of "one" gets incremented after "one
+> two"
+> > is found and so no additional spans get returned). Both in-order and
+> > out-of-order SpanNearQueries fail this test.
+> >
+> > I  think this is an undocumented feature and that the assumption is that
+> if
+> > someone searches for "one" near "two"  they're interested in the "one
+> two"
+> > result and not necessarily the "one two two" result. However,
+> > SpanNearQueries can be combined and by not returning all matching spans
+> this
+> > can result in problems. For example were we to intersect (ie.
+> SpanNearQuery
+> > with 0 slop) between the results of different SpanNearQueries, it is
+> > possible that the shortest possible span won't intersect, while a longer
+> > span (with legal slop) would.
+> >
+> > In my mind this is a bug (at least until there is some documentation),
+> and I
+> > would expect there to be an option (either a boolean parameter or a
+> > different class) which would indeed return all spans which satisfy the
+> slop
+> > constraint.
+> >
+> > What I'd like to know is:
+> >
+> > 1) Is this a bug?
+> > 2) Is there any known workaround for this issue (besides rolling my own,
+> of
+> > course)?
+> > 3) Could this bug/feature lead to problems with document scoring?
+> >
+> > Thanks,
+> >
+> > Moti
+> >
+> >
+> >
+> > import java.io.StringReader;
+> >
+> > import junit.framework.TestCase;
+> >
+> > import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> > import org.apache.lucene.document.Document;
+> > import org.apache.lucene.document.Field ;
+> > import org.apache.lucene.index.IndexReader;
+> > import org.apache.lucene.index.IndexWriter;
+> > import org.apache.lucene.index.Term;
+> > import org.apache.lucene.search.spans.SpanNearQuery;
+> > import org.apache.lucene.search.spans.SpanQuery ;
+> > import org.apache.lucene.search.spans.SpanTermQuery;
+> > import org.apache.lucene.search.spans.Spans;
+> > import org.apache.lucene.store.RAMDirectory;
+> >
+> > public class SpanNearQueryTest extends TestCase {
+> >
+> >     private RAMDirectory dir;
+> >
+> >     @Override
+> >     protected void setUp() throws Exception {
+> >         super.setUp();
+> >         dir = new RAMDirectory();
+> >         Document doc = new Document();
+> >         doc.add(new Field("field", new StringReader("one two two")));
+> >         IndexWriter writer = new IndexWriter(dir, new
+> StandardAnalyzer());
+> >         writer.addDocument(doc);
+> >         writer.close();
+> >     }
+> >
+> >     public void testNearQueryInOrder() throws Exception {
+> >         checkNearQuery(true);
+> >     }
+> >
+> >     public void testNearQueryNotInOrder() throws Exception {
+> >         checkNearQuery(false);
+> >     }
+> >
+> >     private void checkNearQuery(boolean inOrder) throws Exception {
+> >         SpanNearQuery query = new SpanNearQuery(new SpanQuery[]
+> >                     {new SpanTermQuery(new Term("field", "one")),
+> >                     new SpanTermQuery(new Term("field", "two"))}, 5,
+> > inOrder);
+> >
+> >         IndexReader reader = IndexReader.open(dir);
+> >         Spans spans = query.getSpans(reader);
+> >
+> >         int numSpans = 0;
+> >         while (spans.next())
+> >             numSpans++;
+> >
+> >         reader.close();
+> >
+> >         assertEquals(2, numSpans);
+> >     }
+> >
+> >
+> >     @Override
+> >     protected void tearDown() throws Exception {
+> >         dir = null; // release directory
+> >         super.tearDown();
+> >     }
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

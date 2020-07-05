@@ -1,0 +1,82 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: How to Cache Filter Results between Servers
+DATE: 29 Nov 2010
+
+IndexReader does not implement hashCode, so it falls back to
+Object.hashCode which means even if you open an IndexReader on the
+same index, each one will get a different hashCode.
+
+Note that modern versions of Lucene do per-segment searching, which
+means the toplevel MultiReader is never sent to the Filter.getDocIdSet
+(each sub-reader is sent, instead).
+
+Assuming the Filter doesn't use any "external state", then, yes, the
+same index on on another server using the same Filter will get the
+same docIdSet.
+
+You could implement your own CachingWrapperFilter that hashes/equals
+based only on the SegmentInfo behind the sub-reader?  Just take care
+to do the right thing w/ deletions, if your app uses deletions...
+
+Mike
+
+On Sun, Nov 28, 2010 at 10:50 PM, Sariny <sariny@gmail.com> wrote:
+> hello everyone
+>
+>            I have this test code:
+>
+>                IndexReader ir = getReader();
+>        TermQuery q = new TermQuery(new Term("sub_id",NumericUtils.intToPrefixCoded(57)));
+>
+>        Filter f = new QueryWrapperFilter(q);
+>        try
+>        {
+>            DocIdSet s = f.getDocIdSet(ir);
+>
+>            DocIdSetIterator i = s.iterator();
+>            while(i.nextDoc() != DocIdSetIterator.NO_MORE_DOCS)
+>            {
+>                System.out.println(i.docID());
+>            }
+>
+>            System.out.println(f.hashCode());
+>            System.out.println(s.hashCode());
+>            System.out.println(ir.hashCode());
+>            System.out.println(ir.getFieldCacheKey().hashCode());
+>        }
+>        catch (IOException e)
+>        {
+>            e.printStackTrace();
+>        }
+>
+>
+>       1. getReader() returns a MultiReader may consist of  several IndexReaders,
+in my test case ,only consist of one IndexReader
+>           2. index files won't change
+>
+>          assuming that index files won't be updated, and my question is :
+>
+>          1. why ir.hashCode() returns different value every time I run this code?
+>      2. if I copy the index file to another server ,and they provide search service
+together,will f.getDocIdSet(ir) return the same DocIdSet? if true,how to cache filter results
+and share between the 2 servers?  how to form a cache key not influenced by question 1?
+>
+>
+>
+>          Thanks ~~
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

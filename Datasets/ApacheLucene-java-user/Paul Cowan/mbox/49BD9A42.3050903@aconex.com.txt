@@ -1,0 +1,82 @@
+FROM: Paul Cowan <co...@aconex.com>
+SUBJECT: Re: StandardTokenizer issue ?
+DATE: 16 Mar 2009
+
+iMe wrote:
+> This analyzer uses the StandardTokenizer which javadoc states:
+> 
+> Splits words at hyphens, unless there's a number in the token, in which case
+> the whole token is interpreted as a product number and is not split. 
+> 
+> But looking to my index with luke, I saw that my product reference
+> AB-CD-1234 is split in 3 token AB, CD and 123 while I was expected the
+> tokenizer to keep it as a whole.
+> 
+> So its look like the StandardTokenizer does not work as is should.
+> 
+> Am I right ?
+
+
+The Javadoc is actually wrong, I think. It's clear from looking at the 
+code that the intent isn't for ANY number to cause a hyphenated sequence 
+to be interpreted as a single token; there has to be a digit in at least 
+every second segment, i.e.
+
+  AB-1234-CD
+or
+  1234-AB-5678
+but not
+  AB-CD-1234
+
+The .jj JavaCC grammar file, and the newer .jflex JFlex grammar, both 
+contain the following comment on the rule which matches these numbers:
+
+   // floating point, serial, model numbers, ip addresses, etc.
+   // every other segment must have at least one digit
+
+so it's definitely a deliberate decision; I'd say the JavaDoc is 
+incorrect, not the behaviour.
+
+However, given this exact issue is causing us problems now, I've been 
+racking my brain trying to think how this a useful restriction on the 
+rule compared to just 'any segment has a digit' -- if anyone has any 
+insight into the logic behind this rule I'd love to hear it as I can't 
+think of a good use case.
+
+Sure, it stops compound phrase like
+    the contest was a *best-of-3* event
+being treated as a single token, but doesn't stop
+    he was *2nd-placed* in the contest
+and leads, I think, to confusion. I'd be interested in knowing its origin.
+
+In our analyzer (a done-for-performance JFlex rewrite of the JavaCC 
+version, done before StandardTokenizer was rewritten in JFlex anyway), 
+we're considering replacing the rule
+       (<ALPHANUM> <P> <HAS_DIGIT>
+        | <HAS_DIGIT> <P> <ALPHANUM>
+        | <ALPHANUM> (<P> <HAS_DIGIT> <P> <ALPHANUM>)+
+        | <HAS_DIGIT> (<P> <ALPHANUM> <P> <HAS_DIGIT>)+
+        | <ALPHANUM> <P> <HAS_DIGIT> (<P> <ALPHANUM> <P>
+<HAS_DIGIT>)+
+        | <HAS_DIGIT> <P> <ALPHANUM> (<P> <HAS_DIGIT> <P>
+<ALPHANUM>)+
+       )
+with just
+      (
+        ({ALPHANUM} {P})+ {HAS_DIGIT} ({P} {ALPHANUM})*
+        | {HAS_DIGIT} ({P} {ALPHANUM})+
+      )
+which is much simpler and handles situations exactly like you describe.
+
+Either way, the code + javadoc need to be aligned, just not sure which 
+way around it should be.
+
+Paul
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

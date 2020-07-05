@@ -1,0 +1,130 @@
+FROM: Ype Kingma <ykin...@xs4all.nl>
+SUBJECT: Re: Using Lucene in an multiple index/large io scenario
+DATE: 1 Jul 2003
+
+Timo,
+
+On Monday 30 June 2003 15:54, tstich@uni-mannheim.de wrote:
+> Hello,
+> i am ProjectManager from the columba.sourceforge.net java
+> mailclient-project and we integrated Lucene as the search-backend half a
+> year ago. It is now working for small scale mailtraffic but with increasing
+> mailtraffic Lucene throws OutOfMemory and TooManyFilesOpen-Exceptions. I am
+
+I assume you are getting these during updating of your indexes.
+
+> now wondering if Lucene is capable of doing the job for us (like Otis
+> Gospodnetic suggested) and would appreciate any help and knowledge you can
+> share on this topic.
+
+I only have a little experience with Lucene, so I hope others correct me
+when needed.
+
+> I think the problem arises from following issues:
+> - Lucene is designed to create an index once in a while and not to update
+> an index frequently. We need it to add and delete documents very often
+> *and* search the index eventualy after every operation. Has anyone
+> experiences running Lucene in such an environment or do you think it is
+> impossible?
+
+For updating you have at least the following options:
+- keep a large inactive index and a small active index, search them
+  with a MultiSearcher.
+  When deleting you need to search both, you only add to the small
+  active index. When optimizing this small index starts consuming
+  too  many resources, merge the two.
+- as you indicated below, you can use a RAMIndex as the third
+  level.
+- don't optimize at all and let Lucene sort it all out, this uses
+  quite a few open files, evt. tune indexing speed with
+  IndexWriter.maxMergeDocs and mergeFactor.
+  This might slow down querying.
+
+> - Do you have an suggestion on how to use Lucene in such an environment
+> because it is not very nice code if you have to create a new
+> IndexReader/Writer after every operation?
+
+You don't need a new IndexWriter. When you want to have the
+last updates taken into account, you'll need a new IndexReader.
+You can also delay creating/opening an IndexReader until it is
+actually needed, and you can reuse an open IndexReader for
+multiple queries.
+I'd recommend to close unused IndexReaders.
+
+> - We introduced a RAMIndex that is merged to the FileIndex after N
+> operations to reduce the load and to not merge documents that are removed
+> directly after they are added (with filters on the mailboxes that is
+> happening very often). Any ideas if that was wise or if there is a better
+> solution?
+
+Sounds ok to me. See also above. You might merge only when you
+run low on memory.
+
+> - Does Lucene have problems with many indices in the same virtual machine?
+
+Lucene has no problem, but the underlying file system can give headaches.
+The last thing I heard of Windows is that it has a fixed max. of 2000 open
+files. Under Linux the max. nr of open files is settable in /proc.
+
+> We have an index for every mailfolder and get TooManyFilesOpen-Excpetions
+> when having >10 indices open. Maybe we should try to have only a single
+> index that holds all messages?
+
+The number of open files is determined by the total number of open segment
+files. An non optimized index can consist of many segments, an optimized
+index has one segment. Searching a non optimized index is slower
+because each segment needs to be searched separately.
+
+You have to realize that Lucene never modifies an index file, with a few
+exceptions, the most noticeable being the file that contains the 'deleted'
+bits in each segment. The segments are built in a hierarchy with fanout
+of IndexWriter.mergeFactor, and updates are effected by (batched)  deletions
+and (batched) additions.
+
+IndexWriter.mergeFactor controls two things: the amount of RAM and
+the number of files used for indexing. When you get both out memory
+and too many files open exceptions during indexing, you might considering
+lowering this mergeFactor.The amount of memory needed also depends
+on the size of your documents (which is not normally a problem for email),
+and the size of the RAMIndex.
+
+When rapidly alternating updates and queries, the trick is to try and 
+concentrate the additions in a small index and
+and merge the segments of only the small index before querying
+both the large and the small index.
+
+I'm using Lucene with 26 IndexReaders open without problems. I close them
+before opening any IndexWriter, though. Also I optimize after any update,
+but I hope to use a better filesystem soon so I can delay the optimize
+operations and use a lower maxMergeDocs during indexing.
+
+> If you like to look at sourcecode, how we implememted all this look at
+> http://cvs.sourceforge.net/cgi-bin/viewcvs.cgi/columba/columba/src/mail/cor
+>e/org/columba/mail/folder/search/LuceneSearchEngine.java?rev=1.7&content-typ
+>e=text/vnd.viewcvs-markup
+>
+> Its not nice to just give you the plain code and not the relevant snippets,
+> but these are more general design issues that i think are better explained
+> in words than in code.
+>
+> I would really like to see Lucene integrated in Columba, but i had to learn
+> that it is no easy task, maybe an impossible one. Based on the responses i
+> willl decide if we continue to work with Lucene or sadly have to drop it.
+
+It's only impossible when your update and query pattern cannot be made
+to match the (non file modifying) index updating method of Lucene combined
+with the restrictions of the underlying file system.
+
+You'll have to plan for occasional large merges, though.
+Indexing is indexing, and querying is querying.
+Lucene gives you the balance in your hands.
+
+Kind regards,
+Ype Kingma
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

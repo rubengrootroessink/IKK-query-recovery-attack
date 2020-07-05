@@ -1,0 +1,147 @@
+FROM: "Patrick Kimber" <mailing.patrick.kim...@gmail.com>
+SUBJECT: Re: Lucene 2.2, NFS, Lock obtain timed out
+DATE: 3 Jul 2007
+
+Hi Michael
+
+I am setting up the test with the "take2" jar and will let you know
+the results as soon as I have them.
+
+Thanks for your help
+
+Patrick
+
+On 03/07/07, Michael McCandless <lucene@mikemccandless.com> wrote:
+> OK I opened issue LUCENE-948, and attached a patch & new 2.2.0 JAR.
+> Please make sure you use the "take2" versions (they have added
+> instrumentation to help us debug):
+>
+>     https://issues.apache.org/jira/browse/LUCENE-948
+>
+> Patrick, could you please test the above "take2" JAR?  Could you also call
+> IndexWriter.setDefaultInfoStream(...) and capture all output from both
+> machines (it will produce quite a bit of output).
+>
+> However: I'm now concerned about another potential impact of stale
+> directory listing caches, specifically that the writer on the 2nd
+> machine will not see the current segments_N file written by the first
+> machine and will incorrectly remove the newly created files.
+>
+> I think that "take2" JAR should at least resolve this
+> FileNotFoundException but I think likely you are about to hit this new
+> issue.
+>
+> Mike
+>
+> "Patrick Kimber" <mailing.patrick.kimber@gmail.com> wrote:
+> > Hi Michael
+> >
+> > I am really pleased we have a potential fix.  I will look out for the
+> > patch.
+> >
+> > Thanks for your help.
+> >
+> > Patrick
+> >
+> > On 03/07/07, Michael McCandless <lucene@mikemccandless.com> wrote:
+> > >
+> > > "Patrick Kimber" <mailing.patrick.kimber@gmail.com> wrote:
+> > >
+> > > > I am using the NativeFSLockFactory.  I was hoping this would have
+> > > > stopped these errors.
+> > >
+> > > I believe this is not a locking issue and NativeFSLockFactory should
+> > > be working correctly over NFS.
+> > >
+> > > > Here is the whole of the stack trace:
+> > > >
+> > > > Caused by: java.io.FileNotFoundException:
+> > > > /mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_n (No such
+> > > > file or directory)
+> > > >       at java.io.RandomAccessFile.open(Native Method)
+> > > >       at java.io.RandomAccessFile.<init>(RandomAccessFile.java:204)
+> > > >       at org.apache.lucene.store.FSDirectory$FSIndexInput$Descriptor.<init>(FSDirectory.java:506)
+> > > >       at org.apache.lucene.store.FSDirectory$FSIndexInput.<init>(FSDirectory.java:536)
+> > > >       at org.apache.lucene.store.FSDirectory$FSIndexInput.<init>(FSDirectory.java:531)
+> > > >       at org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:440)
+> > > >       at org.apache.lucene.index.SegmentInfos.read(SegmentInfos.java:193)
+> > > >       at org.apache.lucene.index.IndexFileDeleter.<init>(IndexFileDeleter.java:156)
+> > > >       at org.apache.lucene.index.IndexWriter.init(IndexWriter.java:626)
+> > > >       at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:573)
+> > > >       at com.subshell.lucene.indexaccess.impl.IndexAccessProvider.getWriter(IndexAccessProvider.java:68)
+> > > >       at com.subshell.lucene.indexaccess.impl.LuceneIndexAccessor.getWriter(LuceneIndexAccessor.java:171)
+> > > >       at com.company.lucene.RepositoryWriter.addDocument(RepositoryWriter.java:176)
+> > > >       ... 13 more
+> > >
+> > > OK, indeed the exception is inside IndexFileDeleter's initialization
+> > > (this is what I had guessed might be happening).
+> > >
+> > > > I have added more logging to my test application.  I have two servers
+> > > > writing to a shared Lucene index on an NFS partition...
+> > > >
+> > > > Here is the logging from one server...
+> > > >
+> > > > [10:49:18] [DEBUG] LuceneIndexAccessor closing cached writer
+> > > > [10:49:18] [DEBUG] ExpirationTimeDeletionPolicy onCommit() delete
+> > > > [segments_n]
+> > > >
+> > > > and the other server (at the same time):
+> > > >
+> > > > [10:49:18] [DEBUG] LuceneIndexAccessor opening new writer and caching
+it
+> > > > [10:49:18] [DEBUG] IndexAccessProvider getWriter()
+> > > > [10:49:18] [ERROR] DocumentCollection update(DocumentData)
+> > > > com.company.lucene.LuceneIcmException: I/O Error: Cannot add the
+> > > > document to the index.
+> > > > [/mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_n (No
+> > > > such file or directory)]
+> > > >     at
+> > > >     com.company.lucene.RepositoryWriter.addDocument(RepositoryWriter.java:182)
+> > > >
+> > > > I think the exception is being thrown when the IndexWriter is created:
+> > > > new IndexWriter(directory, false, analyzer, false, deletionPolicy);
+> > > >
+> > > > I am confused... segments_n should not have been touched for 3 minutes
+> > > > so why would a new IndexWriter want to read it?
+> > >
+> > > Whenever a writer is opeened, it initializes the deleter
+> > > (IndexFileDeleter).  During that initialization, we list all files in
+> > > the index directory, and for every segments_N file we find, we open it
+> > > and "incref" all index files that it's using.  We then call the
+> > > deletion policy's "onInit" to give it a chance to remove any of these
+> > > commit points.
+> > >
+> > > What's happening here is the NFS directory listing is "stale" and is
+> > > reporting that segments_n exists when in fact it doesn't.  This is
+> > > almost certainly due to the NFS client's caching (directory listing
+> > > caches are in general not coherent for NFS clients, ie, they can "lie"
+> > > for a short period of time, especially in cases like this).
+> > >
+> > > I think this fix is fairly simple: we should catch the
+> > > FileNotFoundException and handle that as if the file did not exist.  I
+> > > will open a Jira issue & get a patch.
+> > >
+> > > Mike
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

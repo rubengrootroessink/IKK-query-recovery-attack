@@ -1,0 +1,307 @@
+FROM: Karl Wettin <karl.wet...@gmail.com>
+SUBJECT: Re: ShingleMatrixFilter for synonyms
+DATE: 14 Jan 2009
+
+Hi Eric,
+
+ShingleMatrixFilter does not add some sort of multiple token synonym  
+feature on top of a plain old Lucene index, it does however create  
+permutations of tokens in a matrix. My suggestion is that you first  
+look at what shingles are and make sure this is something you feel is  
+interesting for your project. It might not work as you expect it to.
+
+A shingle based index works a bit different to a non shingle based  
+index. The default use is in my experience is to replace exact (0- 
+slop) phrase queries, or at least to give more weight to adjuncted  
+tokens.
+
+As for multiple token synonyms there has been a few discussions on the  
+forum about this before I came up with ShingleMatrixFilter, perhaps  
+some of these might work better for you:
+
+http://www.nabble.com/multi-word-synonyms-to17294842.html#a17305359
+
+Still, here is the explaination of what ShingleMatrixFilter does:
+
+Consider the following simple example from the test case:
+<http://svn.apache.org/repos/asf/lucene/java/trunk/contrib/analyzers/src/test/org/apache/lucene/analysis/shingle/TestShingleMatrixFilter.java
+
+ >
+
+>     tokens = new LinkedList();
+>     tokens.add(tokenFactory("hello", 1, 0, 4));
+>     tokens.add(tokenFactory("greetings", 0, 0, 4));
+>     tokens.add(tokenFactory("world", 1, 5, 10));
+>     tokens.add(tokenFactory("earth", 0, 5, 10));
+>     tokens.add(tokenFactory("tellus", 0, 5, 10));
+
+This is a matrix using two dimensions, i.e. single token synonyms by  
+setting positionIncrement to 0 as in a plain old Lucene index:
+
+As a token stream:
+"hello"(1), "greetings"(0), "world"(1), "earth"(0), "tellus"(0)
+
+As a three dimensional matrix (but only using two dimensions):
+{
+   {{"hello"}, {"greetings"}}
+   {{"world"}, {"earth"}, {"tellus"}}
+}
+
+The output of all bi-gram permutations of this is:
+
+>     tls = new TokenListStream(tokens);
+>
+>     // bi-grams
+>
+>     ts = new ShingleMatrixFilter(tls, 2, 2, new Character('_'),  
+> false, new  
+> ShingleMatrixFilter 
+> .TwoDimensionalNonWeightedSynonymTokenSettingsCodec());
+>
+>     final Token reusableToken = new Token();
+>     assertNext(ts, reusableToken, "hello_world");
+>     assertNext(ts, reusableToken, "greetings_world");
+>     assertNext(ts, reusableToken, "hello_earth");
+>     assertNext(ts, reusableToken, "greetings_earth");
+>     assertNext(ts, reusableToken, "hello_tellus");
+>     assertNext(ts, reusableToken, "greetings_tellus");
+>     assertNull(ts.next(reusableToken));
+
+What ShingleMatrixFilter also offers is a third dimension, i.e. it can  
+permutate the output with multiple tokens in once place.
+
+{
+   {{"hello"}, {"greetings", "and", "salutations"}},
+   {{"world"}, {"earth"}, {"tellus"}}
+}
+
+Above would mean that "greetings and salutations" is a "synonym" to  
+"hello" and thus it would produce the following bi/tri-gram shingle  
+permutations:
+
+>     assertNext(ts, reusableToken, "hello_world", 1, 1.4142135f, 0,  
+> 10);
+>     assertNext(ts, reusableToken, "greetings_and", 1, 1.4142135f, 0,  
+> 4);
+>     assertNext(ts, reusableToken, "greetings_and_salutations", 1,  
+> 1.7320508f, 0, 4);
+>     assertNext(ts, reusableToken, "and_salutations", 1, 1.4142135f,  
+> 0, 4);
+>     assertNext(ts, reusableToken, "and_salutations_world", 1,  
+> 1.7320508f, 0, 10);
+>     assertNext(ts, reusableToken, "salutations_world", 1,  
+> 1.4142135f, 0, 10);
+>     assertNext(ts, reusableToken, "hello_earth", 1, 1.4142135f, 0,  
+> 10);
+>     assertNext(ts, reusableToken, "and_salutations_earth", 1,  
+> 1.7320508f, 0, 10);
+>     assertNext(ts, reusableToken, "salutations_earth", 1,  
+> 1.4142135f, 0, 10);
+>     assertNext(ts, reusableToken, "hello_tellus", 1, 1.4142135f, 0,  
+> 10);
+>     assertNext(ts, reusableToken, "and_salutations_tellus", 1,  
+> 1.7320508f, 0, 10);
+>     assertNext(ts, reusableToken, "salutations_tellus", 1,  
+> 1.4142135f, 0, 10);
+>
+
+
+
+I hope this explains what SingleMatrixFilter does.
+
+
+       karl
+
+14 jan 2009 kl. 02.32 skrev Angel, Eric:
+
+> The unit tests don't really show how I could use it for synonyms at
+> index time- does anyone have sample code?  Is it possible?
+>
+> -----Original Message-----
+> From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> Sent: Tuesday, January 13, 2009 3:06 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: ShingleMatrixFilter for synonyms
+>
+> Eric,
+>
+> Unit tests should help you see how this can be used:
+>
+> ./contrib/analyzers/src/java/org/apache/lucene/analysis/shingle/ 
+> ShingleF
+> ilter.java
+> ./contrib/analyzers/src/java/org/apache/lucene/analysis/shingle/ 
+> ShingleA
+> nalyzerWrapper.java
+> ./contrib/analyzers/src/java/org/apache/lucene/analysis/shingle/ 
+> ShingleM
+> atrixFilter.java
+> ./contrib/analyzers/src/test/org/apache/lucene/analysis/shingle/ 
+> ShingleA
+> nalyzerWrapperTest.java
+> ./contrib/analyzers/src/test/org/apache/lucene/analysis/shingle/ 
+> TestShin
+> gleMatrixFilter.java
+> ./contrib/analyzers/src/test/org/apache/lucene/analysis/shingle/ 
+> ShingleF
+> ilterTest.java
+>
+> As for multi-word tokens, you just have to make sure they don't get
+> injected before something that would remove any portion of them.
+>
+> Otis
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+>
+>
+> ----- Original Message ----
+>> From: "Angel, Eric" <eangel@business.com>
+>> To: java-user@lucene.apache.org
+>> Sent: Tuesday, January 13, 2009 2:39:11 PM
+>> Subject: ShingleMatrixFilter for synonyms
+>>
+>> Does anyone have an example using this?
+>>
+>>
+>>
+>> I have a SynonymEngine that returns a an array list of strings, some
+> of
+>> which may be multiple words.  How can I incorporate this with my
+>> SynonymEngine at index time?
+>>
+>>
+>>
+>> Also, the javadoc for the ShingleMatrixFilter class says:
+>>
+>>            Without a spacer character it can be used to handle
+>> composition and decomposion of words such as searching for "multi
+>> dimensional" instead of "multidimensional".
+>>
+>>
+>>
+>> Does any one have a working example of this?
+>>
+>>
+>>
+>>
+>>
+>> Here's my synonym engine (taken from the Lucene In Action book):
+>>
+>>
+>>
+>> public interface SynonymEngine {
+>>
+>>      public String[] getSynonyms(String word) throws IOException;
+>>
+>> }
+>>
+>>
+>>
+>> public class DexSynonymEngine implements SynonymEngine {
+>>
+>>
+>>
+>>      private static Mapmap = new HashMap
+>> String[]>();
+>>
+>>
+>>
+>>      static {
+>>
+>>            // numbers
+>>
+>>            map.put("1" , new String[] {"one"});
+>>
+>>            map.put("2" , new String[] {"two"});
+>>
+>>            map.put("3" , new String[] {"three"});
+>>
+>>            map.put("4" , new String[] {"four"});
+>>
+>>            map.put("5" , new String[] {"five"});
+>>
+>>            map.put("6" , new String[] {"six", "seis"});
+>>
+>>            map.put("7" , new String[] {"seven"});
+>>
+>>            map.put("8" , new String[] {"eight"});
+>>
+>>            map.put("9" , new String[] {"nine"});
+>>
+>>            map.put("10" , new String[] {"ten"});
+>>
+>>            map.put("11" , new String[] {"eleven"});
+>>
+>>            map.put("12" , new String[] {"twelve"});
+>>
+>>            map.put("13" , new String[] {"thirteen"});
+>>
+>>            map.put("14" , new String[] {"fourteen"});
+>>
+>>            map.put("15" , new String[] {"fifteen"});
+>>
+>>            map.put("16" , new String[] {"sixteen"});
+>>
+>>            map.put("17" , new String[] {"seventeen"});
+>>
+>>            map.put("18" , new String[] {"eighteen"});
+>>
+>>            map.put("19" , new String[] {"nineteen"});
+>>
+>>            map.put("20" , new String[] {"twenty"});
+>>
+>>            map.put("21" , new String[] {"twenty one"});
+>>
+>>            // words
+>>
+>>            map.put("pharmacy" , new String[] {"drug store"});
+>>
+>>            map.put("pharmacy" , new String[] {"drug store"});
+>>
+>>            map.put("hospital" , new String[] {"medical center"});
+>>
+>>            map.put("fast", new String[]{"quick", "speedy"});
+>>
+>>            map.put("search", new String[]{"explore", "hunt",
+> "hunting",
+>> "look"});
+>>
+>>            map.put("sound", new String[]{"audio"});
+>>
+>>            map.put("restaurant", new String[]{"eatery"});
+>>
+>>
+>>
+>>      }
+>>
+>>
+>>
+>>
+>>
+>>      public String[] getSynonyms(String word) throws IOException {
+>>
+>>            return map.get(word);
+>>
+>>      }
+>>
+>>
+>>
+>> }
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

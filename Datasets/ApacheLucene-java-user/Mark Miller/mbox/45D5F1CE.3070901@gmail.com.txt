@@ -1,0 +1,108 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Multiword Highlighting
+DATE: 16 Feb 2007
+
+The following addresses the reuse of the Spans object and fixes a bug in 
+checking for required clauses (boolean test was reversed). Again, the 
+only testing I have done involves one doc for "real" hit highlighting so 
+your mileage may vary. Attempt number two:
+
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.search.spans.Spans;
+
+import java.io.IOException;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+
+public class QuerySpansExtractor {
+    public Spans[] extractSpans(Query query, IndexReader reader)
+        throws IOException {
+        List spans = getSpans(query, reader);
+
+        return (Spans[]) spans.toArray(new Spans[spans.size()]);
+    }
+
+    private List getSpans(Query query, IndexReader reader)
+        throws IOException {
+        Spans spans = null;
+
+        if (query instanceof BooleanQuery) {
+            return getSpansFromBooleanQuery((BooleanQuery) query, reader);
+        } else if (query instanceof PhraseQuery) {
+            spans = getSpansFromPhraseQuery((PhraseQuery) query, reader);
+        } else if (query instanceof TermQuery) {
+            spans = getSpansFromTermQuery((TermQuery) query, reader);
+        } else if (query instanceof SpanQuery) {
+            spans = getSpansFromSpanQuery((SpanQuery) query, reader);
+        }
+
+        List spanList = new ArrayList(1);
+        spanList.add(spans);
+
+        return spanList;
+    }
+
+    private List getSpansFromBooleanQuery(BooleanQuery query, 
+IndexReader reader)
+        throws IOException {
+        BooleanClause[] queryClauses = query.getClauses();
+        int i;
+        boolean useQuery = true;
+        List possibleSpans = new ArrayList();
+
+        for (i = 0; i < queryClauses.length; i++) {
+            if (queryClauses[i].isProhibited()) {
+                List prohibSpans = getSpans(queryClauses[i].getQuery(), 
+reader);
+
+                if (((Spans) prohibSpans.get(0)).next()) {
+                    useQuery = false;
+                    break;
+                } else {
+                    prohibSpans = getSpans(queryClauses[i].getQuery(), 
+reader);
+                    possibleSpans.addAll(prohibSpans);
+                }
+            } else if (queryClauses[i].isRequired()) {
+          
+                List reqSpans = getSpans(queryClauses[i].getQuery(), 
+reader);
+
+                if (!((Spans) reqSpans.get(0)).next()) {
+                    useQuery = false;
+                    break;
+                } else {
+                    reqSpans = getSpans(queryClauses[i].getQuery(), reader);
+                    possibleSpans.addAll(reqSpans);
+                }
+            } else {
+                
+possibleSpans.addAll(getSpans(queryClauses[i].getQuery(), reader));
+            }
+        }
+
+        if (!useQuery) {
+            possibleSpans = Collections.EMPTY_LIST;
+        }
+
+        return possibleSpans;
+    }
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

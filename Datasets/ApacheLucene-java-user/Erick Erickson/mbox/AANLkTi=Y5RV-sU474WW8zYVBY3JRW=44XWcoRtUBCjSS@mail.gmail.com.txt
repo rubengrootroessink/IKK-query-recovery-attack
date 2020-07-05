@@ -1,0 +1,126 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: No hits when querying multiple fields
+DATE: 27 Jul 2010
+
+Hmmmm, what analyzers are you using at index and query time? Are they
+identical?
+
+But I think your basic problem is phrases. Parsing text:"hello world"
+expects
+the words "hello" and "world" to appear sequentially in the text field. Try
+something like title:(+hello +world). But depending upon how you indexed
+things, phrases may not be your problem here.
+
+Your Boolean construction suffers from something similar. You asking to find
+a single term that is exactly "hello world". If you analyzed your input at
+index time
+there would be terms "hello" and "world", but no *single *term "hello
+world".
+
+You might get some insights by getting a copy of Luke and examining your
+index to see if what's in there is what you expect....
+
+Query 4 is probably succeeding because the default operator is OR. So it's
+only matching on the id:"1" part.
+
+Which is all very nice, but I have no good explanation why you can get your
+document with either of your sub-queries but not the AND of the two. My *
+guess*
+is that you somehow don't have what you *think* you do in your index. Luke
+will
+help a lot here. Is it possible that you've indexed two different documents
+that
+match the two different parts of your query and that both don't actually
+exist
+in your index in the same document? Perhaps you could re-run your test and
+print
+out the document ID along with the match.....
+
+And if all that fails, try making a small, self-contained test case that
+demonstrates this. I'd bet that you won't be able to and that in the course
+of creating the test you'll have a forehead-slapping moment <G>..
+
+
+Best
+Erick
+
+On Tue, Jul 27, 2010 at 4:18 PM, Geir Gullestad Pettersen
+<geirgp@gmail.com>wrote:
+
+> Consider the following two documents which I have added to my index:
+>
+> doc.add( new Field("text", "hello world", Field.Store.YES,
+> > Field.Index.ANALYZED));
+> > doc.add( new Field("id", "1", Field.Store.YES, Field.Index.ANALYZED));
+> >
+>
+>
+> Using the StandardQueryParser I can retrieve my document with either of
+> these two queries:
+>
+> 1) title:"hello world"
+> >
+> and
+>
+> > 2) id:"1"
+> >
+>
+> however, if I try AND'ing the above two, I get 0 results:
+>
+> > 3) title:"hello world" AND id:"1"
+> >
+>
+> If I remove the AND  and modify the first term to something that i know is
+> not in my document, I also find my document:
+>
+> > 4) title:"no match" id:"1"
+> >
+> ..so i guess leaving out the keywork AND turns it into an OR query, not
+> what
+> I want.
+>
+>
+> In the debugging process I have tried passing the toString() of the Query
+> object returned from the StandardQueryParser to System.out, and it shows
+> the
+> following for the above queries:
+> 1) *title:"hello world"* ->Query.toString()->* title:"hello world"*
+> 2) *id:"1" ->* Query.toString ->* id:1*
+> 3) *title:"hello world" AND id:"1"* -> Query.toString() -> *+title:"hello
+> world" +id:1*
+> 4) *title:"hello world" id:"1"* -> Query.toString() -> *title:"hello world"
+> id:1
+>
+> *The only things noticable is quotations being removed from the "id"-term,
+> and  #3 where the AND is removed and a + is prefixed the field names.
+> Iunderstand that the + sign in front of the field name means that the term
+> has to exist in that field, so essentially my queries seem to have been
+> parsed as expected
+>
+> Queries 1,2 and 4 all return results as expected, but can anyone tell me
+> why
+> number #3 - the AND query - does not return my document? it is essentially
+> an AND between query #1 and #2 which both match the document.
+>
+> I have also tried construction a query manually:
+>
+> BooleanQuery query = new BooleanQuery();
+> > TermQuery textQuery = new TermQuery(new Term("text","hello world"));
+> > TermQuery idQuery = new TermQuery(new Term("id","1"));
+> > query.add(textQuery, Occur.MUST);
+> > query.add(iddQuery, Occur.MUST);
+> >
+>
+> .. but just as with the above query #3 I get nothing back. passing this
+> Query's toString() output to System.out also gives me the same as for #3:
+> 5) *title:"hello world" AND id:"1"* -> Query.toString() -> *+title:"hello
+> world" +id:"1"*
+>
+> Can anyone please tell me what I'm doing wrong? I just want to and queries
+> #1 and #2 which both match my document when executed alone..
+>
+>
+> Thank you very much,
+> Geir Pettersen
+>
+

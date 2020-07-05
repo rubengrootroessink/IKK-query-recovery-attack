@@ -1,0 +1,142 @@
+FROM: Paul Taylor <paul_t...@fastmail.fm>
+SUBJECT: Re: Move from RAMDirectory to FSDirectory causing problem sometimes
+DATE: 8 Jul 2008
+
+Michael McCandless wrote:
+>
+> Technically you should call directory.close() as well, but missing 
+> that will not lead to too many open files.
+>
+> How often is that RuntimeException being thrown?  EG if a single 
+> document is frequently hitting an exception during analysis, your code 
+> doesn't close the IndexWriter in that situation.  It's better to use a 
+> try/finally and close the IndexWriter in the finally clause, to cover 
+> that case.
+>
+> Are you sure nothing else is using up file descriptors?  EG the 
+> createDocument call does not open any files?
+>
+> Mike
+>
+The runtimeException is occurring all the time, Im waiting for some more 
+information from the user. Since the post I've since added 
+directory.close() too, I thought this would cause a problem when I call 
+IndexSearcher with it as a parameter but it seems to still work - the 
+documentation is not very clear on this point. I see your poibnt about 
+the try/finally I'll make that chnage.
+
+There are many other parts of the code that use filedescriptors, but the 
+problem has never occurred before moving to a FSDirectory
+
+thanks paul
+
+heres an example of my search code, is this ok ?
+
+public boolean recNoColumnMatchesSearch(Integer columnId, Integer recNo, 
+String search)
+ {  
+        try
+        {
+            IndexSearcher is = new IndexSearcher(directory);
+
+            //Build a query based on the fields, searchString and 
+standard analyzer
+            QueryParser parser = new 
+QueryParser(String.valueOf(columnId) + INDEXED, analyzer);
+            Query query = parser.parse(search);
+            MainWindow.logger.finer("Parsed Search Query Is" + 
+query.toString() + "of type:" + query.getClass());
+
+            //Create a filter,to restrict search to one row
+            Filter filter = new QueryFilter(new TermQuery(new 
+Term(ROW_NUMBER, String.valueOf(recNo))));
+
+            //run the search
+            Hits hits = is.search(query, filter);
+            Iterator i = hits.iterator();
+            if (i.hasNext())
+            {
+                return true;
+            }
+        }
+        catch (ParseException pe)
+        {
+            //Problem with syntax rather than throwing exception and 
+causing everything to stop we just
+            //log and return false
+            MainWindow.logger.warning("Search Query invalid:" + 
+pe.getMessage());
+            return false;
+        }
+        catch (IOException e)
+        {
+            MainWindow.logger.warning("DataIndexer.Unable to do perform 
+reno match search:" + search + ":" + e);
+        }
+        return false;
+
+> Paul Taylor wrote:
+>
+>> Hi, I have been using a RAMDirectory for indexing without any 
+>> problem, but I then moved to a file based directory to reduce memory 
+>> usage. this has been working fine on Windows and OSX and my version 
+>> of linux (redhat) but is failing on a version of linux (archlinux) 
+>> with 'Too many files opened' , but they are only indexing 32 
+>> documents , I can index thousands without a problem. It mentions this 
+>> error in the Lucene FAQ but I am not dealing directly with the 
+>> filesystem myself, this is my code for creating an index is it okay 
+>> or is there some kind of close that I am missing
+>>
+>> thanks for any help Paul
+>>
+>> public synchronized void reindex()
+>>   {
+>>       MainWindow.logger.info("Reindex start:" + new Date());
+>>       TableModel tableModel = table.getModel();
+>>       try
+>>       {
+>>           //Recreate the RAMDirectory uses too much memory
+>>           //directory = new RAMDirectory();
+>>           directory = 
+>> FSDirectory.getDirectory(Platform.getPlatformLicenseFolder()+ "/" + 
+>> TAG_BROWSER_INDEX);
+>>           IndexWriter writer = new IndexWriter(directory, analyzer, 
+>> true);
+>>
+>>           //Iterate through all rows
+>>           for (int row = 0; row < tableModel.getRowCount(); row++)
+>>           {
+>>               //for each row make a new document
+>>               Document document = createDocument(row);
+>>               writer.addDocument(document);
+>>
+>>           }
+>>           writer.optimize();
+>>           writer.close();
+>>       }
+>>       catch (Exception e)
+>>       {
+>>           throw new RuntimeException("Problem indexing Data:" + 
+>> e.getMessage());
+>>       }
+>> }
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

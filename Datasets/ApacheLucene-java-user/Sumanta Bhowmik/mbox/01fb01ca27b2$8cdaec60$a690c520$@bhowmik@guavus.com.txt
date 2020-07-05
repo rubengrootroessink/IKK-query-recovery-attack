@@ -1,0 +1,406 @@
+FROM: "Sumanta Bhowmik" <sumanta.bhow...@guavus.com>
+SUBJECT: RE: Merge Exception in Lucene 2.4
+DATE: 28 Aug 2009
+
+Hi
+
+Since merging is done in separate threads, I am actually firing multiple
+merges concurrently. That may be causing the problem. Is it possible to make
+merges a synchronous  operation?
+
+Sumanta
+
+-----Original Message-----
+From: Sumanta Bhowmik [mailto:sumanta.bhowmik@guavus.com] 
+Sent: Friday, August 28, 2009 10:56 AM
+To: java-user@lucene.apache.org
+Cc: lucene@mikemccandless.com
+Subject: RE: Merge Exception in Lucene 2.4
+
+Hi
+
+I am not sure if the -Xint option works as the performance goes down like
+anything. Since I am indexing streaming data -Xint is not an option. Is it
+possible that we do the merge synchronously so that I can catch the
+exception, clean the index and start afresh. Even if it is asynchronous if
+there is a way to know the status of the merge operation?
+
+Sumanta
+
+-----Original Message-----
+From: Michael McCandless [mailto:lucene@mikemccandless.com] 
+Sent: Thursday, August 27, 2009 2:30 PM
+To: Sumanta Bhowmik
+Cc: java-user@lucene.apache.org
+Subject: Re: Merge Exception in Lucene 2.4
+
+Was this a smallish contained test case?  Can you post the sources?
+
+Can you run your next test with IndexWriter's infoStream turned on,
+and post the resluting output?
+
+Was this with jdk1.6u16?  That version fixes the original hotspot bug
+from LUCENE-1282... (and your exception looks different from the one
+in LUCENE-1282).
+
+Mike
+
+On Thu, Aug 27, 2009 at 12:46 AM, Sumanta
+Bhowmik<sumanta.bhowmik@guavus.com> wrote:
+> Hi
+>
+> I ran a long running test and now got this exception.
+>
+> Exception in thread "Lucene Merge Thread #39"
+> org.apache.lucene.index.MergePolicy$MergeException: java.io.IOException:
+> read past EOF
+>        at
+>
+org.apache.lucene.index.ConcurrentMergeScheduler.handleMergeException(Concur
+> rentMergeScheduler.java:309)
+>        at
+>
+org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run(ConcurrentM
+> ergeScheduler.java:286)
+> Caused by: java.io.IOException: read past EOF
+>        at
+>
+org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.java:15
+> 1)
+>        at
+>
+org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.java:
+> 38)
+>        at org.apache.lucene.store.IndexInput.readVInt(IndexInput.java:78)
+>        at
+>
+org.apache.lucene.index.SegmentTermPositions.readDeltaPosition(SegmentTermPo
+> sitions.java:73)
+>        at
+>
+org.apache.lucene.index.SegmentTermPositions.nextPosition(SegmentTermPositio
+> ns.java:69)
+>        at
+>
+org.apache.lucene.index.SegmentMerger.appendPostings(SegmentMerger.java:667)
+>        at
+>
+org.apache.lucene.index.SegmentMerger.mergeTermInfo(SegmentMerger.java:586)
+>        at
+>
+org.apache.lucene.index.SegmentMerger.mergeTermInfos(SegmentMerger.java:547)
+>        at
+> org.apache.lucene.index.SegmentMerger.mergeTerms(SegmentMerger.java:500)
+>        at
+> org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:140)
+>        at
+> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:4226)
+>        at org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:3877)
+>        at
+>
+org.apache.lucene.index.ConcurrentMergeScheduler.doMerge(ConcurrentMergeSche
+> duler.java:205)
+>        at
+>
+org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run(ConcurrentM
+> ergeScheduler.java:260)
+>
+>
+>
+> I am running it on Linux version 2.6.26-79.fc9 , gcc version 4.1.2
+20071124
+> (Red Hat 4.1.2-42)
+>
+> This exception occurs after we have indexed more than 100 gb of data. I
+will
+> try running with -Xint to see if I can avoid this exception.
+>
+> Regards
+> Sumanta
+>
+> -----Original Message-----
+> From: Sumanta Bhowmik [mailto:sumanta.bhowmik@guavus.com]
+> Sent: Monday, August 24, 2009 1:10 PM
+> To: java-user@lucene.apache.org
+> Subject: RE: Merge Exception in Lucene 2.4
+>
+> I will be running a long running test with jdk1.6u16. If the problem still
+> appears I will try to create a test case to show the issue.
+>
+> Sumanta
+>
+> -----Original Message-----
+> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Sent: Friday, August 21, 2009 4:44 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Merge Exception in Lucene 2.4
+>
+> That code looks fine...
+>
+> What OS/filesystem are you using?
+>
+> Can you make a small test case that shows the issue?
+>
+> Mike
+>
+> On Thu, Aug 20, 2009 at 7:41 AM, Sumanta
+> Bhowmik<sumanta.bhowmik@guavus.com> wrote:
+>> We put all the IndexWriters in an array which is defined by
+>>
+>> final Directory[] finalDir;
+>>
+>> We also declare an indexer
+>> As
+>> private volatile static Indexer indexer;
+>>
+>> final Indexer finalIndexer = indexer;
+>>
+>> Next we call the merge in a new thread :
+>>
+>> Thread thread = new Thread(){
+>>                        public void run()
+>>                        {
+>>                                try {
+>>                                        logger.debug("starts merging
+w/o
+>> optimization");
+>>
+>> finalIndexer.getWriter().addIndexesNoOptimize(finalDir);
+>>                                        logger.debug("ends merging
+w/o
+>> optimization");
+>>
+>>                                } catch (CorruptIndexException e)
+{
+>>                                        logger.notice("",e);
+>>                                } catch (IOException e) {
+>>                                        logger.notice("",e);
+>>                                }
+>>
+>>        }
+>> }
+>>
+>> Sumanta
+>>
+>>
+>>
+>>
+>> -----Original Message-----
+>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Sent: Thursday, August 20, 2009 3:07 PM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Merge Exception in Lucene 2.4
+>>
+>> You should definitely upgrade to the latest JDK 1.6 to get the fix for
+>> the JRE bug in LUCENE-1282, but, I don't think you are hitting that
+>> bug (read past EOF during merge is a different exception).
+>>
+>> Can you describe more detail on how you merge 6 IndexWriters?
+>>
+>> Mike
+>>
+>> On Thu, Aug 20, 2009 at 5:21 AM, Sumanta
+>> Bhowmik<sumanta.bhowmik@guavus.com> wrote:
+>>> I checked at http://issues.apache.org/jira/browse/LUCENE-1282
+>>> SegmentMerger.java has this code
+>>>
+>>> TermFreqVector[] vectors = reader.getTermFreqVectors(docNum);
+>>> termVectorsWriter.addAllDocVectors(vectors);
+>>>
+>>> so this issue appears inspite of this fix.
+>>>
+>>> I am using java version "1.6.0_07". Is it fixed in jdk6u10 and above
+>>> (http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6707044) ?
+>>>
+>>> Regards
+>>> Sumanta
+>>>
+>>>
+>>> -----Original Message-----
+>>> From: Sumanta Bhowmik [mailto:sumanta.bhowmik@guavus.com]
+>>> Sent: Thursday, August 20, 2009 1:15 PM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Merge Exception in Lucene 2.4
+>>>
+>>> Hi
+>>>
+>>>
+>>>
+>>> I am getting this issue in Lucene2.4 when I try to merge multiple
+>>> IndexWriters(generally 6)
+>>>
+>>>
+>>>
+>>> sh-3.2# Exception in thread "Lucene Merge Thread #5"
+>>> org.apache.lucene.index.MergePolicy$MergeException: java.io.IOException:
+>>> read past EOF
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.ConcurrentMergeScheduler.handleMergeException(Concur
+>>> rentMergeScheduler.java:309)
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run(ConcurrentM
+>>> ergeScheduler.java:286)
+>>>
+>>> Caused by: java.io.IOException: read past EOF
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.java
+>>> :135)
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java:
+>>> 228)
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java:184
+>>> )
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java:
+>>> 204)
+>>>
+>>>        at
+>>> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:4260)
+>>>
+>>>        at
+> org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:3877)
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.ConcurrentMergeScheduler.doMerge(ConcurrentMergeSche
+>>> duler.java:205)
+>>>
+>>>        at
+>>>
+>>
+>
+org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run(ConcurrentM
+>>> ergeScheduler.java:260)
+>>>
+>>>
+>>>
+>>>
+>>>
+>>> Is this a known issue and has any fix been provided for it ? Would
+>>> appreciate any help.
+>>>
+>>>
+>>>
+>>> Regards
+>>>
+>>> Sumanta
+>>>
+>>>
+>>>
+>>>
+>>>
+>>>
+>>>
+>>>
+>>> __________ NOD32 4349 (20090819) Information __________
+>>>
+>>> This message was checked by NOD32 antivirus system.
+>>> http://www.eset.com
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> __________ NOD32 4350 (20090820) Information __________
+>>
+>> This message was checked by NOD32 antivirus system.
+>> http://www.eset.com
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> __________ NOD32 4354 (20090821) Information __________
+>
+> This message was checked by NOD32 antivirus system.
+> http://www.eset.com
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> __________ NOD32 4361 (20090823) Information __________
+>
+> This message was checked by NOD32 antivirus system.
+> http://www.eset.com
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+__________ NOD32 4371 (20090826) Information __________
+
+This message was checked by NOD32 antivirus system.
+http://www.eset.com
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+__________ NOD32 4375 (20090827) Information __________
+
+This message was checked by NOD32 antivirus system.
+http://www.eset.com
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

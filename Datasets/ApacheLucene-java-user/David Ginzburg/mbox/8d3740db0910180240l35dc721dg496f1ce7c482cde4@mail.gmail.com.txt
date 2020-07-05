@@ -1,0 +1,340 @@
+FROM: David Ginzburg <davidginzb...@gmail.com>
+SUBJECT: Re: localToken contains a termBuffer with 10 empty chars ('')
+DATE: 18 Oct 2009
+
+Sorry,What does it mean, to respect the termLength() ?
+
+On Sun, Oct 18, 2009 at 11:37 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+
+> You must also respect termLength() which returns the number of "valid"
+> chars
+> in the term buffer.
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+> > -----Original Message-----
+> > From: David Ginzburg [mailto:davidginzburg@gmail.com]
+> > Sent: Sunday, October 18, 2009 2:28 AM
+> > To: java-user@lucene.apache.org
+> > Subject: localToken contains a termBuffer with 10 empty chars ('')
+> >
+> > Hi,
+> > I have written a my own weighted synonym filter and tried to integrate it
+> > inside an analyzer.
+> > The analyzer as defined in the schema.xml is:
+> >
+> >
+> >
+> >
+> > the field type is
+> > *<fieldType name="Company_Name" class="solr.TextField"
+> > positionIncrementGap="100" >
+> >       <analyzer type="index">
+> >         <tokenizer class="solr.**WhitespaceTokenizerFactory"/>
+> >         **
+> >         <filter class="DTSynonymFactory"
+> > FreskoFunction="**SimilarityProbManual.txt"
+> > ignoreCase="true" expand="false"/>
+> >
+> >         <!--<filter class="solr.**EnglishPorterFilterFactory"
+> > protected="protwords.txt"/>-->
+> >         <!--<filter
+> class="solr.**RemoveDuplicatesTokenFilterFac**tory"/>-
+> > ->
+> >       </analyzer>
+> >       <analyzer type="query">
+> >         <tokenizer class="solr.**StandardTokenizerFactory"/>
+> >         <filter class="solr.**LowerCaseFilterFactory"/>
+> >         <filter class="solr.StopFilterFactory" ignoreCase="true"
+> > words="stopwords.txt"/>
+> >         <!--<filter class="solr.**EnglishPorterFilterFactory"
+> > protected="protwords.txt"/>-->
+> >         <!--<filter class="solr.**RemoveDuplicatesTokenFilterFac**tory"/
+> > >-->
+> >       </analyzer>
+> >     </fieldType>*
+> >
+> >
+> > The problem is that I always get in the  Token next(Token reusableToken)
+> > method in  DTSynonymFilter  a token with a termBuffer containing  10 emty
+> > chars.
+> > *
+> > *
+> > *I have debugged and stepped into Solr code and found that *
+> > *in class DocInverterPerField
+> >  Token token = stream.next(localToken); line 134*
+> > *
+> > localToken contains a termBuffer with 10 empty chars ('')*
+> >
+> > *What am I doing wrong ???
+> > *
+> > The java code:
+> > *
+> > import com.google.common.collect.**ArrayListMultimap;
+> > import java.io.IOException;
+> > import java.util.LinkedList;
+> > import java.util.List;
+> > import org.apache.lucene.analysis.**Token;
+> > import org.apache.lucene.analysis.**TokenFilter;
+> > import org.apache.lucene.analysis.**TokenStream;
+> > import org.apache.lucene.analysis.**payloads.PayloadHelper;
+> > import org.apache.lucene.index.**Payload;
+> >
+> > /**
+> >  *
+> >  * @author david
+> >  */
+> > public class DTSynonymFilter extends TokenFilter {
+> >
+> >     public DTSynonymFilter(TokenStream input, ArrayListMultimap<String,
+> > Synonym> syns) {
+> >         super(input);
+> >         this.synsMap = syns;
+> >         System.out.println("in DTSynonymFilter synsMap ");
+> >
+> >
+> >
+> >     }
+> >     public static final String SYNONYM = "<SYNONYM>";
+> >     TokenFilter tf;
+> >     private LinkedList<Token> synonymTokenQueue = new
+> LinkedList<Token>();
+> >
+> >     private ArrayListMultimap<String, Synonym> synsMap = null;
+> >     private LinkedList<Token> buffer;
+> >
+> >     private Token nextTok(Token target) throws IOException {
+> >
+> >         if (buffer != null && !buffer.isEmpty()) {
+> >             return buffer.removeFirst();
+> >         } else {
+> >             return input.next(target);
+> >         }
+> >     }
+> >
+> >     private void pushTok(Token t) {
+> >         if (buffer == null) {
+> >             buffer = new LinkedList<Token>();
+> >
+> >         }
+> >         buffer.addFirst(t);
+> >     }
+> >
+> >     @Override
+> >     public Token next(Token reusableToken) throws IOException {
+> >
+> >         if (synonymTokenQueue.size() > 0) {
+> >
+> >             return synonymTokenQueue.removeFirst(* *);
+> >
+> >         }
+> >         if (reusableToken == null) {
+> >             return null;
+> >         }
+> >
+> >         reusableToken.setPayload(new Payload(new byte[]{(byte) 1}));
+> >
+> >       //   System.out.println("trying to get synonyms for
+> > "+reusableToken);
+> >       //    System.out.println(synsMap.* *get(reusableToken.term()));
+> >         List<Synonym> syns = synsMap.get(reusableToken.**term());
+> >        for (Synonym synonym : synsMap.get(reusableToken.**term())) {
+> >                 System.out.println(synonym);
+> >             }
+> >         Payload boostPayload;
+> >
+> >         for (Synonym synonym : syns) {
+> >             //Token(char[] startTermBuffer, int termBufferOffset, int
+> > termBufferLength, int start, int end)
+> >            // Token synToken = new
+> > Token(synonym.getToken().**toCharArray(),
+> > reusableToken.startOffset(), reusableToken.endOffset(),
+> > synonym.getToken().length(), 0);//, t.startOffset(), t.endOffset(),
+> > SYNONYM);
+> >             Token newTok = new Token(reusableToken.**startOffset(),
+> > reusableToken.endOffset(), SYNONYM);
+> >             newTok.setTermBuffer(synonym.**getToken().toCharArray(), 0,
+> > synonym.getToken().length());
+> >             // set the position increment to zero
+> >             // this tells lucene the synonym is
+> >             // in the exact same location as the originating word
+> >             newTok.setPositionIncrement(0)**;
+> >             boostPayload = new Payload(PayloadHelper.**
+> > encodeFloat(synonym.getWieght(**)));
+> >             newTok.setPayload(**boostPayload);
+> >             synonymTokenQueue.add(newTok);
+> >
+> >         }
+> >         return reusableToken;
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >     }
+> > }
+> >
+> >
+> > import DTSynonymFilter;
+> > import com.google.common.collect.**ArrayListMultimap;
+> > import java.io.File;
+> > import java.io.IOException;
+> > import java.util.List;
+> > import java.util.Map;
+> > import java.util.logging.Level;
+> > import java.util.logging.Logger;
+> > import org.apache.lucene.analysis.**Token;
+> > import org.apache.lucene.analysis.**TokenStream;
+> > import org.apache.solr.analysis.**BaseTokenFilterFactory;
+> > import org.apache.solr.analysis.**TokenizerFactory;
+> > import org.apache.solr.common.**ResourceLoader;
+> > import org.apache.solr.common.util.**StrUtils;
+> > import org.apache.solr.util.plugin.**ResourceLoaderAware;
+> >
+> > /**
+> >  *
+> >  * @author david
+> >  */
+> > public class DTSynonymFactory extends BaseTokenFilterFactory implements
+> > ResourceLoaderAware {
+> >
+> >     boolean informed=false;
+> >     String synonyms=null;
+> >
+> >     public DTSynonymFactory(){
+> >
+> >        // this.syns= ArrayListMultimap.create();
+> >     }
+> >
+> >     final static Logger log =
+> Logger.getLogger(**DTSynonymFactory.class.**
+> > getName());
+> >
+> >     private static TokenizerFactory loadTokenizerFactory(*
+> *ResourceLoader
+> > loader, String cname, Map<String, String> args) {
+> >         TokenizerFactory tokFactory = (TokenizerFactory)
+> > loader.newInstance(cname);
+> >         tokFactory.init(args);
+> >         return tokFactory;
+> >     }
+> >     private ArrayListMultimap<String, Synonym> syns = null;
+> >
+> >     public DTSynonymFilter create(TokenStream input) {
+> >
+> >         Thread.dumpStack();
+> >         try {
+> >             Thread.sleep(5000);
+> >         } catch (InterruptedException ex) {
+> >
+> > Logger.getLogger(**DTSynonymFactory.class.**getName()).log(Level.SEVERE,
+> > null, ex);
+> >         }
+> >         if(syns!=null){
+> >             System.out.println("in create() syns is "+syns+" syns size is
+> > "+" " );
+> >             return new DTSynonymFilter(input,syns);
+> >         }
+> >         else{
+> >             System.out.println("in create() syns is "+syns+" and informed
+> > is
+> > "+informed);
+> >             return new DTSynonymFilter(input,null);
+> >
+> >
+> >         }
+> >   }
+> >     @Override
+> >     public void inform(ResourceLoader loader) {
+> >
+> >          synonyms = args.get("FreskoFunction");
+> >         System.out.println("in DTSynonymFilter.inform() synonyms file is
+> > "+synonyms);
+> >         boolean ignoreCase = getBoolean("ignoreCase", false);
+> >          System.out.println("in DTSynonymFilter.inform() ignoreCase is
+> > "+ignoreCase);
+> >         boolean expand = getBoolean("expand", true);
+> >         System.out.println("in DTSynonymFilter.inform() expand is
+> > "+expand);
+> >         //String seperator =
+> >         String tf = args.get("tokenizerFactory");
+> >
+> >         TokenizerFactory tokFactory = null;
+> >         if (tf != null) {
+> >             tokFactory = loadTokenizerFactory(loader, tf, args);
+> >         }
+> >         if (tf != null) {
+> >             System.out.println("**TokenizerFactory loaded ");
+> >         }
+> >         if (synonyms != null) {
+> >             List<String> wlist = null;
+> >             try {
+> >                 File synonymFile = new File(synonyms);
+> >                 if (synonymFile.exists()) {
+> >                     wlist = loader.getLines(synonyms);
+> >                 } else {
+> >                     List<String> files = StrUtils.splitFileNames(**
+> > synonyms);
+> >                     for (String file : files) {
+> >                         wlist = loader.getLines(file.trim());
+> >                     }
+> >                 }
+> >             } catch (Exception e) {
+> >                 e.printStackTrace();
+> >
+> >                 throw new RuntimeException(e);
+> >
+> >             }
+> >             syns = ArrayListMultimap.create();
+> >             populateSynMap("\\|", wlist);
+> >             if(syns==null){
+> >                 System.out.println("sysns after create and populate is
+> > null!!!!!!");
+> >                 Thread.sleep(5000);
+> >
+> >
+> >             }
+> >             else{
+> >                 System.out.println("after crete the size of syns is
+> > "+syns.size());
+> >                 informed=true;
+> >             }
+> >
+> >         // synMap = new SynonymMap(ignoreCase);
+> >         // parseRules(wlist, synMap, "=>", ",", expand,tokFactory);
+> >         }
+> >         else{
+> >             throw new RuntimeException("Could not find synonyms");
+> >         }
+> >         }catch(Exception e){
+> >            e.printStackTrace();
+> >            throw  new RuntimeException(e);
+> >         }
+> >     }
+> >
+> >
+> >         }
+> >
+> >     }
+> > }
+> >
+> > * Thanks in advance
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+All that is necessary for evil to triumph is for good men to do nothing
+

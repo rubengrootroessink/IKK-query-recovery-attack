@@ -1,0 +1,62 @@
+FROM: Comron Sattari <comron.satt...@appfolio.com>
+SUBJECT: NPE in MultiSegmentReader$MultiTermDocs.doc
+DATE: 17 Mar 2009
+
+I've recently upgraded to Solr 1.3 using Lucene 2.4. One of the reasons I
+upgraded was because of the nicer SearchComponent architecture that let me
+add a needed feature to the default request handler. Simply put, I needed to
+filter a query based on some additional parameters. So I subclassed
+QueryComponent and replaced the line
+
+   rb.setQuery( parser.getQuery() );
+
+with one that wrapped the parsed query in a FilteredQuery
+
+  Query query = parser.getQuery();
+  String arguments = params.get("param-name");
+  if( arguments != null) {
+    query = new FilteredQuery(query, new MyCustomFilter(arguments));
+  }
+  rb.setQuery(query);
+
+The filter class I used can be seen here: http://privatepaste.com/021ZH27tKG.
+And is nearly verbatim from the Lucene in Action book, when describing a way
+to do security filtering.
+
+This seems to work fine, although I'm getting some strange behavior when
+exercising this code through some unit tests from my Rails app. Sometimes I
+get an NPE when doing the filtering.
+
+  at top level in at
+org.apache.lucene.index.MultiSegmentReader$MultiTermDocs.doc(MultiSegmentReader.java
+at line 533
+  at <MyQueryComponent>$MyCustomFilter.bits(Unknown Source)
+  at top level in at org.apache.lucene.search.Filter.getDocIdSet(Filter.java
+at line 49
+  at top level in at
+org.apache.lucene.search.FilteredQuery$1.scorer(FilteredQuery.java at line
+105
+  at top level in at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java at line 132
+  at top level in at org.apache.lucene.search.Searcher.search(Searcher.java
+at line 126
+
+After some detective work I decided the problem had to do with an empty
+index, and the termDocs iterator has 0 elements to iterate over and was
+throwing this error. Since there is no size() method or analogous method on
+the TermDocs iterator, I decided to use docFreq(term) as you can see in the
+source code. But this didn't solve my problem either. This error is being
+throw even when docFreq(term) returns more then 0 documents. I can't for the
+life of me figure out why this iterator's doc() method throwing an NPE.
+(Well I can deduce that the current member is null, but I don't know why.)
+Is the index corrupted? I can see record in the index that should match my
+Term through the solr /admin/ interface, and docFreq(term) returns a number
+> 0. Yet this NPE keeps showing up.
+
+Any help or guidance would be appreciated. If you need to see more source
+I'd be happy to provide it, but I'm sure thats all the relevant stuff.
+
+(I cross posted this to both Solr and Lucene lists.)
+
+Comron
+

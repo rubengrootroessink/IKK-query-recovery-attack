@@ -1,0 +1,98 @@
+FROM: Chris Lamprecht <clampre...@gmail.com>
+SUBJECT: Re: "docMap" array in SegmentMergeInfo
+DATE: 11 Oct 2005
+
+Hi Peter,
+
+I observed the same issue on a multiprocessor machine.  I included a
+small fix for this in the NIO patch (against the 1.9 trunk) here: 
+http://issues.apache.org/jira/browse/LUCENE-414#action_12322523
+
+The change amounts to the following methods in SegmentReader.java, to
+remove the need synchronized() block by taking a "snapshot" of the
+variable:
+
+// Removed synchronized from document(int)
+public Document document(int n) throws IOException {
+    if (isDeleted(n))
+      throw new IllegalArgumentException
+              ("attempt to access a deleted document");
+    return fieldsReader.doc(n);
+}
+
+// removed synchronized from isDeleted(int)
+public boolean isDeleted(int n) {
+    // avoid race condition by getting a snapshot reference
+    final BitVector snapshot = deletedDocs;
+    return (snapshot != null && snapshot.get(n));
+}
+
+We've been using this in production for a while and it fixed the
+extremely slow searches when there are deleted documents.  Maybe it
+could be applied to the trunk, independent of the full NIO patch.
+
+-chris
+
+On 10/11/05, Peter Keegan <peterlkeegan@gmail.com> wrote:
+> On a multi-cpu system, this loop to build the docMap array can cause severe
+> thread thrashing because of the synchronized method 'isDeleted'. I have
+> observed this on an index with over 1 million documents (which contains a
+> few thousand deleted docs) when multiple threads perform a search with
+> either a sort field or a range query. A stack dump shows all threads here:
+>
+> waiting for monitor entry [0x6d2cf000..0x6d2cfd6c] at
+> org.apache.lucene.index.SegmentReader.isDeleted(SegmentReader.java:241) -
+> waiting to lock <0x04e40278>
+>
+> The performances worsens as the number of threads increases. The searches
+> may take minutes to complete.
+> If only a single thread issues the search, it completes fairly quickly. I
+> also noticed from looking at the code that the docMap doesn't appear to be
+> used in these cases. It seems only to be used for merging segments. If the
+> index is in 'search/read-only' mode, is there a way around this bottleneck?
+>
+> Thanks,
+> Peter
+>
+>
+>
+>
+> On 7/13/05, Doug Cutting <cutting@apache.org> wrote:
+> >
+> > Lokesh Bajaj wrote:
+> > > For a very large index where we might want to delete/replace some
+> > documents, this would require a lot of memory (for 100 million documents,
+> > this would need 381 MB of memory). Is there any reason why this was
+> > implemented this way?
+> >
+> > In practice this has not been an issue. A single index with 100M
+> > documents is usually quite slow to search. When collections get this
+> > big folks tend to instead search multiple indexes in parallel in order
+> > to keep response times acceptable. Also, 381Mb of RAM is often not a
+> > problem for folks with 100M documents. But this is not to say that it
+> > could never be a problem. For folks with limited RAM and/or lots of
+> > small documents it could indeed be an issue.
+> >
+> > > It seems like this could be implemented as a much smaller array that
+> > only keeps track of the deleted document numbers and it would still be very
+> > efficient to calculate the new document number by using this much smaller
+> > array. Has this been done by anyone else or been considered for change in
+> > the Lucene code?
+> >
+> > Please submit a patch to the java-dev list.
+> >
+> > Doug
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

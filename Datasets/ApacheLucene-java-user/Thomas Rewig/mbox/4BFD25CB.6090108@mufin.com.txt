@@ -1,0 +1,105 @@
+FROM: Thomas Rewig <tre...@mufin.com>
+SUBJECT: IndexSearcher - open file handles by deleted files
+DATE: 26 May 2010
+
+Hello,
+
+I use Lucene 2.9.1 with two indices, which alternate each day. One is 
+live, the other is erased and renewed with the latest data.
+The problem is that the index files will be deleted, but the file 
+handles are still available. If the program (JBOSS) is not restarted for 
+some time, the disk space is scarce.
+
+With lsof I see e.g:
+
+java       6054        root   80r      REG                8,1 
+5939406525      84663 /usr/_index/2/item3_index/_2fdtq2.cfs (deleted)
+java       6054        root   82r      REG                8,1  
+401785779      78344 /usr/_index/2/item2_index/_5exkf.cfs (deleted)
+java       6054        root   84r      REG                8,1  
+106496943      72217 /usr/_index/2/item1_index/_85bld.cfs (deleted)
+java       6054        root  147r      REG                8,1 
+5939406525      84663 /usr/_index/2/item3_index/_2fdtq2.cfs (deleted)
+java       6054        root  150r      REG                8,1  
+401785779      78344 /usr/_index/2/item2_index/_5exkf.cfs (deleted)
+
+### open the a specific searcher: ###
+
+    public static Searcher getSearcher(String indexName)
+    throws IOException
+    {
+        Searcher searcher = searchersList.get(indexName);
+        if(searcher == null) {
+            String path = getPath(subDir, indexName);
+            Directory directory = new NIOFSDirectory(new File(path));
+            searcher = new IndexSearcher(directory, true);
+            directoriesList.put(indexName, directory);
+            searchersList.put(indexName, searcher);
+        }
+        return searcher;
+    }
+
+### switch the searchers: ###
+
+    public static void determineIndexDirectories() {
+        searchersListOld = searchersList;
+        searchersList = new Hashtable<String, Searcher>();
+        directoriesListOld = directoriesList;
+        directoriesList = new Hashtable<String, Directory>();
+
+        subDir = getLastIndexDir();
+
+        closeOldSearchers();
+    }
+
+### close the searchers: ###
+
+    private static void closeOldSearchers() {
+        new Thread() {
+            public void run() {
+                try {
+                    sleep(10*1000);
+                } catch (InterruptedException e) {
+                    logger.error("IndexManager.closeOldSearchers", e);
+                }
+               
+                for(Searcher searcher : searchersListOld.values()) {
+                    try {
+                        searcher.close();
+                    } catch (IOException e) {
+                        logger.error("Error closing Searcher.", e);
+                    }
+                }
+                searchersListOld.clear();
+                searchersListOld = null;
+               
+                for(Directory directory : directoriesListOld.values()) {
+                    try {
+                        directory.close();
+                    } catch (IOException e) {
+                        logger.error("Error closing Directory.", e);
+                    }
+                }
+                directoriesListOld.clear();
+                directoriesListOld = null;
+            }
+        }.start();
+    }
+
+I search for this problem in the mailing list, and there are similar 
+Problems with a not correctly closed IndexReader.
+
+If I create a IndexSearcher with a directory could it be that there is a 
+similar problem, e.g. the under lying IndexReader (if there is one) 
+closes not automatically if i close searcher.close()?
+Do I have to close something else, than all IndexSearchers and Directorys?
+Or am I wrong with my assumption, and the problem is somewhere else?
+
+Best
+Thomas
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

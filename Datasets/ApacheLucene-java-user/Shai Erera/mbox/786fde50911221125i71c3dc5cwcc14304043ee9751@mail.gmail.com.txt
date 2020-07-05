@@ -1,0 +1,753 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: How to deal with Token in the new TS API
+DATE: 22 Nov 2009
+
+Ok I see you fixed it at the same time I sent the email :).
+
+I think I get it ... so far.
+
+So far I had to cache just TermAttribute. I think it'll get messy when I'll
+need to cache more, like Type and PositionIncrement. But I haven't reached
+those yet. Perhaps instead of creating many types of clones, I'll create
+Token and populate it w/ what I need, just for convenience ...
+
+Thanks,
+Shai
+
+On Sun, Nov 22, 2009 at 9:23 PM, Shai Erera <serera@gmail.com> wrote:
+
+> I assume termAtt is the input's TermAttribute, right? Therefore it has no
+> copyTo ...
+>
+> What I've done so far is create a TermAttribute like you proposed (fixed
+> from my previous TermAttributeImpl):
+>
+> TermAttribute clone = (TermAttribute)
+> input.getAttributeFactory().createAttributeInstance(TermAttribute.class);
+>
+> and to clear() it I just clone.setTermLength(0);
+>
+> This at least works for me.
+>
+> Shai
+>
+>
+> On Sun, Nov 22, 2009 at 9:14 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+>
+>> Another idea, what you can also do is, create an AttributeSource instance
+>> in
+>> your TokenStream one time using the AttributeSource.cloneAttributes()
+>> call.
+>> You can use this copy of the attributes in parallel and maybe update the
+>> TermAttribute there and so on. If you want to look at the last token, just
+>> look into the copied attributesource. The calls to
+>> addAttribute/getAttribute
+>> of this source can be done after cloning.
+>>
+>> Class Initializer:
+>> private final AttributeSource lastState = cloneAttributes();
+>> private final TermAttribute lastTermAtt =
+>> lastState.addAttribute(TermAttribute.class);
+>>
+>> incrementToken:
+>>
+>> if (input.incrementToken()) {
+>>        if (lastTermAtt.checkSomethingAsYouProposed) {
+>>                blubber...
+>>        }
+>>        termAtt.copyTo(lastTermAtt); // save current state
+>>        return true;
+>> } else return false;
+>>
+>>
+>>
+>> -----
+>> Uwe Schindler
+>> H.-H.-Meier-Allee 63, D-28213 Bremen
+>> http://www.thetaphi.de
+>> eMail: uwe@thetaphi.de
+>>
+>>
+>> > -----Original Message-----
+>> > From: Uwe Schindler [mailto:uwe@thetaphi.de]
+>> > Sent: Sunday, November 22, 2009 8:03 PM
+>> > To: java-user@lucene.apache.org
+>> > Subject: RE: How to deal with Token in the new TS API
+>> >
+>> > I said, you *could* if it would be exposed. But the State is a holder
+>> > class
+>> > without functionality. Because the internals are impl dependent, maybe
+>> we
+>> > will add such thing in future. But: If the state contains a real map, it
+>> > would be slow, because each captureState call would need to fill the
+>> map,
+>> > which is slow. And: If you use the Token as AttImpl, the state will only
+>> > contain one entry. You cannot control which attribute is implemented by
+>> > what
+>> > impl, so the map approach would never work correct.
+>> >
+>> >
+>> >
+>> > You can allocate a TermAttributeImpl and copyTo, but you should create
+>> the
+>> > instance using the same factory as the tokenstream uses:
+>> >
+>> >
+>> >
+>> > TermAttribute copy = (TermAttribute)
+>> > getAttributeFactory().createAttributeInstance(TermAttribute.class);
+>> >
+>> >
+>> >
+>> > By that you guarantee, that both are from the same implementation type.
+>> >
+>> >
+>> >
+>> > -----
+>> >
+>> > Uwe Schindler
+>> >
+>> > H.-H.-Meier-Allee 63, D-28213 Bremen
+>> >
+>> > http://www.thetaphi.de
+>> >
+>> > eMail: uwe@thetaphi.de
+>> >
+>> >
+>> >
+>> > > -----Original Message-----
+>> >
+>> > > From: Shai Erera [mailto:serera@gmail.com]
+>> >
+>> > > Sent: Sunday, November 22, 2009 7:53 PM
+>> >
+>> > > To: java-user@lucene.apache.org
+>> >
+>> > > Subject: Re: How to deal with Token in the new TS API
+>> >
+>> > >
+>> >
+>> > > Yes I can clone the term itself by instantiating a TermAttributeImpl,
+>> >
+>> > > which
+>> >
+>> > > is better than storing the String, because the latter always allocates
+>> >
+>> > > char[], while the former will reuse the char[] if it's big enough.
+>> >
+>> > >
+>> >
+>> > > What if State included a HashMap of all attributes, in addition to its
+>> >
+>> > > "linked-list" structure?
+>> >
+>> > >
+>> >
+>> > > Anyway, you mention that I can iterate on all Attributes of a State,
+>> but
+>> >
+>> > > it's not clear to me how to do it, since I don't see any relevant
+>> method
+>> >
+>> > > in
+>> >
+>> > > its API. Am I missing something?
+>> >
+>> > >
+>> >
+>> > > Shai
+>> >
+>> > >
+>> >
+>> > > On Sun, Nov 22, 2009 at 4:42 PM, Uwe Schindler <uwe@thetaphi.de>
+>> wrote:
+>> >
+>> > >
+>> >
+>> > > > > Because that'd mean I'll check for abbreviations for every token.
+>> >
+>> > > Which
+>> >
+>> > > > is
+>> >
+>> > > > > a
+>> >
+>> > > > > big performance loss. That way, I can just check abbr if I
+>> > encountered
+>> >
+>> > > a
+>> >
+>> > > > > "."
+>> >
+>> > > > > (not even all end-of-sentence tokens).
+>> >
+>> > > >
+>> >
+>> > > > OK, than simply copy the term to a String and store it. The cost is
+>> > the
+>> >
+>> > > > same
+>> >
+>> > > > like cloning/copying. If you find the ".", use the String and look
+>> it
+>> >
+>> > > up.
+>> >
+>> > > >
+>> >
+>> > > > > Why can't State offer a "getAttribute" like AttributeSource?
+>> >
+>> > > >
+>> >
+>> > > > Because State is optimized for fast restore. In previous 2.9
+>> versions
+>> >
+>> > > State
+>> >
+>> > > > was itself an AttributeSource instance, but the capture/store was
+>> > very,
+>> >
+>> > > > very
+>> >
+>> > > > slow.
+>> >
+>> > > >
+>> >
+>> > > > If you want to check an State, you would have need to iterate over
+>> all
+>> >
+>> > > > attributes and find the correct one, which is also slow. The best
+is
+>> > to
+>> >
+>> > > > simply clone the term text as a string. You must create new objects
+>> in
+>> >
+>> > > all
+>> >
+>> > > > cases, even with clone/copy.
+>> >
+>> > > >
+>> >
+>> > > > Uwe
+>> >
+>> > > >
+>> >
+>> > > > > Shai
+>> >
+>> > > > >
+>> >
+>> > > > > On Sun, Nov 22, 2009 at 4:34 PM, Uwe Schindler <uwe@thetaphi.de>
+>> >
+>> > > wrote:
+>> >
+>> > > > >
+>> >
+>> > > > > > If you just want to lookup if "Mr" is an abbreviation, why
+not
+>> > look
+>> >
+>> > > it
+>> >
+>> > > > > up
+>> >
+>> > > > > > when you handle that token and set a boolean variable in
+the TS
+>> >
+>> > > > > > (lastTokenWasAbbreviation). When you process the ".", remove
+it
+>> if
+>> >
+>> > > the
+>> >
+>> > > > > > Boolean is set.
+>> >
+>> > > > > >
+>> >
+>> > > > > > Uwe
+>> >
+>> > > > > >
+>> >
+>> > > > > > -----
+>> >
+>> > > > > > Uwe Schindler
+>> >
+>> > > > > > H.-H.-Meier-Allee 63, D-28213 Bremen
+>> >
+>> > > > > > http://www.thetaphi.de
+>> >
+>> > > > > > eMail: uwe@thetaphi.de
+>> >
+>> > > > > >
+>> >
+>> > > > > >
+>> >
+>> > > > > > > -----Original Message-----
+>> >
+>> > > > > > > From: Shai Erera [mailto:serera@gmail.com]
+>> >
+>> > > > > > > Sent: Sunday, November 22, 2009 3:28 PM
+>> >
+>> > > > > > > To: java-user@lucene.apache.org
+>> >
+>> > > > > > > Subject: Re: How to deal with Token in the new TS API
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > What I've done is:
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > State state = in.captureState();
+>> >
+>> > > > > > > ...
+>> >
+>> > > > > > > // Upon new call to incrementToken().
+>> >
+>> > > > > > > State tmp = in.captureState();
+>> >
+>> > > > > > > in.restoreState(state);
+>> >
+>> > > > > > > // check if termAttribute is an abbreviation.
+>> >
+>> > > > > > > If not : in.restoreState(tmp);
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > But seems a lot of capturing/restoring to me ... how
+expensive
+>> > is
+>> >
+>> > > > > that?
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > Shai
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > On Sun, Nov 22, 2009 at 3:57 PM, Shai Erera <serera@gmail.com
+>> >
+>> >
+>> > > > wrote:
+>> >
+>> > > > > > >
+>> >
+>> > > > > > > > Perhaps I misunderstand something. The current
+use case I'm
+>> >
+>> > > trying
+>> >
+>> > > > > to
+>> >
+>> > > > > > > solve
+>> >
+>> > > > > > > > is - I have an abbreviations TokenFilter which
+reads a token
+>> > and
+>> >
+>> > > > > stores
+>> >
+>> > > > > > > it.
+>> >
+>> > > > > > > > If the next token is end-of-sentence, it checks
+whether the
+>> >
+>> > > > previous
+>> >
+>> > > > > > one
+>> >
+>> > > > > > > is
+>> >
+>> > > > > > > > in the abbreviations list, and discards the end-of-sentence
+>> >
+>> > > token.
+>> >
+>> > > > I
+>> >
+>> > > > > > > need to
+>> >
+>> > > > > > > > store the first token somewhere so I can reference
+it.
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > > Example: "hello mr. shai"
+>> >
+>> > > > > > > > First token = hello -> store it and return
+>> >
+>> > > > > > > > Second token = mr -> store it and return
+>> >
+>> > > > > > > > Third token = "." -> check if "mr" is an abbreviation,
+if so
+>> >
+>> > > don't
+>> >
+>> > > > > > > return
+>> >
+>> > > > > > > > ".".
+>> >
+>> > > > > > > > Fourth token = "shai" -> store it and return.
+>> >
+>> > > > > > > > ...
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > > How do I store "mr" (or any of the others)? It
+was easy w/
+>> >
+>> > > copyTo.
+>> >
+>> > > > > If I
+>> >
+>> > > > > > > > captureState, I get a State, but I can't query
+it for a
+>> >
+>> > > > > TermAttribute.
+>> >
+>> > > > > > > Any
+>> >
+>> > > > > > > > ideas?
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > > Shai
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > > On Sun, Nov 22, 2009 at 3:33 PM, Uwe Schindler
+>> > <uwe@thetaphi.de>
+>> >
+>> > > > > > wrote:
+>> >
+>> > > > > > > >
+>> >
+>> > > > > > > >> Use captureState and save the state somewhere.
+You can
+>> > restore
+>> >
+>> > > the
+>> >
+>> > > > > > > state
+>> >
+>> > > > > > > >> with restoreState to the TokenStream. CachingTokenFilter
+>> does
+>> >
+>> > > > this.
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >> So the new API uses the State object to put
+away tokens for
+>> >
+>> > > later
+>> >
+>> > > > > > > >> reference.
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >> -----
+>> >
+>> > > > > > > >> Uwe Schindler
+>> >
+>> > > > > > > >> H.-H.-Meier-Allee 63, D-28213 Bremen
+>> >
+>> > > > > > > >> http://www.thetaphi.de
+>> >
+>> > > > > > > >> eMail: uwe@thetaphi.de
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >> > -----Original Message-----
+>> >
+>> > > > > > > >> > From: Shai Erera [mailto:serera@gmail.com]
+>> >
+>> > > > > > > >> > Sent: Sunday, November 22, 2009 2:29
+PM
+>> >
+>> > > > > > > >> > To: java-user@lucene.apache.org
+>> >
+>> > > > > > > >> > Subject: Re: How to deal with Token in
+the new TS API
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > ok so from what I understand, I should
+stop working w/
+>> > Token,
+>> >
+>> > > > and
+>> >
+>> > > > > > > move
+>> >
+>> > > > > > > >> to
+>> >
+>> > > > > > > >> > working w/ the Attributes.
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > addAttribute indeed does not work. Even
+though it does
+>> not
+>> >
+>> > > > > through
+>> >
+>> > > > > > an
+>> >
+>> > > > > > > >> > exception, if I call in.addAttribute(Token.class),
+I get
+>> a
+>> >
+>> > > new
+>> >
+>> > > > > > > instance
+>> >
+>> > > > > > > >> of
+>> >
+>> > > > > > > >> > Token and not the once that was added
+by in. So this is
+>> > even
+>> >
+>> > > > more
+>> >
+>> > > > > > > severe
+>> >
+>> > > > > > > >> > than just not blocking this option.
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > I thought I can move to use addAttributeImpl,
+but that
+>> > won't
+>> >
+>> > > > help
+>> >
+>> > > > > > me,
+>> >
+>> > > > > > > >> > because I won't be able to call
+>> getAttribute(Token.class).
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > So this leaves me w/ just working w/
+the interfaces.
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > What do I need to do in order to clone
+an attribute?
+>> >
+>> > > Previously
+>> >
+>> > > > I
+>> >
+>> > > > > > > used
+>> >
+>> > > > > > > >> > token.copyTo(target). How I can do it
+now if I don't have
+>> >
+>> > > copyTo
+>> >
+>> > > > > on
+>> >
+>> > > > > > > the
+>> >
+>> > > > > > > >> > interfaces, and/or clone?
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > Shai
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > On Sun, Nov 22, 2009 at 2:58 PM, Uwe
+Schindler
+>> >
+>> > > <uwe@thetaphi.de
+>> >
+>> > > > >
+>> >
+>> > > > > > > wrote:
+>> >
+>> > > > > > > >> >
+>> >
+>> > > > > > > >> > > > But I do use addAttribute(Token.class),
+so I don't
+>> >
+>> > > > understand
+>> >
+>> > > > > > why
+>> >
+>> > > > > > > >> you
+>> >
+>> > > > > > > >> > say
+>> >
+>> > > > > > > >> > > > it's not possible. And I completely
+don't understand
+>> > why
+>> >
+>> > > the
+>> >
+>> > > > > new
+>> >
+>> > > > > > > API
+>> >
+>> > > > > > > >> > > > allows
+>> >
+>> > > > > > > >> > > > me to just work w/ interfaces
+and not impls ... A
+>> while
+>> >
+>> > > ago
+>> >
+>> > > > I
+>> >
+>> > > > > > got
+>> >
+>> > > > > > > >> the
+>> >
+>> > > > > > > >> > > > impression that we're trying
+to get rid of interfaces
+>> >
+>> > > > because
+>> >
+>> > > > > > > >> they're
+>> >
+>> > > > > > > >> > not
+>> >
+>> > > > > > > >> > > > easy to maintain back-compat
+with ...
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > > AddAttribute(Token.class) should
+throw an Exception,
+>> but
+>> > it
+>> >
+>> > > > > > doesn't
+>> >
+>> > > > > > > >> > (it's a
+>> >
+>> > > > > > > >> > > bug in 3.0). addAttribute should
+only affect
+>> interfaces,
+>> > it
+>> >
+>> > > > > also
+>> >
+>> > > > > > > >> accepts
+>> >
+>> > > > > > > >> > > Token, because the AttributeFactory
+accepts it - bang.
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > > Sorry, but you can only pass attribute
+class literals
+>> to
+>> >
+>> > > > > > > >> > > addAttribute/getAttribute/hasAttribute
+and so on.
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > > Sorry.
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > > Uwe
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > >
+>> ------------------------------------------------------------------
+>> > -
+>> >
+>> > > > > > > --
+>> >
+>> > > > > > > >> > > To unsubscribe, e-mail:
+>> >
+>> > > > java-user-unsubscribe@lucene.apache.org
+>> >
+>> > > > > > > >> > > For additional commands, e-mail:
+java-user-
+>> >
+>> > > > > help@lucene.apache.org
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >> > >
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >>
+>> >
+>> > > > -------------------------------------------------------------------
+>> >
+>> > > > > --
+>> >
+>> > > > > > > >> To unsubscribe, e-mail: java-user-
+>> > unsubscribe@lucene.apache.org
+>> >
+>> > > > > > > >> For additional commands, e-mail: java-user-
+>> >
+>> > > help@lucene.apache.org
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >>
+>> >
+>> > > > > > > >
+>> >
+>> > > > > >
+>> >
+>> > > > > >
+>> >
+>> > > > > >
+>> ------------------------------------------------------------------
+>> > --
+>> >
+>> > > -
+>> >
+>> > > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >
+>> > > > > > For additional commands, e-mail:
+>> java-user-help@lucene.apache.org
+>> >
+>> > > > > >
+>> >
+>> > > > > >
+>> >
+>> > > >
+>> >
+>> > > >
+>> >
+>> > > >
+>> ---------------------------------------------------------------------
+>> >
+>> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >
+>> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> > > >
+>> >
+>> > > >
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

@@ -1,0 +1,104 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Document larger than setRAMBufferSizeMB()
+DATE: 3 Oct 2008
+
+
+First off, IndexWriter's RAM buffer size is "approximate": after each  
+doc is added, we check if the RAM consumed is greater than our bugdet,  
+and if so, we flush.
+
+When you add a doc that's larger than the RAM buffer size, all that  
+will happen is after that doc is indexed, we flush.  In other words,  
+that doc will cause IndexWriter to use more RAM that it's budget,  
+until it flushes.
+
+IndexWriter never throws OOME itself.  The fact that you're hitting it  
+means your JRE is starved for RAM.  You should try increasing it's  
+allowed max heap size (eg -Xmx2048M), making sure you have enough  
+physical RAM on the machine to not start thrashing.
+
+Second, whenever a document hits an exception during indexing, one of  
+two things will happen in response.  If the exception is at a bad  
+time, meaning it may have corrupted the internal RAM buffer,  
+IndexWriter will abort all buffered documents (since the last flush).   
+OOME usually falls into this category.  If instead the exception  
+happens at an "OK" time, say when asking for the next Token from the  
+TokenStream, then we stop indexing that document and immediately mark  
+it as deleted so the "first half" that had been indexed will never be  
+visible in the index -- ie, it's "all or none".
+
+Mike
+
+Aditi Goyal wrote:
+
+> Thanks Anshum.
+> Although it raises another query, committing the current buffer will  
+> commit
+> the docs before and what will happen to the current doc which threw  
+> an error
+> while adding a field to it, will that also get committed in the half??
+>
+> Thanks a lot
+> Aditi
+>
+> On Fri, Oct 3, 2008 at 2:12 PM, Anshum <anshumg@gmail.com> wrote:
+>
+>> Hi Aditi,
+>>
+>> I guess increasing the buffer size would be a solution here, but in  
+>> case
+>> you
+>> wouldn't know the expected max doc size. I guess the best way to  
+>> handle
+>> that
+>> would be a regular try catch block in which you could commit the  
+>> current
+>> buffer. At the least you could just continue the loop after doing  
+>> whatever
+>> you wish to do using an exception handling block.
+>>
+>> --
+>> Anshum Gupta
+>> Naukri Labs!
+>> http://ai-cafe.blogspot.com
+>>
+>> The facts expressed here belong to everybody, the opinions to me. The
+>> distinction is yours to draw............
+>>
+>> On Fri, Oct 3, 2008 at 1:56 PM, Aditi Goyal <aditigupta20@gmail.com>
+>> wrote:
+>>
+>>> Hi Everyone,
+>>>
+>>> I have an index which I am opening at one time only. I keep adding  
+>>> the
+>>> documents to it until I reach a limit of 500.
+>>> After this, I close the index and open it again. (This is done in  
+>>> order
+>> to
+>>> save time taken by opening and closing the index)
+>>> Also, I have set setRAMBufferSizeMB to 16MB.
+>>>
+>>> If the document size itself is greater than 16MB what will happen  
+>>> in this
+>>> case??
+>>> It is throwing
+>>> java.lang.OutOfMemoryError: Java heap space
+>>> Now, my query is,
+>>> Can we change something in the way we parse/index to make it more  
+>>> memory
+>>> friendly so that it doesnt throw this exception.
+>>> And, Can it be caught and overcome gracefully?
+>>>
+>>>
+>>> Thanks a lot
+>>> Aditi
+>>>
+>>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,57 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 2 Mar 2005
+
+Yonik Seeley wrote:
+>>6. Index locally and synchronize changes periodically. This is an
+>>interesting idea and bears looking into. Lucene can combine multiple
+>>indexes into a single one, which can be written out somewhere else, and
+>>then distributed back to the search nodes to replace their existing
+>>index.
+> 
+> This is a promising idea for handling a high update volume because it
+> avoids all of the search nodes having to do the analysis phase.
+
+A clever way to do this is to take advantage of Lucene's index file 
+structure.  Indexes are directories of files.  As the index changes 
+through additions and deletions most files in the index stay the same. 
+So you can efficiently synchronize multiple copies of an index by only 
+copying the files that change.
+
+The way I did this for Technorati was to:
+
+1. On the index master, periodically checkpoint the index.  Every minute 
+or so the IndexWriter is closed and a 'cp -lr index index.DATE' command 
+is executed from Java, where DATE is the current date and time.  This 
+efficiently makes a copy of the index when its in a consistent state by 
+constructing a tree of hard links.  If Lucene re-writes any files (e.g., 
+the segments file) a new inode is created and the copy is unchanged.
+
+2. From a crontab on each search slave, periodically poll for new 
+checkpoints.  When a new index.DATE is found, use 'cp -lr index 
+index.DATE' to prepare a copy, then use 'rsync -W --delete 
+master:index.DATE index.DATE' to get the incremental index changes. 
+Then atomically install the updated index with a symbolic link (ln -fsn 
+index.DATE index).
+
+3. In Java on the slave, re-open 'index' it when its version changes. 
+This is best done in a separate thread that periodically checks the 
+index version.  When it changes, the new version is opened, a few 
+typical queries are performed on it to pre-load Lucene's caches.  Then, 
+in a synchronized block, the Searcher variable used in production is 
+updated.
+
+4. In a crontab on the master, periodically remove the oldest checkpoint 
+indexes.
+
+Technorati's Lucene index is updated this way every minute.  A 
+mergeFactor of 2 is used on the master in order to minimize the number 
+of segments in production.  The master has a hot spare.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

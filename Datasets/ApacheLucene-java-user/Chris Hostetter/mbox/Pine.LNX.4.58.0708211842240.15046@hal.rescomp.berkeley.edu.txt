@@ -1,0 +1,51 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: NPE in IndexReader
+DATE: 22 Aug 2007
+
+
+: I agree segmentInfos are not needed in this case. But it's used in
+: aquireWriteLock(). What should we do?
+
+This is one of the reasons why i was suggesting in a java-dev thread that
+*all* of the refrences to SegmentInfos be refactored out of IndexReader
+and into the subclasses -- any attempt to access the SegmentInfos in a
+MultiReader constructed from an IndexReader[] doesn't make sense -- and it
+never has.  In past releases, any operation in a MultiReader constructed
+from subReaders that attempted to use SegmentInfos (like aquireWriteLock)
+would never work properly (at best it would lock the first subReader)
+
+	...hmm, looking at this more and getting more confused...
+
+I was going to say that this was all a red herring and couldn't cause the
+NPE, since the only time acquireWriteLock is (or ever has been) called is
+when the IndexReader knows it owns the directory, but a quick skim of
+MultiReader on the trunk to try and find where it tells the super class it
+doesn't own the directory made me realize it's not there ... MultiReader
+extends MultiSegmentReader and passes info up the chain of super
+constructors about ot closing the Directory on close, but there is no info
+passed up about not owning the directory.
+
+skimming 2.2 i don't see how this ever worked "corectly" ... it wouldn't
+NPE, but it looks like any attempt at doing anything on a MultiReader
+would always aqcuire the write lock on the *first* sub reader, then
+delegate to the correct subreader.
+
+it appears that this is yet another flaw in the old impl exposed via the
+refactoring done so far (and further motivation for continued refactoring
+untill IndexReader is a glorified abstract class with no meat in it)
+
+(can someone sanity check my assessment ... i'm a little dizzy from
+flipping back and forth between various versions of IndexReader,
+MultiReader and MultiSegmentReader)
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

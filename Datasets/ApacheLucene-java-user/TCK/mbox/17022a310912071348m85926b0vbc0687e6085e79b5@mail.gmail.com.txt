@@ -1,0 +1,96 @@
+FROM: TCK <moonwatcher32...@gmail.com>
+SUBJECT: Re: heap memory issues when sorting by a string field
+DATE: 7 Dec 2009
+
+Thanks for the response. But I'm definitely calling close() on the old
+reader and opening a new one (not using reopen). Also, to simplify the
+analysis, I did my test with a single-threaded requester to eliminate any
+concurrency issues.
+
+I'm doing:
+sSearcher.getIndexReader().close();
+sSearcher.close(); // this actually seems to be a no-op
+IndexReader newIndexReader = IndexReader.open(newDirectory);
+sSearcher = new IndexSearcher(newIndexReader);
+
+Btw, isn't it bad practice anyway to have an unbounded cache? Are there any
+plans to replace the HashMaps used for the innerCaches with an actual
+size-bounded cache with some eviction policy (perhaps EhCache or something)
+?
+
+Thanks again,
+TCK
+
+
+
+
+On Mon, Dec 7, 2009 at 4:37 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+
+> What this sounds like is that you're not really closing your
+> readers even though you think you are. Sorting indeed uses up
+> significant memory when it populates internal caches and keeps
+> it around for later use (which is one of the reasons that warming
+> queries matter). But if you really do close the reader, I'm pretty
+> sure the memory should be GC-able.
+>
+> One thing that trips people up is IndexReader.reopen(). If it
+> returns a reader different than the original, you *must* close the
+> old one. If you don't, the old reader is still hanging around and
+> memory won't be returne.... An example from the Javadocs...
+>
+>  IndexReader reader = ...
+>  ...
+>  IndexReader new = r.reopen();
+>  if (new != reader) {
+>   ...     // reader was reopened
+>   reader.close();
+>  }
+>  reader = new;
+>  ...
+>
+>
+> If this is irrelevant, could you post your close/open
+>
+> code?
+>
+> HTH
+>
+> Erick
+>
+>
+> On Mon, Dec 7, 2009 at 4:27 PM, TCK <moonwatcher32329@gmail.com> wrote:
+>
+> > Hi,
+> > I'm having heap memory issues when I do lucene queries involving sorting
+> by
+> > a string field. Such queries seem to load a lot of data in to the heap.
+> > Moreover lucene seems to hold on to references to this data even after
+> the
+> > index reader has been closed and a full GC has been run. Some of the
+> > consequences of this are that in my generational heap configuration a lot
+> > of
+> > memory gets promoted to tenured space each time I close the old index
+> > reader
+> > and after opening and querying using a new one, and the tenured space
+> > eventually gets fragmented causing a lot of promotion failures resulting
+> in
+> > jvm hangs while the jvm does stop-the-world GCs.
+> >
+> > Does anyone know any workarounds to avoid these memory issues when doing
+> > such lucene queries?
+> >
+> > My profiling showed that even after a full GC lucene is holding on to a
+> lot
+> > of references to field value data notably via the
+> > FieldCacheImpl/ExtendedFieldCacheImpl. I noticed that the WeakHashMap
+> > readerCaches are using unbounded HashMaps as the innerCaches and I used
+> > reflection to replace these innerCaches with dummy empty HashMaps, but
+> > still
+> > I'm seeing the same behavior. I wondered if anyone has gone through these
+> > same issues before and would offer any advice.
+> >
+> > Thanks a lot,
+> > TCK
+> >
+>
+

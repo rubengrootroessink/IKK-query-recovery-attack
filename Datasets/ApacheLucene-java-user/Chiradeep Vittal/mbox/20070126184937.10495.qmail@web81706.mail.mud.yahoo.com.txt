@@ -1,0 +1,76 @@
+FROM: Chiradeep Vittal <rayvittal-li...@yahoo.com>
+SUBJECT: Re: Extending scoring to eliminate sorting on timestamp
+DATE: 26 Jan 2007
+
+Thanks for the insight Chris. You are right-- I was trying to avoid the FieldCache hit. Because
+the index is updated frequently, we have to keep discarding our IndexSearcher. 
+I used String because the timestamp is a Long and there wasn't any SortField.LONG (I guess
+I should have used SortField.CUSTOM). In this case, what should the indexing call look like?
+Currently, I have:
+    doc.add(new Field("timestamp",Long.toString(timestamp),Field.Store.NO,Field.Index.UN_TOKENIZED));
+
+
+
+I have been looking at FunctionQuery in Solr, but I didn't realize it would involve the FieldCache
+again.
+
+The other thing I was considering is to automatically limit the number of results (there is
+no way a user can grok 3 million results anyway) by breaking down the range filter into a
+series of range filters and executing multiple searches in series until the max number of
+results was returned. Of course, the problem here is that it impacts the average case (when
+the number of results is reasonable). One way around this is to execute an initial search
+just to figure out the number of hits (without sorting, without scoring) and then apply different
+strategies, but I'm not sure that the initial query is always going to be very very fast.
+
+The patch you pointed out looks very very promising.
+
+
+----- Original Message ----
+From: Chris Hostetter <hossman_lucene@fucit.org>
+To: java-user@lucene.apache.org
+Sent: Thursday, January 25, 2007 9:09:12 PM
+Subject: Re: Extending scoring to eliminate sorting on timestamp
+
+
+: For various reasons, we'd like to eliminate the sort step.
+
+can you elaborate on what those reasons are?
+
+FunctionQuery (in the solr code base, you'll find lots of discussing in
+the archives of this list) can let you use a numeric field value in the
+score calculation, but it still uses the FieldCache so if you are trying
+to avoid that for space/time reasons it won't help.
+
+you may also be interested in this patch...
+
+  https://issues.apache.org/jira/browse/LUCENE-769
+
+in the general case it should be slower then standard sorting, but if
+you are dealing with an extremely large index and your result sets all
+tend to be small, it may be faster (and it won't pay the initial
+FieldCache setup time on frequently modified indexes)
+
+:                    new SortField("timestamp",SortField.STRING,true)}));
+
+why are you sorting timestamps as strings? ... if you sort them as ints,
+your FieldCache will be a whole hell of a lot smaller (i'm guessing very
+few documents have identicle timestamps, so your FieldCache should be at
+least half as big if you sort on ints (and probably a lot more).
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

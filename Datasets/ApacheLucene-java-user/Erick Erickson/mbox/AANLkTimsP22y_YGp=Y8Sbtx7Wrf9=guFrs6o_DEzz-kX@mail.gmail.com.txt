@@ -1,0 +1,175 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: not indexing analyzed field
+DATE: 26 Nov 2010
+
+Can you "define the problem away"? That is, why do you want to store it at
+all?
+If there's no value to the users in seeing the encoded value, just don't
+store it.
+You can still search on the encoded value if in that case....
+
+Which is a way of saying that I don't know, off the top of my head, how
+you'd
+index one thing and store the result of analysis...
+
+Best
+Erick
+
+On Fri, Nov 26, 2010 at 9:54 AM, Bernd Fehling <
+bernd.fehling@uni-bielefeld.de> wrote:
+
+> Hi Erik,
+>
+> I see my problem, caused by a misunderstanding of the indexing by lucene.
+> I guess its due to the fact that FAST Data Search has real processing
+> pipelines.
+>
+> Youre right I use Solr but, as a matter of fact, in this special case
+> I really want to change the indexed _and_ stored data.
+> For security reasons I have to MD5 or even better SHA256 strings which
+> go into a field. So where is the sense if I SHA256 the string but
+> still display the plain text of the stored field?
+>
+> So the Analyzer or Filter should MessageDigest the content and index and
+> store it as MessageDigest.
+>
+> Can this be achived somehow with Analyzer or Filter,
+> what is your opinion?
+>
+> May be a hint which classes to use?
+>
+> Kind regards,
+> Bernd
+>
+>
+>
+> Am 26.11.2010 15:05, schrieb Erick Erickson:
+> > So, you're using Solr, right? And have a custom analyzer? If that's the
+> > case, Uwe pointed you in the right direction and I think everything may
+> > be working fine, or at least as I'd expect.
+> >
+> > Specifying stored="true" puts a verbatim, unanalyzed copy of the data
+> > in the index. When you display a field in a document (i.e. query
+> > on *:*) the *stored* value is returned, *not* the results of analysis.
+> The
+> > stored
+> > value has nothing to do with what's searched.
+> >
+> > To see if I've got it right, go into the admin page of solr, click on
+> > "schema browser",
+> > and then the field dcdocid should have the MD5 in it. If that's true,
+> then
+> > Solr
+> > is working as expected.
+> >
+> > If the analyzed values were returned, humans would be in a world of hurt
+> > since
+> > all the transformations would be applied and results pages would have
+> > gibberish.
+> > Imagine applying lowercase and stemming to input for "Running on Empty",
+> > your
+> > display would be something like "run on empti".
+> >
+> > And if you're doing pure lucene, you can see this by enumerating the
+> terms
+> > in your
+> > dcdocid field.
+> >
+> > Best
+> > Erick
+> >
+> > On Fri, Nov 26, 2010 at 2:10 AM, Bernd Fehling <
+> > bernd.fehling@uni-bielefeld.de> wrote:
+> >
+> >> Hi Erik,
+> >>
+> >> my evidence is that I load a single document into an empty index
+> >> with a field "id" and a second field "dcdocid". The field "dcdocid"
+> >> has the word "foo". This goes through my analyzer and changes to
+> >> MD5 string which is then "acbd18db4cc2f85cedef654fccc4a4d8".
+> >> After indexing and commit a search for *:* shows me "foo" for
+> >> the field "dcdocid" and not my MD5.
+> >>
+> >> my fieldType:
+> >> <fieldType name="text_md" class="solr.TextField" omitNorms="true" >
+> >>  <analyzer type="index"
+> >> class="de.ubbielefeld.solr.analysis.TextMessageDigestAnalyzer" />
+> >> </fieldType>
+> >>
+> >> <!-- UNIQUE ID -->
+> >> <field name="id" type="string" indexed="true" stored="true"
+> required="true"
+> >> />
+> >> <field name="dcdocid" type="text_md" indexed="true" stored="true" />
+> >> <copyField source="id" dest="dcdocid" />
+> >>
+> >> Using the debugger shows that the value in question is going
+> >> through the TextMessageDigestAnalyzer and coming out as MD5
+> >> but it is not as MD5 in the index.
+> >>
+> >> I also tried a filter but no success.
+> >> So why is something that is analyzed (and the value has changed
+> >> due to analysis) not stored with its new value in the index?
+> >>
+> >> Best regards,
+> >> Bernd
+> >>
+> >>
+> >> Am 25.11.2010 18:18, schrieb Erick Erickson:
+> >>> What is your evidence that "the result never reaches the index?"
+> >>>
+> >>> Are you sure:
+> >>> 1> you commit afterwards
+> >>> 2> you reopen the underlying reader to see
+> >>> 3> if you don't store the value for the field, how are you sure?
+> >>> 4> If you search and don't find it, did you index it?
+> >>>
+> >>> First, I'd be sure the value in question is in the document just before
+> >>> sending it to be added to your index to see if the value you think
+> >>> is in there really is. Something like Document.get() and see if
+> >>>
+> >>> Best
+> >>> Erick
+> >>>
+> >>> On Thu, Nov 25, 2010 at 8:08 AM, Bernd Fehling <
+> >>> bernd.fehling@uni-bielefeld.de> wrote:
+> >>>
+> >>>> I used KeywordAnalyzer and KeywordTokenizer as templates for
+> >>>> a new analyzer.
+> >>>> The analyzer works fine but the result never reaches the index.
+> >>>>
+> >>>> My analyzer is called in "DocInverterPerField.processFields"
+> >>>> with "stream.incrementToken()".
+> >>>> ...
+> >>>> try {
+> >>>>    boolean hasMoreTokens = stream.incrementToken();
+> >>>>
+> >>>>    fieldState.attributeSource = stream;
+> >>>>
+> >>>>    OffsetAttribute offsetAttribute =
+> >>>> fieldState.attributeSource.addAttribute(OffsetAttribute.class);
+> >>>>    PositionIncrementAttribute posIncrAttribute =
+> >>>>
+> >>
+> fieldState.attributeSource.addAttribute(PositionIncrementAttribute.class);
+> >>>>
+> >>>>    consumer.start(field);
+> >>>> ...
+> >>>>
+> >>>> The result goes to "fieldState.attributeSource" but is not in "field".
+> >>>> So "field.fieldsData" still has the old content before calling my
+> >>>> analyzer. And when calling "consumer.start(field)" the old content
+> >>>> is going to the index and not the new analyzed one.
+> >>>> Does the analyzer has to care about "Fieldable field.fieldsData"
+> >>>> or who is responsible for it?
+> >>>>
+> >>>> Regards
+> >>>> Bernd
+> >>>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

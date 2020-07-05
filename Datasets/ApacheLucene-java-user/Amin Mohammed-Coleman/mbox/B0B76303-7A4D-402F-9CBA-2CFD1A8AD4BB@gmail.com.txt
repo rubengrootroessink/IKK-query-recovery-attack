@@ -1,0 +1,309 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Indexing and Searching Web Application
+DATE: 21 Jan 2009
+
+Hi
+Will give that a go.
+
+Thanks
+
+Sent from my iPhone
+
+On 21 Jan 2009, at 12:26, "Ganesh" <emailgane@yahoo.co.in> wrote:
+
+> I am closing the old reader and it is working fine for me. Refer to  
+> IndexReader.Reopen javadoc.
+>
+> ///Below is the code snipper from IndexReader.reopen javadoc
+>
+> IndexReader reader = ...
+> ...
+> IndexReader new = r.reopen();
+> if (new != reader) {
+>  ...     // reader was reopened
+>  reader.close();  //Old reader is closed.
+> }
+> reader = new;
+>
+> Regards
+> Ganesh
+>
+> ----- Original Message ----- From: "Amin Mohammed-Coleman" <aminmc@gmail.com 
+> >
+> To: <java-user@lucene.apache.org>
+> Cc: <java-user@lucene.apache.org>
+> Sent: Wednesday, January 21, 2009 1:07 AM
+> Subject: Re: Indexing and Searching Web Application
+>
+>
+>> Hi
+>>
+>> Yes I am using the reopen method on indexreader. I am not closing  
+>> the  old indexer as per Ganesh's instruction. It seems to be  
+>> working  correctly so I presume it's ok not to close.
+>>
+>> Thanks
+>>
+>>
+>> Amin
+>>
+>> On 20 Jan 2009, at 19:27, "Angel, Eric" <eangel@business.com> wrote:
+>>
+>>> There's a reopen() method in the IndexReader class.  You can use  
+>>> that.
+>>>
+>>> -----Original Message-----
+>>> From: Amin Mohammed-Coleman [mailto:aminmc@gmail.com]
+>>> Sent: Tuesday, January 20, 2009 5:02 AM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Re: Indexing and Searching Web Application
+>>>
+>>> Am I supposed to close the oldIndexReader?  I just tried this and  
+>>> I  get
+>>> an
+>>> exception stating that the IndexReader is closed.
+>>>
+>>> Cheers
+>>>
+>>> On Tue, Jan 20, 2009 at 9:33 AM, Ganesh <emailgane@yahoo.co.in>  
+>>> wrote:
+>>>
+>>>> Reopen the reader, only if it is modified.
+>>>>
+>>>> IndexReader oldIndexReader = indexSearcher.getIndexReader();
+>>>> if (!oldIndexReader.isCurrent()) {
+>>>> IndexReader newIndexReader = oldIndexReader.reOpen();
+>>>> oldIndexReader.close();
+>>>> indexSearcher.close();
+>>>> IndexSearcher indexSearch = new IndexSearcher(newIndexReader);
+>>>> }
+>>>>
+>>>> Regards
+>>>> Ganesh
+>>>>
+>>>> ----- Original Message ----- From: "Amin Mohammed-Coleman" <
+>>>> aminmc@gmail.com>
+>>>> To: <java-user@lucene.apache.org>
+>>>> Sent: Tuesday, January 20, 2009 1:38 PM
+>>>> Subject: Re: Indexing and Searching Web Application
+>>>>
+>>>>
+>>>>
+>>>> Hi
+>>>>>
+>>>>> After your email I had a look around and came up with the below
+>>>>> solution (I'm not sure if this is the right approach or there is a
+>>>>> performance implication to doing this)
+>>>>>
+>>>>> public Summary[] search(SearchRequest searchRequest) {
+>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>> stopWatch.start();
+>>>>> MultiSearcher multiSearcher = null;
+>>>>> List<IndexSearcher> newIndexSearchers = new
+>>>>> ArrayList<IndexSearcher>();
+>>>>> try {
+>>>>> for (IndexSearcher indexSearcher: searchers) {
+>>>>> IndexReader indexReader = indexSearcher.getIndexReader().reopen();
+>>>>> IndexSearcher indexSearch = new IndexSearcher(indexReader);
+>>>>> newIndexSearchers.add(indexSearch);
+>>>>> }
+>>>>>
+>>>>> multiSearcher = new MultiSearcher(newIndexSearchers.toArray(new
+>>>>> IndexSearcher[] {}));
+>>>>> QueryParser queryParser = new
+>>>>> MultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+>>> analyzer);
+>>>>> Query query = queryParser.parse(searchRequest.getSearchTerm());
+>>>>>
+>>>>> //TODO: Sort and Filters
+>>>>>
+>>>>> TopDocs topDocs = multiSearcher.search(query, 100);
+>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>> LOGGER.debug("total number of hits for [" + query.toString() + " ]
+>>>>> = " +topDocs.totalHits);
+>>>>>
+>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>> final Document doc = multiSearcher.doc(scoreDoc.doc);
+>>>>> float score = scoreDoc.score;
+>>>>> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>>>>> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>>>>> summaryList.add(documentSummary);
+>>>>> }
+>>>>>
+>>>>> } catch (Exception e) {
+>>>>> throw new IllegalStateException(e);
+>>>>> }
+>>>>>
+>>>>> stopWatch.stop();
+>>>>>
+>>>>> LOGGER.debug("total time taken for seach: " +
+>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>> return summaryList.toArray(new Summary[] {});
+>>>>> }
+>>>>>
+>>>>>
+>>>>> The searchers are configured in spring using which looks like  
+>>>>> this:
+>>>>>
+>>>>> <bean id="rtfIndexSearcher"
+>>>>> class="org.apache.lucene.search.IndexSearcher" scope="prototype"
+>>> lazy-
+>>>>> init="true" >
+>>>>> <constructor-arg type="org.apache.lucene.store.Directory"
+>>>>> ref="rtfDirectory"  />
+>>>>> </bean>
+>>>>>
+>>>>> I set the dependencies on the DocumentSearcher class.
+>>>>>
+>>>>>
+>>>>> Cheers
+>>>>> Amin
+>>>>>
+>>>>>
+>>>>> On 19 Jan 2009, at 21:45, Amin Mohammed-Coleman wrote:
+>>>>>
+>>>>> I make a call to my search class which looks like this:
+>>>>>>
+>>>>>>
+>>>>>> public Summary[] search(SearchRequest searchRequest) {
+>>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>>> stopWatch.start();
+>>>>>> MultiSearcher multiSearcher = null;
+>>>>>> try {
+>>>>>> multiSearcher = new MultiSearcher(searchers.toArray(new
+>>>>>> IndexSearcher[] {}));
+>>>>>> QueryParser queryParser = new
+>>>>>> MultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+>>>>>> analyzer);
+>>>>>> Query query = queryParser.parse(searchRequest.getSearchTerm());
+>>>>>>
+>>>>>> //TODO: Sort and Filters
+>>>>>>
+>>>>>> TopDocs topDocs = multiSearcher.search(query, 100);
+>>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>>> LOGGER.debug("total number of hits for [" + query.toString() +
+>>>>>> " ] = " +topDocs.totalHits);
+>>>>>>
+>>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>>> final Document doc = multiSearcher.doc(scoreDoc.doc);
+>>>>>> float score = scoreDoc.score;
+>>>>>> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>>>>>> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>>>>>> summaryList.add(documentSummary);
+>>>>>> }
+>>>>>>
+>>>>>> } catch (Exception e) {
+>>>>>> throw new IllegalStateException(e);
+>>>>>> }
+>>>>>> stopWatch.stop();
+>>>>>>
+>>>>>> LOGGER.debug("total time taken for seach: " +
+>>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>>> return summaryList.toArray(new Summary[] {});
+>>>>>> }
+>>>>>>
+>>>>>> Do I need to do this explicitly?
+>>>>>>
+>>>>>>
+>>>>>> Cheers
+>>>>>> Amin
+>>>>>>
+>>>>>> On 19 Jan 2009, at 20:48, Greg Shackles wrote:
+>>>>>>
+>>>>>> After you make the commit to the index, are you reloading the  
+>>>>>> index
+>>>>>>> in the
+>>>>>>> searchers?
+>>>>>>>
+>>>>>>> - Greg
+>>>>>>>
+>>>>>>>
+>>>>>>> On Mon, Jan 19, 2009 at 3:29 PM, Amin Mohammed-Coleman <
+>>>>>>> aminmc@gmail.com
+>>>>>>>> wrote:
+>>>>>>>
+>>>>>>> Hi
+>>>>>>>>
+>>>>>>>> I have recently worked on developing an application which
+ 
+>>>>>>>> allows
+>>>>>>>> you to
+>>>>>>>> upload a file (which is indexed so you can search later).
+ I  
+>>>>>>>> have
+>>>>>>>> numerous
+>>>>>>>> tests to show that you can index and search documents (in
+some
+>>>>>>>> instances
+>>>>>>>> within the same test), however when I perform the operation
+ 
+>>>>>>>> in  the
+>>>>>>>> site:
+>>>>>>>>
+>>>>>>>> 1) Upload File and Index
+>>>>>>>> 2) Search
+>>>>>>>>
+>>>>>>>> I don't get any hits.  When I restart the application then
+if I
+>>> make
+>>>>>>>> another search I can find the results.  It seems as though
+  
+>>>>>>>> indexes
+>>>>>>>> aren't
+>>>>>>>> being committed when I do the initial upload.  This is  
+
+>>>>>>>> strange.  I
+>>>>>>>> explicitly call commit in my code when I upload the file.
+ Has
+>>>>>>>> anyone
+>>>>>>>> experienced this before?
+>>>>>>>>
+>>>>>>>> Any help would be appreciated.
+>>>>>>>>
+>>>>>>>> Kind Regards
+>>>>>>>>
+>>>>>>>> Amin
+>>>>>>>>
+>>>>>>>>
+>>> --- 
+>>> ------------------------------------------------------------------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>
+>>>>>
+>>>>>
+>>>> Send instant messages to your online friends
+>>> http://in.messenger.yahoo.com
+>>>> --- 
+>>>> ------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>>> --- 
+>>> ------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> Send instant messages to your online friends http://in.messenger.yahoo.com
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

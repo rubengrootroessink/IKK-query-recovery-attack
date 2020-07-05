@@ -1,0 +1,200 @@
+FROM: "Chad Small" <Chad.Sm...@definityhealth.com>
+SUBJECT: RE: Query syntax on Keyword field question
+DATE: 24 Mar 2004
+
+Here is my attempt at a KeywordAnalyzer - although is not working?  Excuse the length of the
+message, but wanted to give actual code.
+ 
+package domain.lucenesearch;
+ 
+import java.io.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.CharTokenizer;
+import org.apache.lucene.analysis.TokenStream;
+ 
+public class KeywordAnalyzer extends Analyzer
+{
+   public TokenStream tokenStream(String s, Reader reader)
+   {
+      return new KeywordTokenizer(reader);
+   }
+ 
+   private class KeywordTokenizer extends CharTokenizer
+   {
+      public KeywordTokenizer(Reader in)
+      {
+         super(in);
+      }
+      /**
+       * Collects all characters.
+       */
+      protected boolean isTokenChar(char c)
+      {
+         return true;
+      }
+   }
+
+However, this test: fails
+ 
+public class KeywordAnalyzerTest extends TestCase
+{
+   RAMDirectory directory;
+   private IndexSearcher searcher;
+ 
+   public void setUp() throws Exception
+   {
+      directory = new RAMDirectory();
+      IndexWriter writer = new IndexWriter(directory,
+                                           new StandardAnalyzer(),
+                                           true);
+      Document doc = new Document();
+      doc.add(Field.Keyword("category", "HW-NCI_TOPICS"));
+      doc.add(Field.Text("description", "Illidium Space Modulator"));
+      writer.addDocument(doc);
+      writer.close();
+      searcher = new IndexSearcher(directory);
+   }
+ 
+public void testPerFieldAnalyzer() throws Exception
+   {
+      analyze("HW-NCI_TOPICS");
+ 
+      PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(new StandardAnalyzer());
+      analyzer.addAnalyzer("category", new KeywordAnalyzer());   //|#1
+      Query query = QueryParser.parse("category:HW-NCI_TOPICS AND SPACE",
+                                      "description",
+                                      analyzer);
+      Hits hits = searcher.search(query);
+      System.out.println("query.ToString = " + query.toString("description"));
+      assertEquals("HW-NCI_TOPICS kept as-is",
+                   "category:HW-NCI_TOPICS +space", query.toString("description"));
+      assertEquals("doc found!", 1, hits.length());
+   }
+ 
+   private void analyze(String text) throws Exception
+   {
+      Analyzer[] analyzers = new Analyzer[]{
+         new WhitespaceAnalyzer(),
+         new SimpleAnalyzer(),
+         new StopAnalyzer(),
+         new StandardAnalyzer(),
+         new KeywordAnalyzer(),
+         //new SnowballAnalyzer("English", StopAnalyzer.ENGLISH_STOP_WORDS)
+      };
+      System.out.println("Analzying \"" + text + "\"");
+      for (int i = 0; i < analyzers.length; i++)
+      {
+         Analyzer analyzer = analyzers[i];
+         System.out.println("\t" + analyzer.getClass().getName() + ":");
+         System.out.print("\t\t");
+         TokenStream stream = analyzer.tokenStream("category", new StringReader(text));
+         while (true)
+         {
+            Token token = stream.next();
+            if (token == null) break;
+            System.out.print("[" + token.termText() + "] ");
+         }
+         System.out.println("\n");
+      }
+   }
+}
+ 
+With this output:
+ 
+Analzying "HW-NCI_TOPICS"
+ org.apache.lucene.analysis.WhitespaceAnalyzer:
+  [HW-NCI_TOPICS] 
+ org.apache.lucene.analysis.SimpleAnalyzer:
+  [hw] [nci] [topics] 
+ org.apache.lucene.analysis.StopAnalyzer:
+  [hw] [nci] [topics] 
+ org.apache.lucene.analysis.standard.StandardAnalyzer:
+  [hw] [nci] [topics] 
+ healthecare.domain.lucenesearch.KeywordAnalyzer:
+  [HW-NCI_TOPICS] 
+ 
+query.ToString = category:HW -"nci topics" +space
+
+junit.framework.ComparisonFailure: HW-NCI_TOPICS kept as-is 
+Expected:+category:HW-NCI_TOPICS +space
+Actual  :category:HW -"nci topics" +space
+ 
+See anything?
+thanks,
+chad.
+
+	-----Original Message----- 
+	From: Chad Small 
+	Sent: Tue 3/23/2004 8:48 PM 
+	To: Lucene Users List 
+	Cc: 
+	Subject: RE: Query syntax on Keyword field question
+	
+	
+
+	Thanks-you Erik and Incze.  I now understand the issue and I'm trying to create a "KeywordAnalyzer"
+as suggested from you book excerpt, Erik:
+	
+	http://issues.apache.org/eyebrowse/ReadMsg?listName=lucene-user@jakarta.apache.org&msgNo=6727
+	
+	However, not being all that familiar with the Analyzer framework, I'm not sure how to implement
+the "KeywordAnalyzer" even though it might be "trivial" :)  Any hints, code, or messages to
+look at?
+	
+	<<from message link above>>
+	Ok, here is the section from Lucene in Action.  I'll leave the
+	development of KeywordAnalyzer as an exercise for the reader (although
+	its implementation is trivial, one of the simplest analyzers possible -
+	only emit one token of the entire contents).  I hope this helps.
+	
+	Erik
+	
+	>>
+	thanks again,
+	chad.
+	
+	        -----Original Message-----
+	        From: Incze Lajos [mailto:incze@mail.matav.hu]
+	        Sent: Tue 3/23/2004 8:08 PM
+	        To: Lucene Users List
+	        Cc:
+	        Subject: Re: Query syntax on Keyword field question
+	       
+	       
+	
+	        On Tue, Mar 23, 2004 at 08:10:15PM -0500, Erik Hatcher wrote:
+	        > QueryParser and Field.Keyword fields are a strange mix.  For some
+	        > background, check the archives as this has been covered pretty
+	        > extensively.
+	        >
+	        > A quick answer is yes you can use MFQP and QP with keyword fields,
+	        > however you need to be careful which analyzer you use.
+	        > PerFieldAnalyzerWrapper is a good solution - you'll just need to use an
+	        > analyzer for your keyword field which simply tokenizes the whole string
+	        > as one chunk.  Perhaps such an analyzer should be made part of the
+	        > core?
+	        >
+	        >       Erik
+	       
+	        I've implemented suche an analyzer but it's only partial solution
+	        if your keyword field contains spaces, as the QP would split
+	        the query, e.g.:
+	       
+	        NOTTOKNIZED:(term with spaces*)
+	       
+	        would give you no hit even with an not tokenized field
+	        "term with spaces and other useful things". The full solution
+	        would be to be able to tell the QP not to split at spaces,
+	        either by 'do not split till apos' syntax, or by the good ol'
+	        backslash: do\ not\ notice\ these\ spaces.
+	       
+	        incze
+	       
+	        ---------------------------------------------------------------------
+	        To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+	        For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+	       
+	       
+	
+	
+

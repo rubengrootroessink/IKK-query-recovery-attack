@@ -1,0 +1,146 @@
+FROM: Babak Farhang <farh...@gmail.com>
+SUBJECT: Re: incremental document field update
+DATE: 19 Jan 2010
+
+> This is about multiple sessions with the writer.  Ie, open writer,
+> update a few docs, close.  Do the same again, but, that 2nd session
+> cannot overwrite the same files from the first one, since readers may
+> have those files open.  The "write once" model gives Lucene its
+> transactional semantics, too -- we can keep multiple commits in the
+> index, open an arbitrary commit, rollback, etc.
+
+Ahh, I see. We're worried about the read-consistency of the open readers
+while there is a concurrent writer. I think that's already taken care of with
+the fact that under the hood we are only appending data into the logical
+segment.  When a reader first loads one of our slave segments, it first
+loads into memory the number of entries in the right-ahead log of mapped
+doc-ids before reading those number of entries from the log. It could note
+the max unmapped document number represented in the last entry and
+discard any document numbers above that max in the postings.
+
+> I think both approaches are O(total size of updates) in indexing cost,
+> assuming each writes only the new changes, to a new generation
+> filename.
+>
+> But I think at search time the "remap during indexing" approach should
+> simpler, since you "just" have to OR together N posting lists... and
+> performance should be better (by a constant factor) since there's no
+> remapping.
+
+I think I see how this approach can work for indexed-only fields. I imagine
+we also need a parallel dictionary for these mapped postings lists in order
+to deal with new terms encountered during the update. Not sure how this
+would work. Can you elaborate?
+
+And how would we deal with updated stored fields?
+
+-Babak
+
+On Mon, Jan 18, 2010 at 4:42 AM, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> On Mon, Jan 18, 2010 at 12:35 AM, Babak Farhang <farhang@gmail.com> wrote:
+>
+>>> Got it.  You'd presumably have to add a generation to this file, so
+>>> that multiple sessions of updates + commit write to private files
+>>> ("write once")?  And then the reader merges all of them.
+>>
+>> Actually, I hadn't considered concurrent update/commit semantics;
+>> I was thinking more along a single writer / many readers model..
+>> Concurrent update is an altogether different beast than concurrent
+>> add semantics, and I was hoping to avoid complexity.
+>
+> This isn't about concurrency (we should just keep single writer +
+> multiple readers model).
+>
+> This is about multiple sessions with the writer.  Ie, open writer,
+> update a few docs, close.  Do the same again, but, that 2nd session
+> cannot overwrite the same files from the first one, since readers may
+> have those files open.  The "write once" model gives Lucene its
+> transactional semantics, too -- we can keep multiple commits in the
+> index, open an arbitrary commit, rollback, etc.
+>
+> Each newly written file only has the updates from that one session,
+> so write cost is in proportion to how much updating you did in that
+> one session.
+>
+>>> It sounds like this'd require the full posting list for a given term X
+>>> to be loaded into RAM, mapped, and sorted, before the caller can
+>>> actually pull the first docID, right?  I guess often this is likely an
+>>> acceptable cost, since "usually" the fields you update are smallish.
+>>
+>> I was thinking, for large posting lists, we can avoid loading the entire
+>> list into RAM in most cases. Given that we have a sorted set of mapped
+>> surrogate doc-ids (the key-set in the TreeMap), we should be able to
+>> search any surrogate doc-ids that need to be mapped in the underlying
+>> posting list using judicious calls to skipTo() on the underlying TermDocs.
+>> (This is just like an efficient implementation of finding the intersection
+>> of 2 sorted arrays of integers: the performance is linear in the size of
+>> the shortest array, and often, not all the elements of the shorter array
+>> need even be examined.)
+>>
+>> So when the
+>> [Filter]TermDocs instance is first positioned to a term, it first gathers
+>> the to-be-mapped (surrogate) doc-ids in a sorted list (hopefully a small
+>> subset of postings list), then maps these to their "view" ids in a separate
+>> list, and finally sorts this list of mapped "view" ids. So one list contains
+>> the (sorted) doc-ids that must be removed from the underlying posting
+>> list, and another contains the (sorted) doc-ids that must be interleaved
+>> into the postings.  Using these two lists, we should be able implement
+>> a proper view of the postings.
+>
+> Ahhh I see.  Nice!
+>
+>>> Thinking out loud... I wonder if, instead of deferring the mapping
+>>> until search time (which is costly since every search must re-do it),
+>>> we could do the mapping at indexing time?
+>>>
+>>> Say we add an IndexWriter.updateDocumentFields(Term, Document) method,
+>>
+>> This method name/signature/semantics much better than
+>> the one I proposed..
+>>
+>>> which will update only the specified fields.  The Term must uniquely
+>>> refer to 1 existing doc in the index.  On flush, we resolve that Term
+>>> -> docID (we do this already, to apply deletions), and then we write
+>>> to a new set of "delta postings" files using the correct docID.  Then
+>>> the reader would have to merge these postings files when reading.
+>>
+>> [Thinking out loud too] Interesting. So instead of rewriting the entire
+>> slave segment on update we rewrite things like the "delta postings"
+>> files on committing an update?
+>>
+>> I'm thinking this approach would probably best work on "batch"
+>> update/commits.
+>
+> It should work well for single doc updates as well, ie, its net
+> indexing cost is also in proportion to the number of updated fields.
+> It's just that it does the remapping once (during indexing) instead of
+> during searching.
+>
+>> If on the other hand the use case is a sequence of N single-doc
+>> update/commits, then the total cost of the N updates would likely
+>> approach O(N**2) -- <N rewrites> * <avg delta postings file size = O(N)>
+>> So as ever, there are tradeoffs.
+>
+> I think both approaches are O(total size of updates) in indexing cost,
+> assuming each writes only the new changes, to a new generation
+> filename.
+>
+> But I think at search time the "remap during indexing" approach should
+> simpler, since you "just" have to OR together N posting lists... and
+> performance should be better (by a constant factor) since there's no
+> remapping.
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,88 @@
+FROM: Toke Eskildsen ...@statsbiblioteket.dk>
+SUBJECT: RE: External sort
+DATE: 18 Dec 2009
+
+(reposted to the list as I originally sent my reply to only Marvin by mistake)
+
+From: Marvin Humphrey [marvin@rectangular.com]
+> We use a hash set to perform uniquing, but when there are a lot of unique
+> values, the memory requirements of the SortWriter go very high.
+>
+> Assume that we're sorting string data rather than date time values (so the
+> memory occupied by all those unique values is significant).  What algorithms
+> would you consider for performing the uniquing?
+
+We do have a structure that is comparable to the above: An ordered list of
+Strings, where updates to a Lucene index requires updates to the list. We do
+this by having a long[] with collator-sorted offsets into a file with all the Strings
+in insertion order.
+
+When a new String is considered, existence is checked in O(log(n)) by
+binary search. If it is new, it is appended to the file and the offset inserted
+into the offset-array (arrayCopy). That is only usable for a relatively small
+amount of inserts, due to the arrayCopy. SSDs are very helpful for
+String lookup performance here.
+
+For building the initial list, we use the terms for a given field, so we know that
+they are unique: We Append them all in a file and keep track of the offsets,
+then sort the offset-list based on what they're pointing at. By using caching
+and mergesort (heapsort _kills_ performance in this scenario, as there is no
+locality), it performs fairly well.
+(I'm lying a little about our setup, for sake of brevity)
+Memory usage excl. caching is 8 bytes * #Strings + housekeeping.
+
+By adding another level of indirection and storing the offsets as a file and
+sort a list of pointers to the offsets (argh), memory requirements can be
+dropped to 4 bytes * # Strings. That doubles the number of seeks, so I
+would only recommend it with SSDs and in tight spots.
+
+We do have some code for duplicate reduction (long story): When the list
+is sorted, step through the offsets and compare the Strings for the entries
+at position x and x+1. If the Strings are equal, set offset[x+1] = x.
+When the iteration has finished, the offsets only points to unique Strings
+and the Strings-file contains some non-referenced entries, that can be
+cleaned up by writing a new Strings-file.
+
+
+Somewhat related, I'm experimenting with a sliding-window approach to
+sorting Lucene terms, which might be usable in your scenario. It is a fairly
+clean trade-off between memory and processing time. It is outlined in the
+thread "heap memory issues when sorting by a string field" and it should
+be fairly straight-forward to adapt the algorithm to remove duplicates.
+The main requirement is that it is possible to iterate over the Strings
+multiple times.
+
+
+In general, I find that the memory-killer in these cases tend to be all the
+wrapping and not the data themselves. A String has 38+ bytes of
+overhead and if you're mainly using ASCII, Java's 2-byte char sure
+means a lot of always-0-bits in memory. I don't know if it is feasible, but
+making something like
+class LittleString {
+  private byte[] utf8;
+  LittleString(String s) {
+    utf8 = s.getBytes("utf-8");
+  }
+  public int hashCode() {
+    ...generate from utf8
+  }
+  public String toString() {
+    return new String(utf8, "utf-8");
+  }
+  public boolean equals(Object o) {
+    if (!(o instanceof LittleString) return false;
+    return Arrays.equals(utf8, ((LittleString)o).utf8);
+  }
+}
+and storing that in your HashSet instead of the Strings directly ought
+to cut a fair amount of your memory usage. I don't know how much
+it would cost in performance though and the HashSet structure itself
+isn't free.
+
+Regards,
+Toke Eskildsen
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

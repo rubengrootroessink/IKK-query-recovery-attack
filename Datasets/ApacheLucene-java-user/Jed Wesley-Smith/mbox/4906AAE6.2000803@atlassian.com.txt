@@ -1,0 +1,70 @@
+FROM: Jed Wesley-Smith <...@atlassian.com>
+SUBJECT: IllegalStateEx thrown when calling close
+DATE: 28 Oct 2008
+
+All,
+
+We have seen the following stacktrace in production with Lucene 2.3.2:
+
+java.lang.IllegalStateException: abort() can only be called when 
+IndexWriter was opened with autoCommit=false
+    at org.apache.lucene.index.IndexWriter.abort(IndexWriter.java:2009)
+    at org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1175)
+    at org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1154)
+
+This is caused by some IndexWriter method catching an OutOfMemoryError 
+previously and then aborting the close.
+
+My question is twofold. Firstly, does it make any sense for this to 
+happen (it feels like a bug, shouldn't close not call abort if 
+autoCommit=true?). Secondly, is there anything I can do to recover 
+(should I call flush()?), or can I just ignore it if autoCommit is true?
+
+Following is a test that reproduces the problem:
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.store.RAMDirectory;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public class TestIndexWriter {
+
+    @Test public void testOutOfMemoryErrorCausesCloseToFail() throws 
+Exception {
+        final AtomicBoolean throwFirst = new AtomicBoolean(true);
+        final IndexWriter writer = new IndexWriter(new RAMDirectory(), 
+new StandardAnalyzer()) {
+            @Override public void message(final String message) {
+                if (message.startsWith("now flush at close") && 
+throwFirst.getAndSet(false)) {
+                    throw new OutOfMemoryError(message);
+                }
+            }
+        };
+        // need to set an info stream so message is called
+        writer.setInfoStream(new PrintStream(new 
+ByteArrayOutputStream())); //or better, use NullOS from commons-io
+        try {
+            writer.close();
+            Assert.fail("OutOfMemoryError expected");
+        }
+        catch (final OutOfMemoryError expected) {}
+
+        // throws IllegalStateEx
+        writer.close();
+    }
+}
+
+thanks for any help,
+jed.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

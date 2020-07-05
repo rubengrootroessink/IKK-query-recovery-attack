@@ -1,0 +1,492 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Search within a sentence (revisited)
+DATE: 26 Jul 2011
+
+As long as you are happy with the results, I'm good. Always nice to have an excuse to dip back
+into Lucene. Just don't want you to feel over confident with the code without proper testing
+of it - I coded to fix the broken tests rather than taking the time to write a bunch more
+corner case tests like I likely should try if I was going to commit this thing.
+
+- Mark Miller
+lucidimagination.com
+
+On Jul 26, 2011, at 8:56 AM, Peter Keegan wrote:
+
+> Thanks Mark! The new patch is working fine with the tests and a few more. If
+> you have particular test cases in mind, I'd be happy to add them.
+> 
+> Thanks,
+> Peter
+> 
+> On Mon, Jul 25, 2011 at 5:56 PM, Mark Miller <markrmiller@gmail.com> wrote:
+> 
+>> Sorry Peter - I introduced this problem with some kind of typo type issue -
+>> I somehow changed an includeSpans variable to excludeSpans - but I certainly
+>> didn't mean too - it makes no sense. So not sure how it happened, and
+>> surprised the tests that passed still passed!
+>> 
+>> We could probably use even more tests before feeling too confident here…
+>> 
+>> I've attached a patch for 3X with the new test and fix (changed that
+>> include back to exclude).
+>> 
+>> - Mark Miller
+>> lucidimagination.com
+>> 
+>> On Jul 25, 2011, at 10:29 AM, Mark Miller wrote:
+>> 
+>>> Thanks Peter - if you supply the unit tests, I'm happy to work on the
+>> fixes.
+>>> 
+>>> I can likely look at this later today.
+>>> 
+>>> - Mark Miller
+>>> lucidimagination.com
+>>> 
+>>> On Jul 25, 2011, at 10:14 AM, Peter Keegan wrote:
+>>> 
+>>>> Hi Mark,
+>>>> 
+>>>> Sorry to bug you again, but there's another case that fails the unit
+>> test
+>>>> (search within the second sentence), as shown here in the last test:
+>>>> 
+>>>> package org.apache.lucene.search.spans;
+>>>> 
+>>>> import java.io.Reader;
+>>>> 
+>>>> import org.apache.lucene.analysis.Analyzer;
+>>>> import org.apache.lucene.analysis.TokenStream;
+>>>> import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
+>>>> import
+>>>> org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
+>>>> import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
+>>>> import org.apache.lucene.document.Document;
+>>>> import org.apache.lucene.document.Field;
+>>>> import org.apache.lucene.index.IndexReader;
+>>>> import org.apache.lucene.index.RandomIndexWriter;
+>>>> import org.apache.lucene.index.Term;
+>>>> import org.apache.lucene.store.Directory;
+>>>> import org.apache.lucene.search.IndexSearcher;
+>>>> import org.apache.lucene.search.PhraseQuery;
+>>>> import org.apache.lucene.search.ScoreDoc;
+>>>> import org.apache.lucene.search.TermQuery;
+>>>> import org.apache.lucene.search.spans.SpanNearQuery;
+>>>> import org.apache.lucene.search.spans.SpanQuery;
+>>>> import org.apache.lucene.search.spans.SpanTermQuery;
+>>>> import org.apache.lucene.util.LuceneTestCase;
+>>>> 
+>>>> public class TestSentence extends LuceneTestCase {
+>>>> public static final String field = "field";
+>>>> public static final String START = "^";
+>>>> public static final String END = "$";
+>>>> public void testSetPosition() throws Exception {
+>>>> Analyzer analyzer = new Analyzer() {
+>>>> @Override
+>>>> public TokenStream tokenStream(String fieldName, Reader reader) {
+>>>> return new TokenStream() {
+>>>> private final String[] TOKENS = {"1", "2", "3", END, "4", "5", "6", END,
+>>>> "9"};
+>>>> private final int[] INCREMENTS = {1,1,1,0,1,1,1,0,1};
+>>>> private int i = 0;
+>>>> PositionIncrementAttribute posIncrAtt =
+>>>> addAttribute(PositionIncrementAttribute.class);
+>>>> CharTermAttribute termAtt = addAttribute(CharTermAttribute.class);
+>>>> OffsetAttribute offsetAtt = addAttribute(OffsetAttribute.class);
+>>>> @Override
+>>>> public boolean incrementToken() {
+>>>> assertEquals(TOKENS.length, INCREMENTS.length);
+>>>> if (i == TOKENS.length)
+>>>> return false;
+>>>> clearAttributes();
+>>>> termAtt.append(TOKENS[i]);
+>>>> offsetAtt.setOffset(i,i);
+>>>> posIncrAtt.setPositionIncrement(INCREMENTS[i]);
+>>>> i++;
+>>>> return true;
+>>>> }
+>>>> };
+>>>> }
+>>>> };
+>>>> Directory store = newDirectory();
+>>>> RandomIndexWriter writer = new RandomIndexWriter(random, store,
+>> analyzer);
+>>>> Document d = new Document();
+>>>> d.add(newField("field", "bogus", Field.Store.YES,
+>> Field.Index.ANALYZED));
+>>>> writer.addDocument(d);
+>>>> IndexReader reader = writer.getReader();
+>>>> writer.close();
+>>>> IndexSearcher searcher = newSearcher(reader);
+>>>> SpanTermQuery startSentence = makeSpanTermQuery(START);
+>>>> SpanTermQuery endSentence = makeSpanTermQuery(END);
+>>>> SpanQuery[] clauses = new SpanQuery[2];
+>>>> clauses[0] = makeSpanTermQuery("1");
+>>>> clauses[1] = makeSpanTermQuery("2");
+>>>> SpanNearQuery allKeywords = new SpanNearQuery(clauses,
+>> Integer.MAX_VALUE,
+>>>> false); // SpanAndQuery equivalent
+>>>> SpanWithinQuery query = new SpanWithinQuery(allKeywords, endSentence,
+>> 0);
+>>>> System.out.println("query: "+query);
+>>>> ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+>>>> assertEquals(1, hits.length);
+>>>> clauses[1] = makeSpanTermQuery("4");
+>>>> allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE, false); //
+>>>> SpanAndQuery equivalent
+>>>> query = new SpanWithinQuery(allKeywords, endSentence, 0);
+>>>> System.out.println("query: "+query);
+>>>> hits = searcher.search(query, null, 1000).scoreDocs;
+>>>> assertEquals(0, hits.length);
+>>>> PhraseQuery pq = new PhraseQuery();
+>>>> pq.add(new Term(field, "3"));
+>>>> pq.add(new Term(field, "4"));
+>>>> System.out.println("query: "+pq);
+>>>> hits = searcher.search(pq, null, 1000).scoreDocs;
+>>>> assertEquals(1, hits.length);
+>>>> clauses[0] = makeSpanTermQuery("4");
+>>>> clauses[1] = makeSpanTermQuery("6");
+>>>> allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE, false); //
+>>>> SpanAndQuery equivalent
+>>>> query = new SpanWithinQuery(allKeywords, endSentence, 0);
+>>>> System.out.println("query: "+query);
+>>>> hits = searcher.search(query, null, 1000).scoreDocs;
+>>>> assertEquals(1, hits.length);
+>>>> }
+>>>> 
+>>>> public SpanTermQuery makeSpanTermQuery(String text) {
+>>>> return new SpanTermQuery(new Term(field, text));
+>>>> }
+>>>> public TermQuery makeTermQuery(String text) {
+>>>> return new TermQuery(new Term(field, text));
+>>>> }
+>>>> }
+>>>> 
+>>>> Peter
+>>>> 
+>>>> On Thu, Jul 21, 2011 at 5:23 PM, Mark Miller <markrmiller@gmail.com>
+>> wrote:
+>>>> 
+>>>>> 
+>>>>> I just uploaded a patch for 3X that will work for 3.2.
+>>>>> 
+>>>>> On Jul 21, 2011, at 4:25 PM, Mark Miller wrote:
+>>>>> 
+>>>>>> Yeah, it's off trunk - I'll submit a 3X patch in a bit - just have
+to
+>>>>> change that to an IndexReader I believe.
+>>>>>> 
+>>>>>> - Mark
+>>>>>> 
+>>>>>> On Jul 21, 2011, at 4:01 PM, Peter Keegan wrote:
+>>>>>> 
+>>>>>>> Does this patch require the trunk version? I'm using 3.2 and
+>>>>>>> 'AtomicReaderContext' isn't there.
+>>>>>>> 
+>>>>>>> Peter
+>>>>>>> 
+>>>>>>> On Thu, Jul 21, 2011 at 3:07 PM, Mark Miller <markrmiller@gmail.com>
+>>>>> wrote:
+>>>>>>> 
+>>>>>>>> Hey Peter,
+>>>>>>>> 
+>>>>>>>> Getting sucked back into Spans...
+>>>>>>>> 
+>>>>>>>> That test should pass now - I uploaded a new patch to
+>>>>>>>> https://issues.apache.org/jira/browse/LUCENE-777
+>>>>>>>> 
+>>>>>>>> Further tests may be needed though.
+>>>>>>>> 
+>>>>>>>> - Mark
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> On Jul 21, 2011, at 9:28 AM, Peter Keegan wrote:
+>>>>>>>> 
+>>>>>>>>> Hi Mark,
+>>>>>>>>> 
+>>>>>>>>> Here is a unit test using a version of 'SpanWithinQuery'
+modified
+>> for
+>>>>> 3.2
+>>>>>>>>> ('getTerms' removed) . The last test fails (search for
+"1" and
+>> "3").
+>>>>>>>>> 
+>>>>>>>>> package org.apache.lucene.search.spans;
+>>>>>>>>> 
+>>>>>>>>> import java.io.Reader;
+>>>>>>>>> 
+>>>>>>>>> import org.apache.lucene.analysis.Analyzer;
+>>>>>>>>> import org.apache.lucene.analysis.TokenStream;
+>>>>>>>>> import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
+>>>>>>>>> import
+>>>>>>>>> 
+>> org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
+>>>>>>>>> import
+>> org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
+>>>>>>>>> import org.apache.lucene.document.Document;
+>>>>>>>>> import org.apache.lucene.document.Field;
+>>>>>>>>> import org.apache.lucene.index.IndexReader;
+>>>>>>>>> import org.apache.lucene.index.RandomIndexWriter;
+>>>>>>>>> import org.apache.lucene.index.Term;
+>>>>>>>>> import org.apache.lucene.store.Directory;
+>>>>>>>>> import org.apache.lucene.search.IndexSearcher;
+>>>>>>>>> import org.apache.lucene.search.PhraseQuery;
+>>>>>>>>> import org.apache.lucene.search.ScoreDoc;
+>>>>>>>>> import org.apache.lucene.search.TermQuery;
+>>>>>>>>> import org.apache.lucene.search.spans.SpanNearQuery;
+>>>>>>>>> import org.apache.lucene.search.spans.SpanQuery;
+>>>>>>>>> import org.apache.lucene.search.spans.SpanTermQuery;
+>>>>>>>>> import org.apache.lucene.util.LuceneTestCase;
+>>>>>>>>> 
+>>>>>>>>> public class TestSentence extends LuceneTestCase {
+>>>>>>>>> public static final String field = "field";
+>>>>>>>>> public static final String START = "^";
+>>>>>>>>> public static final String END = "$";
+>>>>>>>>> public void testSetPosition() throws Exception {
+>>>>>>>>> Analyzer analyzer = new Analyzer() {
+>>>>>>>>> @Override
+>>>>>>>>> public TokenStream tokenStream(String fieldName, Reader
+reader) {
+>>>>>>>>> return new TokenStream() {
+>>>>>>>>> private final String[] TOKENS = {"1", "2", "3", END,
+"4", "5", "6",
+>>>>> END,
+>>>>>>>>> "9"};
+>>>>>>>>> private final int[] INCREMENTS = {1,1,1,0,1,1,1,0,1};
+>>>>>>>>> private int i = 0;
+>>>>>>>>> 
+>>>>>>>>> PositionIncrementAttribute posIncrAtt =
+>>>>>>>>> addAttribute(PositionIncrementAttribute.class);
+>>>>>>>>> CharTermAttribute termAtt = addAttribute(CharTermAttribute.class);
+>>>>>>>>> OffsetAttribute offsetAtt = addAttribute(OffsetAttribute.class);
+>>>>>>>>> 
+>>>>>>>>> @Override
+>>>>>>>>> public boolean incrementToken() {
+>>>>>>>>> assertEquals(TOKENS.length, INCREMENTS.length);
+>>>>>>>>> if (i == TOKENS.length)
+>>>>>>>>> return false;
+>>>>>>>>> clearAttributes();
+>>>>>>>>> termAtt.append(TOKENS[i]);
+>>>>>>>>> offsetAtt.setOffset(i,i);
+>>>>>>>>> posIncrAtt.setPositionIncrement(INCREMENTS[i]);
+>>>>>>>>> i++;
+>>>>>>>>> return true;
+>>>>>>>>> }
+>>>>>>>>> };
+>>>>>>>>> }
+>>>>>>>>> };
+>>>>>>>>> Directory store = newDirectory();
+>>>>>>>>> RandomIndexWriter writer = new RandomIndexWriter(random,
+store,
+>>>>>>>> analyzer);
+>>>>>>>>> Document d = new Document();
+>>>>>>>>> d.add(newField("field", "bogus", Field.Store.YES,
+>>>>> Field.Index.ANALYZED));
+>>>>>>>>> writer.addDocument(d);
+>>>>>>>>> IndexReader reader = writer.getReader();
+>>>>>>>>> writer.close();
+>>>>>>>>> IndexSearcher searcher = newSearcher(reader);
+>>>>>>>>> 
+>>>>>>>>> SpanTermQuery startSentence = makeSpanTermQuery(START);
+>>>>>>>>> SpanTermQuery endSentence = makeSpanTermQuery(END);
+>>>>>>>>> SpanQuery[] clauses = new SpanQuery[2];
+>>>>>>>>> clauses[0] = makeSpanTermQuery("1");
+>>>>>>>>> clauses[1] = makeSpanTermQuery("2");
+>>>>>>>>> SpanNearQuery allKeywords = new SpanNearQuery(clauses,
+>>>>> Integer.MAX_VALUE,
+>>>>>>>>> false); // SpanAndQuery equivalent
+>>>>>>>>> SpanWithinQuery query = new SpanWithinQuery(allKeywords,
+>> endSentence,
+>>>>> 0);
+>>>>>>>>> System.out.println("query: "+query);
+>>>>>>>>> ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+>>>>>>>>> assertEquals(hits.length, 1);
+>>>>>>>>> 
+>>>>>>>>> clauses[1] = makeSpanTermQuery("4");
+>>>>>>>>> allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE,
+false);
+>> //
+>>>>>>>>> SpanAndQuery equivalent
+>>>>>>>>> query = new SpanWithinQuery(allKeywords, endSentence,
+0);
+>>>>>>>>> System.out.println("query: "+query);
+>>>>>>>>> hits = searcher.search(query, null, 1000).scoreDocs;
+>>>>>>>>> assertEquals(hits.length, 0);
+>>>>>>>>> 
+>>>>>>>>> PhraseQuery pq = new PhraseQuery();
+>>>>>>>>> pq.add(new Term(field, "3"));
+>>>>>>>>> pq.add(new Term(field, "4"));
+>>>>>>>>> hits = searcher.search(pq, null, 1000).scoreDocs;
+>>>>>>>>> assertEquals(hits.length, 1);
+>>>>>>>>> 
+>>>>>>>>> clauses[1] = makeSpanTermQuery("3");
+>>>>>>>>> allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE,
+false);
+>> //
+>>>>>>>>> SpanAndQuery equivalent
+>>>>>>>>> query = new SpanWithinQuery(allKeywords, endSentence,
+0);
+>>>>>>>>> System.out.println("query: "+query);
+>>>>>>>>> hits = searcher.search(query, null, 1000).scoreDocs;
+>>>>>>>>> assertEquals(hits.length, 1);
+>>>>>>>>> 
+>>>>>>>>> 
+>>>>>>>>> }
+>>>>>>>>> 
+>>>>>>>>> public SpanTermQuery makeSpanTermQuery(String text) {
+>>>>>>>>> return new SpanTermQuery(new Term(field, text));
+>>>>>>>>> }
+>>>>>>>>> public TermQuery makeTermQuery(String text) {
+>>>>>>>>> return new TermQuery(new Term(field, text));
+>>>>>>>>> }
+>>>>>>>>> }
+>>>>>>>>> 
+>>>>>>>>> Peter
+>>>>>>>>> 
+>>>>>>>>> On Wed, Jul 20, 2011 at 9:22 PM, Mark Miller <
+>> markrmiller@gmail.com>
+>>>>>>>> wrote:
+>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> On Jul 20, 2011, at 7:44 PM, Mark Miller wrote:
+>>>>>>>>>> 
+>>>>>>>>>>> 
+>>>>>>>>>>> On Jul 20, 2011, at 11:27 AM, Peter Keegan wrote:
+>>>>>>>>>>> 
+>>>>>>>>>>>> Mark Miller's 'SpanWithinQuery' patch
+>>>>>>>>>>>> seems to have the same issue.
+>>>>>>>>>>> 
+>>>>>>>>>>> If I remember right (It's been more the a couple
+years), I did
+>> index
+>>>>>>>> the
+>>>>>>>>>> sentence markers at the same position as the last
+word in the
+>>>>> sentence.
+>>>>>>>> And
+>>>>>>>>>> I think the limitation that I ate was that the word
+could belong
+>> to
+>>>>> both
+>>>>>>>>>> it's true sentence, and the one after it.
+>>>>>>>>>>> 
+>>>>>>>>>>> - Mark Miller
+>>>>>>>>>>> lucidimagination.com
+>>>>>>>>>> 
+>>>>>>>>>> Perhaps you could index the sentence marker at both
+the last word
+>> of
+>>>>> the
+>>>>>>>>>> sentence as well as the first word of the next sentence
+if there
+>> is
+>>>>> one.
+>>>>>>>>>> This would seem to solve the above limitation as
+well?
+>>>>>>>>>> 
+>>>>>>>>>> - Mark Miller
+>>>>>>>>>> lucidimagination.com
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>>>> 
+>> ---------------------------------------------------------------------
+>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>> 
+>>>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> - Mark Miller
+>>>>>>>> lucidimagination.com
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>>>>>>>> 
+>> ---------------------------------------------------------------------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>> 
+>>>>>>>> 
+>>>>>> 
+>>>>>> - Mark Miller
+>>>>>> lucidimagination.com
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>> 
+>>>>> - Mark Miller
+>>>>> lucidimagination.com
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>> 
+>>>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> 
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> 
+>> 
+
+
+
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

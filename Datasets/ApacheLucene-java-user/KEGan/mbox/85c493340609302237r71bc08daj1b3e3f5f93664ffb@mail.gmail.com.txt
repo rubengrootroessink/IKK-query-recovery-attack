@@ -1,0 +1,292 @@
+FROM: KEGan <khoon.ee....@gmail.com>
+SUBJECT: Re: Sort by date THEN by relevancy
+DATE: 1 Oct 2006
+
+Erick,
+
+Wow!! Thanks for the invaluable advice and sharing of your experience :) I
+greatly appreciate them.
+
+Alright, I think it really make the most sense to follow the path of least
+resistant first, then see if it really need optimization.
+
+Thanks a lot.
+
+~KEGan
+
+
+On 9/30/06, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> See below
+>
+> On 9/29/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> >
+> > Erick,
+> >
+> > Thanks for the great advice!!
+> >
+> > About closing/opening searcher on each request .... isnt this
+> unavoidable
+> > in
+> > some cases? The application I am building will have users insert/search
+> > documents all the time. So for every insert, the searcher need to be
+> > recreated again, isnt it? Else new document wont be searchable with the
+> > 'old' searcher, right?
+>
+>
+> Yep, if your requirement is that the documents be immediately searchable
+> then the searcher will have to be opened/closed each time. Except you can
+> get as clever as you want with this.
+>
+> Say, for example, you keep two indexes, one in RAM and one on disk. The
+> algorithm then goes something like this.
+>
+> For a search:
+>
+> Open FSDir-based index *searcher*
+> Open RAM-based index writer.
+> For each search {
+>   Open ram-based searcher
+>   Use a multi-searcher on the FSDir and RAM-based indexes
+>   Close the ram-based searcher;
+>   return results
+> }
+>
+> User adds document, just add it to the RAM AND FS-based indexes. Searches
+> will get this immediately by the code above. Whether you open/close the
+> FS-based writer for each document added is your option.
+>
+> Periodically close the FS-based readers and writers and re-create the
+> RAM-based index.
+>
+> NOTE: If it was me, I'd actually write to a COPY of the FS-based index,
+> and
+> when you synchronize (i.e. close/reopen the FS-based searcher), copy your
+> most recent FS-based index to your "real" directory before re-opening your
+> FS-based index.
+>
+> Also, you'll have to do some good coordination so you don't accidentally
+> get
+> the same document from both indexes.
+>
+> All that said, are you really, really, really sure that additions to the
+> index *must* be immediately available? Or would, say, a 10 minute (or even
+> 1
+> hour) delay be acceptable? I'd recommend you check carefully, since I've
+> often seen cases where if you ask your product manager what "immediate"
+> means, and explain that they can have a product faster with fewer bugs if
+> they accept something like, say, an hour latency and you could spend the
+> time on some *other* feature, the PM will say "fine". especially if you
+> explain that you can still do the immediate thing later.
+>
+> In particular, I'd think about selling this as something that you'll
+> change
+> later, and do it the simple way (in this case, just close/reopen the
+> searchers every 1/2 hour, say) in the interests of getting something into
+> the hands of the users sooner. To be sure, build the simple case with the
+> notion of immediate searches in mind, but don't spend the time actually
+> doing the complex thing first off. Then, one of three things will happen:
+> 1>
+> in actual real-world use, the delay is just fine and you can work on other
+> things that are more valuable, or 2> the delay isn't acceptable and you
+> have
+> to implement the change, or 3> the dealy isn't acceptable but never gets
+> high enough on the priority list to get fixed, in which case it's really
+> situation <1>. In case <2>, you haven't lost any time to speak of. In <1
+> or
+> 3>, you have saved time you can spend working on something *else* of more
+> importance, .
+>
+> This long diatribe is mostly based on the eXtreme Programming/Agile
+> methodologies model, and it's Saturday and I'm not at work <G>. I've spent
+> faaaar to much of my professional life working on unimportant features of
+> a
+> project at the expense of things that are actually *useful* because I've
+> uncritically accepted requirements like "the documents must be immediately
+> searchable" that the product managers would gladly forgoe if they knew
+> they
+> could get a different feature if they would accept a 1/2 hour delay.
+>
+>
+> For this situation, I am thinking of recreating the searcher (and do a
+> warm
+> > up) inside the thread that do the insert. With this, the performance
+> > penalty
+> > occurs to the user that does the insert. Also for my application, there
+> > will
+> > be more searches than inserts.
+>
+>
+> Well, really, the general case here is that you want the warmup to happen
+> outside the "current" searcher. Again, before you get fancy, just see if
+> the
+> delay for the searcher when re-opening it is acceptable. I have no idea
+> what
+> your actual delay for the first search after opening your index is. Don't
+> go
+> the coordination route until you *know* it's unacceptable.
+>
+> But if the delay is unacceptable, there are several alternatives. In
+> general, you could easily have  a thread that is your "warmer-upper" that
+> could even be your document add code. But, I suspect this is more complex
+> than you think. what happens if two users add documents at the same time?
+> How do you get the "right" warmed-up searcher? Will there be collisions?
+> How
+> do you debug this kind of thing? If you *must* do this, I'd make sure all
+> the code for warming things up is in the searcher. Upon some signal, it
+> fires up a thread that opens a searcher and warms it up. Upon thread
+> termination, swap the actual searcher you're using for requests with the
+> just-warmed-up one. But *please* make sure you need to first.
+>
+>
+> 'Good Lord has gotten long!
+>
+> Is this what people normally do?
+>
+>
+>
+> I have no clue. Each situation is different <G>.
+>
+>
+> Thanks.
+> >
+> > ~KEGan
+> >
+> >
+> > On 9/30/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> > >
+> > > Sorting will inevitably have an impact on your speed, but it's
+> > impossible
+> > > to
+> > > generalize. FWIW, my app has 870K documents, the index is around
+> 1.4Gand
+> > > search/sort times are fine. But even that statement is misleading.
+> > "Fine"
+> > > means that the product manager for this product is satisfied with
+> > > performance, which has no relevance to your situation <G>......
+> > >
+> > > I'm afraid that you'll just have to put in your sorting and see. I
+> know
+> > > that's not a very satisfactory answer, but without knowing lots of
+> > details
+> > > about your app AND the distribution of terms AND the expected
+> throughput
+> > > AND
+> > > the usage statistics AND.......,  it's hard to say.
+> > >
+> > > It was easy to put together a test harness that fired off a bunch of
+> > > threads
+> > > at my searcher and measured throughput. I highly recommend something
+> > like
+> > > this if you're going to try to answer this question before putting the
+> > > product in production, just so you get an idea of what to expect.
+> > >
+> > > Be sure you are satisfied with the performance before adding sorting.
+> > Lots
+> > > of people have gotten into trouble by opening/closing searchers for
+> each
+> > > request, which is FAR more expensive that sorting in my experience. It
+> > > would
+> > > be unfortunate to think your problem was sorting when, in fact, it was
+> > > something else.
+> > >
+> > > Best
+> > > Erick
+> > >
+> > > On 9/29/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> > > >
+> > > > Erick,
+> > > >
+> > > > Ouch!! Please excuse the cut-n-paste ;)
+> > > >
+> > > > LIA mentions a lot about performance when doing sorting. Is it
+> > something
+> > > > to
+> > > > be cautious about? You mention doing 5 fields and it works ok, ...
+> can
+> > > > share
+> > > > with us how many documents you are handling there with 5 fields ?
+> > > >
+> > > > Thanks.
+> > > >
+> > > > ~KEGan
+> > > >
+> > > > On 9/29/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> > > > >
+> > > > > Yes. I do this with 5 fields and it works just fine. Although your
+> > > > > cut-n-paste got kind of hard to read <G>....
+> > > > >
+> > > > > Erick
+> > > > >
+> > > > > On 9/29/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> > > > > >
+> > > > > > I think I am going to answer my own question.
+> > > > > >
+> > > > > > Just use the
+> > > > > >
+> > > > > > *Sort*<
+> > > > > >
+> > > > >
+> > > >
+> > >
+> >
+> file:///D:/library/apache/lucene-2.0.0/docs/api/org/apache/lucene/search/Sort.html#Sort(org.apache.lucene.search.SortField[])
+> > > > > > >
+> > > > > > (SortField<
+> > > > > >
+> > > > >
+> > > >
+> > >
+> >
+> file:///D:/library/apache/lucene-2.0.0/docs/api/org/apache/lucene/search/SortField.html
+> > > > > > >
+> > > > > > [] fields)
+> > > > > > *Sort*<
+> > > > > >
+> > > > >
+> > > >
+> > >
+> >
+> file:///D:/library/apache/lucene-2.0.0/docs/api/org/apache/lucene/search/Sort.html#Sort(java.lang.String[])
+> > > > > > >
+> > > > > > (String <
+> > http://java.sun.com/j2se/1.4/docs/api/java/lang/String.html
+> > > >
+> > > > > > [] fields)
+> > > > > >
+> > > > > > This should do it right ?
+> > > > > >
+> > > > > >
+> > > > > >
+> > > > > > On 9/29/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> > > > > > >
+> > > > > > > Hi,
+> > > > > > >
+> > > > > > > I have seen some sort examples in LIA. But cant find what
+I am
+> > > > looking
+> > > > > > > for. How do I sort document by date, AND for all the documents
+> > > with
+> > > > > the
+> > > > > > same
+> > > > > > > date ... these are sorted by relavency. (Date has higher
+sort
+> > > > priority
+> > > > > > in
+> > > > > > > this case).
+> > > > > > >
+> > > > > > > Thanks.
+> > > > > > >
+> > > > > >
+> > > > > >
+> > > > >
+> > > > >
+> > > >
+> > > >
+> > >
+> > >
+> >
+> >
+>
+>
+

@@ -1,0 +1,78 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Queries not derived from the text index
+DATE: 9 Feb 2006
+
+
+On Feb 8, 2006, at 6:46 PM, Daniel Noll wrote:
+
+> Erik Hatcher wrote:
+>> One interesting option is to subclass QueryParser and override  
+>> getFieldQuery.  When the field is "tag", return a FilteredQuery  
+>> (see trunk codebase, or the nightly 1.9 binaries) using a Filter  
+>> that interfaces with your database.  Caching of the filters would  
+>> be desirable for performance reasons.
+>
+> Aha.  That does sound like it could work, although it will be an  
+> interesting exercise in trickery.
+>
+> I'm not sure it would entirely work at the getFieldQuery level,  
+> perhaps at the getBooleanQuery level.  The reasoning is this...
+>
+>   text:camel AND tag:zoo
+>
+>     This needs to become a single FilteredQuery with a TermQuery
+>     (text:camel) and a TagFilter (tag:zoo).
+
+Actually I'm pretty certain that it'll work with just getFieldQuery  
+overriding.  You can AND or OR a FilteredQuery with any other Query  
+inside a BooleanQuery.  I'd be surprised if it didn't work.  Scoring  
+is the one tricky caveat to this sort of thing, and perhaps the new  
+"function" capability would be the ticket to adjusting scores for  
+your non-Lucene "search".
+
+>   text:camel NOT tag:zoo
+>
+>     This would be a FilteredQuery with a TermQuery (text:camel) and
+>     a NotFilter over a TagFilter(tag:zoo).
+>
+> It's complicated, but it seems like it would work.  The only cases  
+> which become really hard are cases where there are multiple non- 
+> text-index queries in there.  Then I might have to use an AndFilter  
+> or similar. And in cases where there are only non-text-index  
+> queries in there I would have to automatically insert a  
+> MatchAllDocsQuery.
+
+Maybe I haven't thought this through enough given your (quite  
+detailed and clear) descriptions of the scenario, but I still think  
+just letting getFieldQuery produce a FilteredQuery appropriately that  
+AND/OR/NOT will be handled the rest of the way as desired.  Well  
+worth a try.  Certainly a pure NOT query is the one case that  
+QueryParser and BooleanQuery don't currently like, but that is an  
+easy hack (and perhaps should be part of QueryParser anyway) to use  
+the MatchAllDocsQuery instead.
+
+> My main motivation for wanting to use a "real" query as opposed to  
+> a FilteredQuery is that filters cost more up-front, and if you  
+> cache them then they start costing in memory (our indexes are huge,  
+> therefore they cost a LOT of memory.)  Real queries are more or  
+> less a BitSet implemented as an iterator, which is far preferable  
+> for us.
+
+I'm pulling of the same sort of stunts with the faceted search system  
+I've developed.  The data has not currently reached the "huge" level  
+yet, but it is growing and memory will become more of a concern.   
+There is a memory saving alternative BitSet-like implementation  
+available in JIRA somewhere (sorry, no reference handy, but it's  
+there and probably finable by a "BitSet" search).  Perhaps that is  
+worth consideration in your case.  There is also discussion about  
+changing how Filters work to not use a BitSet directly but rather an  
+enumeration-like interface such at TermEnum, etc.
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

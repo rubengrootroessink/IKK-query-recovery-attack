@@ -1,0 +1,105 @@
+FROM: Steven A Rowe <sar...@syr.edu>
+SUBJECT: RE: PrefixQuery and special characters
+DATE: 14 Apr 2010
+
+Hi Franz,
+
+The likely problem is that you're using an index-time analyzer that strips out the parentheses.
+ StandardAnalyzer, for example, does this; WhitespaceAnalyzer does not.
+
+Remember that hits are the result of matches between index-analyzed terms and query-analyzed
+terms.  Except in the case of synonyms, most people will want their index and query analyzers
+to be the same.
+
+Steve
+
+________________________________________
+From: Franz Roth [franzroth@gmx.de]
+Sent: Wednesday, April 14, 2010 7:42 AM
+To: java-user@lucene.apache.org
+Subject: PrefixQuery and special characters
+
+Hi all,
+
+say I have an Index with one field named "category". There are two documents one with value
+"(testvalue)" and one with value "test value".
+Now somone search with "test". My Searchenine uses the org.apache.lucene.search.PrefixQuery
+and finds 2 documents. Maybe he  estimated only one hit; owever: if he searches for "(test"
+and the Searchengine uses the QueryParser.escape to clean the request and takes that PrefixQuery
+to search nothing results.
+
+How can I search for the document "(testvalue)" and only this one?
+
+Thx!
+
+
+
+
+
+package foo.bar;
+
+import java.io.IOException;
+
+import junit.framework.TestCase;
+
+import org.apache.log4j.Logger;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.store.LockObtainFailedException;
+import org.apache.lucene.store.RAMDirectory;
+
+
+
+public class TestPrefixQuery extends TestCase {
+        public void testEscapeAndPrefix() throws CorruptIndexException,
+        LockObtainFailedException, IOException {
+
+            RAMDirectory directory = new RAMDirectory();
+            IndexWriter writer = new IndexWriter(directory, new StandardAnalyzer(),
+                    true, IndexWriter.MaxFieldLength.LIMITED);
+            Document doc = new Document();
+            doc.add(new Field("category", "(testvalue)", Field.Store.YES,
+                    Field.Index.ANALYZED));
+            writer.addDocument(doc);
+            doc = new Document();
+            doc.add(new Field("category", "test value", Field.Store.YES,
+                Field.Index.ANALYZED));
+            writer.addDocument(doc);
+            writer.close();
+
+            String value= "test";
+            PrefixQuery query = new PrefixQuery(new Term("category", value));
+            //log.debug(query.toString());
+            IndexSearcher searcher = new IndexSearcher(directory);
+            ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+            assertEquals("One for " + value , 2, hits.length); //I want one for this?!
+
+            value= "(test";
+            String escaped = QueryParser.escape(value);
+            query = new PrefixQuery(new Term("category", escaped));
+            //log.debug(query.toString());
+            hits = searcher.search(query, null, 1000).scoreDocs;
+            assertEquals("One for " + value + "/" + escaped, 1, hits.length); //FAILS!
+        }
+}
+
+--
+GRATIS für alle GMX-Mitglieder: Die maxdome Movie-FLAT!
+Jetzt freischalten unter http://portal.gmx.net/de/go/maxdome01
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

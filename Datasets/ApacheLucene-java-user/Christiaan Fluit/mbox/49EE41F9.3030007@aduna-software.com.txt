@@ -1,0 +1,174 @@
+FROM: Christiaan Fluit <christiaan.fl...@aduna-software.com>
+SUBJECT: Re: semi-infinite loop during merging
+DATE: 21 Apr 2009
+
+Michael McCandless wrote:
+> One question: are you using IndexWriter.close(false)?  I wonder if
+> there's some path whereby the merges fail to abort (and simply keep
+> retrying) if you do that...
+
+No, I don't.
+
+> More inlined below...
+> 
+> On Thu, Apr 16, 2009 at 5:42 AM, Christiaan Fluit
+> <christiaan.fluit@aduna-software.com> wrote:
+>> I spent a lot of time on getting the stacktraces, but JET seems to make this
+>> impossible. Ctrl-Break, connecting with JConsole, even a "Dump Threads"
+>> button in my UI that uses Threads.getAllStacktraces were not able to produce
+>> a dump of all threads.
+> 
+> Sigh.
+> 
+>> I just got an additional confirmation that the problem also occurs with the
+>> Java build, but unfortunately the client's data is too sensitive to share it
+>> with me.
+> 
+> Could they "kill -QUIT" or  Ctrl-Break when it's happening?
+
+The confirmation was received recently but the problem occurred a while 
+ago and can't be reproduced now.
+
+>> One option is to hack the Lucene 2.4.1 code to print out some additional
+>> debug info. Do you known some println's that would help?
+> 
+> How about adding this at the top of IndexWriter.handleMergeException:
+> 
+>   if (infoStream != null) {
+>     message("handleMergeException: merge=" +
+> merge.segString(directory) + " exc=" + t);
+>   }
+> 
+> ?
+> 
+> You could also sprinkle prints in between where message("merge:
+> total"...) occurs and the call to commitMerge, in
+> IndexWriter.mergeMiddle.  The mystery here is why you see these two
+> lines in a row:
+> 
+>   IW 0 [CrawlThread]: merge: total 18586 docs
+>   IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> 
+> That first line is supposed to be followed by a "commitMerge: ..."
+> line.  I suspect some exception (maybe a MergeAbortedException) is
+> being hit, leading to the commit not happening.
+> 
+>> Also I suspect that JET-compiled code is able to do Thread.dumpStack (but
+>> not Thread.getAllStackTraces), so what are good locations for doing that?
+>> E.g. IndexWriter.merge, etc.
+> 
+> This would be great -- I would add that in handleMergeException as well.
+
+A test run with the modified code just completed minutes ago.
+
+I modified IndexWriter in two places. IW.handleMergeException starts 
+with the following code:
+
+   if (infoStream != null) {
+     message("handleMergeException: merge=" + merge.segString(directory)
+         + " exc=" + t);
+		
+     message("dumping current stack");
+     new Exception("Stack trace").printStackTrace(infoStream);
+		
+     message("dumping throwable");
+     t.printStackTrace(infoStream);
+   }
+
+To IW.mergeMiddle I added eight message(String) invocations:
+
+[...]
+   try {
+     [...]
+
+     message("IW: checkAborted");
+     merge.checkAborted(directory);
+     message("IW: checkAborted done");
+
+     // This is where all the work happens:
+     message("IW: mergedDocCount");
+     mergedDocCount = merge.info.docCount = 
+merger.merge(merge.mergeDocStores);
+     message("IW: mergedDocCount done");
+
+     assert mergedDocCount == totDocCount;
+     } finally {
+       // close readers before we attempt to delete
+       // now-obsolete segments
+       if (merger != null) {
+     	message("IW: closeReaders");
+         merger.closeReaders();
+   	message("IW: closeReaders done");
+       }
+     }
+
+     message("IW: commitMerge");
+     if (!commitMerge(merge, merger, mergedDocCount))
+       // commitMerge will return false if this merge was aborted
+       return 0;
+     message("IW: commitMerge done");
+[...]
+
+This gives the following output:
+
+[...]
+IFD [CrawlThread]: delete "_9.fnm"
+IFD [CrawlThread]: delete "_9.frq"
+IFD [CrawlThread]: delete "_9.prx"
+IFD [CrawlThread]: delete "_9.tis"
+IFD [CrawlThread]: delete "_9.tii"
+IFD [CrawlThread]: delete "_9.nrm"
+IFD [CrawlThread]: delete "_9.tvx"
+IFD [CrawlThread]: delete "_9.tvf"
+IFD [CrawlThread]: delete "_9.tvd"
+IFD [CrawlThread]: delete "_9.fdx"
+IFD [CrawlThread]: delete "_9.fdt"
+IW 1 [CrawlThread]: LMP: findMerges: 10 segments
+IW 1 [CrawlThread]: LMP:   level 6.9529195 to 7.7029195: 10 segments
+IW 1 [CrawlThread]: LMP:     0 to 10: add this merge
+IW 1 [CrawlThread]: add merge to pendingMerges: _0:c2201 _1:c1806 
+_2:c1023 _3:c430 _4:c1166 _5:c812 _6:c1737 _7:c2946 _8:c3129 _9:c3429 
+[total 1 pending]
+IW 1 [CrawlThread]: now merge
+   merge=_0:c2201 _1:c1806 _2:c1023 _3:c430 _4:c1166 _5:c812 _6:c1737 
+_7:c2946 _8:c3129 _9:c3429 into _a
+   merge=org.apache.lucene.index.MergePolicy$OneMerge@14171768
+   index=_0:c2201 _1:c1806 _2:c1023 _3:c430 _4:c1166 _5:c812 _6:c1737 
+_7:c2946 _8:c3129 _9:c3429
+IW 1 [CrawlThread]: merging _0:c2201 _1:c1806 _2:c1023 _3:c430 _4:c1166 
+_5:c812 _6:c1737 _7:c2946 _8:c3129 _9:c3429 into _a
+IW 1 [CrawlThread]: merge: total 18678 docs
+IW 1 [CrawlThread]: IW: checkAborted
+IW 1 [CrawlThread]: IW: checkAborted done
+IW 1 [CrawlThread]: IW: mergedDocCount
+IW 1 [CrawlThread]: IW: mergedDocCount done
+IW 1 [CrawlThread]: IW: closeReaders
+IW 1 [CrawlThread]: IW: closeReaders done
+IW 1 [CrawlThread]: IW: commitMerge
+IW 1 [CrawlThread]: LMP: findMerges: 10 segments
+IW 1 [CrawlThread]: LMP:   level 6.9529195 to 7.7029195: 10 segments
+IW 1 [CrawlThread]: LMP:     0 to 10: add this merge
+IW 1 [CrawlThread]: add merge to pendingMerges: _0:c2201 _1:c1806 
+_2:c1023 _3:c430 _4:c1166 _5:c812 _6:c1737 _7:c2946 _8:c3129 _9:c3429 
+[total 1 pending]
+... and this goes on and on.
+
+It seems that it gets up to the point to commit, but the "IW: 
+commitMerge done" message is never reached.
+
+Furthermore, no exceptions are printed to the output, so 
+handleMergeException does not seem to have been invoked.
+
+Should I add more debug statements elsewhere?
+
+
+Kind regards,
+
+Chris
+--
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

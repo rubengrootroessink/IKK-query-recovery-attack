@@ -1,0 +1,1937 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Faceted Search using Lucene
+DATE: 2 Mar 2009
+
+oh dear...i think i may cry...i'll debug.
+
+On Mon, Mar 2, 2009 at 2:15 PM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+>
+> Or even just get() with no call to maybeReopen().  That should work fine as
+> well.
+>
+>
+> Mike
+>
+> Amin Mohammed-Coleman wrote:
+>
+>  In my test case I have a set up method that should populate the indexes
+>> before I start using the document searcher.  I will start adding some more
+>> debug statements.  So basically I should be able to do: get() followed by
+>> maybeReopen.
+>>
+>> I will let you know what the outcome is.
+>>
+>>
+>> Cheers
+>> Amin
+>>
+>> On Mon, Mar 2, 2009 at 1:39 PM, Michael McCandless <
+>> lucene@mikemccandless.com> wrote:
+>>
+>>
+>>> Is it possible that when you first create the SearcherManager, there is
+>>> no
+>>> index in each Directory?
+>>>
+>>> If not... you better start adding diagnostics.  EG inside your get(),
+>>> print
+>>> out the numDocs() of each IndexReader you get from the SearcherManager?
+>>>
+>>> Something is wrong and it's best to explain it...
+>>>
+>>>
+>>> Mike
+>>>
+>>> Amin Mohammed-Coleman wrote:
+>>>
+>>> Nope. If i remove the maybeReopen the search doesn't work.  It only works
+>>>
+>>>> when i cal maybeReopen followed by get().
+>>>>
+>>>> Cheers
+>>>> Amin
+>>>>
+>>>> On Mon, Mar 2, 2009 at 12:56 PM, Michael McCandless <
+>>>> lucene@mikemccandless.com> wrote:
+>>>>
+>>>>
+>>>>  That's not right; something must be wrong.
+>>>>>
+>>>>> get() before maybeReopen() should simply let you search based on the
+>>>>> searcher before reopening.
+>>>>>
+>>>>> If you just do get() and don't call maybeReopen() does it work?
+>>>>>
+>>>>>
+>>>>> Mike
+>>>>>
+>>>>> Amin Mohammed-Coleman wrote:
+>>>>>
+>>>>> I noticed that if i do the get() before the maybeReopen then I get no
+>>>>>
+>>>>>  results.  But otherwise I can change it further.
+>>>>>>
+>>>>>> On Mon, Mar 2, 2009 at 11:46 AM, Michael McCandless <
+>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>
+>>>>>>
+>>>>>> There is no such thing as final code -- code is alive and is always
+>>>>>>
+>>>>>>> changing ;)
+>>>>>>>
+>>>>>>> It looks good to me.
+>>>>>>>
+>>>>>>> Though one trivial thing is: I would move the code in the try clause
+>>>>>>> up
+>>>>>>> to
+>>>>>>> and including the multiSearcher=get() out above the try.  I always
+>>>>>>> attempt
+>>>>>>> to "shrink wrap" what's inside a try clause to the minimum that needs
+>>>>>>> to
+>>>>>>> be
+>>>>>>> there.  Ie, your code that creates a query, finds the right sort &
+>>>>>>> filter
+>>>>>>> to
+>>>>>>> use, etc, can all happen outside the try, because you have not yet
+>>>>>>> acquired
+>>>>>>> the multiSearcher.
+>>>>>>>
+>>>>>>> If you do that, you also don't need the null check in the finally
+>>>>>>> clause,
+>>>>>>> because multiSearcher must be non-null on entering the try.
+>>>>>>>
+>>>>>>> Mike
+>>>>>>>
+>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>
+>>>>>>> Hi there
+>>>>>>>
+>>>>>>> Good morning!  Here is the final search code:
+>>>>>>>
+>>>>>>>>
+>>>>>>>> public Summary[] search(final SearchRequest searchRequest)
+>>>>>>>> throwsSearchExecutionException {
+>>>>>>>>
+>>>>>>>> final String searchTerm = searchRequest.getSearchTerm();
+>>>>>>>>
+>>>>>>>> if (StringUtils.isBlank(searchTerm)) {
+>>>>>>>>
+>>>>>>>> throw new SearchExecutionException("Search string cannot be empty.
+>>>>>>>> There
+>>>>>>>> will be too many results to process.");
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>>>>>
+>>>>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>>>>>
+>>>>>>>> stopWatch.start();
+>>>>>>>>
+>>>>>>>> MultiSearcher multiSearcher = null;
+>>>>>>>>
+>>>>>>>> try {
+>>>>>>>>
+>>>>>>>> LOGGER.debug("Ensuring all index readers are up to date...");
+>>>>>>>>
+>>>>>>>> maybeReopen();
+>>>>>>>>
+>>>>>>>> Query query = queryParser.parse(searchTerm);
+>>>>>>>>
+>>>>>>>> LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene Query '"
+>>>>>>>> +
+>>>>>>>> query.toString() +"'");
+>>>>>>>>
+>>>>>>>> Sort sort = null;
+>>>>>>>>
+>>>>>>>> sort = applySortIfApplicable(searchRequest);
+>>>>>>>>
+>>>>>>>> Filter[] filters =applyFiltersIfApplicable(searchRequest);
+>>>>>>>>
+>>>>>>>> ChainedFilter chainedFilter = null;
+>>>>>>>>
+>>>>>>>> if (filters != null) {
+>>>>>>>>
+>>>>>>>> chainedFilter = new ChainedFilter(filters, ChainedFilter.OR);
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>> multiSearcher = get();
+>>>>>>>>
+>>>>>>>> TopDocs topDocs = multiSearcher.search(query,chainedFilter
+>>>>>>>> ,100,sort);
+>>>>>>>>
+>>>>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>>>>>
+>>>>>>>> LOGGER.debug("total number of hits for [" + query.toString() + " ] =
+>>>>>>>> "+topDocs.
+>>>>>>>> totalHits);
+>>>>>>>>
+>>>>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>>>>>
+>>>>>>>> final Document doc = multiSearcher.doc(scoreDoc.doc);
+>>>>>>>>
+>>>>>>>> float score = scoreDoc.score;
+>>>>>>>>
+>>>>>>>> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>>>>>>>>
+>>>>>>>> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>>>>>>>>
+>>>>>>>> summaryList.add(documentSummary);
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>> } catch (Exception e) {
+>>>>>>>>
+>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>
+>>>>>>>> } finally {
+>>>>>>>>
+>>>>>>>> if (multiSearcher != null) {
+>>>>>>>>
+>>>>>>>> release(multiSearcher);
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>> stopWatch.stop();
+>>>>>>>>
+>>>>>>>> LOGGER.debug("total time taken for document seach: " +
+>>>>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>>>>>
+>>>>>>>> return summaryList.toArray(new Summary[] {});
+>>>>>>>>
+>>>>>>>> }
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> I hope this makes sense...thanks again!
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Cheers
+>>>>>>>>
+>>>>>>>> Amin
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> On Sun, Mar 1, 2009 at 8:09 PM, Michael McCandless <
+>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> You're calling get() too many times.  For every call to get() you
+>>>>>>>> must
+>>>>>>>>
+>>>>>>>>  match with a call to release().
+>>>>>>>>>
+>>>>>>>>> So, once at the front of your search method you should:
+>>>>>>>>>
+>>>>>>>>> MultiSearcher searcher = get();
+>>>>>>>>>
+>>>>>>>>> then use that searcher to do searching, retrieve docs, etc.
+>>>>>>>>>
+>>>>>>>>> Then in the finally clause, pass that searcher to release.
+>>>>>>>>>
+>>>>>>>>> So, only one call to get() and one matching call to release().
+>>>>>>>>>
+>>>>>>>>> Mike
+>>>>>>>>>
+>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>
+>>>>>>>>> Hi
+>>>>>>>>>
+>>>>>>>>> The searchers are injected into the class via Spring.  So when a
+>>>>>>>>>
+>>>>>>>>>  client
+>>>>>>>>>> calls the class it is fully configured with a list of index
+>>>>>>>>>> searchers.
+>>>>>>>>>> However I have removed this list and instead injecting a list of
+>>>>>>>>>> directories which are passed to the DocumentSearchManager.
+>>>>>>>>>> DocumentSearchManager is SearchManager (should've mentioned that
+>>>>>>>>>> earlier).
+>>>>>>>>>> So finally I have modified by release code to do the following:
+>>>>>>>>>>
+>>>>>>>>>> private void release(MultiSearcher multiSeacher) throws Exception
+>>>>>>>>>> {
+>>>>>>>>>>
+>>>>>>>>>> IndexSearcher[] indexSearchers = (IndexSearcher[])
+>>>>>>>>>> multiSeacher.getSearchables();
+>>>>>>>>>>
+>>>>>>>>>> for(int i =0 ; i < indexSearchers.length;i++) {
+>>>>>>>>>>
+>>>>>>>>>> documentSearcherManagers[i].release(indexSearchers[i]);
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> and it's use looks like this:
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> public Summary[] search(final SearchRequest searchRequest)
+>>>>>>>>>> throwsSearchExecutionException {
+>>>>>>>>>>
+>>>>>>>>>> final String searchTerm = searchRequest.getSearchTerm();
+>>>>>>>>>>
+>>>>>>>>>> if (StringUtils.isBlank(searchTerm)) {
+>>>>>>>>>>
+>>>>>>>>>> throw new SearchExecutionException("Search string cannot be empty.
+>>>>>>>>>> There
+>>>>>>>>>> will be too many results to process.");
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>>>>>>>
+>>>>>>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>>>>>>>
+>>>>>>>>>> stopWatch.start();
+>>>>>>>>>>
+>>>>>>>>>> List<IndexSearcher> indexSearchers = new
+>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>
+>>>>>>>>>> try {
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("Ensuring all index readers are up to date...");
+>>>>>>>>>>
+>>>>>>>>>> maybeReopen();
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("All Index Searchers are up to date. No of index
+>>>>>>>>>> searchers
+>>>>>>>>>> '"
+>>>>>>>>>> +
+>>>>>>>>>> indexSearchers.size() +"'");
+>>>>>>>>>>
+>>>>>>>>>> Query query = queryParser.parse(searchTerm);
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene Query
+>>>>>>>>>> '"
+>>>>>>>>>> +
+>>>>>>>>>> query.toString() +"'");
+>>>>>>>>>>
+>>>>>>>>>> Sort sort = null;
+>>>>>>>>>>
+>>>>>>>>>> sort = applySortIfApplicable(searchRequest);
+>>>>>>>>>>
+>>>>>>>>>> Filter[] filters =applyFiltersIfApplicable(searchRequest);
+>>>>>>>>>>
+>>>>>>>>>> ChainedFilter chainedFilter = null;
+>>>>>>>>>>
+>>>>>>>>>> if (filters != null) {
+>>>>>>>>>>
+>>>>>>>>>> chainedFilter = new ChainedFilter(filters, ChainedFilter.OR);
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> TopDocs topDocs = get().search(query,chainedFilter ,100,sort);
+>>>>>>>>>>
+>>>>>>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("total number of hits for [" + query.toString() + " ]
+>>>>>>>>>> =
+>>>>>>>>>> "+topDocs.
+>>>>>>>>>> totalHits);
+>>>>>>>>>>
+>>>>>>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>>>>>>>
+>>>>>>>>>> final Document doc = get().doc(scoreDoc.doc);
+>>>>>>>>>>
+>>>>>>>>>> float score = scoreDoc.score;
+>>>>>>>>>>
+>>>>>>>>>> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>>>>>>>>>>
+>>>>>>>>>> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>>>>>>>>>>
+>>>>>>>>>> summaryList.add(documentSummary);
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> } catch (Exception e) {
+>>>>>>>>>>
+>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>
+>>>>>>>>>> } finally {
+>>>>>>>>>>
+>>>>>>>>>> release(get());
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> stopWatch.stop();
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("total time taken for document seach: " +
+>>>>>>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>>>>>>>
+>>>>>>>>>> return summaryList.toArray(new Summary[] {});
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> So the final post construct constructs the DocumentSearchMangers
+>>>>>>>>>> with
+>>>>>>>>>> the
+>>>>>>>>>> list of directories..looking like this
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> @PostConstruct
+>>>>>>>>>>
+>>>>>>>>>> public void initialiseDocumentSearcher() {
+>>>>>>>>>>
+>>>>>>>>>> PerFieldAnalyzerWrapper analyzerWrapper = new
+>>>>>>>>>> PerFieldAnalyzerWrapper(
+>>>>>>>>>> analyzer);
+>>>>>>>>>>
+>>>>>>>>>> analyzerWrapper.addAnalyzer(FieldNameEnum.TYPE.getDescription(),
+>>>>>>>>>> newKeywordAnalyzer());
+>>>>>>>>>>
+>>>>>>>>>> queryParser =
+>>>>>>>>>> newMultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+>>>>>>>>>> analyzerWrapper);
+>>>>>>>>>>
+>>>>>>>>>> try {
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("Initialising multi searcher ....");
+>>>>>>>>>>
+>>>>>>>>>> documentSearcherManagers = new
+>>>>>>>>>> DocumentSearcherManager[directories.size()];
+>>>>>>>>>>
+>>>>>>>>>> for (int i = 0; i < directories.size() ;i++) {
+>>>>>>>>>>
+>>>>>>>>>> Directory directory = directories.get(i);
+>>>>>>>>>>
+>>>>>>>>>> DocumentSearcherManager documentSearcherManager =
+>>>>>>>>>> newDocumentSearcherManager(directory);
+>>>>>>>>>>
+>>>>>>>>>> documentSearcherManagers[i]=documentSearcherManager;
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> LOGGER.debug("multi searcher initialised");
+>>>>>>>>>>
+>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>
+>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>> }
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> Cheers
+>>>>>>>>>>
+>>>>>>>>>> Amin
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> On Sun, Mar 1, 2009 at 6:15 PM, Michael McCandless <
+>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> I don't understand where searchers comes from, prior to
+>>>>>>>>>>
+>>>>>>>>>> initializeDocumentSearcher?  You should, instead, simply create
+>>>>>>>>>> the
+>>>>>>>>>>
+>>>>>>>>>>> SearcherManager (from your Directory instances).  You don't need
+>>>>>>>>>>> any
+>>>>>>>>>>> searchers during initialize.
+>>>>>>>>>>>
+>>>>>>>>>>> Is DocumentSearcherManager the same as SearcherManager (just
+>>>>>>>>>>> renamed)?
+>>>>>>>>>>>
+>>>>>>>>>>> The release method is wrong -- you're calling .get() and then
+>>>>>>>>>>> immediately release.  Instead, you should step through the
+>>>>>>>>>>> searchers
+>>>>>>>>>>> from your MultiSearcher and release them to each SearcherManager.
+>>>>>>>>>>>
+>>>>>>>>>>> You should call your release() in a finally clause.
+>>>>>>>>>>>
+>>>>>>>>>>> Mike
+>>>>>>>>>>>
+>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>
+>>>>>>>>>>> Sorry...i'm getting slightly confused.
+>>>>>>>>>>>
+>>>>>>>>>>> I have a PostConstruct which is where I should create an array of
+>>>>>>>>>>>
+>>>>>>>>>>> SearchManagers (per indexSeacher).  From there I initialise the
+>>>>>>>>>>>
+>>>>>>>>>>>> multisearcher using the get().  After which I need to call
+>>>>>>>>>>>> maybeReopen
+>>>>>>>>>>>> for
+>>>>>>>>>>>> each IndexSearcher.  So I'll do the following:
+>>>>>>>>>>>>
+>>>>>>>>>>>> @PostConstruct
+>>>>>>>>>>>>
+>>>>>>>>>>>> public void initialiseDocumentSearcher() {
+>>>>>>>>>>>>
+>>>>>>>>>>>> PerFieldAnalyzerWrapper analyzerWrapper = new
+>>>>>>>>>>>> PerFieldAnalyzerWrapper(
+>>>>>>>>>>>> analyzer);
+>>>>>>>>>>>>
+>>>>>>>>>>>> analyzerWrapper.addAnalyzer(FieldNameEnum.TYPE.getDescription(),
+>>>>>>>>>>>> newKeywordAnalyzer());
+>>>>>>>>>>>>
+>>>>>>>>>>>> queryParser =
+>>>>>>>>>>>> newMultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+>>>>>>>>>>>> analyzerWrapper);
+>>>>>>>>>>>>
+>>>>>>>>>>>> try {
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("Initialising multi searcher ....");
+>>>>>>>>>>>>
+>>>>>>>>>>>> documentSearcherManagers = new
+>>>>>>>>>>>> DocumentSearcherManager[searchers.size()];
+>>>>>>>>>>>>
+>>>>>>>>>>>> for (int i = 0; i < searchers.size() ;i++) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> IndexSearcher indexSearcher = searchers.get(i);
+>>>>>>>>>>>>
+>>>>>>>>>>>> Directory directory =
+>>>>>>>>>>>> indexSearcher.getIndexReader().directory();
+>>>>>>>>>>>>
+>>>>>>>>>>>> DocumentSearcherManager documentSearcherManager =
+>>>>>>>>>>>> newDocumentSearcherManager(directory);
+>>>>>>>>>>>>
+>>>>>>>>>>>> documentSearcherManagers[i]=documentSearcherManager;
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("multi searcher initialised");
+>>>>>>>>>>>>
+>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> This initialises search managers.  I then have methods:
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> private void maybeReopen() throws Exception {
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("Initiating reopening of index readers...");
+>>>>>>>>>>>>
+>>>>>>>>>>>> for (DocumentSearcherManager documentSearcherManager :
+>>>>>>>>>>>> documentSearcherManagers) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> documentSearcherManager.maybeReopen();
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> private void release() throws Exception {
+>>>>>>>>>>>>
+>>>>>>>>>>>> for (DocumentSearcherManager documentSearcherManager :
+>>>>>>>>>>>> documentSearcherManagers) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> documentSearcherManager.release(documentSearcherManager.get());
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> private MultiSearcher get() {
+>>>>>>>>>>>>
+>>>>>>>>>>>> List<IndexSearcher> listOfIndexSeachers = new
+>>>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>>>
+>>>>>>>>>>>> for (DocumentSearcherManager documentSearcherManager :
+>>>>>>>>>>>> documentSearcherManagers) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> listOfIndexSeachers.add(documentSearcherManager.get());
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> try {
+>>>>>>>>>>>>
+>>>>>>>>>>>> multiSearcher = new
+>>>>>>>>>>>> MultiSearcher(listOfIndexSeachers.toArray(newIndexSearcher[]
+>>>>>>>>>>>> {}));
+>>>>>>>>>>>>
+>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> return multiSearcher;
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> These methods are used in the following manner in the search
+>>>>>>>>>>>> code:
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> public Summary[] search(final SearchRequest searchRequest)
+>>>>>>>>>>>> throwsSearchExecutionException {
+>>>>>>>>>>>>
+>>>>>>>>>>>> final String searchTerm = searchRequest.getSearchTerm();
+>>>>>>>>>>>>
+>>>>>>>>>>>> if (StringUtils.isBlank(searchTerm)) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> throw new SearchExecutionException("Search string cannot be
+>>>>>>>>>>>> empty.
+>>>>>>>>>>>> There
+>>>>>>>>>>>> will be too many results to process.");
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>>>>>>>>>
+>>>>>>>>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>>>>>>>>>
+>>>>>>>>>>>> stopWatch.start();
+>>>>>>>>>>>>
+>>>>>>>>>>>> List<IndexSearcher> indexSearchers = new
+>>>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>>>
+>>>>>>>>>>>> try {
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("Ensuring all index readers are up to date...");
+>>>>>>>>>>>>
+>>>>>>>>>>>> maybeReopen();
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("All Index Searchers are up to date. No of index
+>>>>>>>>>>>> searchers
+>>>>>>>>>>>> '"
+>>>>>>>>>>>> +
+>>>>>>>>>>>> indexSearchers.size() +"'");
+>>>>>>>>>>>>
+>>>>>>>>>>>> Query query = queryParser.parse(searchTerm);
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene Query
+>>>>>>>>>>>> '"
+>>>>>>>>>>>> +
+>>>>>>>>>>>> query.toString() +"'");
+>>>>>>>>>>>>
+>>>>>>>>>>>> Sort sort = null;
+>>>>>>>>>>>>
+>>>>>>>>>>>> sort = applySortIfApplicable(searchRequest);
+>>>>>>>>>>>>
+>>>>>>>>>>>> Filter[] filters =applyFiltersIfApplicable(searchRequest);
+>>>>>>>>>>>>
+>>>>>>>>>>>> ChainedFilter chainedFilter = null;
+>>>>>>>>>>>>
+>>>>>>>>>>>> if (filters != null) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> chainedFilter = new ChainedFilter(filters, ChainedFilter.OR);
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> TopDocs topDocs = get().search(query,chainedFilter ,100,sort);
+>>>>>>>>>>>>
+>>>>>>>>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("total number of hits for [" + query.toString() + "
+>>>>>>>>>>>> ]
+>>>>>>>>>>>> =
+>>>>>>>>>>>> "+topDocs.
+>>>>>>>>>>>> totalHits);
+>>>>>>>>>>>>
+>>>>>>>>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> final Document doc = get().doc(scoreDoc.doc);
+>>>>>>>>>>>>
+>>>>>>>>>>>> float score = scoreDoc.score;
+>>>>>>>>>>>>
+>>>>>>>>>>>> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>>>>>>>>>>>>
+>>>>>>>>>>>> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>>>>>>>>>>>>
+>>>>>>>>>>>> summaryList.add(documentSummary);
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> release();
+>>>>>>>>>>>>
+>>>>>>>>>>>> } catch (Exception e) {
+>>>>>>>>>>>>
+>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>> stopWatch.stop();
+>>>>>>>>>>>>
+>>>>>>>>>>>> LOGGER.debug("total time taken for document seach: " +
+>>>>>>>>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>>>>>>>>>
+>>>>>>>>>>>> return summaryList.toArray(new Summary[] {});
+>>>>>>>>>>>>
+>>>>>>>>>>>> }
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> Does this look better?  Again..I really really appreciate your
+>>>>>>>>>>>> help!
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> On Sun, Mar 1, 2009 at 4:18 PM, Michael McCandless <
+>>>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>> This is not quite right -- you should only create
+>>>>>>>>>>>> SearcherManager
+>>>>>>>>>>>> once
+>>>>>>>>>>>>
+>>>>>>>>>>>> (per Direcotry) at startup/app load, not with every search
+>>>>>>>>>>>> request.
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>> And I don't see release -- it must call SearcherManager.release
+>>>>>>>>>>>>> of
+>>>>>>>>>>>>> each of the IndexSearchers previously returned from get().
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Thanks again for helping on a Sunday!
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> I have now modified my maybeOpen() to do the following:
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> private void maybeReopen() throws Exception {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> LOGGER.debug("Initiating reopening of index readers...");
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> IndexSearcher[] indexSearchers = (IndexSearcher[])
+>>>>>>>>>>>>>> multiSearcher
+>>>>>>>>>>>>>> .getSearchables();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> for (IndexSearcher indexSearcher : indexSearchers) {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> IndexReader indexReader = indexSearcher.getIndexReader();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> SearcherManager documentSearcherManager = new
+>>>>>>>>>>>>>> SearcherManager(indexReader.directory());
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> documentSearcherManager.maybeReopen();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> And get() to:
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> private synchronized MultiSearcher get() {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> IndexSearcher[] indexSearchers = (IndexSearcher[])
+>>>>>>>>>>>>>> multiSearcher
+>>>>>>>>>>>>>> .getSearchables();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> List<IndexSearcher>  indexSearchersList = new
+>>>>>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> for (IndexSearcher indexSearcher : indexSearchers) {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> IndexReader indexReader = indexSearcher.getIndexReader();
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> SearcherManager documentSearcherManager = null;
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> try {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> documentSearcherManager = new
+>>>>>>>>>>>>>> SearcherManager(indexReader.directory());
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> indexSearchersList.add(documentSearcherManager.get());
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> try {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> multiSearcher = new
+>>>>>>>>>>>>>> MultiSearcher(indexSearchersList.toArray(newIndexSearcher[]
+>>>>>>>>>>>>>> {}));
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> return multiSearcher;
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> This makes all my test pass.  I am using the SearchManager
+>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>> you
+>>>>>>>>>>>>>> recommended.  Does this look ok?
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 2:38 PM, Michael McCandless <
+>>>>>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> Your maybeReopen has an excess incRef().
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> I'm not sure how you open the searchers in the first place?
+>>>>>>>>>>>>>>  The
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> list
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> starts as empty, and nothing populates it?
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> When you do the initial population, you need an incRef.
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> I think you're hitting IllegalStateException because
+>>>>>>>>>>>>>>> maybeReopen
+>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>> closing a reader before get() can get it (since they
+>>>>>>>>>>>>>>> synchronize
+>>>>>>>>>>>>>>> on
+>>>>>>>>>>>>>>> different objects).
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> I'd recommend switching to the SearcherManager class.
+>>>>>>>>>>>>>>> Instantiate
+>>>>>>>>>>>>>>> one
+>>>>>>>>>>>>>>> for each of your searchers.  On each search request, go
+>>>>>>>>>>>>>>> through
+>>>>>>>>>>>>>>> them
+>>>>>>>>>>>>>>> and call maybeReopen(), and then call get() and gather each
+>>>>>>>>>>>>>>> IndexSearcher instance into a new array.  Then, make a new
+>>>>>>>>>>>>>>> MultiSearcher (opposite of what I said before): while that
+>>>>>>>>>>>>>>> creates
+>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>> small amount of garbage, it'll keep your code simpler (good
+>>>>>>>>>>>>>>> tradeoff).
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> sorrry I added
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> release(multiSearcher);
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>  instead of multiSearcher.close();
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 2:17 PM, Amin Mohammed-Coleman <
+>>>>>>>>>>>>>>>> aminmc@gmail.com
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> I've now done the following:
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> public Summary[] search(final SearchRequest searchRequest)
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>  throwsSearchExecutionException {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> final String searchTerm = searchRequest.getSearchTerm();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> if (StringUtils.isBlank(searchTerm)) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> throw new SearchExecutionException("Search string cannot be
+>>>>>>>>>>>>>>>>> empty.
+>>>>>>>>>>>>>>>>> There
+>>>>>>>>>>>>>>>>> will be too many results to process.");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> List<Summary> summaryList = new ArrayList<Summary>();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> stopWatch.start();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> List<IndexSearcher> indexSearchers = new
+>>>>>>>>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> try {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("Ensuring all index readers are up to
+>>>>>>>>>>>>>>>>> date...");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> maybeReopen();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("All Index Searchers are up to date. No of
+>>>>>>>>>>>>>>>>> index
+>>>>>>>>>>>>>>>>> searchers
+>>>>>>>>>>>>>>>>> '"+ indexSearchers.size() +
+>>>>>>>>>>>>>>>>> "'");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Query query = queryParser.parse(searchTerm);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene
+>>>>>>>>>>>>>>>>> Query
+>>>>>>>>>>>>>>>>> '"
+>>>>>>>>>>>>>>>>> +
+>>>>>>>>>>>>>>>>> query.toString() +"'");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Sort sort = null;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> sort = applySortIfApplicable(searchRequest);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Filter[] filters =applyFiltersIfApplicable(searchRequest);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> ChainedFilter chainedFilter = null;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> if (filters != null) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> chainedFilter = new ChainedFilter(filters,
+>>>>>>>>>>>>>>>>> ChainedFilter.OR);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> TopDocs topDocs = get().search(query,chainedFilter
+>>>>>>>>>>>>>>>>> ,100,sort);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("total number of hits for [" +
+>>>>>>>>>>>>>>>>> query.toString()
+>>>>>>>>>>>>>>>>> +
+>>>>>>>>>>>>>>>>> "
+>>>>>>>>>>>>>>>>> ]
+>>>>>>>>>>>>>>>>> =
+>>>>>>>>>>>>>>>>> "+topDocs.
+>>>>>>>>>>>>>>>>> totalHits);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> for (ScoreDoc scoreDoc : scoreDocs) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> final Document doc = multiSearcher.doc(scoreDoc.doc);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> float score = scoreDoc.score;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> final BaseDocument baseDocument = new BaseDocument(doc,
+>>>>>>>>>>>>>>>>> score);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Summary documentSummary = new
+>>>>>>>>>>>>>>>>> DocumentSummaryImpl(baseDocument);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> summaryList.add(documentSummary);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> multiSearcher.close();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> } catch (Exception e) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> stopWatch.stop();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("total time taken for document seach: " +
+>>>>>>>>>>>>>>>>> stopWatch.getTotalTimeMillis() + " ms");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> return summaryList.toArray(new Summary[] {});
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> And have the following methods:
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> @PostConstruct
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> public void initialiseQueryParser() {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> PerFieldAnalyzerWrapper analyzerWrapper = new
+>>>>>>>>>>>>>>>>> PerFieldAnalyzerWrapper(
+>>>>>>>>>>>>>>>>> analyzer);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> analyzerWrapper.addAnalyzer(FieldNameEnum.TYPE.getDescription(),
+>>>>>>>>>>>>>>>>> newKeywordAnalyzer());
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> queryParser =
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> newMultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> analyzerWrapper);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> try {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("Initialising multi searcher ....");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> this.multiSearcher = new
+>>>>>>>>>>>>>>>>> MultiSearcher(searchers.toArray(newIndexSearcher[] {}));
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> LOGGER.debug("multi searcher initialised");
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Initialises mutltisearcher when this class is creared by
+>>>>>>>>>>>>>>>>> spring.
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> private synchronized void swapMultiSearcher(MultiSearcher
+>>>>>>>>>>>>>>>>> newMultiSearcher)  {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> try {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> release(multiSearcher);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> } catch (IOException e) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> throw new IllegalStateException(e);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> multiSearcher = newMultiSearcher;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> public void maybeReopen() throws IOException {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> MultiSearcher newMultiSeacher = null;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> boolean refreshMultiSeacher = false;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> List<IndexSearcher> indexSearchers = new
+>>>>>>>>>>>>>>>>> ArrayList<IndexSearcher>();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> synchronized (searchers) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> for (IndexSearcher indexSearcher: searchers) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> IndexReader reader = indexSearcher.getIndexReader();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> reader.incRef();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Directory directory = reader.directory();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> long currentVersion = reader.getVersion();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> if (IndexReader.getCurrentVersion(directory) !=
+>>>>>>>>>>>>>>>>> currentVersion)
+>>>>>>>>>>>>>>>>> {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> IndexReader newReader =
+>>>>>>>>>>>>>>>>> indexSearcher.getIndexReader().reopen();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> if (newReader != reader) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> reader.decRef();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> refreshMultiSeacher = true;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> reader = newReader;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> IndexSearcher newSearcher = new IndexSearcher(newReader);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> indexSearchers.add(newSearcher);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> if (refreshMultiSeacher) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> newMultiSeacher = new
+>>>>>>>>>>>>>>>>> MultiSearcher(indexSearchers.toArray(newIndexSearcher[]
+>>>>>>>>>>>>>>>>> {}));
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> warm(newMultiSeacher);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> swapMultiSearcher(newMultiSeacher);
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> private void warm(MultiSearcher newMultiSeacher) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> private synchronized MultiSearcher get() {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> for (IndexSearcher indexSearcher: searchers) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> indexSearcher.getIndexReader().incRef();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> return multiSearcher;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> private synchronized void release(MultiSearcher
+>>>>>>>>>>>>>>>>> multiSearcher)
+>>>>>>>>>>>>>>>>> throwsIOException {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> for (IndexSearcher indexSearcher: searchers) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> indexSearcher.getIndexReader().decRef();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> However I am now getting
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> java.lang.IllegalStateException:
+>>>>>>>>>>>>>>>>> org.apache.lucene.store.AlreadyClosedException: this
+>>>>>>>>>>>>>>>>> IndexReader
+>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>> closed
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> on the call:
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> private synchronized MultiSearcher get() {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> for (IndexSearcher indexSearcher: searchers) {
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> indexSearcher.getIndexReader().incRef();
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> return multiSearcher;
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> I'm doing something wrong ..obviously..not sure where
+>>>>>>>>>>>>>>>>> though..
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 1:36 PM, Michael McCandless <
+>>>>>>>>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> I was wondering the same thing ;)
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> It's best to call this method from a single BG "warming"
+>>>>>>>>>>>>>>>>> thread,
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> in
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> which
+>>>>>>>>>>>>>>>>>> case it would not need its own synchronization.
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> But, to be safe, I'll add internal synchronization to it.
+>>>>>>>>>>>>>>>>>> You
+>>>>>>>>>>>>>>>>>> can't
+>>>>>>>>>>>>>>>>>> simply put synchronized in front of the method, since you
+>>>>>>>>>>>>>>>>>> don't
+>>>>>>>>>>>>>>>>>> want
+>>>>>>>>>>>>>>>>>> this to
+>>>>>>>>>>>>>>>>>> block searching.
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> just a quick point:
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> public void maybeReopen() throws IOException {
+>>>>>>>>>>>>>>>>>> //D
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> long currentVersion =
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> currentSearcher.getIndexReader().getVersion();
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>  if (IndexReader.getCurrentVersion(dir) != currentVersion)
+>>>>>>>>>>>>>>>>>>> {
+>>>>>>>>>>>>>>>>>>> IndexReader newReader =
+>>>>>>>>>>>>>>>>>>> currentSearcher.getIndexReader().reopen();
+>>>>>>>>>>>>>>>>>>> assert newReader != currentSearcher.getIndexReader();
+>>>>>>>>>>>>>>>>>>> IndexSearcher newSearcher = new IndexSearcher(newReader);
+>>>>>>>>>>>>>>>>>>> warm(newSearcher);
+>>>>>>>>>>>>>>>>>>> swapSearcher(newSearcher);
+>>>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> should the above be synchronised?
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 1:25 PM, Amin Mohammed-Coleman <
+>>>>>>>>>>>>>>>>>>> aminmc@gmail.com
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> thanks.  i will rewrite..in between giving my baby her
+>>>>>>>>>>>>>>>>>>> feed
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>  and
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> playing
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>  with the other child and my wife who wants me to do
+>>>>>>>>>>>>>>>>>>> several
+>>>>>>>>>>>>>>>>>>> other
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> things!
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 1:20 PM, Michael McCandless <
+>>>>>>>>>>>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> Thanks for your input.  I would like to have a go at
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> doing
+>>>>>>>>>>>>>>>>>>>>> this
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> myself
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> first, Solr may be an option.
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>  * You are creating a new Analyzer & QueryParser every
+>>>>>>>>>>>>>>>>>>>>>> time,
+>>>>>>>>>>>>>>>>>>>>>> also
+>>>>>>>>>>>>>>>>>>>>>> creating unnecessary garbage; instead, they should be
+>>>>>>>>>>>>>>>>>>>>>> created
+>>>>>>>>>>>>>>>>>>>>>> once
+>>>>>>>>>>>>>>>>>>>>>> & reused.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> -- I can moved the code out so that it is only created
+>>>>>>>>>>>>>>>>>>>>>> once
+>>>>>>>>>>>>>>>>>>>>>> and
+>>>>>>>>>>>>>>>>>>>>>> reused.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> * You always make a new IndexSearcher and a new
+>>>>>>>>>>>>>>>>>>>>>> MultiSearcher
+>>>>>>>>>>>>>>>>>>>>>> even
+>>>>>>>>>>>>>>>>>>>>>> when nothing has changed.  This just generates
+>>>>>>>>>>>>>>>>>>>>>> unnecessary
+>>>>>>>>>>>>>>>>>>>>>> garbage
+>>>>>>>>>>>>>>>>>>>>>> which GC then must sweep up.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> -- This was something I thought about.  I could move
+>>>>>>>>>>>>>>>>>>>>>> it
+>>>>>>>>>>>>>>>>>>>>>> out
+>>>>>>>>>>>>>>>>>>>>>> so
+>>>>>>>>>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>>>>>>>>>> it's
+>>>>>>>>>>>>>>>>>>>>>> created once.  However I presume inside my code i need
+>>>>>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>>>>>> check
+>>>>>>>>>>>>>>>>>>>>>> whether
+>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>> indexreaders are update to date.  This needs to be
+>>>>>>>>>>>>>>>>>>>>>> synchronized
+>>>>>>>>>>>>>>>>>>>>>> as
+>>>>>>>>>>>>>>>>>>>>>> well I
+>>>>>>>>>>>>>>>>>>>>>> guess(?)
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> Yes you should synchronize the check for whether the
+>>>>>>>>>>>>>>>>>>>>>> IndexReader
+>>>>>>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> current.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> * I don't see any synchronization -- it looks like two
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>  search
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> requests are allowed into this method at the same time?
+>>>>>>>>>>>>>>>>>>>>> Which
+>>>>>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> dangerous... eg both (or, more) will wastefully reopen
+>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> readers.
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> --  So i need to extract the logic for reopening and
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> provide
+>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>> synchronisation mechanism.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> Yes.
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> Ok.  So I have some work to do.  I'll refactor the
+>>>>>>>>>>>>>>>>>>>>>> code
+>>>>>>>>>>>>>>>>>>>>>> and
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> see
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> if
+>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>> can
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> get
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> inline to your recommendations.
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> On Sun, Mar 1, 2009 at 12:11 PM, Michael McCandless <
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> On a quick look, I think there are a few problems with
+>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>> code:
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> * I don't see any synchronization -- it looks like two
+>>>>>>>>>>>>>>>>>>>>>> search
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> requests are allowed into this method at the same
+>>>>>>>>>>>>>>>>>>>>>> time?
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> Which
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>>>>>>>> dangerous... eg both (or, more) will wastefully
+>>>>>>>>>>>>>>>>>>>>>>> reopen
+>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>> readers.
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> * You are over-incRef'ing (the reader.incRef inside
+>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>> loop)
+>>>>>>>>>>>>>>>>>>>>>>> --
+>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>> don't see a corresponding decRef.
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> * You reopen and warm your searchers "live" (vs with
+>>>>>>>>>>>>>>>>>>>>>>> BG
+>>>>>>>>>>>>>>>>>>>>>>> thread);
+>>>>>>>>>>>>>>>>>>>>>>> meaning the unlucky search request that hits a reopen
+>>>>>>>>>>>>>>>>>>>>>>> pays
+>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>> cost.  This might be OK if the index is small enough
+>>>>>>>>>>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>>>>>>>>>>> reopening & warming takes very little time.  But if
+>>>>>>>>>>>>>>>>>>>>>>> index
+>>>>>>>>>>>>>>>>>>>>>>> gets
+>>>>>>>>>>>>>>>>>>>>>>> large, making a random search pay that warming cost
+>>>>>>>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>>>>>>>> not
+>>>>>>>>>>>>>>>>>>>>>>> nice
+>>>>>>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>>>>>>> the end user.  It erodes their trust in you.
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> * You always make a new IndexSearcher and a new
+>>>>>>>>>>>>>>>>>>>>>>> MultiSearcher
+>>>>>>>>>>>>>>>>>>>>>>> even
+>>>>>>>>>>>>>>>>>>>>>>> when nothing has changed.  This just generates
+>>>>>>>>>>>>>>>>>>>>>>> unnecessary
+>>>>>>>>>>>>>>>>>>>>>>> garbage
+>>>>>>>>>>>>>>>>>>>>>>> which GC then must sweep up.
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> * You are creating a new Analyzer & QueryParser every
+>>>>>>>>>>>>>>>>>>>>>>> time,
+>>>>>>>>>>>>>>>>>>>>>>> also
+>>>>>>>>>>>>>>>>>>>>>>> creating unnecessary garbage; instead, they should be
+>>>>>>>>>>>>>>>>>>>>>>> created
+>>>>>>>>>>>>>>>>>>>>>>> once
+>>>>>>>>>>>>>>>>>>>>>>> & reused.
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> You should consider simply using Solr -- it handles
+>>>>>>>>>>>>>>>>>>>>>>> all
+>>>>>>>>>>>>>>>>>>>>>>> this
+>>>>>>>>>>>>>>>>>>>>>>> logic
+>>>>>>>>>>>>>>>>>>>>>>> for
+>>>>>>>>>>>>>>>>>>>>>>> you and has been well debugged with time...
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> The reason for the indexreader.reopen is because I
+>>>>>>>>>>>>>>>>>>>>>>> have
+>>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>>> webapp
+>>>>>>>>>>>>>>>>>>>>>>> which
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> enables users to upload files and then search for the
+>>>>>>>>>>>>>>>>>>>>>>> documents.
+>>>>>>>>>>>>>>>>>>>>>>> If
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> don't
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> reopen i'm concerned that the facet hit counter won't
+>>>>>>>>>>>>>>>>>>>>>>> be
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>  updated.
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> On Tue, Feb 24, 2009 at 8:32 PM, Amin
+>>>>>>>>>>>>>>>>>>>>>>>> Mohammed-Coleman
+>>>>>>>>>>>>>>>>>>>>>>>> <
+>>>>>>>>>>>>>>>>>>>>>>>> aminmc@gmail.com
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>  I have been able to get the code working for my
+>>>>>>>>>>>>>>>>>>>>>>>>> scenario,
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> however
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>  I
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> have
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> question and I was wondering if I could get some
+>>>>>>>>>>>>>>>>>>>>>>>> help.
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>  I
+>>>>>>>>>>>>>>>>>>>>>>>>> have
+>>>>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>>>>> list
+>>>>>>>>>>>>>>>>>>>>>>>>> of
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexSearchers which are used in a MultiSearcher
+>>>>>>>>>>>>>>>>>>>>>>>>> class.
+>>>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>>>> use
+>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>> indexsearchers to get each indexreader and put them
+>>>>>>>>>>>>>>>>>>>>>>>>> into
+>>>>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>>>>> MultiIndexReader.
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexReader[] readers = new
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexReader[searchables.length];
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> for (int i =0 ; i < searchables.length;i++) {
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexSearcher indexSearcher =
+>>>>>>>>>>>>>>>>>>>>>>>>> (IndexSearcher)searchables[i];
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> readers[i] = indexSearcher.getIndexReader();
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexReader newReader = readers[i].reopen();
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> if (newReader != readers[i]) {
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> readers[i].close();
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> readers[i] = newReader;
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> }
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> multiReader = new MultiReader(readers);
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> OpenBitSetFacetHitCounter facetHitCounter =
+>>>>>>>>>>>>>>>>>>>>>>>>> newOpenBitSetFacetHitCounter();
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexSearcher indexSearcher = new
+>>>>>>>>>>>>>>>>>>>>>>>>> IndexSearcher(multiReader);
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> I then use the indexseacher to do the facet stuff.
+>>>>>>>>>>>>>>>>>>>>>>>>>  I
+>>>>>>>>>>>>>>>>>>>>>>>>> end
+>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>> code
+>>>>>>>>>>>>>>>>>>>>>>>>> with
+>>>>>>>>>>>>>>>>>>>>>>>>> closing the multireader.  This is causing problems
+>>>>>>>>>>>>>>>>>>>>>>>>> in
+>>>>>>>>>>>>>>>>>>>>>>>>> another
+>>>>>>>>>>>>>>>>>>>>>>>>> method
+>>>>>>>>>>>>>>>>>>>>>>>>> where I
+>>>>>>>>>>>>>>>>>>>>>>>>> do some other search as the indexreaders are
+>>>>>>>>>>>>>>>>>>>>>>>>> closed.
+>>>>>>>>>>>>>>>>>>>>>>>>> Is
+>>>>>>>>>>>>>>>>>>>>>>>>> it
+>>>>>>>>>>>>>>>>>>>>>>>>> ok
+>>>>>>>>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>>>>>>>>> not
+>>>>>>>>>>>>>>>>>>>>>>>>> close
+>>>>>>>>>>>>>>>>>>>>>>>>> the multiindexreader or should I do some additional
+>>>>>>>>>>>>>>>>>>>>>>>>> checks
+>>>>>>>>>>>>>>>>>>>>>>>>> in
+>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>> other
+>>>>>>>>>>>>>>>>>>>>>>>>> method to see if the indexreader is closed?
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> P.S. Hope that made sense...!
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> On Mon, Feb 23, 2009 at 7:20 AM, Amin
+>>>>>>>>>>>>>>>>>>>>>>>>> Mohammed-Coleman
+>>>>>>>>>>>>>>>>>>>>>>>>> <
+>>>>>>>>>>>>>>>>>>>>>>>>> aminmc@gmail.com
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>> Thanks just what I needed!
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> Amin
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>> On 22 Feb 2009, at 16:11, Marcelo Ochoa <
+>>>>>>>>>>>>>>>>>>>>>>>>>> marcelo.ochoa@gmail.com>
+>>>>>>>>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>> Hi Amin:
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>> Please take a look a this blog post:
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> http://sujitpal.blogspot.com/2007/04/lucene-search-within-search-with.html
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Best regards, Marcelo.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> On Sun, Feb 22, 2009 at 1:18 PM, Amin
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Mohammed-Coleman
+>>>>>>>>>>>>>>>>>>>>>>>>>>> <
+>>>>>>>>>>>>>>>>>>>>>>>>>>> aminmc@gmail.com>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Sorry to re send this email but I was wondering
+>>>>>>>>>>>>>>>>>>>>>>>>>>> if
+>>>>>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>>>>>> could
+>>>>>>>>>>>>>>>>>>>>>>>>>>> get
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> some
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> advice
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> on this.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> Amin
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> On 16 Feb 2009, at 20:37, Amin Mohammed-Coleman
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> <
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> aminmc@gmail.com>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> Hi
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> I am looking at building a faceted search using
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> Lucene.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> know
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> Solr
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> comes with this built in, however I would like
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>  try
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> this
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> by
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> myself
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> (something to add to my CV!).  I have been
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> looking
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> around
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> and
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> I
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> found
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> you can use the IndexReader and use
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TermVectors.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> This
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> looks
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ok
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> but
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> I'm
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> not
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> sure how to filter the results so that a
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> particular
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> user
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> can
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> only
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> see
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> a
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> subset of results.  The next option I was
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> looking
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> at
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> was
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> something
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> like
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Term term1 = new Term("brand", "ford");
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Term term2 = new Term("brand", "vw");
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Term[] termsArray = new Term[] { term1, term2
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> };un
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> int[] docFreqs =
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> indexSearcher.docFreqs(termsArray);
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> The only problem here is that I have to provide
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> brand
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> type
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> each
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> time a
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> new brand is created.  Again I'm not sure how I
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> can
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> filter
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> results
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> here.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> It may be that I'm using the wrong api methods
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> do
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> this.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> I would be grateful if I could get some advice
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> on
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> this.
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Amin
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> P.S.  I am basically trying to do something
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> that
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> displays
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> the
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> following
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Personal Contact (23) Business Contact (45) and
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> so
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> on..
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> --
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Marcelo F. Ochoa
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> http://marceloochoa.blogspot.com/
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>> http://marcelo.ochoa.googlepages.com/home
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>  ______________
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Want to integrate Lucene and Oracle?
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> http://marceloochoa.blogspot.com/2007/09/running-lucene-inside-your-oracle-jvm.html
+>>>>>>>>>>>>>>>>>>>>>>>>>>> Is Oracle 11g REST ready?
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> http://marceloochoa.blogspot.com/2008/02/is-oracle-11g-rest-ready.html
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>>  java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>>  For additional commands, e-mail:
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>  For additional commands, e-mail:
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>  java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>  For additional commands, e-mail:
+>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>
+>>>>>>>>>>>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>
+>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

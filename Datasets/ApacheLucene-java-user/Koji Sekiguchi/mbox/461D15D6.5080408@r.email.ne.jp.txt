@@ -1,0 +1,116 @@
+FROM: Koji Sekiguchi <k...@r.email.ne.jp>
+SUBJECT: strange idf in Lucene 2.1
+DATE: 11 Apr 2007
+
+Hello,
+
+I have the following three documents in my index:
+
+- Java programming is required to write Lucene application.
+- Java is a popular computer language. I like Java.
+- Perl is not a kind of jewelry. It is a programming language.
+
+With Lucene 2.0, if I search "java" and print explanation, the output is:
+
+1 0.53033006 Java is a popular computer language. I like Java.
+0.53033006 = fieldWeight(text:java in 1), product of:
+1.4142135 = tf(termFreq(text:java)=2)
+1.0 = idf(docFreq=2)
+0.375 = fieldNorm(field=text, doc=1)
+
+0 0.375 Java programming is required to write Lucene application.
+0.375 = fieldWeight(text:java in 0), product of:
+1.0 = tf(termFreq(text:java)=1)
+1.0 = idf(docFreq=2)
+0.375 = fieldNorm(field=text, doc=0)
+
+But when I use Lucene 2.1, the output is:
+
+4 0.62702066 Java is a popular computer language. I like Java.
+0.62702066 = (MATCH) fieldWeight(text:java in 4), product of:
+1.4142135 = tf(termFreq(text:java)=2)
+1.1823215 = idf(docFreq=4)
+0.375 = fieldNorm(field=text, doc=4)
+
+3 0.44337058 Java programming is required to write Lucene application.
+0.44337058 = (MATCH) fieldWeight(text:java in 3), product of:
+1.0 = tf(termFreq(text:java)=1)
+1.1823215 = idf(docFreq=4)
+0.375 = fieldNorm(field=text, doc=3)
+
+I don't understand why the idf is not 1.0 (and docFreq is not 2)
+when I use Lucene 2.1.
+
+The program is attached at the bottom of this mail.
+In the program, I added these three documents to the index,
+then deleted all of them, and then added them to the index on purpose.
+If I optimize the index, idf gets into 1.0 with Lucene 2.1 (uncomment in
+the program).
+Is it a feature?
+
+Thank you,
+
+Koji
+
+---
+
+public class Test1 {
+
+private static String[] contents = {
+"Java programming is required to write Lucene application.",
+"Java is a popular computer language. I like Java.",
+"Perl is not a kind of jewelry. It is a programming language."
+};
+private static String F = "text";
+private static String QUERY = "java";
+private static Analyzer analyzer = new StandardAnalyzer();
+private static Directory dir = new RAMDirectory();
+
+public static void main(String[] args) throws IOException {
+makeIndex( true );
+deleteAll();
+makeIndex( false );
+searchIndex();
+}
+
+private static void makeIndex( boolean create ) throws IOException{
+IndexWriter writer = new IndexWriter( dir, analyzer, create );
+for( String content : contents ){
+Document doc = new Document();
+doc.add( new Field( F, content, Store.YES, Index.TOKENIZED ) );
+writer.addDocument( doc );
+}
+//writer.optimize();
+writer.close();
+}
+
+private static void deleteAll() throws IOException{
+IndexReader reader = IndexReader.open( dir );
+int max = reader.maxDoc();
+for( int i = 0; i < max; i++ )
+reader.deleteDocument( i );
+reader.close();
+}
+
+private static void searchIndex() throws IOException{
+IndexSearcher searcher = new IndexSearcher( dir );
+Query query = new TermQuery( new Term( F, QUERY ) );
+Hits hits = searcher.search( query );
+for( int i = 0; i < hits.length(); i++ ){
+int id = hits.id( i );
+float score = hits.score( i );
+Document doc = hits.doc( i );
+System.out.println( id + "\t" + score + "\t" + doc.get( F ) );
+Explanation exp = searcher.explain( query, id );
+System.out.println( exp.toString() );
+}
+searcher.close();
+}
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

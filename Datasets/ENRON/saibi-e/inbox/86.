@@ -1,0 +1,167 @@
+Message-ID: <13644393.1075841488574.JavaMail.evans@thyme>
+Date: Mon, 28 Jan 2002 03:08:41 -0800 (PST)
+From: shcctrade@eudoramail.com
+To: money.in.motion@mailman.enron.com
+Subject: Tonight's Investment Special                   MZAZ
+Mime-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: quoted-printable
+X-From: SHCCtrade@eudoramail.com@ENRON
+X-To: Money.in.Motion@mailman.enron.com
+X-cc: 
+X-bcc: 
+X-Folder: \ExMerge - Saibi, Eric\Inbox
+X-Origin: SAIBI-E
+X-FileName: eric saibi 6-26-02.PST
+
+
+=20
+ Investment Special  Tonight's Feature Company=09
+ ShareCom, Inc. (OTCBB: SHCC)  Current Price: $0.0063  52 Week High: $2.49 =
+52 Week Low: $0.0062        Why SHCC?   SHCC has established business relat=
+ionships with FEMA, the American Red Cross, AAA, NOAA, and more.   SHCC is =
+currently booking revenues of $45,000 per month and projects revenues of $1=
+3 million for 2002.   On January 17th, SHCC showed its continued growth tra=
+ck through its new partnership with Maxwood Technology to produce breakthro=
+ugh emergency broadcast products.   The Time is NOW at Sharecom  The Federa=
+l Emergency Management Agency (FEMA), the National Weather Service (NWS), t=
+he Red Cross and AAA are a but a few of the agencies and organizations with=
+ whom ShareCom Inc. has forged alliances to ensure clear competitive advant=
+age for its product lines. The past 10 years have seen a dramatic increase =
+in severe weather conditions, and with continued global warming these patte=
+rns will become worse. Prompted by FEMA and NWS aggressive programs, demand=
+ for the company's NOAA radios will soar.  Today 7% of American homes posse=
+ss an NOAA radio.  The national goal is 100%.  Sharecom's www.WeatherRadios=
+.com is the site for consumers to purchase the company's superior product a=
+t a significant discount. SHCC's revenue flow rate is at $45,000/month and =
+rapidly growing. The Company will realize a profit this year and plans to t=
+riple it next.. SHCC's market dominance in this growing "bread and butter",=
+ niche business makes it an interesting acquisition candidate and a compell=
+ing investment.  This Just Out: SHCC NEWS     ShareCom Partners With Maxwoo=
+d Technology to Produce Breakthrough NOAA Emergency Broadcast Products  Inn=
+ovative NOAA Emergency Radio products Unveiled at CES 2002  PALATINE, Ill.-=
+-(BUSINESS WIRE)--Jan. 17, 2002-- ShareCom, a leading marketing and sales o=
+rganization which specializes in NOAA Weather Radio Products, today announc=
+ed the formation of a strategic alliance with Maxwood Techics BHD and NIKKO=
+ CO., LTD.--to design, develop, manunology LTD., an affiliate and partner o=
+f NIKKO Electronfacture, market and sell specialized unique Emergency Weath=
+er Radio Products never before seen by the consumer electronics industry!  =
+The partnership has developed three specialized products that ShareCom has =
+introduced, including the latest Homeland Security device introduced at the=
+ 2002 Consumer Electronics Show.  In addition to the valued priced WRP-50 W=
+eather Radio, ShareCom has introduced two very special and unique products:=
+  The WRP-500 is a New Graphical Interface Emergency Radio that features a =
+PDA style readout that will allow the end user to track weather related bro=
+adcasts on a map of the county that the emergency notification from NOAA is=
+ broadcast in. This model will also feature a 20 memory tracking capability=
+ that will store the last 20 alerts including the time of date, date and na=
+ture of the alerts so the end user can track a storm/emergency as it develo=
+ps. This unit also features a 20 hour battery back up the will allow the en=
+d user complete warning capability in the case that power is lost to the ho=
+me. With the county codes built into the software, this model is the easies=
+t NOAA Weather Radio on the market to program.  The WRP-900 is a unique com=
+puter based homeland security product that will interface with any PC or se=
+rver network, and will allow people in offices, business and homes to have =
+the most up-to-date weather or national emergency information directly from=
+ the federal government. NOAA will be able to broadcast FEMA warnings as we=
+ll as supply information for "follow on'' details as to where to go to get =
+food, water, medical help or shelter in the area of a national emergency to=
+ weather related disaster.  "Our ability to develop and produce unique and =
+strategic products is significantly enhanced as a result of this partnershi=
+p," says Brad Nordling, President and CEO of ShareCom, Inc. "Maxwood Techno=
+logy has a tremendous amount of technical abilities that we will rely upon =
+in producing the highest quality products possible."  "We are pleased to be=
+ able to work with ShareCom as a strategic partner in developing and manufa=
+cturing communications products that will help inform and protect citizens =
+in the United States of America," Kunihiko Ichioka, President and CEO of Ma=
+xwood Technology Ltd.     Stay tuned for more announcements to come  More R=
+easons to Consider Buying SHCC  1. WeatherRadios.com has been awarded a Nat=
+ional Partnership with the Federal Emergency Management Agency (FEMA) to in=
+crease the use of Weather Radios countrywide through a program called Proje=
+ct Impact. There are 2,600 Project Impact communities in the U.S. The FEMA =
+website lists WeatherRadios.com as a national partner  providing a banner a=
+nd link to the WeatherRadios.com site. The FEMA site receives over 100,000 =
+visitors per day.  2.  The National Oceanic and Aerospace Administration (N=
+OAA) has WeatherRadios.com listed first on their web site page that tells p=
+eople where to purchase a NOAA Weather Radio.  3.  The National Weather Ser=
+vice (NWS) has offered to promote corporate sponsorships to the WeatherRadi=
+os.com site through  recognition and media support.  4.  Local American Red=
+ Cross chapters will promote NOAA Weather Radios through WeatherRadios.com =
+in exchange for a $5.00 donation per sold radio.  5.  The Chicago area AAA =
+will feature SHCC's  2WayTalk.com on its website offering exclusive discoun=
+ts on Weather Radios, and FRS Family Radios. 2WayTalk.com will also be  lis=
+ted in the AAA magazine called "Home and Away".  6.  The Federation of Manu=
+factured Home Owners of Florida (FMO) has entered into a one-year agreement=
+ that will increase the sale of Weather Radios from the WeatherRadios.com s=
+ite. Mailings and web site links will offer a group discount to members and=
+ also pay a rebate to the organization for every radio sold.  7.  The Owner=
+-Operator Independent Drivers Association (OOIDA) has begun to promote the =
+discount that is offered  through WeatherRadios.com site. Magazine articles=
+, mailings and web site links will offer a group discount to members and al=
+so pay a rebate to the organization for every radio sold. This      agreeme=
+nt will run for one year.  Why Weather Radios are Poised for Growth  NOAA W=
+eather Radios automatically alert people of impending severe weather condit=
+ions "24/7". This is especially critical for families while sleeping. These=
+ devices are fast becoming recognized as essential and potentially life sav=
+ing for use in homes, businesses, and critical care facilities.  The Nation=
+al Weather Service (NWS) has stated that there has been an increase in seve=
+re weather in the last 10 years and this trend is expected to continue. NWS=
+ has a published goal for NOAA Weather Radios to be in every home within th=
+e next 10 years. Currently, approximately just 7% of homes have this device=
+. This being said, we can expect a tremendous increase in the presence and =
+sale of weather radios over the coming years. The NWS, NOAA, the Federal Em=
+ergency Management Agency (FEMA) and other government agencies have an aggr=
+essive education and funding effort to reach the 100% goal.  New technology=
+ called Specific Area Message Encoding (SAME) was introduced in the mid 90s=
+. It allows users to set an alarm only for their specific geographic area. =
+This feature is expected to make this tool commonplace in homes alerting fa=
+milies of weather conditions that pose an immediate danger.   Additionally,=
+ 2WayTalk.com will continue to focus on Internet users who are outdoor enth=
+usiasts. The market continues to be strong and growing. FRS Family Radios a=
+re now becoming a popular family item on vacations, ski trips, camping, and=
+ biking events. They are used for a wide variety of purposes, from staying =
+in touch with children playing in the neighborhood, to coordinating soccer =
+tournaments and antique auctions.   A Final Word About SHCC  SHCC is curren=
+tly booking $45,000/ month and is conservatively projecting earnings next y=
+ear of $1.3 million on revenues of $13 million. Unlike most e-commerce vent=
+ures, ShareCom's marketing "burn rate" is very modest. The Company forecast=
+s revenues of $32.5 million the following year, increasing profitability to=
+ earn $4.6 million. Given its impressive relationships and the rapidly grow=
+ing market for its product, SHCC's share price of just 1.6 cents makes it a=
+ compelling play for the astute investor. =09
+ To be removed from future mailings, please reply to this email with "Remov=
+e" in the subject line   DISCLAIMER:  Information within this email contain=
+s "forward looking statements" within the meaning of Section 27A of the Sec=
+urities Act of 1933 and Section 21B of the Securities Exchange Act of 1934.=
+ Any statements that express or involve discussions with respect to predict=
+ions, expectations, beliefs, plans, projections, objectives, goals, assumpt=
+ions or future events or performance are not statements of historical fact =
+and may be "forward looking statements."  Forward looking statements are ba=
+sed on expectations, estimates and projections at the time the statements a=
+re made that involve a number of risks and uncertainties which could cause =
+actual results or events to differ materially from those presently anticipa=
+ted. Forward looking statements in this action may be identified through th=
+e use of words such as "projects", "foresee", "expects", "will,"  "anticipa=
+tes," "estimates," "believes," "understands" or that by statements indicati=
+ng certain actions "may," "could," or "might" occur.  All information provi=
+ded within this email pertaining to investing, stocks, securities must be u=
+nderstood as information provided and not investment advice. Investment New=
+s Alert advises all readers and subscribers to seek advice from a registere=
+d professional securities representative before deciding to trade in stocks=
+ featured within this email.  None of the material within this report shall=
+ be construed as any kind of investment advice.  In compliance with the Sec=
+urities Act of 1933, Section17(b), Investment Special discloses the receipt=
+ of $20,000 cash from a third party for the publication of this report and =
+additional services related to SHCC.  In addition, Investment Special discl=
+oses the receipt of fifteen million unrestricted shares of SHCC from a thir=
+d party for the publication of this report and additional services related =
+to SHCC.  Be aware of an inherent conflict of interest resulting from our i=
+ntent to profit from the sale of these shares.  Part or all of our position=
+ may be liquidated at any time, even after we have made positive statements=
+ regarding the above company.  All factual information in this report was g=
+athered from public sources, including but not limited to SEC filings, Comp=
+any Press Releases, and Market Guide.  Investment Special  believes this in=
+formation to be reliable but can make no guarantee as to its accuracy or co=
+mpleteness. Use of the material within this email constitutes your acceptan=
+ce of these terms.   To be removed from future mailings, please reply to th=
+is email with "Remove" in the subject line=09

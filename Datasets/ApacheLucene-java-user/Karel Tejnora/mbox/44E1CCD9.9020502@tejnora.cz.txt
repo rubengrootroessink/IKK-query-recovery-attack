@@ -1,0 +1,77 @@
+FROM: Karel Tejnora <ka...@tejnora.cz>
+SUBJECT: Re: updating document
+DATE: 15 Aug 2006
+
+Im sending a snippet of code how to reconstruct UNSTORED fields.
+It has two parts:
+DB+terms
+
+Class.forName("org.postgresql.Driver").newInstance();
+            con = DriverManager.getConnection("jdbc:postgresql:lucene", 
+"lucene", "lucene");
+            PreparedStatement psCompany=con.prepareStatement("INSERT 
+INTO term (name,value,doc,pos) VALUES ('company',?,?,?)");
+           
+            Directory sourceDir = FSDirectory.getDirectory(source,false);
+            Directory targetDir = FSDirectory.getDirectory(target,true);
+            Analyzer analyzer = (Analyzer)analyzers.get(lang);
+
+            if(!IndexReader.indexExists(sourceDir))
+            {
+                System.err.println("Source index doesn't live on 
+specified path");
+                return;
+            }
+           
+            ir = IndexReader.open(sourceDir);
+            iw = new IndexWriter(targetDir,analyzer,true);
+           
+            int numdocs = ir.numDocs();
+           
+            TermEnum terms = ir.terms();
+
+            String fnCompany = "company".intern();
+            while(terms.next())
+            {
+                Term t = terms.term();
+                if(fnCompany==t.field())
+                {
+                    int docfreq = ir.docFreq(t);
+                    psCompany.setString(1, t.text());
+                    TermPositions tp = ir.termPositions(t);
+                    for(int i=0;i<docfreq;i++)
+                    {
+                        tp.next();
+                        int docId =tp.doc();
+                        for(int j=0,len=tp.freq();j<len;j++)
+                        {
+                            int pos = tp.nextPosition();
+                            psCompany.setInt(2, docId);
+                            psCompany.setInt(3, pos);
+                            psCompany.executeUpdate();
+                        }
+                    }
+                }
+            }
+
+For indexing you need, I suppose, - length of field (max(pos) + 
+maxPosTerm.length())
+and fields is recon by select pos,value,length(value) from term where 
+name=? and doc=? order by pos asc;
+and (analyzer) tokenstream is just wrapper for resultset.
+
+
+If you would like to check if table is correct than
+select t.value,count(*) as co from (select distinct doc,value from term) 
+as t group by t.value order by co desc;
+
+Isssues - you can store it but the information is not OK - it just clone 
+UN_STORED well
+
+PS: PostgreSQL with proper PK is pretty fast
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

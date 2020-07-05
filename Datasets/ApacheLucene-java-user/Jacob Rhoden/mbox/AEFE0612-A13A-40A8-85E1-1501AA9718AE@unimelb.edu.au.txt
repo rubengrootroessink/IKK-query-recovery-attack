@@ -1,0 +1,76 @@
+FROM: Jacob Rhoden <jrho...@unimelb.edu.au>
+SUBJECT: Wrapping IndexSearcher so that it is safe?
+DATE: 11 Nov 2009
+
+I am pondering a way to allow closing of an index searcher and  
+releasing the pointer to it so that it automatically cleans up by  
+itself when all threads stop using the index searcher. Inspired by the  
+Objective C retain/release model, what do you think about this?
+
+Basically when threads start a search, they increment the "retain"  
+count, when threads leave the searcher, they decrement the "retain"  
+count, and close the searcher if requested. I am attracted to this  
+solution as it seems to simplify things greatly unless I have  
+overlooked something.
+
+
+public class SafeIndexSearcher {
+
+	private boolean finish = false;
+	private int retainCount = 0;
+	private IndexSearcher searcher;
+
+	public SafeIndexSearcher(IndexSearcher searcher) {
+		this.searcher = searcher;
+	}
+
+	public TopDocs search(Query query, int limit) throws IOException {
+		this.retain();
+
+		try {
+			TopDocs result = searcher.search(query, limit);
+			this.release();
+			return result;
+		} catch (IOException e) {
+			this.release();
+			throw e;
+		}
+
+	}
+
+	public synchronized void close() {
+		finish = true;
+	}
+
+	private synchronized void retain() throws IOException {
+		if(finish)
+			throw new IOException("SafeIndexSearcher used after close has been  
+called.");
+		retainCount++;
+	}
+
+	private synchronized void release() {
+		retainCount--;
+		if(finish && retainCount==0)
+			try {
+				searcher.close();
+			} catch (IOException e) {
+				System.err.println("IndexSearcher.close() unexpected error: " +  
+e.getMessage());
+			}
+	}
+
+}
+
+Thanks!
+Jacob
+
+____________________________________
+Information Technology Services,
+The University of Melbourne
+
+Email: jrhoden@unimelb.edu.au
+Phone: +61 3 8344 2884
+Mobile: +61 4 1095 7575
+
+

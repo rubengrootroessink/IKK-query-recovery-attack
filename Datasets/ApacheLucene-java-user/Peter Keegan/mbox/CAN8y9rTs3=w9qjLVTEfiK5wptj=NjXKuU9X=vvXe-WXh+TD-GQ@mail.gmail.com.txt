@@ -1,0 +1,164 @@
+FROM: Peter Keegan <peterlkee...@gmail.com>
+SUBJECT: Re: Search within a sentence (revisited)
+DATE: 21 Jul 2011
+
+Hi Mark,
+
+Here is a unit test using a version of 'SpanWithinQuery' modified for 3.2
+('getTerms' removed) . The last test fails (search for "1" and "3").
+
+package org.apache.lucene.search.spans;
+
+import java.io.Reader;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
+import
+org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.RandomIndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.util.LuceneTestCase;
+
+public class TestSentence extends LuceneTestCase {
+public static final String field = "field";
+public static final String START = "^";
+public static final String END = "$";
+public void testSetPosition() throws Exception {
+Analyzer analyzer = new Analyzer() {
+@Override
+public TokenStream tokenStream(String fieldName, Reader reader) {
+return new TokenStream() {
+private final String[] TOKENS = {"1", "2", "3", END, "4", "5", "6", END,
+"9"};
+private final int[] INCREMENTS = {1,1,1,0,1,1,1,0,1};
+private int i = 0;
+
+PositionIncrementAttribute posIncrAtt =
+addAttribute(PositionIncrementAttribute.class);
+CharTermAttribute termAtt = addAttribute(CharTermAttribute.class);
+OffsetAttribute offsetAtt = addAttribute(OffsetAttribute.class);
+
+@Override
+public boolean incrementToken() {
+assertEquals(TOKENS.length, INCREMENTS.length);
+if (i == TOKENS.length)
+return false;
+clearAttributes();
+termAtt.append(TOKENS[i]);
+offsetAtt.setOffset(i,i);
+posIncrAtt.setPositionIncrement(INCREMENTS[i]);
+i++;
+return true;
+}
+};
+}
+};
+Directory store = newDirectory();
+RandomIndexWriter writer = new RandomIndexWriter(random, store, analyzer);
+Document d = new Document();
+d.add(newField("field", "bogus", Field.Store.YES, Field.Index.ANALYZED));
+writer.addDocument(d);
+IndexReader reader = writer.getReader();
+writer.close();
+IndexSearcher searcher = newSearcher(reader);
+
+SpanTermQuery startSentence = makeSpanTermQuery(START);
+SpanTermQuery endSentence = makeSpanTermQuery(END);
+SpanQuery[] clauses = new SpanQuery[2];
+clauses[0] = makeSpanTermQuery("1");
+clauses[1] = makeSpanTermQuery("2");
+SpanNearQuery allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE,
+false); // SpanAndQuery equivalent
+SpanWithinQuery query = new SpanWithinQuery(allKeywords, endSentence, 0);
+System.out.println("query: "+query);
+ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+assertEquals(hits.length, 1);
+
+clauses[1] = makeSpanTermQuery("4");
+allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE, false); //
+SpanAndQuery equivalent
+query = new SpanWithinQuery(allKeywords, endSentence, 0);
+System.out.println("query: "+query);
+hits = searcher.search(query, null, 1000).scoreDocs;
+assertEquals(hits.length, 0);
+
+PhraseQuery pq = new PhraseQuery();
+pq.add(new Term(field, "3"));
+pq.add(new Term(field, "4"));
+hits = searcher.search(pq, null, 1000).scoreDocs;
+assertEquals(hits.length, 1);
+
+clauses[1] = makeSpanTermQuery("3");
+allKeywords = new SpanNearQuery(clauses, Integer.MAX_VALUE, false); //
+SpanAndQuery equivalent
+query = new SpanWithinQuery(allKeywords, endSentence, 0);
+System.out.println("query: "+query);
+hits = searcher.search(query, null, 1000).scoreDocs;
+assertEquals(hits.length, 1);
+
+
+}
+
+public SpanTermQuery makeSpanTermQuery(String text) {
+return new SpanTermQuery(new Term(field, text));
+}
+public TermQuery makeTermQuery(String text) {
+return new TermQuery(new Term(field, text));
+}
+}
+
+Peter
+
+On Wed, Jul 20, 2011 at 9:22 PM, Mark Miller <markrmiller@gmail.com> wrote:
+
+>
+> On Jul 20, 2011, at 7:44 PM, Mark Miller wrote:
+>
+> >
+> > On Jul 20, 2011, at 11:27 AM, Peter Keegan wrote:
+> >
+> >> Mark Miller's 'SpanWithinQuery' patch
+> >> seems to have the same issue.
+> >
+> > If I remember right (It's been more the a couple years), I did index the
+> sentence markers at the same position as the last word in the sentence. And
+> I think the limitation that I ate was that the word could belong to both
+> it's true sentence, and the one after it.
+> >
+> > - Mark Miller
+> > lucidimagination.com
+>
+> Perhaps you could index the sentence marker at both the last word of the
+> sentence as well as the first word of the next sentence if there is one.
+> This would seem to solve the above limitation as well?
+>
+> - Mark Miller
+> lucidimagination.com
+>
+>
+>
+>
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

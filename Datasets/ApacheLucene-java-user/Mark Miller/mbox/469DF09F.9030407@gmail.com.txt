@@ -1,0 +1,153 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: WildcardQuery and SpanQuery
+DATE: 18 Jul 2007
+
+You could give this a shot (From my Qsol query parser):
+
+package com.mhs.qsol.spans;
+
+/**
+ * Copyright 2006 Mark Miller (markrmiller@gmail.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Set;
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.WildcardQuery;
+import org.apache.lucene.search.spans.SpanOrQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.search.spans.Spans;
+
+/**
+ * @author mark miller
+ *
+ */
+public class SpanWildcardQuery extends SpanQuery {
+    private Term term;
+
+    private BooleanQuery rewrittenWildQuery;
+
+    public SpanWildcardQuery(Term term) {
+        this.term = term;
+    }
+
+    public Term getTerm() {
+        return term;
+    }
+
+    public Query rewrite(IndexReader reader) throws IOException {
+        WildcardQuery wildQuery = new WildcardQuery(term);
+
+        rewrittenWildQuery = (BooleanQuery) wildQuery.rewrite(reader);
+
+        BooleanQuery bq = (BooleanQuery) rewrittenWildQuery.rewrite(reader);
+
+        BooleanClause[] clauses = bq.getClauses();
+        SpanQuery[] sqs = new SpanQuery[clauses.length];
+
+        for (int i = 0; i < clauses.length; i++) {
+            BooleanClause clause = clauses[i];
+
+            TermQuery tq = (TermQuery) clause.getQuery();
+
+            sqs[i] = new SpanTermQuery(tq.getTerm());
+            sqs[i].setBoost(tq.getBoost());
+        }
+
+        SpanOrQuery query = new SpanOrQuery(sqs);
+        query.setBoost(wildQuery.getBoost());
+
+        return query;
+    }
+
+    public Spans getSpans(IndexReader reader) throws IOException {
+        throw new UnsupportedOperationException(
+                "Query should have been rewritten");
+    }
+
+    public String getField() {
+        return term.field();
+    }
+
+    /**
+     * @deprecated use extractTerms instead
+     * @see #extractTerms(Set);
+     */
+    public Collection getTerms() {
+        Collection terms = new ArrayList();
+        terms.add(term);
+
+        return terms;
+    }
+
+    public void extractTerms(Set terms) {
+        terms.add(term);
+    }
+
+    public String toString(String field) {
+        StringBuffer buffer = new StringBuffer();
+        buffer.append("spanWildcardQuery(");
+        buffer.append(term);
+        buffer.append(")");
+
+        // buffer.append(ToStringUtils.boost(getBoost()));
+        return buffer.toString();
+    }
+}
+
+
+Cedric Ho wrote:
+> Hi everybody,
+>
+> We recently need to support wildcard search terms "*", "?" together
+> with SpanQuery. It seems that there's no SpanWildcardQuery available.
+> After looking into the lucene source code for a while, I guess we can
+> either:
+>
+> 1. Use SpanRegexQuery, or
+>
+> 2. Write our own SpanWildcardQuery, and implements the
+> rewrite(IndexReader) method to rewrite the query into a SpanOrQuery
+> with some SpanTermQuery.
+>
+> Of the two approaches, Option 1 seems to be easier. But I am rather
+> concerned about the performance of using regular expression. On the
+> other hand, I am not sure if there are any other concerns I am not
+> aware of for option 2 (i.e. is there a reason why there's no
+> SpanWildcardQuery in the first place?)
+>
+> Any advices ?
+>
+> Cedric
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

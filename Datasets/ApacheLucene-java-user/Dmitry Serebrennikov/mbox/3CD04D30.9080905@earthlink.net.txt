@@ -1,0 +1,86 @@
+FROM: Dmitry Serebrennikov <dmit...@earthlink.net>
+SUBJECT: Re: FileNotFoundException: Too many open files
+DATE: 1 May 2002
+
+PA,
+
+ > On average, there seem to be less than one hundred Lucene files per 
+index.
+
+You are probably past this point by now, but since I didn't see anyone 
+pick up on this, I wanted to respond.
+"Less then a hundred" is definetely too many files for a Lucene index, 
+unless you have a very large number of stored fields!
+
+An optimized index should have about a dozen. So this either means that 
+you have many stored fields, or you are not calling optimize, or that, 
+if you are, there are unclosed IndexReader instances floating around 
+that are still using segments that existed before the optimization 
+(which replaces all segments with one new one).
+
+About file names:
+Here's the naming convention of the files in the index. This might help 
+you understand which kind of a situation you are facing:
+The index directory has the following files:
+    deletable    - one, lists segment ids that can be deleted when no 
+longer locked by the filesystem because they are open
+    segments    - one, lists segment ids of the current set of segments
+    _<n>.tii      - one per segment, "term index" file
+    _<n>.tis     - one per segment, "term infos" file
+    _<n>.frq    - one per segment, "term frequency" file
+    _<n>.prx   - one per segment, "term positions" file
+    _<n>.fdx    - one per segment, "field index" file
+    _<n>.fdt     - one per segment, "field infos" file
+    _<n>.fnm   - one per segment, "field infos" file
+    _<n>.f<m> - one per segment per stored field, "field data" file
+
+<n> - is the segment number, encoded using numbers and letters
+<m> - is the field number, which is a unique field id in that segment.
+(I realize that this is still too vague, but I had not looked through 
+that code in a while, so I can't do better than "term infos" and "field 
+infos" right now. However, this should give you an idea of what to 
+expect I think).
+An index should have 2 + n *  (7 + m) files, where n is the number of 
+segments and m is the number of stored fields. For an optimized index 
+with one stored field this gives 10 files (not a 100!).
+
+About garbage collection:
+I believe that the IndexReader instances will attempt to close 
+themselves upon finalization, however that may occur very differently 
+between different VMs and OSs. So, unless IndexReaders are closed 
+explicitly, this might explain why an application runs fine under 
+Windows, but has problems under OSX, or whatever.
+
+About the file handles:
+I'm not familiar with BSD (which is the basis for OSX on which you are 
+having these problems, right?), so I don't know how the number of open 
+files is managed there. I know that on Solaris it is a per-process 
+setting with a "soft" limit, "hard" limit, both controlled by each user, 
+and a system-wide max to the "hard" limit which only a root can change. 
+I agree that a desktop application should not require changes to system 
+configuration, but it might resonably expect a default value to be 
+present and it might change the soft limit (which is usually set very 
+low) in the startup script.
+
+On NT, so far as I know, there is no explicit setting for the number of 
+open files. Rather, it is limited by the amount of available memory in a 
+particular NT kernel memory pool (not just the free memory on the 
+system). The pool size can be controlled probably, but I've found that 
+it is usually generous enough - more so than the Solaris settings.
+
+If BSD is like NT in this regard (at least to some degree), the number 
+of open files will be determined for the entire system, so depending on 
+what other applications are running, your tests may produce a different 
+results.
+
+
+Good luck.
+Dmitry.
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

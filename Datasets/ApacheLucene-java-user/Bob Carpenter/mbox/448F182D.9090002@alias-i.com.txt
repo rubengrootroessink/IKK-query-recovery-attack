@@ -1,0 +1,211 @@
+FROM: Bob Carpenter <c...@alias-i.com>
+SUBJECT: Re: question with spellchecker
+DATE: 13 Jun 2006
+
+Very nice idea.  This is the basis of most of the work on
+word-sense-disambiguation (e.g. is it "run" as in baseball,
+"run" as in stock, or "run" as in stocking? or is "John Smith"
+CEO of GM or "John Smith" lover of  Pocahantas?).  TF/IDF's
+not a bad way to compute this, either, though there
+are definitely better classifiers for the purpose.  The approach (reprinted
+below) to context winds up looking like pseudo query refinement. 
+
+Bosworth is a bit disengenous in the podcast about just how stupid the
+techniques are that are being driven by Google's Patton-like Ph.D.s
+in tanks (his metaphor, not mine; all the Google employees I know
+are pacifists :-)). He also seems to have a bit
+of the "only Google can do this" bug, when in fact, Yahoo and Amazon
+both have very respectable web-wide spelling correction.  Here's what a 
+couple
+of Ph.D.s from Microsoft have to say about the problem of using
+query logs for search:
+
+http://acl.ldc.upenn.edu/acl2004/emnlp/pdf/Cucerzan.pdf
+
+Check out what Google itself says publicly about how their
+spell checker works:
+
+"... When we calculate a greater number of relevant search results with 
+an alternative spelling,
+     you'll see "Did you mean: (more common spelling)" at the top of 
+your search results page."
+                    - 
+http://www.google.com/support/bin/answer.py?answer=1723
+
+The key here is the "greater number of relevant search results with an 
+alt spelling".
+Yahoo does the same thing, and you can even reverse-engineer the nubmers,
+as in how many times greater does the number of results with an alt spelling
+have to be (answer is about 256-2000 times more likely, depending on the
+likelihood of the substitution [more expensive early in words, vowels 
+cheaper
+to substitute for each other than anything else, etc.]).
+This is essentially the basis of all the modern spell checkers, whether they
+use logs or not. 
+
+If it was just mining searcher behavior patterns literally, you wouldn't 
+expect
+them to be able to correct all the variants of Lucene, as in:
+
+Apache lacene -> Apache Lucen{a,b,c,...,z}
+
+because as popular and Google and Lucene are, there aren't
+that many typos in Google's logs.  Especially from all over the
+keyboard and at every point in the word.
+
+So there's really a more sophisticated notion of edit distance going on 
+here,
+with query logs being used as a feature (in the machine learning sense)
+to guide the process.  You need a lot of logs for this, and you need to be
+able to put sessions back together from IP addresses to mine the data.
+Piece of cake, so it's a common practice.
+
+Now try Google search without the "Apache" in front, and you'll see they use
+context:
+
+Apache Lucenx -> apache lucene
+akache lucne -> apache lucene
+Lucenx -> Lucent
+
+Even if they did only use the logs, it still requires some pretty fancy
+algorithm work to extract matches of variable length from huge amounts
+of log material.  And a lot of careful tuning that's hard to get right
+if you never leave your tank.
+
+Note that they'll also split and recombine, so it's not just 
+token-for-token:
+
+apachelucene -> apache lucene
+apache luc ene -> apache lucene
+
+You can also see their token sensitivity in
+
+apache luc(ene -> apache lucene
+apache lucene( -> apache lucene(
+
+You can also see how they normalize inside:
+
+apache luc()()()()ene -> apache lucene
+
+This is a very hard problem to tackle multi-lingually, which is why
+Google et al. a lot of problem with false positives (correcting things
+that were right) and false negatives (missing corrections).  This is
+especially obvious once you drop into a specialized domain that's
+not computer science (which is over-represented proportionally
+on the web), or a language that's much less popular on the web
+than English.  For example
+
+s'ils vous plaid -> no correction (846 hits)
+s'ils vous plait -> no correction 1.3M hits
+
+- Bob Carpenter
+
+mark harwood wrote:
+> For those with the luxury of a large store of historical queries it's interesting to
+note Google's approach to this.
+>
+> Not some fancy spell checker - just mining searcher behaviour patterns.
+> Google's Bosworth describes this approach approx 13 minutes into this podcast:
+>
+> http://www.itconversations.com/shows/detail571.html
+>
+>
+>
+> ----- Original Message ----
+> From: Van Nguyen <vnguyen@ur.com>
+> To: java-user@lucene.apache.org
+> Sent: Monday, 12 June, 2006 11:09:20 PM
+> Subject: RE: question with spellchecker
+>
+> I'll experiment with both.
+>
+> Thanks...
+>
+> -----Original Message-----
+> From: mark harwood [mailto:markharw00d@yahoo.co.uk] 
+> Sent: Wednesday, June 07, 2006 2:16 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: question with spellchecker
+>
+> I think the problem in your particular example is the
+> suggestion software has no consideration of context.
+>
+> I've been playing with context-sensitive suggestions
+> recently which take a bunch of validated (ie existing)
+> words (eg "tape") and use this to help shortlist
+> alternatives for an unknown or partially typed word
+> (eg ducted)
+>
+> This has potential applications in spell checking and
+> as-you-type query completion.
+>
+> The approach is quite simple but effective - You use
+> your choice of code to produce a list of candidate
+> terms  (eg FuzzyTermEnum or some form of Soundex or
+> PrefixQuery) THEN take the large list of candidate
+> terms produced and compare their usage in relation to
+> the context of  words you already know eg "tape".
+> In practice this means that TermDocs for the candidate
+> term are used to construct a doc bitset which is
+> compared with a doc bitset produced from all other
+> terms which make up the context. The level of
+> intersection between these bitsets can be used to help
+> sensibly rank the "duct" and "ducked" candidates in
+> relation to "tape". Do they co-occur often?
+>
+> [psuedo code]
+> BitSet contextDocs= matchKnownTerms();
+> float numContextMatches=contextDocs.cardinality();
+> for all candidate terms for unknown term
+> {
+>   BitSet candMatches =createBitset(candTerm)
+>   float numCandMatches=candMatches.cardinality();
+>   float
+> numSharedMatches=candMatches.and(contextDocs).cardinality()
+>   float contextRelatedness =numSharedMatches/
+>    (
+>      (numCandMatches+numContextMatches)
+>       -numSharedMatches
+>    )
+>   //collect candidate Terms that have high combo of 
+>   //contextRelatedness and unknown term similarity (eg
+> low edit distance) 
+> }
+>
+> There are quite a few optimisations I've added to this
+> basic pseudo code in my implementation. When I get
+> some time I'll package this code up and contribute it
+> but for now this psuedo code may give some pointers
+> which help to provide a solution.
+>
+>
+> Cheers,
+> Mark
+>
+>
+> Send instant messages to your online friends
+> http://uk.messenger.yahoo.com 
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

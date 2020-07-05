@@ -1,0 +1,127 @@
+FROM: "Marcelo Ochoa" <marcelo.oc...@gmail.com>
+SUBJECT: Oracle/Lucene integration -status-
+DATE: 21 Dec 2006
+
+Hi:
+  Yesterday, I uploaded a new version of the Oracle/Lucene integration
+using BLOB as storage for the inverted index and the Oracle JVM for
+running the Lucene framework inside the Oracle Database, see it at the
+Jira:
+http://issues.apache.org/jira/browse/LUCENE-724
+  This new version includes a full implementation of a new Oracle
+Domain Index to index and search Oracle columns of type VARCHAR2, CLOB
+and XMLType using Lucene.
+  You can index a table with Lucene with a simple SQL command:
+create index it1 on t1(f2) indextype is lucene.LuceneIndex
+parameters('Analyzer:org.apache.lucene.analysis.StopAnalyzer');
+   This DDL command will index the column f2 of the table t1,
+registering a new index for the table named it1.
+   Next you can search against the table by using the SQL Operator
+lcontains and get the score with lscore, for example:
+   select lscore(1),f2 from t1 where lcontains(f2, 'procedure or
+function',1) > 0;
+   Also the lcontains operator can be used outside the where:
+   select lcontains(f2, 'procedure or function') from t1;
+   the lucene inverted index is called to check if the current row
+contains the string "procedure or function".
+   The implementation of the Domain Index provides a new way to sort
+and filter Lucene queries, It mean you can change the design of the
+application to use other database index and filters, for example
+bitmap index for column with low cardinality or BTrees, then the
+optimizer will choose the correct execution plan for the query.
+    Here a simple example:
+create table emails (
+ emailFrom VARCHAR2(256),
+ emailTo VARCHAR2(256),
+ subject VARCHAR2(4000),
+ emailDate DATE,
+ bodyText CLOB)
+/
+
+create index emailSubject on emails(subject) indextype is lucene.LuceneIndex
+parameters('Analyzer:org.apache.lucene.analysis.SimpleAnalyzer');
+
+create index emailBody on emails(bodyText) indextype is lucene.LuceneIndex
+parameters('Analyzer:org.apache.lucene.analysis.StopAnalyzer');
+-- BTree index
+create index emailFromIdx on emails(emailFrom);
+-- BTree index
+create index emailToIdx on emails(emailTo);
+
+SQL> explain plan for
+SELECT * FROM emails where emailfrom like '%@gmail.com' and
+lcontains(bodytext,'security',1)>0
+order by emaildate,lscore(1);
+set echo off
+@@explainPlan
+set echo on
+  2    3
+Explained.
+
+Elapsed: 00:00:00.03
+SQL> SQL>
+PLAN_TABLE_OUTPUT
+--------------------------------------------------------------------------------------------------------------------------------------------
+Plan hash value: 1696552134
+
+------------------------------------------------------------------------------------------
+| Id  | Operation                    | Name      | Rows  | Bytes |
+Cost (%CPU)| Time     |
+------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT             |           |     1 |  4285 |
+4  (25)| 00:00:01 |
+|   1 |  SORT ORDER BY               |           |     1 |  4285 |
+4  (25)| 00:00:01 |
+|*  2 |   TABLE ACCESS BY INDEX ROWID| EMAILS    |     1 |  4285 |
+3   (0)| 00:00:01 |
+|*  3 |    DOMAIN INDEX              | EMAILBODY |       |       |
+       |          |
+------------------------------------------------------------------------------------------
+
+Predicate Information (identified by operation id):
+---------------------------------------------------
+
+   2 - filter("EMAILFROM" LIKE '%@gmail.com')
+   3 - access("LUCENE"."LCONTAINS"("BODYTEXT",'security',1)>0)
+
+Note
+-----
+   - dynamic sampling used for this statement
+
+20 rows selected.
+
+   The above example shows that the optimizer chooses first the Lucene
+Domain Index to search all the emails that contains the text
+'security', get the rows using is rowid (direct access), apply the
+filter like and finally sort by the score and date.
+   I am still working on the code to implement the todo list (see
+db/readmeOJVM.html file on the tar.gz) specially to pass the stats of
+the index to the Oracle Data Cartridge API and the stemmer (Snowball
+Analyzer) for indexing other languages than the English ;)
+   Today, I added the code for caching Hits in addition to the caching
+of the searcher and the Filter, so multiples invocations of the
+operator lcontains share the same read-only instance of the
+OJVMDirectory and if the query string returned by the query parser is
+equals, it will re-use the Hits returned by a previous query.
+   Sorry for the long email :)
+   Best regards, Marcelo.
+-- 
+Marcelo F. Ochoa
+http://marcelo.ochoa.googlepages.com/home
+______________
+Do you Know DBPrism? Look @ DB Prism's Web Site
+http://www.dbprism.com.ar/index.html
+More info?
+Chapter 17 of the book "Programming the Oracle Database using Java &
+Web Services"
+http://www.amazon.com/gp/product/1555583296/
+Chapter 21 of the book "Professional XML Databases" - Wrox Press
+http://www.amazon.com/gp/product/1861003587/
+Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+http://www.oreilly.com/catalog/oracleopen/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

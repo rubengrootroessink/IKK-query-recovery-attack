@@ -1,0 +1,68 @@
+FROM: Oliver Flege <o.fl...@market-maker.de>
+SUBJECT: FieldCacheImpl caveat
+DATE: 7 Apr 2008
+
+
+An undocumented feature of FieldCacheImpl led to an OutOfMemoryError 
+in our application and to know about that might be of general interest:
+
+We are using lucene 2.3.1 and our index (3m documents)
+is updated 3 times per day. On every update, we create a new 
+instance of a Searcher class, which is defined like this: 
+
+class Searcher {
+   private final IndexReader indexReader;
+   private final int[] ids;
+
+   Searcher(IndexReader indexReader) {
+         this.indexReader = indexReader;
+
+         this.ids = FieldCache.DEFAULT.getInts(this.indexReader, "ids",
+                new FieldCache.IntParser() {
+                    public int parseInt(String s) {
+                        return Integer.parseInt(s, Character.MAX_RADIX);
+                    }
+                });
+
+
+The ids[] field is used to improve search speed and had been added recently.
+At first, everything looked fine, but after a couple of days
+our application crashed with an OutOfMemoryError.
+
+The FieldCacheImpl (implementation behind FieldCache.DEFAULT) stores entries
+in a WeakHashMap and uses IndexReader objects as keys, so when a particular 
+IndexReader is only weakly reachable its values can be removed from the
+cache.
+
+Since we only have a single reference to the most recent Searcher instance
+in a 
+Controller class, it seemed obvious that stale values in FieldCache's
+WeakHashMap 
+could be gc'ed as soon as a new Searcher object replaced the old one.
+
+BUT FieldCacheImpl stores a reference to the IntParser (or any other parser)
+in the cache. Since we used an anonymous inner class, it contained a
+reference
+to the enclosing Searcher instance which in turn referenced the IndexReader,
+so 
+that was never only weakly reachable and never got removed from the
+FieldCache.
+After replacing the anonymous inner IntParser with a static inner class, 
+the FieldCache worked as expected.
+
+It would be a good idea to document the fact that the FieldCacheImpl stores
+references to Parsers.
+
+
+ Oliver 
+
+-- 
+View this message in context: http://www.nabble.com/FieldCacheImpl-caveat-tp16537223p16537223.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

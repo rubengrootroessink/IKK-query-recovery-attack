@@ -1,0 +1,50 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Lucene 2.2, NFS, Lock obtain timed out
+DATE: 30 Jun 2007
+
+
+Patrick Kimber wrote:
+
+> I have been checking the application log.  Just before the time when
+> the lock file errors occur I found this log entry:
+> [11:28:59] [ERROR] IndexAccessProvider
+> java.io.FileNotFoundException:
+> /mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_h75 (No
+> such file or directory)
+>     at java.io.RandomAccessFile.open(Native Method)
+
+I think this exception is the root cause.  On hitting this IOException
+in reader.close(), that means this reader has not released its write
+lock.  Is it possible to see the full stack trace?
+
+Having the wrong deletion policy or even a buggy deletion policy (if
+indeed file.lastModified() varies by too much across machines) can't
+cause this (I think).  At worse, the wrong deletion policy should
+cause other already-open readers to hit "Stale NFS handle"
+IOExceptions during searching.  So, you should use your
+ExpirationTimeDeletionPolicy when opening your readers if they will be
+doing deletes, but I don't think it explains this root-cause exception
+during close().
+
+It's a rather spooky exception ... in close(), the reader initializes
+an IndexFileDeleter which lists the directory and opens any segments_N
+files that it finds.
+
+Do you have a writer on one machine closing, and then very soon
+thereafter this reader on a different machine does deletes and tries
+to close? 
+
+My best guess is the exception is happening inside that initialization
+because the directory listing said that "segments_XXX" exists but then
+when it tries to open that file, it does not in fact exist.  Since NFS
+client-side caching (especially directory listing cache) is not
+generally guaranteed to be "correct", it could explain this.  But let's
+see the full stack trace to make sure this is it...
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

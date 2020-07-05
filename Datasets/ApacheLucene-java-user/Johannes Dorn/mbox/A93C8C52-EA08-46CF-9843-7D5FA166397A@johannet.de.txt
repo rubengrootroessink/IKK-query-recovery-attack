@@ -1,0 +1,205 @@
+FROM: Johannes Dorn <johan...@johannet.de>
+SUBJECT: Search returns empty Documents
+DATE: 23 Jul 2008
+
+Hello,
+I am quite new to Lucene.
+I've added a search to my application by combining the getting started  
+application and the xml#1 contribution.
+
+Here are the methods used to generate the index.
+
+	public static void generateIndex() {
+		try {
+			if (!docDir.exists() || !docDir.canRead()) {
+				System.out.println("Document directory '" +docDir.getAbsolutePath() 
++ "' does not exist or is not readable, please check the path");
+				System.exit(1);
+			}	
+			IndexWriter writer = new IndexWriter(INDEX_DIR, new  
+StandardAnalyzer(), true);
+			indexDocs(writer, docDir);
+			writer.optimize();
+			writer.close();
+		} catch (IOException e) {
+			System.out.println(e.getMessage());
+		}
+	}
+
+	private static void indexDocs(IndexWriter writer, File file) throws  
+IOException {
+		if (file.canRead()) {
+			if (!file.getName().substring(0, 1).equals(".")) {
+				if (file.isDirectory() && file.equals(docDir)) {
+					String[] files = file.list();
+					if (files != null) {
+						for (int i=0; i<files.length; i++) {			
+							indexDocs(writer, new File(file+"/"+files[i]));
+						}
+					}
+				}
+				else {
+					try {
+						saxParserFactory = SAXParserFactory.newInstance();
+						saxParserFactory.setValidating(false);
+						SAXParser saxParser = saxParserFactory.newSAXParser();
+						xmlReader = saxParser.getXMLReader();
+
+						transformerFactory = TransformerFactory.newInstance();
+						Transformer transformer = transformerFactory.newTransformer(new  
+StreamSource(xslFileSite.toURL().toString()));
+						xmlIndexer = new XMLIndexer(writer,xmlReader,transformer);
+						xmlIndexer.indexFile(file);
+					}
+					catch (Exception ex) {
+						System.out.println(ex);
+					}
+				}
+			}
+		}			
+	}
+
+    public void startElement(String namespaceURI, String localName,
+                             String rawName, Attributes atts)
+		throws SAXException
+    {
+    	if(rawName.equals("field") || rawName.equals("datefield"))
+    	{
+    		currentField = new FieldHolder();
+			currentField.type = rawName;
+			currentField.name = atts.getValue("name");
+			currentField.value = new StringBuffer();
+			currentField.store = atts.getValue("store").equals("true") ?  
+true:false;
+			currentField.index = atts.getValue("index").equals("true") ?  
+true:false;
+			currentField.token = atts.getValue("token").equals("true") ?  
+true:false;
+			inField = true;
+		}
+    }
+
+    public void characters(char[] ch, int start, int length) throws  
+SAXException
+    {
+		if(inField)
+		{
+			currentField.value.append(ch,start,length);
+		}
+	}
+
+	public void endElement(java.lang.String namespaceURI,
+                       java.lang.String localName,
+                       java.lang.String qName)
+                throws SAXException
+	{
+		fieldHolders.add(currentField);
+		inField = false;
+	}
+
+	public void indexFile(File xmlFile) throws Exception
+	{
+		if(xmlFile.exists())
+		{
+			try
+			{
+				ByteArrayOutputStream byteOutputStream = new  
+ByteArrayOutputStream((int)(xmlFile.length())*2);
+				BufferedOutputStream bufferedOutputStream = new  
+BufferedOutputStream(byteOutputStream);
+				StreamResult streamResult = new StreamResult(bufferedOutputStream);
+
+				FileInputStream fileInputStream = new FileInputStream(xmlFile);
+				StreamSource streamSource = new StreamSource(new  
+BufferedInputStream(fileInputStream));
+				transformer.transform(streamSource,streamResult);
+				BufferedInputStream inputStream = new BufferedInputStream(new  
+ByteArrayInputStream(byteOutputStream.toByteArray()));
+				xmlReader.parse(new InputSource(inputStream));
+
+				Document doc = new Document();
+				for(int i=0; i<2; i++)
+				{
+					FieldHolder fieldHolder = (FieldHolder)(fieldHolders.get(i));
+					
+					//Modified by Johannes Dorn
+					Field.Store store = Field.Store.YES;
+					if (fieldHolder.store == false)
+						store = Field.Store.NO;
+					
+					Field.Index index = Field.Index.NO;
+					if (fieldHolder.index) {
+						if (fieldHolder.token)
+							index = Field.Index.TOKENIZED;
+						else
+							index = Field.Index.UN_TOKENIZED;
+					}
+					
+			//		if(!fieldHolder.value.toString().trim().equals(""))
+					   doc.add(new  
+Field(fieldHolder.name,fieldHolder.value.toString(),store,index));
+					//End of Modifications
+				}
+				writer.addDocument(doc);
+			}
+			catch (Exception exception)
+			{
+				transformer.clearParameters();
+				//put log messages here
+			}
+		}
+		else
+		{
+			//put log messages here
+		}
+	}
+
+And now the search:
+
+	public static Vector<String> search(String searchText) throws  
+Exception {
+		Vector<String> result = new Vector<String>();
+		String index = "index";
+		String defaultField = "text";
+
+		IndexReader reader = IndexReader.open(index);
+		Searcher searcher = new IndexSearcher(reader);
+		Analyzer analyzer = new StandardAnalyzer();
+
+		QueryParser parser = new QueryParser(defaultField, analyzer);
+
+		Query query = parser.parse(searchText);
+
+		Hits hits = searcher.search(query);
+		for (int i = 0; i < hits.length(); i++) {
+			Document doc = hits.doc(i);
+			String path = doc.get("path");
+			if (path != null) {
+				String title = path;
+				int pos = title.indexOf("/");
+				title = title.substring(pos+1);
+				pos = title.indexOf("/");
+				title = title.substring(pos+1);
+				if (title != null) {
+					result.add(title);
+				}
+			} else {
+			}
+		}
+		reader.close();
+		searcher.close();
+		return result;
+	}
+
+
+Right now, I only index and search two files.
+If i search for a word, that is in either of these files, hits has  
+three docs, all of whice are null.
+
+What am i doing wrong here?
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

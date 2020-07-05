@@ -1,0 +1,172 @@
+FROM: Thomas Rewig <tre...@mufin.com>
+SUBJECT: Re: Problems with ItemBasedRecommender with Lucene
+DATE: 17 Sep 2009
+
+Oh, I overlooked the simplest way to do that. You're right, tokens are 
+the key to this problem. It works pretty well.
+It would be perfect if I use payloads. I read your advice 
+http://www.lucidimagination.com/blog/category/payloads/.
+
+You store the payloads with your PayLoadAnalyzer in this way:
+
+    //Store both position and offset information
+    Field text = new Field("body", DOCS[i], Field.Store.NO, 
+Field.Index.ANALYZED);
+
+Is there a chance to use
+
+    Field.Index.ANALYZED_NO_NORMS
+
+because otherwise my index would be much to big or are normes necessary 
+for Payloads?
+
+You use Lucene 2.9 is there a way to do this with Lucene 2.4.1 because I 
+can't find e.g. the "PayloadEncoder" or do I have to wait for the release?
+
+Regards Thomas
+>
+> You might want to ask on mahout-user, but I'm guessing Ted didn't mean 
+> a new field for every item-item, but instead to represent them as 
+> tokens and then create the corresponding appropriate queries (seems 
+> like payloads may be useful, or function queries).  That to me is the 
+> only way you would achieve the sparseness savings you are after.
+>
+> -Grant
+>
+> --------------------------
+> Grant Ingersoll
+> http://www.lucidimagination.com/
+>
+> Search the Lucene ecosystem (Lucene/Solr/Nutch/Mahout/Tika/Droids) 
+> using Solr/Lucene:
+> http://www.lucidimagination.com/search
+>
+>> Hello,
+>>
+>> I build a "real time ItemBasedRecommender" based on a users history 
+>> and a (sparse) item similarity matrix with lucene. Some time ago Ted 
+>> Dunning recommended me this approach at the mahout mailing list to 
+>> create a ItemBasedRecommender:
+>>
+>> "It is actually very easy to do. The output of the recommendation 
+>> off-line process is generally a sparse matrix of item-item links. 
+>> Each line of this sparse matrix can be considered a document in 
+>> creating a Lucene index. You will have to use a correct analyzer and 
+>> a line by line document segmenter, but that is trivial. Then 
+>> recommendation is a simple query step."
+>>
+>> So for 100000 items it works fine - but for 1 million items the 
+>> Indexing fails and I have no idea how to avoid this. Maybe you can 
+>> give me a hint.
+>>
+>> First I create a Item-Item-Similaritymatrix with mahout's taste and 
+>> in the second step I index it. The matrix is sparce because only 
+>> Item-Item-Relations with a high correlation will be saved.
+>>
+>> Here are the Code Snippets for this indexing :
+>>           CachedRowSetImpl rowSetMainItemList = null; // Mapping of 
+>> Items
+>>       ArrayList<String> listBelongingItems = null; // Belonging and 
+>> highest correlating Items for a MainItem
+>>       Document aDocument = null;
+>>       Field aField = null;
+>>       Field aField1 = null;
+>>             Analyzer aAnalyzer  = new StandardAnalyzer();
+>>       IndexWriter aWriter = new IndexWriter(this.indexDirectory, 
+>> aAnalyzer, true, IndexWriter.MaxFieldLength.UNLIMITED);
+>>             aWriter.setRAMBufferSizeMB(48);
+>>             rowSetMainItemList = getRowSetItemList(); //get all Items
+>>             aField1 = new Field("Item1", "", 
+>> Field.Store.YES,Field.Index.ANALYZED); // reuse this field
+>>             while (rowSetMainItemList.next()){
+>>                         aDocument = new Document();
+>>                             
+>> aField1.setValue(rowSetMainItemList.getString(1));              
+>> aDocument.add(aField1);
+>>                     listBelongingItems = 
+>> getRowSetBelongingItems(rowSetMainItemList.getString(1)); // get the 
+>> most similar Items fpr a Item
+>>           Iterator<String> itrBelongingItems = 
+>> listBelongingItems.iterator();
+>>                         while (itrBelongingItems.hasNext()){
+>>                                 String strBelongingItem = (String) 
+>> itrBelongingItems.next();
+>>               //No reuse of Field possible because of different 
+>> fieldnames:
+>>               aField = new Field(strBelongingItem,"1", 
+>> Field.Store.NO,Field.Index.ANALYZED_NO_NORMS);
+>>               aDocument.add(aField);
+>>           }
+>>                         
+>> aWriter.addDocument(aDocument);                        }
+>>             aWriter.optimize();
+>>       aWriter.close();
+>>                 aAnalyzer.close();
+>>              Actually the Field of the BelongingItem have to be 
+>> boosted with the MainItem-BelongingItem-Correlation-Value to get 
+>> accurate Recommendations, but here the Index would be about 80 GByte 
+>> for 6 million items... without it will only be about 2Gbyte.
+>> But under the condition that only relevant Correlations will be saved 
+>> in the Similaritymatrix the recommendation quality will be good enough.
+>>
+>> The item recommendation for a User is a simple BooleanQuery with 
+>> userhistory boosted TermQuerys. Here I search for documents with the 
+>> largest Correspondence regarding the userhistory.  So I  look in 
+>> which Documents the most Fields with the name of a BelongingItem are 
+>> set (with value 1) and recommend the "key"-value which was set in 
+>> aField1("Item"...)
+>> Whatever, as i mentioned it worked for a Number of 100000 Items.  But 
+>> if there are 1 million items the indexing crash after a while with
+>>
+>> Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+>>       at java.util.HashMap.resize(HashMap.java:462)
+>>       at java.util.HashMap.addEntry(HashMap.java:755)
+>>       at java.util.HashMap.put(HashMap.java:385)
+>>       at java.util.HashSet.add(HashSet.java:200)
+>>       at org.apache.lucene.index.DocInverter.flush(DocInverter.java:66)
+>>       at 
+>> org.apache.lucene.index.DocFieldConsumers.flush(DocFieldConsumers.java:75) 
+>>
+>>       at 
+>> org.apache.lucene.index.DocFieldProcessor.flush(DocFieldProcessor.java:60) 
+>>
+>>       at 
+>> org.apache.lucene.index.DocumentsWriter.flush(DocumentsWriter.java:574)
+>>       at 
+>> org.apache.lucene.index.IndexWriter.doFlush(IndexWriter.java:3540)
+>>       at 
+>> org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:3450)
+>>       at 
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:1937)
+>>       at 
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:1895)
+>>
+>> if I increase the Java heap space there will be a "OutOfMemoryError: 
+>> /PermGen space" /Exception.
+>> If I increase the PermGen Space -XX:MaxPermSize=1024m the Java heap 
+>> space is still the limiting factor.
+>> I can increase both to the maximum of my system  - 20Gbyte Ram are 
+>> available - but this doesn't solve the problem.
+>>
+>> Through indexing the ram-memory consumtion growing steadily until it 
+>> chrashes. It does not matter if I index the data in segments with 
+>> open and close each time the IndexWriter or if I optimize the index 
+>> periodically - the ram-memory consumtion is still growing ...
+>>
+>> I think the problem is, that I can't reuse the field aField for my 
+>> approach and it seems the GC doesn't collect it. Extrapolated thats 
+>> 600 Million unique fields...
+>>
+>> I'm using lucene 2.4.1 and java version "1.6.0_16".
+>>
+>> Do anyone have an idea to avoid the growing memory. Or do somebody 
+>> know an other approche for a "realtime Item based Recommender" with 
+>> Lucene?
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

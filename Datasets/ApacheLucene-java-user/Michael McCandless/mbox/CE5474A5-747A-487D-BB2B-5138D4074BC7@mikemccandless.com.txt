@@ -1,0 +1,61 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: SnapshotDeletionPolicy usage
+DATE: 5 Feb 2008
+
+
+jm wrote:
+
+> Hi guys,
+>
+> I want to make use of the possibylity of hot backups in 2.3. If i
+> understand correctly, the only thing i need to do is to open the
+> writers with SnapshotDeletionPolicy, is that correct?
+
+Right.
+
+> SnapshotDeletionPolicy dp = new SnapshotDeletionPolicy(new
+> KeepOnlyLastCommitDeletionPolicy());
+> final IndexWriter writer = new IndexWriter(dir, true, new
+> StandardAnalyzer(), dp);
+
+You can also wrap any other deletion policy (it doesn't have to be  
+KeepOnlyLastCommit).
+
+When you want to do a backup, make sure to do try/finally, ie:
+
+   IndexCommitPoint cp = dp.snapshot();
+   try {
+     Collection files = cp.getFileNames();
+     <do copying here>
+   } finally {
+     dp.release();
+   }
+
+> And what would be the trade off of using this policy versus the
+> default (performance wise)? I have frenquently updating indexes (up to
+> tens every second) that i close periodically, and much less freqent
+> readers.
+
+There should be no performance loss as far as indexing throughput goes.
+
+Though obviously while a backup is running, if you are taxing your IO  
+system, then flushing/merging by the writer may take longer to run...  
+however, it's safe (and maybe a good idea) to throttle the IO of your  
+backup so you don't adversely affect ongoing indexing & searching.   
+It just means you hold the commit point open for longer...
+
+There is a transient cost in disk space: while a backup is running,  
+the writer will not delete any segment files referenced by the commit  
+point you have open.  So, if the writer goes and merges away some of  
+these segments while your backup is running, this will consume some  
+extra disk space.  Once you release the snapshot, the disk space will  
+be reclaimed the next time the writer flushes, merges or is closed.
+
+Mike
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

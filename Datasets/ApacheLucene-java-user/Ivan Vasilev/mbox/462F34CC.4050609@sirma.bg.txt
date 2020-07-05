@@ -1,0 +1,209 @@
+FROM: Ivan Vasilev <ivasi...@sirma.bg>
+SUBJECT: Re: Out of memory exception for big indexes
+DATE: 25 Apr 2007
+
+Hi Artem,
+
+Thank you very much for your mails :)
+So first I have to tell you that your patch works perfectly even with 
+very big indexes - 40 GB (you can see the results bellow).
+The reason I to have bad test results last time is that I made a bit 
+change (but I can not understand why this change made problem - on my 
+opinion it should not have so big effects on performance).
+So the change that I made is - I added a new method in the class 
+StoredFieldSortFactory. It is the same like create(String sortFieldName, 
+boolean sortDescending) method but instead of wrapping SortField it 
+return it directly and in my class I wrap this object in a Sort one. 
+Here is the code:
+
+public static SortField createSortField(String sortFieldName, boolean 
+sortDescending) {
+return new SortField(sortFieldName, instance, sortDescending);
+}
+
+I do this because we have to support sorting on multiple fields and I 
+obtain all SortField objects in a cycle and then create Sort out of them:
+
+Sort sort = new Sort(sortFields);
+
+In my tests that were with very bad results (time for searches was more 
+than 5 mins) in all the tests I used sorting ONLY BY ONE FIELD (means 
+the array sortFields was always with length 1).
+But I still used the constructor Sort(SortField[]) but not 
+Sort(SortField) as originally in your code in the method 
+StoredFieldSortFactory.create(..).
+Do you think this is the reason for pure performance?
+
+If so, COULD YOU PLEASE TELL ME how to use your patch for sorting on 
+multiple stored fields?
+
+Here are the test result of your patch with different indexes (the tests 
+are with code just as you recommend to use it - with using of your 
+create(..) method that uses constructor Sort(SortField) ):
+
+- CPU - Intel Core2Duo, max memory allowed to the process that makes 
+searching - 1GB (not all of it used)
+**********************************************************************************************************
+- index size 3,3 GB, about 486 410 documents (all the testing searches 
+include all documents);
+
+____________________________________________________________________________________________
+
+- field size - it is file name and varies - on my opinion 15 - 30 chars 
+average.
+- search time (ASC) - 1,312 s, memory usage - 71MB
+- search time (DSC) - 1,281 s, memory usage - 71MB
+
+- field size - it is abs path name and varies - on my opinion 60 - 90 
+chars average.
+- search time (ASC) - 1,344 s, memory usage - 71MB
+- search time (DSC) - 1,328 s, memory usage - 71MB
+
+- field size - it is file size and varies - on my opinion 3 - 7 chars 
+average.
+- search time (ASC) - 1,313 s, memory usage - 71MB
+- search time (DSC) - 1,312 s, memory usage - 71MB
+
+**********************************************************************************
+
+- index size 21,4 GB, about 376 999 documents (all the testing searches 
+include all documents);
+____________________________________________________________________________________________
+
+- field size - it is file name and varies - on my opinion 15 - 30 chars 
+average.
+- search time (ASC) - 0,875 s, memory usage - 371MB
+- search time (DSC) - 0,828 s, memory usage - 371MB
+
+- field size - it is abs path name and varies - on my opinion 60 - 90 
+chars average.
+- search time (ASC) - 0,844 s, memory usage - 371MB
+- search time (DSC) - 0,813 s, memory usage - 371MB
+
+- field size - it is file size and varies - on my opinion 3 - 7 chars 
+average.
+- search time (ASC) - 0,813 s, memory usage - 371MB
+- search time (DSC) - 0,797 s, memory usage - 371MB
+
+**********************************************************************************
+
+- index size 42,9 GB, about 10 944 918 documents (all the testing 
+searches include all documents);
+____________________________________________________________________________________________
+
+- field size - it is file name and varies - on my opinion 15 - 30 chars 
+average.
+- search time (ASC) - 21,905 s, memory usage - 625MB
+- search time (DSC) - 21,781 s, memory usage - 625MB
+
+- field size - it is abs path name and varies - on my opinion 60 - 90 
+chars average.
+- search time (ASC) - 21,874 s, memory usage - 625MB
+- search time (DSC) - 21,749 s, memory usage - 625MB
+
+- field size - it is file size and varies - on my opinion 3 - 7 chars 
+average.
+- search time (ASC) - 21,687 s, memory usage - 625MB
+- search time (DSC) - 21,812 s, memory usage - 625MB
+
+
+THANK YOU VERY MUCH,
+Ivan
+
+
+
+
+Artem Vasiliev wrote:
+> Hello Ivan!
+>
+> It's so sad to me that you had bad results with that patch. :)
+>
+> The discussion in the ticket is out-of-date - the patch was initially in
+> several classes, used WeakHashMap but then it evolved to what it's now 
+> - one
+> StoredFieldSortFactory class. I use it in my sharehound app in pretty 
+> much
+> the same the form it is in Jira currently and it does show good 
+> results to
+> me.
+>
+> In your sample searches,
+> - how many results do you have?
+> - how long does the sorted search execute?
+> - what is the average size of a sorted field?
+> - what is the CPU and how much of it and memory you give to the 
+> application?
+>
+> I get page 1 (first 100 items) of sorted list with 10000 items in 0.3s 
+> to 3s
+> (for date column it exactly depends on whether the sort is ascending or
+> descending - don't know why is that). My index is about 1mln docs and 1G;
+> sorted fields are rather small (numbers, dates and string of maybe 50
+> symbols average). The machine looks quite beefy to me - Intel core duo 
+> with
+> 500M given to the application.
+>
+> Regards,
+> Artem
+>
+> On 4/23/07, Ivan Vasilev <ivasilev@sirma.bg> wrote:
+>>
+>> Hi All,
+>> THANK YOU FOR YOUR HELP :)
+>> I put this problem in the forum but I had no chance to work on it last
+>> week unfurtunately...
+>> So now I tested the Artem's patch but the results show:
+>> 1) speed is very slow compare with the usage without patch
+>> 2) There are not very big differences of memory usage (I tested till now
+>> only with relativly small indexes - less than 1 GB and less than 1 mil
+>> docs because the when using with 20-40 GB indexes I had to wait more
+>> than 5 mins what is practically usless).
+>>
+>> So I have doubts if I use the patch correctly. I do just what is
+>> described in Artem's letter:
+>>
+>> AV> You can include StoredFieldSortFactory class source file into your
+>> sources and
+>> AV> then use StoredFieldSortFactory.create(sortFieldName, 
+>> sortDescending)
+>> to get
+>> AV> Sort object for sorting query.
+>> AV> StoredFieldSortFactory source file can be extracted from LUCENE-769
+>> patch or
+>> AV> from sharehound sources:
+>> http://sharehound.cvs.sourceforge.net/*checkout*/sharehound/jNetCrawler/src/java/org/apache/lucene/search/StoredFieldSortFactory.java
+
+>>
+>>
+>>
+>> What I am wondering about is that in the patch commetns
+>> (https://issues.apache.org/jira/browse/LUCENE-769) I see that there is
+>> written that patch solves the problem by using WeakHashMap, but actually
+>> in the downloaded StoredFieldSortFactory.java  file there is not used
+>> WeakHashMap. Another thing: In the comments in Lucene-769 issue there is
+>> mentioned something about classes like: WeakDocumentsCache and
+>> DocCachingIndexReader but I did not found them in Lucene source code
+>> neither as classes in StoredFieldSortFactory.java. So my questions are:
+>> 1. Is it enought to include the file StoredFieldSortFactory.java in the
+>> source code or there are also other classes that I have to douwnload and
+>> include?
+>> 2. Have I to use this DocCachingIndexReader instead of Reader that I
+>> currently use in cases when I expect OOMException and will use this 
+>> patch?
+>>
+>> Thanks to all once again :),
+>> Ivan
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

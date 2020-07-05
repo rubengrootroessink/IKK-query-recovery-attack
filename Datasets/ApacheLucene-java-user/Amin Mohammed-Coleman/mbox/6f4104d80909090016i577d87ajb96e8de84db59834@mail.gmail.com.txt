@@ -1,0 +1,226 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Filtering question/advice
+DATE: 9 Sep 2009
+
+Hi
+
+Thanks for your reponse.  Here is the following testcase:
+
+public class UnderwriterReferenceTest {
+    private Directory directory;
+    private Analyzer analyzer;
+    private IndexSearcher indexSearcher;
+    private IndexWriter indexWriter;
+    private Document layerDocumentA;
+
+
+    @Before
+    public void setUp() throws Exception {
+        directory = new RAMDirectory();
+        analyzer = new StandardAnalyzer();
+        indexWriter = new IndexWriter(directory, analyzer,
+IndexWriter.MaxFieldLength.UNLIMITED);
+
+    }
+
+   @Before
+   public void setUpDocumentsForIndexing() throws Exception {
+
+       Field uw1 = new Field("uw-refernce", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+       Field uw2 = new Field("uw-refernce", "bye", Field.Store.NO,
+Field.Index.ANALYZED);
+
+
+       Field uw1UWA = new Field("uw-uwa", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+       Field uw2UWB = new Field("uw-uwb", "bye", Field.Store.NO,
+Field.Index.ANALYZED);
+
+
+       layerDocumentA = new Document();
+       layerDocumentA.add(uw1);
+       layerDocumentA.add(uw1);
+       layerDocumentA.add(uw1UWA);
+       layerDocumentA.add(uw2UWB);
+   }
+
+
+    @Test
+    public void
+testUWBCannotSeeResultIfUWReferenceIsSearchThatDoesNotBelongToUWB() throws
+Exception {
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+        filter.setUwId("uwb");
+        filter.setTermValue("hello");
+
+        QueryParser queryParser = new QueryParser("uw-refernce", analyzer);
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(0, topDocs.totalHits);
+    }
+
+
+    @Test
+    public void
+testUWACanSeeResultIfUWReferenceIsSearchThatDoesBelongToUWA() throws
+Exception {
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+        filter.setUwId("uwa");
+        filter.setTermValue("hello");
+
+        QueryParser queryParser = new QueryParser("uw-refernce", analyzer);
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(1, topDocs.totalHits);
+    }
+
+    @Test
+    public void testUWBCanSeeResultIfSearchTermMatchesOnSomethingElse()
+throws Exception {
+
+        Field data = new Field("data", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+        layerDocumentA.add(data);
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+
+        MultiFieldQueryParser queryParser = new MultiFieldQueryParser(new
+String[]{"uw-refernce", "data"}, analyzer);
+        queryParser.enable_tracing();
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+
+
+
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(1, topDocs.totalHits);
+
+    }
+
+   private class UnderwriterReferenceFilter extends Filter {
+
+    private String uwId;
+    private String termValue;
+
+    public void setTermValue(String termValue) {
+       this.termValue = termValue;
+    }
+
+    public void setUwId(String uwId) {
+        this.uwId = uwId;
+    }
+
+    @Override
+    public DocIdSet getDocIdSet(org.apache.lucene.index.IndexReader reader)
+throws java.io.IOException  {
+        if (uwId == null || "".equals(uwId)) {
+            throw new IllegalArgumentException("uwidnot set for filtering");
+        }
+
+        OpenBitSet bitSet = new OpenBitSet( reader.maxDoc());
+        Term term = new Term("uw-"+uwId, termValue);
+        TermDocs termDocs = reader.termDocs( term );
+        while ( termDocs.next() ) {
+            bitSet.set( termDocs.doc() );
+        }
+
+        return bitSet;
+
+    }
+   }
+
+}
+
+As you can see I am using a filter to filter out results based on uwId.  Is
+it possible to use the grouping that you mentioned within a filter or should
+be implemented some other way for example appending the grouping concept
+after recieveing the query from the user?
+
+
+Thanks again for your input!
+
+Cheers
+Amin
+
+
+On Tue, Sep 8, 2009 at 11:24 PM, Chris Hostetter
+<hossman_lucene@fucit.org>wrote:
+
+> : Hi
+> : I include a testcase to show what I am trying to do.  Testcase number 3
+> : fails.
+>
+> the mailing list is finicky about attachments ... the best thing to do is
+> to include your test case directly in the body of your email as plain
+> text.
+>
+> : > I created a test case to test this solution and it works. The problem
+> is
+> : > that if UWB searches for "HELLO" that exists in another field such as:
+> : > data:HELLO then he should get a result. It's only when the query is
+> matched
+> : > on reference he should not see anything.  My testcase fails when the
+> match
+> : > is made on the data field as the security filter does not pass (valid
+> : > filter).  Is there a way around this?  Hope this made sense!
+>
+> it sounds like perhaps you just need to group your clauses...
+>
+>  data:HELLO (uw-reference:HELLO +uw-uwb:HELLO)
+>
+> ...if HELLO is in data, you'll get a match regardless of the other fields.
+> if it's not in data, but it is in uw-reference, it will only match if it's
+> also in uw-uwb.
+>
+>
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

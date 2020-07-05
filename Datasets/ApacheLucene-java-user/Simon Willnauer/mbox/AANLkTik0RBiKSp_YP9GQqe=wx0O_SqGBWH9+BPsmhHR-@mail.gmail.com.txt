@@ -1,0 +1,95 @@
+FROM: Simon Willnauer <simon.willna...@googlemail.com>
+SUBJECT: Re: Proper way to deal with shared indexer exception
+DATE: 25 Feb 2011
+
+I looked at your code briefly. I could imagine that you have a problem
+if you close the IndexReader while there is still Search going on
+holding on to the already replaced IndexSearcher. I usually recommend
+to use a some kind of a "transactional" pattern. When you do a search
+you ask for the IndexSearcher (lets call it public IndexSearcher
+beginSearch();) once you are done you return the Searcher with void
+finishSearch(IndexSearcher)
+
+you would then search like this
+
+IndexSearcher searcher = x.beginSearch();
+try {
+
+// do search
+} finally {
+ x.finishSearch(searcher);
+}
+
+public IndexSearcher beginSearch() {
+  this.searcher.getIndexReader().incRef()
+  return searcher;
+}
+
+
+public void finishSearch(IndexSearcher searcher) {
+  searcher.getIndexReader().decRef();
+}
+
+that way you can just call searcher.getindexReader().close()
+
+once you switch to a new IndexReader. if there is still a referenced
+IndexReader out there doing some searches the close will happen once
+the last ref is decremented.
+
+maybe that solves your problem and make your code simpler too..
+
+
+simon
+On Fri, Feb 25, 2011 at 3:22 PM, Jason Tesser <jasontesser@gmail.com> wrote:
+> We are having issues with FileChannelClosed and are NOT calling
+> Thread.interrupt.  We also start to see AlreadyClosedException on Reader.
+>
+> *
+> *
+>
+> we are running the latest 3.0.3
+>
+>
+> We have code in my lucene Util class like this  http://pastebin.com/ifbxhVLi
+>
+> *
+> *
+>
+> we have a single shared searcher and a single writer which is only checked
+> out once not shared single threaded http://pastebin.com/YF8nmwg0
+>
+> *
+> *
+>
+> we use to call destroy in all the caches of the first paste bin which I
+> think is a problem
+>
+> *
+> *
+>
+>  1. what would be the recommended way here?
+>
+> *
+> *
+>
+> in other words if I catch AlreadyClosedException ace OR
+> ClosedChannelException OR IOException what would be the best to do with my
+> shared searcher
+>
+> *
+> *
+>
+> 2.  is reopen enough?  or should I get a brand new searcher?
+>
+>
+> Thanks,
+> Jason Tesser
+> dotCMS Lead Development Manager
+> 1-305-858-1422
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

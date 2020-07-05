@@ -1,0 +1,179 @@
+FROM: Britske <gbr...@gmail.com>
+SUBJECT: Re: addIndexesNoOptimize on shards --> is docid deterministic and  calculable?
+DATE: 4 Nov 2009
+
+
+please ignore the garbage at the end ;-) 
+
+
+Britske wrote:
+> 
+> This issue is related to post: "merging Parallel indexes (can
+> indexWriter.addIndexesNoOptimize be used?)"
+> 
+> Among another thing described in the post above, I'm experimenting with a
+> combination of sharding and vertical partitioning which I feel will
+> increase my indexing performance a lot, which at the moment is a real
+> problem. Indexing time is for more than 99% related to a bunch of indexed
+> fields (+/- 20.000 of them, I know that's a lot) which are all pretty much
+> related. 
+> 
+> For this I'm considering the following setup: 
+> N boxes will create 2 indexes each: index A containing the 20.000 indexed
+> fields, and index B contains the rest. 
+> 
+> Index B is created using the normal route: indexWriter.addDocument(). 
+> But index A will be created using a custom (yet to write) indexer. Since
+> the indexing client knows a lot of the documents and these particular
+> fields (basically it can very effciently calculate the inverse indexes for
+> all these fields and thus more or less directly construct .frq, .tii, 
+> .tis files) I'm pretty sure a lot of time can be gained. That is, once I
+> figure out the nitty-gritty low level details of writing to these files.
+> Any help here much appreciated ;-).  
+> 
+> At some point all of these indexes over these boxes have to be merged. 
+> there would be 2 routes: (hypothetical methods) 
+> 
+> 1.
+> TotalA  = mergeShards(box1.A,...boxN.A)
+> TotalB  = mergeShards(box1.B,...boxN.B)
+> Total = MergeVertical(TotalA, TotalB)
+> 
+> 2.
+> Total 1  = mergeVertical(box1.A,box1.B)
+> Total 2  = mergeVertical(box2.A,box2.B)
+> ...
+> Total N  = mergeVertical(boxN.A,boxN.B)
+> Total   = mergeShards(Total1,...TotalN)
+> 
+> 
+> My question stems from option 1. 
+> 
+> After merging shards TotalA and Total2 should have the same docid-order,
+> because that's a prereq for doing something like: 
+> docwriter.addIndexesNoOptimize(new ParallelReader(TotalA,TotalB))
+> 
+> Sadly your suggestion doesn't work in this situation I think. 
+> 
+> However, After having written this I feel option 2 might be better anyway
+> performance wise, because I have N boxes around which could parallelize: 
+> Total 1  = mergeVertical(box1.A,box1.B)
+> Total 2  = mergeVertical(box2.A,box2.B)
+> ...
+> Total N  = mergeVertical(boxN.A,boxN.B)
+> 
+> In this situation I don't have to rely on mergeShards to produce a
+> calculable order of docids, because I do all vertical merges before
+> merging the shards. Of course for all individual vertical merges docids
+> have to still be in order but this could be achieved using your
+> suggestion. 
+> 
+> And advice or thought on if this route would be worth the effort or not is
+> much appreciated!
+> 
+> Thanks for clearing my head a bit. 
+> 
+> Geert-Jan
+> 
+> 
+> 
+> 
+> 
+> Total 1  = mergeVertical(box1.A,box1.B)
+> TotalB  = mergeShards(box1.B,...boxN.B)
+> Total = MergeVertical(TotalA, TotalB)
+> 
+> 
+> 
+> 
+> At some time I want to merge these parallel indexes but need to ensure
+> that docids are in order. 
+> 
+> I could indeed wait for the first index (which contains all other fields
+> but the 20.000) to be constructed and optimized and use your suggested
+> method to go from key --> docid and thus know the order in which I should
+> add the documents to the second index. 
+> However this requires me to wait for the first  
+> 
+> 
+> 
+> Erick Erickson wrote:
+>> 
+>> Hmmmm, why do you care? That is, what is it you're trying to do
+>> that makes this question necessary? There might be a better
+>> solution than trying to depend on doc IDs.
+>> 
+>> Because I don't think you can assume that, even if it is deterministic
+>> with the version you're using now that it would be in some other version,
+>> Lucene makes no promises here.
+>> 
+>> All the advice I've ever seen says that if you want to keep track of
+>> documents, you assign and index your own ID. You can get the
+>> doc ID from your unique term quite efficiently if you need to.
+>> 
+>> HTH
+>> Erick
+>> 
+>> On Wed, Nov 4, 2009 at 9:23 AM, Britske <gbrits@gmail.com> wrote:
+>> 
+>>>
+>>> Hi,
+>>>
+>>> say I have:
+>>> - Indexreader[] readers = {reader1, reader2, reader3} //containing all
+>>> different docs
+>>> - I know the internal docids of documents in reader1, reader2, reader3
+>>> seperately
+>>>
+>>> Does doing IndexWriter.addIndexesNoOptimize(Indexreader[] readers) on
+>>> these
+>>> readers give me a determinstic and calculable set of docids on the
+>>> documents
+>>> in the resulting documentWriter?
+>>>
+>>> i.e: from http://lucene.apache.org/java/2_4_1/fileformats.html:
+>>> "The numbers stored in each segment are unique only within the segment,
+>>> and
+>>> must be converted before they can be used in a larger context. The
+>>> standard
+>>> technique is to allocate each segment a range of values, based on the
+>>> range
+>>> of numbers used in that segment. To convert a document number from a
+>>> segment
+>>> to an external value, the segment's base document number is added."
+>>>
+>>> Does assinging docids in addIndexesNoOptimize work like this?
+>>> in other words:
+>>> - docids of docs in reader1 stay the same in indexwriter
+>>> - docids of docs in reader2 are incremented by reader1.docs.size();
+>>> - docids of docs in reader3 are incremented by reader1.docs.size() +
+>>> reader2.docs.size()
+>>>
+>>> Thanks,
+>>> Geert-Jan
+>>> --
+>>> View this message in context:
+>>> http://old.nabble.com/addIndexesNoOptimize-on-shards---%3E-is-docid-deterministic-and-calculable--tp26197146p26197146.html
+>>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>> 
+>> 
+> 
+> 
+
+-- 
+View this message in context: http://old.nabble.com/addIndexesNoOptimize-on-shards---%3E-is-docid-deterministic-and-calculable--tp26197146p26199239.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

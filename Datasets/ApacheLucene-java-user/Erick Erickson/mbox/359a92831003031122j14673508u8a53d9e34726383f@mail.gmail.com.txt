@@ -1,0 +1,233 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Lucene Indexing out of memory
+DATE: 3 Mar 2010
+
+The first place I'd look is how big my your strings
+got. w_context and context_str come to mind. My
+first suspicion is that you're building ever-longer
+strings and around 70K documents your strings
+are large enough to produce OOMs.
+
+FWIW
+Erick
+
+On Wed, Mar 3, 2010 at 1:09 PM, ajay_gupta <ajay978@gmail.com> wrote:
+
+>
+> Mike,
+> Actually my documents are very small in size. We have csv files where each
+> record represents a document which is not very large so I don't think
+> document size is an issue.
+> For each record I am tokenizing it and for each token I am keeping 3
+> neighbouring tokens in a Hashtable. After X number of documents where X is
+> currently 2500 I am creating
+> index by following code:
+>
+>                                //Initialization step done only at starting
+>
+>                                cram = FSDirectory.open(new
+> File("lucenetemp2"));
+>                                context_writer = new IndexWriter(cram,
+> analyzer, true,
+> IndexWriter.MaxFieldLength.LIMITED);
+>
+>                    // After each 2500 docs
+>
+>                    update_context()
+>                    {
+>                        context_writer.commit();
+>                        context_writer.optimize();
+>
+>                        IndexSearcher is = new IndexSearcher(cram);
+>                        IndexReader ir = is.getIndexReader();
+>                        Iterator<String> it = context.keySet().iterator();
+>
+>                        while(it.hasNext())
+>                        {
+>                                String word = it.next();
+>                                // This is all the context of "word" for all
+> the 2500 docs
+>                                StringBuffer w_context = context.get(word);
+>                                Term t = new Term("Word", word);
+>                                TermQuery tq = new TermQuery(t);
+>                                TopScoreDocCollector collector =
+> TopScoreDocCollector.create(1, false);
+>                                is.search(tq,collector);
+>                                ScoreDoc[] hits =
+> collector.topDocs().scoreDocs;
+>
+>                                if(hits.length!=0)
+>                                {
+>                                        int id = hits[0].doc;
+>                                        TermFreqVector tfv =
+> ir.getTermFreqVector(id, "Context");
+>
+>                                        // This creates context string from
+> TermFreqVector. For e.g if
+> TermFreqVector is word1(2), word2(1),word3(2) then its output is
+>                                        // context_str="word1 word1 word2
+> word3 word3"
+>                                        String context_str =
+> getContextString(tfv);
+>
+>
+>                                        w_context.append(context_str);
+>                                        Document new_doc = new Document();
+>                                        new_doc.add(new Field("Word",
+> word,Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>                                        new_doc.add(new Field("Context",
+> w_context.toString(),Field.Store.YES,
+> Field.Index.ANALYZED, Field.TermVector.YES));
+>                                        context_writer.updateDocument(t,
+> new_doc);
+>
+>                                }else{
+>
+>                                        Document new_doc = new Document();
+>                                        new_doc.add(new Field("Word",
+> word,Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>                                        new_doc.add(new Field("Context",
+> w_context.toString(),Field.Store.YES,
+> Field.Index.ANALYZED, Field.TermVector.YES));
+>                                        context_writer.addDocument(new_doc);
+>
+>                                }
+>                        }
+>                        ir.close();
+>                        is.close();
+>
+>                    }
+>
+>
+> I am printing memory also after each invocation of this method and I
+> observed that after each call of update_context memory increases and when
+> it
+> reaches around 65-70k it goes outofmemory so somewhere memory is increasing
+> in each invocation. I thought each invocation should take constant amount
+> of
+> memory and it should not be increased cumulatively. Also after each
+> invocation of Update_context I am also calling System.gc() to release
+> memory
+> and I also tried various other parameters like
+> context_writer.setMaxBufferedDocs()
+> context_writer.setMaxMergeDocs()
+> context_writer.setRAMBufferSizeMB()
+> I set these parameters smaller values as well but nothing worked.
+>
+> Any hint will be very helpful.
+>
+> Thanks
+> Ajay
+>
+>
+> Michael McCandless-2 wrote:
+> >
+> > The worst case RAM usage for Lucene is a single doc with many unique
+> > terms.  Lucene allocates ~60 bytes per unique term (plus space to hold
+> > that term's characters = 2 bytes per char).  And, Lucene cannot flush
+> > within one document -- it must flush after the doc has been fully
+> > indexed.
+> >
+> > This past thread (also from Paul) delves into some of the details:
+> >
+> >   http://lucene.markmail.org/thread/pbeidtepentm6mdn
+> >
+> > But it's not clear whether that is the issue affecting Ajay -- I think
+> > more details about the docs, or, some code fragments, could help shed
+> > light.
+> >
+> > Mike
+> >
+> > On Tue, Mar 2, 2010 at 8:47 AM, Murdoch, Paul <PAUL.B.MURDOCH@saic.com>
+> > wrote:
+> >> Ajay,
+> >>
+> >> Here is another thread I started on the same issue.
+> >>
+> >>
+> http://stackoverflow.com/questions/1362460/why-does-lucene-cause-oom-whe
+> >> n-indexing-large-files
+> >>
+> >> Paul
+> >>
+> >>
+> >> -----Original Message-----
+> >> From: java-user-return-45254-PAUL.B.MURDOCH=saic.com@lucene.apache.org
+> >> [mailto:java-user-return-45254-PAUL.B.MURDOCH=saic.com@
+> lucene.apache.org
+> >> ] On Behalf Of ajay_gupta
+> >> Sent: Tuesday, March 02, 2010 8:28 AM
+> >> To: java-user@lucene.apache.org
+> >> Subject: Lucene Indexing out of memory
+> >>
+> >>
+> >> Hi,
+> >> It might be general question though but I couldn't find the answer yet.
+> >> I
+> >> have around 90k documents sizing around 350 MB. Each document contains a
+> >> record which has some text content. For each word in this text I want to
+> >> store context for that word and index it so I am reading each document
+> >> and
+> >> for each word in that document I am appending fixed number of
+> >> surrounding
+> >> words. To do that first I search in existing indices if this word
+> >> already
+> >> exist and if it is then I get the content and append the new context and
+> >> update the document. In case no context exist I create a document with
+> >> fields "word" and "context" and add these two fields with values as word
+> >> value and context value.
+> >>
+> >> I tried this in RAM but after certain no of docs it gave out of memory
+> >> error
+> >> so I thought to use FSDirectory method but surprisingly after 70k
+> >> documents
+> >> it also gave OOM error. I have enough disk space but still I am getting
+> >> this
+> >> error.I am not sure even for disk based indexing why its giving this
+> >> error.
+> >> I thought disk based indexing will be slow but atleast it will be
+> >> scalable.
+> >> Could someone suggest what could be the issue ?
+> >>
+> >> Thanks
+> >> Ajay
+> >> --
+> >> View this message in context:
+> >> http://old.nabble.com/Lucene-Indexing-out-of-memory-tp27755872p27755872
+> .
+> >> html
+> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+>
+> --
+> View this message in context:
+> http://old.nabble.com/Lucene-Indexing-out-of-memory-tp27755872p27771637.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

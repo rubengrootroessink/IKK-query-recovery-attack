@@ -1,0 +1,55 @@
+FROM: "Alexander Devine" <alex.dev...@gmail.com>
+SUBJECT: advice on using Lucene for sorting based on payloads
+DATE: 7 Oct 2008
+
+Hi Luceners,
+
+I have a particular sorting problem and I wanted some advice on what the
+best implementation approach would be. We currently use Lucene as the
+searching engine for our vacation rental website. Each vacation rental
+property is represented by a single document in Lucene. We want to add a
+feature that allows users to sort results by price. The problem is that each
+rental property can potentially have a different price for each day. For
+example, many rental properties charge more on weekends, or higher rates for
+on-season vs. off-season. When a user performs a search, they can specify
+the start and end dates of their desired travel, so we should be able to
+calculate the total price for that time period for each property by adding
+up the price for each day.
+
+I was thinking of implementing this using payloads. Each document would have
+a "priceByDate" field and there would be one term stored for each day for
+the next 2 years (which is as far out as we support booking a property). The
+payload associated with each term would be the price, and then when
+searching I could use those payloads as basis for scoring the docs using a
+BoostingTermQuery. For example, suppose someone was searching for travel
+dates Dec 1 - Dec 5, I would create a query like so:
+
+BooleanQuery query = new BooleanQuery();
+query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081201")),
+BooleanClause.Occur.MUST);
+query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081202")),
+BooleanClause.Occur.MUST);
+query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081203")),
+BooleanClause.Occur.MUST);
+query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081204")),
+BooleanClause.Occur.MUST);
+
+PriceBoostingTermQuery would be a subclass of BoostingTermQuery that
+overrides getSimilarity() to return a Similarity with a custom scorePayload
+method that scores based on the price.
+
+Does this approach sound reasonable? Can anyone think of a better approach?
+One thing I don't understand is that the score needs to be the SUM (or the
+average) of all the payloads - how does the BooleanQuery handle that? Also,
+I need to get the calculated total price back to the caller, and I'm worried
+that making priceByDate a stored field will have negative performance
+implications. Perhaps there is some way I could just return the calculated
+price as the score and then get it from the ScoreDoc?
+
+Thanks for any and all help, and a huge thank you to all the Lucene devs for
+a great product. The reason I'm trying to solve this problem in Lucene
+instead of a database is because Lucene is so much faster for our queries
+and I don't want to add a DB into the mix.
+
+Alex
+

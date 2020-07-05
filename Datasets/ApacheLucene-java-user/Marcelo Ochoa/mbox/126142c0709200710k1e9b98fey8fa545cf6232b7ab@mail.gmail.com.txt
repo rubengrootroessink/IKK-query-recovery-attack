@@ -1,0 +1,166 @@
+FROM: "Marcelo Ochoa" <marcelo.oc...@gmail.com>
+SUBJECT: Re: Oracle-Lucene integration (OJVMDirectory and Lucene Domain Index) - LONG
+DATE: 20 Sep 2007
+
+Hi Chris:
+  First sorry for the delay :(
+  I have some preliminary performance test using Oracle 11g running on
+in a VMWare virtual Machine with 400Mb SGA (Virtual Machine using
+812Mb RAM for Oracle Enterprise Linux 4.0). This virtual machine is
+hosted in a modest hardware, a Pentium IV 2.18Ghz with 2Gb RAM linux
+Mandriva 2007.
+  Here some result:
+  Indexing all_source system view took 23 minutes, all_source view
+have 220731 rows with 50Mb of data, sure this text is not free text
+because many rows have wrapped code with hexadecimal numbers. Here the
+table and the index:
+SQL> desc test_source_big
+ Name                                      Null?    Type
+ ----------------------------------------- -------- ----------------------------
+ OWNER                                              VARCHAR2(30)
+ NAME                                               VARCHAR2(30)
+ TYPE                                               VARCHAR2(12)
+ LINE                                               NUMBER
+ TEXT                                               VARCHAR2(4000)
+SQL> create index source_big_lidx on test_source_big(text)
+indextype is lucene.LuceneIndex
+parameters('Stemmer:English;MaxBufferedDocs:5000;DecimalFormat:0000;ExtraCols:line');
+
+Index created.
+
+Elapsed: 00:23:02.74
+   Index storage (45Mb, 220K Lucene docs) is:
+ FILE_SIZE NAME
+---------- ------------------------------
+         9 parameters
+         2 updateCount
+        20 segments.gen
+  45941031 _1d.cfs
+        42 segments_2t
+
+   A query like this:
+
+select /*+ FIRST_ROWS(10) */ lscore(1) from test_source_big where
+lcontains(text,'"procedure java"~10',1)>0 order by lscore(1) desc;
+
+   It took 11ms, and will be faster if you don't need lscore(1) value,
+here other example:
+
+select /*+ FIRST_ROWS(10) DOMAIN_INDEX_SORT */ lscore(1) from
+test_source_big where lcontains(text,'(optimize OR sync) AND "LANGUAGE
+JAVA"',1)>0 order by lscore(1) asc;
+
+  It took 7ms.
+
+  But there are other benefits related to the Domain Index
+implementation using Data Cartridge API:
+  - Any modification on the table is notified to Lucene automatically,
+you can apply this modification on line or deferred, except for
+deletion that are always synced.
+  - The execution plan is calculated by the optimizer using the domain
+index, and with latest additions (User Data Store) you can reduce with
+Lucene how many rows the database will process using multiples column
+at lcontains operator.
+   For example this query use Lucene to search a free text at TEXT
+column and Oracle's filter reduction at LINE column:
+
+SQL> select count(text) from test_source_big where
+lcontains(text,'function')>0 and line>=6000;
+
+COUNT(TEXT)
+-----------
+          2
+
+Elapsed: 00:00:00.74
+PLAN_TABLE_OUTPUT
+--------------------------------------------------------------------------------------------------------------------------------------------
+Plan hash value: 2350958379
+
+------------------------------------------------------------------------------------------------
+| Id  | Operation                    | Name            | Rows  | Bytes
+| Cost (%CPU)| Time     |
+------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT             |                 |     1 |  2027
+|  2968   (1)| 00:00:36 |
+|   1 |  SORT AGGREGATE              |                 |     1 |  2027
+|            |          |
+|*  2 |   TABLE ACCESS BY INDEX ROWID| TEST_SOURCE_BIG |     7 | 14189
+|  2968   (1)| 00:00:36 |
+|*  3 |    DOMAIN INDEX              | SOURCE_BIG_LIDX |       |
+|            |          |
+------------------------------------------------------------------------------------------------
+
+Predicate Information (identified by operation id):
+---------------------------------------------------
+
+   2 - filter("LINE">=6000)
+   3 - access("LUCENE"."LCONTAINS"("TEXT",'function')>0)
+
+   But if you use Lucene to reduce the number of rows visited by
+Oracle by using User Data Store to index LINE column too, you can
+perform a query like this:
+
+SQL> select count(text) from test_source_big where
+lcontains(text,'function AND line:[6000 TO 7000]')>0;
+
+COUNT(TEXT)
+-----------
+          2
+
+Elapsed: 00:00:00.05
+PLAN_TABLE_OUTPUT
+--------------------------------------------------------------------------------------------------------------------------------------------
+Plan hash value: 2350958379
+
+------------------------------------------------------------------------------------------------
+| Id  | Operation                    | Name            | Rows  | Bytes
+| Cost (%CPU)| Time     |
+------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT             |                 |     1 |  2014
+|  2968   (1)| 00:00:36 |
+|   1 |  SORT AGGREGATE              |                 |     1 |  2014
+|            |          |
+|   2 |   TABLE ACCESS BY INDEX ROWID| TEST_SOURCE_BIG | 11587 |
+22M|  2968   (1)| 00:00:36 |
+|*  3 |    DOMAIN INDEX              | SOURCE_BIG_LIDX |       |
+|            |          |
+------------------------------------------------------------------------------------------------
+
+Predicate Information (identified by operation id):
+---------------------------------------------------
+
+   3 - access("LUCENE"."LCONTAINS"("TEXT",'function AND line:[6000 TO 7000]')>0)
+
+   Note different execution plan used in both queries.
+   The trick here is that, if you minimize the number of rowids
+returned by lcontains() operator by reducing it with more Lucene
+filters the query will be faster.
+   Also, I had executed all Lucene JUnit Test suites inside the Oracle
+JVM and have similar execution time compared to run it outside the
+database with a JDK 1.5.
+   Sure, Lucene Index using a File System Store is faster than
+OJVMDirectory implementation, but with OJVMDirectory you have another
+benefits inherit from BLOB storage, transaction isolation, no network
+round trip during indexing time, among others.
+   Best regards, Marcelo.
+-- 
+Marcelo F. Ochoa
+http://marceloochoa.blogspot.com/
+http://marcelo.ochoa.googlepages.com/home
+______________
+Do you Know DBPrism? Look @ DB Prism's Web Site
+http://www.dbprism.com.ar/index.html
+More info?
+Chapter 17 of the book "Programming the Oracle Database using Java &
+Web Services"
+http://www.amazon.com/gp/product/1555583296/
+Chapter 21 of the book "Professional XML Databases" - Wrox Press
+http://www.amazon.com/gp/product/1861003587/
+Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+http://www.oreilly.com/catalog/oracleopen/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

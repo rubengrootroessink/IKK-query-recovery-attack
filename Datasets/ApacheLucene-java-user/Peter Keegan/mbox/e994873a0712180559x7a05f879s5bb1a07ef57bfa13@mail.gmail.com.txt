@@ -1,0 +1,262 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: Can I do boosting based on term postions?
+DATE: 18 Dec 2007
+
+This is a nice alternative to using payloads and BoostingTermQuery. Is there
+any reason not to make this change to SpanFirstQuery, in particular:
+
+>This modification to SpanFirstQuery would be that the Spans
+>returned by SpanFirstQuery.getSpans() must always return 0
+>from its start() method.
+
+Should I open a Jira issue?
+
+Thanks,
+Peter
+
+
+On Aug 3, 2007 2:11 PM, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+
+> On Friday 03 August 2007 20:35, Shailendra Sharma wrote:
+> > Paul,
+> >
+> > If I understand Cedric right, he wants to have different boosting
+> depending
+> > on search term positions in the document. By using SpanFirstQuery he
+> will
+> > only be able to consider in terms till particular position;
+>
+>
+> > but he won't be
+> > able to do something like following:
+> >   a) Give 100% boosting to matching in first 100 words.
+> >   b) Give 80% boosting to matching in next 100 words.
+> >   c) Give 60% boosting to matching in next 100 words.
+>
+> > Though it can be done by writing DisjunctionMaxQuery having multiple
+> > SpanFirstQuery with different boosting - but I see it as a workaround
+> only
+> > and not the direct and efficient solution.
+>
+> You're right, but SpanFirstQuery needs only a minor modification
+> for this to work.
+>
+> This modification to SpanFirstQuery would be that the Spans
+> returned by SpanFirstQuery.getSpans() must always return 0
+> from its start() method. Then the slop passed to sloppyFreq(slop)
+> would be the distance from the beginning of the indexed field
+> to the end of the Spans of the SpanQuery passed to SpanFirstQuery.
+>
+> Then the following should work:
+>
+> Term firstTerm = .... ;
+>
+> SpanFirstQuery sfq = new SpanFirstQuery(
+>  new SpanTermQuery( firstTerm),
+>  Integer.MAX_VALUE)) {
+> ...
+> public Similarity getSimilarity() {
+> return new Similarity() {
+> ...
+> float sloppyFreq(slop) {
+>  return (slop < 100)  ? 1.0f
+>           : (slop < 200) ? 0.8f
+>           : (slop < 300) ? 0.6f
+>           : 0.4f ; // etc. etc.
+> }}}}
+>
+>
+> Actually, I'm a bit surprised that SpanFirstQuery does not work that
+> way now.
+>
+> Regards,
+> Paul Elschot
+>
+>
+> >
+> > Cedric,
+> >
+> > I am sending you the implementation of SpanTermQuery to your gmail
+> > account (lucene
+> > mailing list is bouncing email with attachment). I have named the class
+> as
+> > VSpanTermQuery (I have followed the same package hierarchy as lucene).
+> You
+> > also need to extend VSimilarity class - which would require
+> implementation
+> > of method scoreSpan(..).
+> >
+> > Let me know how it went. Though I did a testing for it, but before
+> > submitting to contrib, I need to do extensive testing.
+> >
+> > Thanks,
+> > Shailendra
+> >
+> > On 8/3/07, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+> > >
+> > > Cedric,
+> > >
+> > > You can choose the end limit for SpanFirstQuery yourself.
+> > >
+> > > Regards,
+> > > Paul Elschot
+> > >
+> > >
+> > > On Friday 03 August 2007 05:38, Cedric Ho wrote:
+> > > > Hi Paul,
+> > > >
+> > > > Isn't SpanFirstQuery only match those with position less than a
+> > > > certain end position?
+> > > >
+> > > > I am rather looking for a query that would score a document higher
+> for
+> > > > terms appear near the start but not totally discard those with terms
+> > > > appear near the end.
+> > > >
+> > > > Regards,
+> > > > Cedric
+> > > >
+> > > > On 8/2/07, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+> > > > > Cedric,
+> > > > >
+> > > > > SpanFirstQuery could be a solution without payloads.
+> > > > > You may want to give it your own Similarity.sloppyFreq() .
+> > > > >
+> > > > > Regards,
+> > > > > Paul Elschot
+> > > > >
+> > > > > On Thursday 02 August 2007 04:07, Cedric Ho wrote:
+> > > > > > Thanks for the quick response =)
+> > > > > >
+> > > > > > On 8/1/07, Shailendra Sharma <shailendra.sharma@gmail.com>
+> wrote:
+> > > > > > > Yes, it is easily doable through "Payload" facility. During
+> > > indexing
+> > > > > process
+> > > > > > > (mainly tokenization), you need to push this extra information
+> in
+> > > each
+> > > > > > > token. And then you can use BoostingTermQuery for using
+> Payload
+> > > value
+> > > to
+> > > > > > > include Payload in the score. You also need to implement
+> > > Similarity
+> > > for
+> > > > > this
+> > > > > > > (mainly scorePayload method).
+> > > > > >
+> > > > > > If I store, say a custom boost factor as Payload, does it means
+> that
+> > > I
+> > > > > > will store one more byte per term per document in the index
+> file? So
+> > > > > > the index file would be much larger?
+> > > > > >
+> > > > > > >
+> > > > > > > Other way can be to extend SpanTermQuery, this already
+> calculates
+> > > the
+> > > > > > > position of match. You just need to do something to use
+this
+> > > position
+> > > > > value
+> > > > > > > in the score calculation.
+> > > > > >
+> > > > > > I see that SpanTermQuery takes a TermPositions from the
+> indexReader
+> > > > > > and I can get the term position from there. However I am not
+> sure
+> > > how
+> > > > > > to incorporate it into the score calculation. Would you mind
+> give a
+> > > > > > little more detail on this?
+> > > > > >
+> > > > > > >
+> > > > > > > One possible advantage of SpanTermQuery approach is that
+you
+> can
+> > > play
+> > > > > > > around, without re-creating indices everytime.
+> > > > > > >
+> > > > > > > Thanks,
+> > > > > > > Shailendra Sharma,
+> > > > > > > CTO, Ver se' Innovation Pvt. Ltd.
+> > > > > > > Bangalore, India
+> > > > > > >
+> > > > > > > On 8/1/07, Cedric Ho <cedric.ho@gmail.com> wrote:
+> > > > > > > >
+> > > > > > > > Hi all,
+> > > > > > > >
+> > > > > > > > I was wondering if it is possible to do boosting by
+search
+> > > terms'
+> > > > > > > > position in the document.
+> > > > > > > >
+> > > > > > > > for example:
+> > > > > > > > search terms appear in the first 100 words, or first
+10%
+> words,
+> > > or
+> > > in
+> > > > > > > > first two paragraphs would be given higher score.
+> > > > > > > >
+> > > > > > > > Is it achievable through using the new Payload function
+in
+> > > lucene
+> > > 2.2?
+> > > > > > > > Or are there any easier ways to achieve these ?
+> > > > > > > >
+> > > > > > > >
+> > > > > > > > Regards,
+> > > > > > > > Cedric
+> > > > > > > >
+> > > > > > > >
+> > > ---------------------------------------------------------------------
+> > > > > > > > To unsubscribe, e-mail:
+> java-user-unsubscribe@lucene.apache.org
+> > > > > > > > For additional commands, e-mail:
+> > > java-user-help@lucene.apache.org
+> > > > > > > >
+> > > > > > > >
+> > > > > > >
+> > > > > >
+> > > > > > Thanks,
+> > > > > > Cedric
+> > > > > >
+> > > > > >
+> > > ---------------------------------------------------------------------
+> > > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > > > For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> > > > > >
+> > > > > >
+> > > > > >
+> > > > >
+> > > > >
+> ---------------------------------------------------------------------
+> > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > > >
+> > > > >
+> > > >
+> > > >
+> > > > --
+> > > > 愛@上.Keyboard
+> > > >
+> > > >
+> > > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

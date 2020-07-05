@@ -1,0 +1,228 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: Antw.: Search returning documents matching a NOT range
+DATE: 8 Nov 2010
+
+I think it might be an edge case around TermRangeQuery and
+MultiTermQuery and rewrite methods.  It only seems to happen when part
+of the query is a TermRangeQuery and I can make the problem go away
+with a call to setRewriteMethod(MultiTermQuery.xxx).
+
+Where xxx is
+
+CONSTANT_SCORE_BOOLEAN_QUERY_REWRITE  get spurious hit
+CONSTANT_SCORE_AUTO_REWRITE_DEFAULT   get spurious hit
+CONSTANT_SCORE_FILTER_REWRITE         all OK
+
+>From o.a.l.search.MultiTermQuery.java for 3.0.2
+
+    // If the query will hit more than 1 in 1000 of the docs
+    // in the index (0.1%), the filter method is fastest:
+    public static double DEFAULT_DOC_COUNT_PERCENT = 0.1;
+
+The literal value 1000 might be a clue, but this is getting beyond my
+level of expertise.
+
+
+--
+Ian.
+
+
+On Mon, Nov 8, 2010 at 12:22 PM, Ian Lea <ian.lea@gmail.com> wrote:
+> It occurs in David's index and in my much simplifed test/demo index.
+> There is nothing special in mine so I'd guess the problem isn't really
+> index or data related, but certainly can't vouch for that.
+>
+>
+> --
+> Ian.
+>
+>
+> On Mon, Nov 8, 2010 at 12:05 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+>> That's extremely strange. If this is a bug in Multisearcher, we should fix
+>> in proposed 3.0.3 release. Does the problem only occur with this special
+>> index?
+>>
+>> ---
+>> Uwe Schindler
+>> Generics Policeman
+>> Bremen, Germany
+>>
+>> ----- Reply message -----
+>> Von: "Ian Lea" <ian.lea@gmail.com>
+>> Datum: Mo., Nov. 8, 2010 12:45
+>> Betreff: Search returning documents matching a NOT range
+>> An: <java-user@lucene.apache.org>
+>> Cc: "David Fertig" <dfertig@cymfony.com>
+>>
+>>
+>> This does seem extremely odd.  David sent me a copy of his index and
+>> I've played around with it and also written a self-contained RAM index
+>> program, below, that shows the same problem, namely that if the second
+>> index has 1000+ docs the one and only doc in the first index is
+>> incorrectly matched if the search is done with a MultiSearcher.  In
+>> answer to Uwe's question, it works correctly if use a single
+>> IndexSearcher on top of a MultiReader.
+>>
+>> Tests run with lucene-core-3.0.2.jar.
+>>
+>> Snippet from program output:
+>>
+>> Larger index with 999 docs
+>> --- multi reader ---
+>> Query: +author:aaa -pubdate:[aaa TO bbb]
+>> MaxDocs: 1000
+>> Hit count: 0
+>> --- multi searcher ---
+>> Query: +author:aaa -pubdate:[aaa TO bbb]
+>> MaxDocs: 1000
+>> Hit count: 0
+>>
+>> Larger index with 1000 docs
+>> --- multi reader ---
+>> Query: +author:aaa -pubdate:[aaa TO bbb]
+>> MaxDocs: 1001
+>> Hit count: 0
+>> --- multi searcher ---
+>> Query: +author:aaa -pubdate:[aaa TO bbb]
+>> MaxDocs: 1001
+>> Hit count: 1
+>> Docno: 0
+>> author: /aaa/, indexed: true
+>> pubdate: /abc/, indexed: true
+>>
+>> -----------------------------------------------------------------------
+>> package test;
+>>
+>> import org.apache.lucene.analysis.*;
+>> import org.apache.lucene.analysis.standard.*;
+>> import org.apache.lucene.document.*;
+>> import org.apache.lucene.queryParser.QueryParser;
+>> import org.apache.lucene.index.*;
+>> import org.apache.lucene.search.*;
+>> import org.apache.lucene.store.*;
+>> import org.apache.lucene.util.Version;
+>>
+>> public class LuceneTest8 {
+>>
+>>    static public void main(String[] args) throws Exception {
+>> test(999);
+>> test(1000);
+>> test(1001);
+>>    }
+>>
+>>
+>>    static void test(int _max) throws Exception {
+>> System.out.printf("\n\nLarger index with %s docs\n", _max);
+>> Analyzer anl = new StandardAnalyzer(Version.LUCENE_30);
+>> Directory dir1 = loadIndex(anl, 1, "aaa", "abc");
+>> Directory dir2 = loadIndex(anl, _max, "zzz", "zzz");
+>> QueryParser qp = new QueryParser(Version.LUCENE_30, "author", anl);
+>> String qstr = "author:aaa AND NOT pubdate:[aaa TO bbb]";
+>> Query q = qp.parse(qstr);
+>> IndexReader ir1 = IndexReader.open(dir1);
+>> IndexReader ir2 = IndexReader.open(dir2);
+>> Searcher searcher1 = new IndexSearcher(ir1);
+>> Searcher searcher2 = new IndexSearcher(ir2);
+>> MultiReader mr = new MultiReader(ir1, ir2);
+>> Searcher searcherm1 = new IndexSearcher(mr);
+>> MultiSearcher searcherm2 = new MultiSearcher(searcher1, searcher2);
+>> search(q, searcher1, "small index");
+>> search(q, searcher2, "larger index");
+>> search(q, searcherm1, "multi reader");
+>> search(q, searcherm2, "multi searcher");
+>>    }
+>>
+>>
+>>
+>>    static Directory loadIndex(Analyzer _anl,
+>>       int _max,
+>>       String _author,
+>>       String _pd) throws Exception {
+>> RAMDirectory dir = new RAMDirectory();
+>> IndexWriter iw = new IndexWriter(dir,
+>> _anl,
+>> true,
+>> IndexWriter.MaxFieldLength.UNLIMITED);
+>> for (int i = 0; i < _max; i++) {
+>>    Document d = new Document();
+>>    d.add(new Field("author", _author,
+>>    Field.Store.YES, Field.Index.ANALYZED));
+>>    d.add(new Field("pubdate", _pd,
+>>    Field.Store.YES, Field.Index.ANALYZED));
+>>    iw.addDocument(d);
+>> }
+>> iw.close();
+>> return dir;
+>>    }
+>>
+>>
+>>    static void search(Query _q,
+>>       Searcher _searcher,
+>>       String _what) throws Exception {
+>> System.out.printf("--- %s ---\n", _what);
+>> System.out.printf("Query: %s\n", _q.toString());
+>> System.out.printf("MaxDocs: %s\n", _searcher.maxDoc());
+>> TopDocs topDocs = _searcher.search(_q, 10);
+>> System.out.printf("Hit count: %s\n", topDocs.totalHits);
+>> for (int in = 0; in < topDocs.totalHits; in++) {
+>>    int docno = topDocs.scoreDocs[in].doc;
+>>    Document ldoc = _searcher.doc(docno);
+>>    System.out.printf("Docno: %s\n", docno);
+>>    for (Fieldable f : ldoc.getFields()) {
+>> System.out.printf("%s: /%s/, indexed: %s\n",
+>>  f.name(), f.stringValue(), f.isIndexed());
+>>    }
+>> }
+>>    }
+>> }
+>>
+>>
+>> --
+>> Ian.
+>>
+>>
+>> On Mon, Nov 8, 2010 at 4:32 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+>>> Does the same happen with a MultiReader on top of both indexes and using a
+>>> single IndexSearcher on top of this MultiReader?
+>>>
+>>> P.S.: How about using NumericField?
+>>>
+>>> -----
+>>> Uwe Schindler
+>>> H.-H.-Meier-Allee 63, D-28213 Bremen
+>>> http://www.thetaphi.de
+>>> eMail: uwe@thetaphi.de
+>>>
+>>>
+>>>> -----Original Message-----
+>>>> From: David Fertig [mailto:dfertig@cymfony.com]
+>>>> Sent: Monday, November 08, 2010 4:21 AM
+>>>> To: java-user@lucene.apache.org
+>>>> Subject: RE: Search returning documents matching a NOT range
+>>>>
+>>>> publish_date is a string, formatted as YYYYMMDD, so it string sorting
+>>> should
+>>>> work correctly for this field.
+>>>>
+>>>> The field is indexed as a keyword and the field's value is also stored.
+>>>>
+>>>> I have previously reviewed the terms and optimized the index with luke
+>>>> 1.0.1 to make sure there was no index corruption. It is a very useful
+>>> tool,
+>>>> however it can only open 1 index at a time so I can't reproduce the issue
+>>> with
+>>>> it.
+>>>>
+>>>> At your suggestion I added code to enumerate all terms in the indexes and
+>>>> there are no inconsistencies.
+>>>>
+>>>> Th
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

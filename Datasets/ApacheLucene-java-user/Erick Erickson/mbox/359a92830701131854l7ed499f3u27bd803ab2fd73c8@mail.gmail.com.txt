@@ -1,0 +1,155 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Making document numbers persistent
+DATE: 14 Jan 2007
+
+A couple of things...
+
+1> You're probably already aware that the indexreader doesn't reflect
+updates until it is re-opened, so any filters you cached would be valid
+until you re-opened the reader. CachingWrapperFilter will store the Lucene
+filters for you. But this probably isn't germane to your problem..
+
+2> If you are closing and re-opening your readers, this is a big performance
+hit. Is it possible that that's what you're seeing? (I doubt this, but I
+thought I'd bring it up).
+
+3> I doubt it really will make a performance difference, but you could use
+TermDocs.seek rather than get a new termdocs for each term from the reader.
+(and if this *does* make a difference, please let me know)
+
+4> It's playing with fire, but.... you say "in essence, we want persistent
+Lucene document numbers". I believe they *are* persistent until and unless
+you optimize *after* deleting documents. So you control when they change
+(you'll get more information by searching the mail archive, but what to
+search for escapes my poor memory). So it *may* be possible to, say,
+optimize your index (and record the user-id/luceneid pairs) at discrete
+points in time and/or synchronize this correspondence when convenient.
+Perhaps in another index or orthogonal documents.
+
+5> Is there any chance whatsoever of inverting your problem? That is, make
+the database use the Lucene IDs as the primary key (assuming you can control
+when the Lucene IDs change as above)? This is out there on the fringes of
+possibility and I'd be really surprised if you could.... but you're
+desperate <G>. You'd essentially have to be able to rebuild your database
+whenever you re-optimized your index, a bit of the tail wagging the dog
+here.....
+
+6> Can you post-filter instead of pre-filter your queries? Essentially, when
+you get your search results, ask "is the user in the my set of users"? It
+depends upon whether you need to return the whole set or the top N documents
+I suppose, as well as the result-set size. If your results (without the
+filter) are too high probably not..... I'm assuming that there must be other
+clauses you attach the filter to.
+
+7> If you can't re-order your database, can you invert the problem by
+maintaining a table in the database with this correspondence that changes as
+the Lucene index changes and use a query on *that* to populate your filter?
+You're right in that this part of your application is using Lucene for
+something other than it was intended for. You're really running into trouble
+when you're trying to use Lucene like a RDBMS. Maybe it's the correct thing
+to do to move the RDBMS-like actions to one of those....
+
+Anyway, that exhausts my creativity this evening. And Mark's right. People
+way more knowledgeable than me will be on the lists Monday.....
+
+Best of luck!
+Erick
+
+On 1/13/07, Kay Roepke <kroepke@classdump.org> wrote:
+>
+> Hi Erick!
+>
+> On 13. Jan 2007, at 19:54 , Erick Erickson wrote:
+>
+> > Before going off into modifying things, could you expand a bit on
+> > how you
+> > query to build up the filter? Perhaps providing a code snippet?
+>
+> We are passing in our unique ids from our database which we have to
+> translate
+> to lucene document ids. This is done by an API (our own API) call,
+> because the
+> main application isn't written in Java. Lucene will function as a
+> remote service
+> for the other application servers.
+>
+> > Just to be sure we're talking about the same thing, when you say
+> > filter, are
+> > you talking about Lucene filters? I'm assuming you are, in which
+> > case there
+> > is probably wisdom on the list (although I won't provide very much
+> > <G>).
+> > building up a Lucene filter with termenum/termdocs has been quite
+> > fast in my
+> > experience, but I don't know if my experience has any relevance to
+> > your
+> > situation....
+>
+> Yes, I was talking about Lucene filters. Here's what we do currently
+> (pretty much
+> standard, if I'm correct):
+>
+> public class IdQueryFilter extends Filter {
+>
+>      Collection users;
+>
+>      public IdQueryFilter(Collection users) {
+>          this.users = users;
+>      }
+>
+>      public BitSet bits(IndexReader index) throws IOException {
+>          BitSet result = new BitSet();
+>          Iterator it = users.iterator();
+>          while (it.hasNext()) {
+>              Term term = new Term( "id", new Long(((User)it.next
+> ()).id).toString());
+>              TermDocs terms = ((IndexReader)index).termDocs( term );
+>              if (terms.next()) {
+>                  result.set(terms.doc());
+>              }
+>              terms = null; term = null;
+>          }
+>          return result;
+>      }
+> }
+>
+> This can take up to 30sec for a large (~500.000 elements) collections
+> of users and it
+> it the thing I'm currently trying to solve.
+> I can handle situations where this can take long once, since I'm
+> really asking something
+> that Lucene isn't designed for, but the culprit is that I can't
+> really cache the resulting
+> bitset. I can cache it on one of the Lucene servers, but can't share
+> it among the rest of
+> the servers (we will eventually have way more than one for scalabilty/
+> reliability reasons).
+> We cannot afford to calculate these bitsets on all servers (think of
+> a repeated search, or
+> paging, when you cannot make sure that you will hit the same Lucene
+> application to do the
+> search - you might end up on a different server that hasn't seen a
+> request before).
+>
+> I hope this makes it more clear of what I'm up against. I'm not
+> running around to change things
+> for the change's sake. If I can get around it, fine. If not, I can
+> deal :)
+>
+> Thanks,
+>
+> Kay
+> --
+> Kay Röpke
+> http://classdump.org/
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,228 @@
+FROM: Olivier Jaquemet <olivier.jaque...@jalios.com>
+SUBJECT: Re: Multiple threads in Lucene
+DATE: 23 Mar 2006
+
+Hi,
+
+In order to prevent such problem, here is how you should open your index:
+    Directory indexDir = FSDirectory.getDirectory(luceneDir, 
+!IndexReader.indexExists(luceneDir));
+    IndexReader.unlock(indexDir); // unlock directory in case of 
+unproper shutdown
+    if (!IndexReader.indexExists(luceneDir)) {
+      writer = new IndexWriter(indexDir, analyzer, true);
+      writer.close();
+    }
+
+And to prevent problems with writer/reader/searcher not being closed 
+properly on exit, here is how you should make sure they are closed 
+(although it is not guaranteed to be called at all by the jvm, it's 
+better than nothing)
+   // clean writer reader and searcher correctly
+   Thread shutdown = new Thread() {
+     public void run() {
+       if (writer != null) {
+         try { writer.close(); }
+         catch (Exception ex){ /*empty*/ }
+         writer = null;
+       }
+       if (reader != null) {
+         try { reader.close(); }
+         catch (IOException ex){ /*empty*/ }
+         reader = null;
+       }
+       if (searcher != null) {
+         try { searcher.close(); }
+         catch (IOException ex){ /*empty*/ }
+         searcher = null;
+       }
+     }
+   };
+   Runtime.getRuntime().addShutdownHook(shutdown);
+
+As another reminder if you start with lucene:
+ - Keep your reader/searcher open as long as possible until you write to 
+the index. It increases performance. You can use a class like this one 
+(taken from this ML):
+  /**
+   * For optimized used of the searcher, we keep it open as much as 
+possible and
+   * delay its close only when it is replaced by a new one when 
+modifying index.
+   */
+  public class IndexSearcherWrapper extends IndexSearcher {
+    private int referenceCount;
+   
+    public IndexSearcherWrapper(Directory dir) throws IOException {
+      super(dir);
+      this.referenceCount = 1;
+    }
+   
+    public IndexSearcherWrapper getReference() {
+      referenceCount++;
+      return this;
+    }
+   
+    public void close() throws IOException {
+      referenceCount--;
+      if (referenceCount <= 0) {
+        super.close();
+      }
+    }
+  };
+
+Use it like that:
+
+    IndexSearcher localSearcher = searcher.getReference();
+    Hits hits = localSearcher.search(query);
+    [...]
+
+And use a method such as this one every time you write to the index:
+  /**
+   * Renew internal reader and searcher, call this method after index 
+change.
+   */
+  public void renewReaderAndSeacher() throws IOException {
+    // Reader
+    IndexReader oldReader = reader;
+    reader = IndexReader.open(index);
+    if (oldReader != null) {
+      oldReader.close();
+    }
+    // Searcher
+    IndexSearcherWrapper oldSearcher = searcher;
+    searcher = new IndexSearcherWrapper(index);
+    if (oldSearcher != null) {
+      oldSearcher.close();
+    }
+  }
+
+Hope it will help! :)
+
+
+Nikhil Goel wrote:
+> Hi Otis,
+>
+> Thanks for the reply but I have one question to ask here. You said big no no
+> for opening opening multiple IndexWriters. I want to clarify :-
+> 1) Do you mean multiple IndexWriters at the same time? I am not doing this.
+> At a time there is only one Indexwriter opened.
+> or
+> 1) Do you mean I cant open another IndexWriter again after closing the prior
+> one. In my writing thread, for every file I index, I open a new IndexWriter
+> and close it and as soon as I have second file available for indexing. I
+> open the IndexWriter again and close it and directory object is the same
+> across all the threads as well as while reopening IndexWriters.
+>
+> If the latter is NO too, then how would a developer make sure that this
+> index is closed when the Program is killed. Suppose a program is killed in
+> between and Index is not closed, then next time when I run the program there
+> will be a write.lock in Index and it won't allow us to open another index.
+>
+> Please let me know if I am wrong in what I said.
+>
+> Thanks
+> -Nikhil
+>
+>
+> On 3/22/06, Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote:
+>   
+>> Yes, 1 IndexWriter + multiple IndexSearchers definitely work together :)
+>> I can't tell what you're doing wrong with the threads... it looks like you
+>> might be opening multiple IndexWriters on the same index/directory (big no
+>> no).
+>>
+>> Otis
+>>
+>> ----- Original Message ----
+>> From: Nikhil Goel <nikhil.goel@gmail.com>
+>> To: java-user@lucene.apache.org
+>> Sent: Wednesday, March 22, 2006 6:04:41 PM
+>> Subject: Multiple threads in Lucene
+>>
+>> Hi Lucene Developers,
+>>
+>> According to Lucene Documentation, IndexWriter can exist with multiple
+>> IndexSearcher and its thread safe. To verify that: I wrote a simple
+>> program
+>> to simulate that condition but unfortunately I get an exception. Please
+>> let
+>> me know if anyone has ever tested the Lucene claim that IndexWriter and
+>> IndexSearcher are thread safe.
+>>
+>>
+>> I have a program in which I have 4 threads.
+>> 1) One IndexWriter Thread
+>> 2) 3 IndexSearcher Thread.
+>>
+>> Everytime when we need to index a file. We run the following code in
+>> IndexWriter Thread:-
+>> function IndexFile(Document doc)
+>> {
+>>    writer = new IndexWriter(directory, new StandardAnalyzer(), false);
+>>    writer.addDocument(doc);
+>>    writer.close();
+>> }
+>>
+>> Our IndexSearcherThread looks like this:-
+>> function IndexSearch(String termToBeSearched)
+>> {
+>>      IndexSearchersearcher = new IndexSearcher(directory);
+>> //Note: This directory is the same reference as used to initiate
+>> IndexWriter  in Indexfile function. Hence this directory //reference is
+>> used
+>> across all the threads.
+>>
+>>      Query query = QueryParser.parse(termToBeSearched, "contents", new
+>> StandardAnalyzer());
+>>      Hits hits = searcher.search(query);
+>> }
+>>
+>> If I execute these 4 threads above together, then whenever a search
+>> routine
+>> gets executed and IndexWriter is also in use, then I get an error at the
+>> following line:- writer.close();
+>>
+>> Stack Strace looks like this:-
+>> unable to close the writer stream
+>> java.io.IOException: read past EOF
+>>     at org.apache.lucene.store.InputStream.refill(InputStream.java:192)
+>>     at org.apache.lucene.store.InputStream.readByte(InputStream.java:81)
+>>     at org.apache.lucene.store.InputStream.readBytes(InputStream.java:95)
+>>     at org.apache.lucene.index.SegmentReader.norms(SegmentReader.java:375)
+>>     at org.apache.lucene.index.SegmentReader.norms(SegmentReader.java:342)
+>>     at org.apache.lucene.index.SegmentMerger.mergeNorms(SegmentMerger.java
+>> :306)
+>>     at org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:99)
+>>     at org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java
+>> :430)
+>>     at org.apache.lucene.index.IndexWriter.flushRamSegments(
+>> IndexWriter.java
+>> :383)
+>>     at org.apache.lucene.index.IndexWriter.close(IndexWriter.java:193)
+>>
+>>
+>> Thanks in advance
+>> -Nikhil
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>     
+>
+>   
+
+
+-- 
+Olivier Jaquemet <olivier.jaquemet@jalios.com>
+Ingénieur R&D Jalios S.A.
+Tel: 01.39.23.92.83
+http://www.jalios.com/
+http://support.jalios.com/
+
+

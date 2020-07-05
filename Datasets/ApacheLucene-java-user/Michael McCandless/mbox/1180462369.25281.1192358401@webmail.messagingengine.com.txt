@@ -1,0 +1,64 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: (Sort of) transactional behavior
+DATE: 29 May 2007
+
+"Carlos Pita" <carlosjosepita@gmail.com> wrote:
+
+> I have a searcher and a writer, the writer writes N changes, then the
+> searcher is reopened to reflect them. Depending on whether autoCommit is
+> false or true for the writer it could have to be closed after the N-changes
+> batch too, just to make visible the flushed changes. But suppose for now
+> that autoCommit=true (classic behaviour).
+> 
+> The index itself references external documents by id, when these documents
+> are added or changed a correspondent update in the index takes place. The
+> external documents have a couple of timestamps indicating one the date of
+> the last document change and the other the last time the document was
+> indexed. Of course, if the first timestamp is newer than the second one, the
+> index must be updated for that document. If and only if this update is
+> successfully carried on, the indexed timestamp has to be updated, that is to
+> mark the document as indexed.
+> 
+> The point is that I don't know how to ensure that the index update is in
+> fact persisted to disk except by flushing after every M changes by myself.
+> Also, if there were some callback mechanism by which my app could be told of
+> flush events, I would update the timestamps just for the effectively flushed
+> documents; but I'm not aware of such feedback mechanism. Then, it's still
+> another history with autoCommit=true, because I know changes are not
+> committed before the index is closed, this could be a beginning but I still
+> don't know if that close operation is in fact atomic.
+
+I think this may work: if you leave autoCommit=true, and set your
+maxBufferedDocs to M, then you could keep a separate counter and after
+every M'th addDocument call you then "commit" your timestamp (ie
+update the "last indexed timestamp").
+
+If you set autoCommit=false, then you do the same logic but you run it
+instead after writer.close() has been successfully called.  Using
+autoCommit=false allows you to do "all or none" for all of your N
+added docs, if that's important.
+
+Both flush and close are atomic in the sense that either all or none
+of the docs will have been added to the index.  Note however that if
+an exception is hit during these, it's still possible that all docs
+were added (this can happen when the exception is hit during merging
+that happens after the buffered documents are flushed to disk).
+
+Or you could be simpler and just wait until all N docs are done in
+either case, then commit the indexed timestamps, on the assumption
+that it's OK if docs get accidentally reindexed?
+
+But realize Lucene is only as good as the JVM & IO subsystem under it.
+For example, if the machine crashes but there were writes "in flight"
+in a write cache somewhere that didn't actually make it to physical
+storage then even though the close() or flush() returned successfully,
+some changes will have been lost (and likely the index will be
+corrupt).
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

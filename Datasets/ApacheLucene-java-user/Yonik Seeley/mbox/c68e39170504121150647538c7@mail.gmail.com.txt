@@ -1,0 +1,244 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: Strange sort error
+DATE: 12 Apr 2005
+
+A workaround until this problem is fixed in Lucene would be to add an
+indexed sentinel field to a single doc in the collection that will be
+larger (after) all other fields that you may try a sort on.
+
+Example:
+            String sentinel = new String(new char[]{0xffff}); 
+            doc.add(Field.Keyword(sentinel, sentinel));
+
+-Yonik
+
+On Apr 12, 2005 2:32 PM, Yonik Seeley <yseeley@gmail.com> wrote:
+> >  Any fieldName that starts with "i" or
+> > below (including capitals) works.  Can anyone think of what could
+> > possibly be going on here?
+> 
+> Looks like you uncovered an obscure sorting bug.
+> The reason that fields >= "j" fail is that your last indexed field
+> (and hence the last indexed term) starts with "i" (specifically
+> "indexVersion").
+> 
+> >      private static String VERSION_CREATOR_KEY = "creatorVer";
+> >      private static String INDEX_VERSION_KEY   = "indexVersion";
+> 
+> If you changed these to "a" and "aa", then all three tests would fail.
+> 
+> -Yonik
+> 
+> 
+> On Apr 12, 2005 2:04 PM, Bill Tschumy <bill@otherwise.com> wrote:
+> > On Apr 12, 2005, at 8:38 AM, Erik Hatcher wrote:
+> >
+> > > Could you give us a self-contained test case that reproduces this
+> > > issue?
+> > >
+> > >       Erik
+> > >
+> >
+> > Here is a small program that will manifest the error.  Hopefully
+> > someone can explain the problem.  It happens with Lucene 1.4.2 and
+> > 1.4.3.
+> >
+> > file: SortProblem.java
+> > =========================
+> > import java.io.*;
+> > import org.apache.lucene.search.*;
+> > import org.apache.lucene.index.*;
+> > import org.apache.lucene.store.*;
+> > import org.apache.lucene.document.*;
+> > import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> >
+> > /**
+> >   *  This program demonstrates a problem I'm having with Lucene.  If I
+> > search for
+> >   *  documents with a particular field name/value pair and sort them
+> > based upon
+> >   *  another field, I sometimes get a RuntimeException thrown.  This
+> > happens when the
+> >   *  Hits comes back empty and the sort field name begins with a letter
+> > < "j".  For
+> >   *  the bug to manifest it appears I also need to have an unrelated
+> > document in the
+> >   *  index that is storing version information.
+> >   **/
+> >
+> > public class SortProblem
+> > {
+> >
+> >      private static String INDEX_DIRECTORY     = "SortProblemIndex";
+> >
+> >      // This is the field name of a field in the dcoument that hold
+> > version
+> >      // information.  The bug happens if this field name has certain
+> > values.
+> >      // "creatorVal" will fail, but "xreatorVal" will not.  Very wierd.
+> >      private static String VERSION_CREATOR_KEY = "creatorVer";
+> >
+> >      private static String INDEX_VERSION_VAL   = "indexVersionVal";
+> >      private static String INDEX_VERSION_KEY   = "indexVersion";
+> >      private static String INDEX_VERSION       = "1.1";
+> >      private static String CREATOR_KEY         = "creator";
+> >      private static String PARSNIPS_VAL        = "Parsnips";
+> >
+> >      public static void main(String[] args)
+> >      {
+> >          initIndex(INDEX_DIRECTORY);
+> >          // The search appears to fail if the fieldName starts with a
+> > letter >= "j".
+> >          // The first and last search here will work while the middle
+> > will fail.
+> >          search(INDEX_DIRECTORY, "aaa");
+> >          search(INDEX_DIRECTORY, "mmm");
+> >          search(INDEX_DIRECTORY, "bbb");
+> >      }
+> >
+> >      private static void initIndex(String directoryName)
+> >      {
+> >          File indexDir  = new File(directoryName);
+> >          if (indexDir.exists())
+> >              deleteFileOrDirectory(indexDir);
+> >          indexDir.mkdir();
+> >          try
+> >          {
+> >              IndexWriter writer = new IndexWriter(indexDir, new
+> > StandardAnalyzer(), true);
+> >              // Adding the one document which contains version
+> > information seems
+> >              // necessary to cause some search/sorts to fail.
+> >              Document doc = new Document();
+> >              doc.add(Field.Keyword(VERSION_CREATOR_KEY,
+> > INDEX_VERSION_VAL));
+> >              doc.add(Field.Keyword(INDEX_VERSION_KEY, INDEX_VERSION));
+> >              writer.addDocument(doc);
+> >              writer.close();
+> >          }
+> >          catch (IOException ioe)
+> >          {
+> >              ioe.printStackTrace();
+> >          }
+> >      }
+> >
+> >      private static void search(String directoryName, String
+> > sortFieldName)
+> >      {
+> >          try
+> >          {
+> >              File indexDir  = new File(directoryName);
+> >              Directory fsDir = FSDirectory.getDirectory(indexDir, false);
+> >              IndexSearcher searcher = new IndexSearcher(fsDir);
+> >              Hits hits;
+> >              Query query = new TermQuery(new Term(CREATOR_KEY,
+> > PARSNIPS_VAL));
+> >              Sort sorter = new Sort(new SortField(sortFieldName,
+> > SortField.STRING, true));
+> >              try
+> >              {
+> >                  hits = searcher.search(query, sorter);
+> >                  System.out.println("sort on " + sortFieldName + "
+> > successful.");
+> >              }
+> >              catch (RuntimeException e)
+> >              {
+> >                  System.out.println("sort on " + sortFieldName + "
+> > failed.");
+> >                  e.printStackTrace();
+> >              }
+> >          }
+> >          catch (IOException e)
+> >          {
+> >              e.printStackTrace();
+> >          }
+> >
+> >      }
+> >
+> >      private static boolean deleteFileOrDirectory(File dir)
+> >      {
+> >          if (dir.isDirectory())
+> >          {
+> >              String[] children = dir.list();
+> >              for (int i = 0; i < children.length; i++)
+> >              {
+> >                  boolean success = deleteFileOrDirectory(new File(dir,
+> > children[i]));
+> >                  if (!success)
+> >                  {
+> >                      return false;
+> >                  }
+> >              }
+> >          }
+> >          // The directory is now empty so delete it
+> >          return dir.delete();
+> >      }
+> > }
+> >
+> > > On Apr 12, 2005, at 9:19 AM, Bill Tschumy wrote:
+> > >
+> > >> This problem is seeming more and more strange.  It now looks like if
+> > >> the fieldName I'm sorting on starts is ASCII "j" or above, the
+> > >> RuntimeException is thrown.  Any fieldName that starts with "i" or
+> > >> below (including capitals) works.  Can anyone think of what could
+> > >> possibly be going on here?
+> > >>
+> > >>
+> > >> On Apr 11, 2005, at 2:27 PM, Bill Tschumy wrote:
+> > >>
+> > >>> In my application, by default I display all documents that are in
+> > >>> the index.  I sort them either using a "time modified" or "time
+> > >>> created".  If I have a newly created empty index, I find I get an
+> > >>> error if I sort by "time modified" but not "time created".  In
+> > >>> either case there are actually no documents that match my query so
+> > >>> in reality there is nothing to sort.
+> > >>>
+> > >>> Here is my query:
+> > >>>
+> > >>> query = new TermQuery(new Term(MyIndexer.CREATOR_KEY,
+> > >>> MyIndexer.PARSNIPS_VAL));
+> > >>> String fieldName = sortType == Parsnips.SORT_BY_MODIFIED ?
+> > >>> MyIndexer.MODIFIED_KEY : MyIndexer.CREATED_KEY;
+> > >>> Sort sorter = new Sort(new SortField(fieldName, SortField.STRING,
+> > >>> true));
+> > >>> hits = searcher.search(query, sorter);
+> > >>>
+> > >>> The error I'm getting when using MyIndexer.MODIFIED_KEY (which is
+> > >>> "modified") as the sort field is:
+> > >>>
+> > >>> java.lang.RuntimeException: no terms in field modified
+> > >>>         at
+> > >>> org.apache.lucene.search.FieldCacheImpl.getStringIndex(FieldCacheImpl
+> > >>> .java:256)
+> > >>>         at
+> > >>> org.apache.lucene.search.FieldSortedHitQueue.comparatorString(FieldSo
+> > >>> rtedHitQueue.java:265)
+> > >>>         at
+> > >>> org.apache.lucene.search.FieldSortedHitQueue.getCachedComparator(Fiel
+> > >>> dSortedHitQueue.java:180)
+> > >>>         at
+> > >>> org.apache.lucene.search.FieldSortedHitQueue.<init>(FieldSortedHitQue
+> > >>> ue.java:58)
+> > >>>         at
+> > >>> org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:
+> > >>> 122)
+> > >>>         at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:64)
+> > >>>         at org.apache.lucene.search.Hits.<init>(Hits.java:51)
+> > >>>         at org.apache.lucene.search.Searcher.search(Searcher.java:41)
+> > >>>         at
+> > >>> com.otherwise.parsnips.MySearcher.search(MySearcher.java:170)
+> > >>>         at
+> > >>> com.otherwise.parsnips.MySearcher.search(MySearcher.java:149)
+> > >>>         at com.otherwise.parsnips.Parsnips.<init>(Parsnips.java:163)
+> > >>>         at com.otherwise.parsnips.Parsnips.main(Parsnips.java:1205)
+> > >>>
+> > >>> I can't understand why I would be getting this for one sort field
+> > >>> but not the other given there are 0 hits anyway in a newly created
+> > >>> index.  Anyone have any thoughts?  I am using Lucene 1.4.2.
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

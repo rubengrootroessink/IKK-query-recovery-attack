@@ -1,0 +1,79 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: "Starts with" query?
+DATE: 6 Jan 2006
+
+
+On Jan 6, 2006, at 7:00 AM, Erik Hatcher wrote:
+>> I notice that if I have a title "auto update", then the phrase  
+>> query trick works if it searches on
+>>
+>> 	title:"0start0 auto*"
+>>
+>> but does not find any matches for
+>>
+>> 	title:"0start0 aut*"
+>>
+>> I'm a bit stuck.
+>
+> PhraseQuery does not handle wildcards.  Unfortunately this is  
+> common misunderstanding.
+>
+> The MultiPhraseQuery could do this provided you expand "aut*" into  
+> all the matching terms yourself.  But here is an alternative using  
+> the new SpanRegexQuery (in contrib/regex):
+>
+>     RAMDirectory directory = new RAMDirectory();
+>     IndexWriter writer = new IndexWriter(directory, new  
+> SimpleAnalyzer(), true);
+>     Document doc = new Document();
+>     doc.add(new Field("field", "auto update", Field.Store.NO,  
+> Field.Index.TOKENIZED));
+>     writer.addDocument(doc);
+>     doc = new Document();
+>     doc.add(new Field("field", "first auto update", Field.Store.NO,  
+> Field.Index.TOKENIZED));
+>     writer.addDocument(doc);
+>     writer.optimize();
+>     writer.close();
+>
+>     IndexSearcher searcher = new IndexSearcher(directory);
+>     SpanRegexQuery srq = new SpanRegexQuery(new Term("field",  
+> "aut.*"));
+>     SpanFirstQuery sfq = new SpanFirstQuery(srq, 1);
+>     Hits hits = searcher.search(sfq);
+>     assertEquals(1, hits.length());
+>
+> Notice that the query is "aut.*", not "aut*" such that it is a  
+> valid regular expression for what you want.  In my current project,  
+> my custom query parser handles * and ? like WildcardQuery, but  
+> under the covers I simply convert that into a regex by replacing ?  
+> with . and * with .*
+
+Let me add a major caveat, especially given that Paul's index is  
+large.  (Span)RegexQuery by default, currently, scans through *every*  
+term in the index.  This is due to the complexity in determining the  
+prefix of the regex.  While it is obvious that "aut.*" should only  
+scan through terms starting with "aut", it gets more complicated with  
+expressions like "a?uto" because the "a" is optional.  There is a  
+Jakarta Regexp implementation in contrib/regex also and it is capable  
+of determining the static prefix to reduce term enumeration, but I  
+suspect java.util.regex is much faster than Jakarta Regexp.  I'm  
+using, in my project, a blending of the two letting Jakarta Regexp  
+determine the prefix but using java.util.regex for matching - this  
+requires a custom, and trivial, implementation of RegexCapabilities.   
+I didn't include that in contrib/regex because it seems a bit awkward  
+for general consumption.
+
+Anyway, caveat emptor for term enumeration with (Span)RegexQuery!    
+Also, doing term rotation on indexing and with searching can also  
+greatly reduce term enumeration even with leading wildcards - but  
+I'll leave that as an exercise for the reader for now :)
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

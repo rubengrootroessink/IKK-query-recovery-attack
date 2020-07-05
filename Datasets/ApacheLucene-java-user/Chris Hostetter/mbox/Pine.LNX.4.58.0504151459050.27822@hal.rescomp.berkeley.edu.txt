@@ -1,0 +1,64 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: RE: Update performance/indexwriter.delete()?
+DATE: 15 Apr 2005
+
+
+: The first thing that comes to mind is that I could look at the transactions
+: in the batch queue, and based on the docid, I could make sure to delete all
+: the matching ADD docid's in the batch queue whenever a matching DEL comes
+: in.   However, that will only work if I know the docid's.  But, what happens
+: when the deletes are "term" deletes. My app would have to know how to search
+
+well, it depends on what the terms you allow for deletions are ... if the
+Terms are unique to individual documents (ie: an identifier) then you
+don't really have a problem -- Paul Libbrecht & John Haxby have allready
+replied with great suggestions.
+
+If you are allowing deletions on arbitrary Terms, which may match many
+documents .. yeah, that's a tricky one.
+
+My off the cuff answer would be sort of along the lines of what you
+alluded to here...
+
+: interesting ways to do that (i.e. keep all the batched docs in a ram index,
+: and use that to match previously added docs), I think that's probably going
+
+you could maintain your batch using a temporary RAMDirectory based index,
+and a list of Terms to delete.
+ - to start a batch, create a new IndeWriter on a RAMDirectory, and List
+   for deletions.
+ - whenever an "update" comes in, add the doc to your RAM Index, and add
+   the UID for that doc do your List.
+ - when a "delete" comes in, add the Term to delete by to the List.
+ - once you're ready to "process" the job:
+   * close the writer on your RAM Index
+   * open a reader on both your RAM Index and your persistent index
+   * for each Term in your deletion List, delete from both readers
+   * close the reader on your persistent index, open a writer, and merge
+     your RAM based index into it.
+
+.,..I've never acctually tried that, but i think it should work ... if i
+recall correctly, Yonik was looking into this for a while, but i think he
+ran into a snag with the fact that IndexWriter.addIndexes() wants to call
+optimize twice. (?)
+
+
+Anyway, that's the best suggestion i can think of.  Personally I'm
+suspicious of any application that needs to process updates/delets so
+urgently that the cost of open/closing the reader/writer is that
+significant -AND- needs to delete by more then just a Unique Identifier.
+
+perhaps if you described your use cases a little more (ie; the context of
+your application) people could propose alternate approaches that might
+accomplish your needs faster.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

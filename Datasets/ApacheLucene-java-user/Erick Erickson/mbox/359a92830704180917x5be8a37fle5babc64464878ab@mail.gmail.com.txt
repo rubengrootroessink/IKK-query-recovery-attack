@@ -1,0 +1,170 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Merge performance
+DATE: 18 Apr 2007
+
+This *may* be relevant, I haven't needed to investigate
+it yet...
+
+ http://issues.apache.org/jira/browse/LUCENE-845
+
+Also, see the thread titled
+"MergeFactor and MaxBufferedDocs value should ...?" for an
+interesting discussion of how to optimize indexing, although
+I'm not sure the notion of using IndexWriter.ramSizeInBytes
+is of too much use when merging indexes....
+
+Erick
+
+On 4/18/07, d m <dmataxo@gmail.com> wrote:
+>
+> I'd like to share index merge performance data and have a couple
+> of questions about it...
+>
+> We (AXS-One, www.axsone.com) build one "master" index per day.
+> For backup and recovery purposes, we also build many individual
+> "mini" indexes from the docs added to the master index.
+>
+> Should one of our master indexes become unusable (for whatever
+> reason - and I'm glad to say this has not yet happened), we plan to
+> reconstruct it by merging its mini indexes.
+>
+> I've done some merge testing so we have an idea of how long it will
+> take to reconstruct a master index.
+>
+> For testing purposes, I have created 1,000 mini indexes. Each:
+>   - contains 1,000 documents
+>   - is optimized
+>   - uses the compound file format
+>
+> The avg doc size across the 1 million docs is: 10.8 KB
+>
+> My testing has been to merge the 1,000 mini indexes to an empty
+> destination index. Destination index settings:
+>
+>   - mergeFactor: 40
+>   - minMergeDocs: 10,000
+>   - maxMergeDocs: Integer.MAX_VALUE
+>   - use compound file format
+>
+> Those values were obtained from some empirical (but not exhaustive)
+> merge testing.
+>
+> In each test run I merge N mini indexes into a single destination
+> index. Each merge starts with an empty destination index. N increases
+> by 25 for each data point.
+>
+> This means our test merges 25 minis to an empty index.  Then merges 50
+> minis to an empty index. Etc... until it merges 1,000 minis to an
+> empty index.
+>
+> Mini indexes merged with V2.1 were indexed with V2.1.
+> Mini indexes merged with V2.0 were indexed with V2.0.
+>
+> Hardware:
+>   - 64-bit
+>   - 4 CPUs: AMD Opteron 280, 2.41 GHz
+>   - 12.8 GB RAM
+>   - 1.63 TB disk space / 6 SCSI drives / RAID ??
+>
+> Software:
+>   - Lucene V2.1 and V2.0
+>   - Java 1.6
+>   - Windows Server 2003, SP 1
+>
+> I did tests with:
+>   - Lucene 2.1 using addIndexesNoOptimize() - 2 identical runs
+>   - Lucene 2.1 using addIndexes() - 1 run
+>   - Lucene 2.0 using addIndexes() - 1 run
+>
+> The recorded merge times (in seconds) include a final call to
+> optimize() the destination index after returning from
+> addIndexesNoOptimize() or addIndexes().
+>
+> I've included the test data below. (If you'd like, I can email an
+> Excel version of the data with a graph.)
+>
+> A few things caught my attention (seen easily when graphing "Indexes"
+> vs "Merge Time (secs)"):
+>
+> 1. The runs (3 & 4) using addIndexes() show a relatively smooth
+>    increase in merge times (as expected).
+>
+> 2. The 2.1 runs (1 & 2) using addIndexesNoOptimize() show multiple
+>    spikes in times for a particular merge count - with the next merge
+>    counts running faster. The pattern of spikes was identical in both
+>    runs.
+>
+>    The most notable spike occurs in the addIndexesNoOptimize() merge
+>    of 900 indexes with took 44:26 (mm:ss) in one run and 43:37 in the
+>    other. In both runs the merge times for 925, 950, 975, and 1000
+>    indexes took less time than the 900 merge.
+>
+> 3. Overall, using addIndexes() appears to be faster than
+>    addIndexesNoOptimize().
+>
+> 4. V2.0 addIndexes() performs better than V2.1 addIndexes(). Look at
+>    the very last row of data below - it is the merge rate (in
+>    docs/min) for each test run.
+>
+> Can someone explain what might be happening to cause the spikes in 2.1,
+> not seen in 2.0?
+>
+> Any thoughts on 2.0 merging faster than 2.1?
+>
+> Thanks, david.
+>
+>
+> Run 1: Lucene 2.1 / addIndexesNoOptimize()
+> Run 2: Repeat Run 1
+> Run 3: Lucene 2.1 / addIndexes()
+> Run 4: Lucene 2.0 / addIndexes()
+> All runs include a final call to optimize()
+>
+>       Merge Times (seconds)
+> Numb  Run   Run   Run   Run
+> Idxs  1     2     3     4
+> 25    39    59    44    38
+> 50    73    93    83    81
+> 75    113   131   128   120
+> 100   147   169   163   154
+> 125   179   198   193   220
+> 150   222   241   227   231
+> 175   246   261   249   239
+> 200   266   273   269   266
+> 225   297   301   288   283
+> 250   323   325   312   308
+> 275   461   471   343   337
+> 300   393   388   376   364
+> 325   424   423   410   401
+> 350   465   467   445   438
+> 375   498   504   475   466
+> 400   527   528   516   503
+> 425   586   567   608   587
+> 450   677   656   703   675
+> 475   876   880   786   750
+> 500   841   832   872   821
+> 525   920   914   937   924
+> 550   1213  1206  1038  995
+> 575   1094  1065  1137  1069
+> 600   1250  1207  1275  1189
+> 625   1367  1337  1385  1315
+> 650   1473  1433  1454  1396
+> 675   1600  1575  1499  1468
+> 700   1570  1552  1563  1516
+> 725   1605  1587  1602  1581
+> 750   1852  1808  1687  1627
+> 775   1761  1719  1732  1668
+> 800   1829  1821  1876  1753
+> 825   2167  2138  1882  1832
+> 850   2045  2042  2057  1887
+> 875   2169  2207  2101  2025
+> 900   2666  2617  2138  2014
+> 925   2174  2218  2206  2057
+> 950   2390  2391  2193  2121
+> 975   2304  2322  2247  2149
+> 1000  2321  2322  2321  2227
+>
+> 20500 43423 43248 41820 40095   <- Totals
+>       28326 28441 29412 30667   <- Merge rate: Docs per minute
+>
+

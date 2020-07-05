@@ -1,0 +1,129 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Querying fragments of a tree structure
+DATE: 21 Mar 2007
+
+Is it a fair restatement of your problem that you want to generate
+a list of all children of a node? That's what I'm reading.....
+
+Would it work for you to store the complete ancestry in each node?
+By that I mean (from your example),
+
+NOTE: it's no problem in Lucene to store different values for the
+same field in the same document. I.e
+Document doc.
+doc.add("field" "value1");
+doc.add("field" "value2");
+writer.add(doc);...
+
+This is equivalent (if using WhitespaceAnalyzer in this example)  to:
+Document doc;
+doc.add("field", "value1 value2");
+writer.add(doc);
+
+(There is a subtle difference between the two having to do
+with PositionIncrementGap, but that's probably irrelevant for you
+in this problem).
+
+So what about just doing that for each parent node in your tree? So
+your "ancestry" field for documents D and E have stored "C" and "A".
+This is TOKENIZED, but not necessarily STORED....
+
+Document C has only "A".
+
+Now, finding the children of "A" reduces to something like
++ancestry:A
+which you can add to your BooleanClauses if you want to also specify
+other search criteria or just use by itself if you don't.
+
+
+What follows is my first idea, but I think the above is a better notion.
+
+Node A stores nothing
+Nodes  B and C  store "A"
+Nodex D and E store "A$C"
+etc.
+
+Now, finding all the children of A reduces to doing a WildcardTermEnum
+on "A*" and, for each resulting term using TermDocs.seek(term) to find
+the corresponding document.
+
+Note a couple of things:
+1> index the ancestry field UN_TOKENIZED. You don't need to store it.
+1a> You could use something like this to form a Lucene Filter if you needed
+to, say, find all the nodes in the tree that were children of a specified
+node
+AND met certain search criteria.
+
+2> You could also just search on A*, but be aware that you may have to
+deal with TooManyClauses exceptions. The TermEnum/TermDocs method
+avoids that problem, but may be overkill in your situation.
+2a> Lucene 2.1 allows wildcards in the first position if you do a wlidcard
+search, but you need to turn that on by a call which I can't bring up from
+memory.
+
+
+Hope this helps
+Erick
+
+On 3/21/07, Emanuel Schleussinger <emanuel@ngine.de> wrote:
+>
+> Hi,
+>
+> first, thanks for this great a resource, and sorry if i am oversimplfying
+> a few things, i am still rather new to Lucene.
+>
+> I have been thinking how to integrate my app with Lucene - it is a CMS
+> type system that has documents organized in a tree-style layout. A few facts
+> about the system:
+> - Every node in the system is represented by a unique numeric id in  a
+> field called "id"
+> - There is one deinfed root node, and an arbitrary amount of descendants.
+> - Each of the nodes on any level knows his descendants in a field called
+> "child"
+> - Each node also knows his parent node in a field called "parent"
+>
+> I am indexing all the fields from all the nodes in Lucene already, and
+> thus, i can use Lucene to e.g. get all the descendant node IDs of a node
+> simply by issuing a query like "id:2" and then extracting the
+> multivalue-field "child".
+>
+> Now, here is what i am trying to solve now -- i would like to be able to
+> fetch all the nodes that match a certain criteria, if they are contained in
+> some fragment of the tree. To visualize:
+>
+> Root
+> +-> A
+> |   +-> B
+> |   +-> C
+> |       +->D
+> |       +->E
+> +->F
+>     +->G
+>
+> i would like to issue a query that gives me all the nodes within "A", a
+> flat list of results that contain B,C,D and E
+>
+> Now, since per my definition D is not directly correlated with A (it knows
+> his parent C, but not that its also part of A -- only C knows that) , i was
+> thinking of introducing a new field for every node into my Lucene index that
+> holds a list of IDs thats trace back to the root element (in this case, the
+> D node would have C and A in that field, in that order) - but it strikes me
+> this may not be the most elegant approach...
+>
+> The above is only a simplified example, in reality, i have a tree about 10
+> levels deep, with thousands of nodes, and i frequently need to surface nodes
+> within a certain fragment of that tree.
+>
+> Is there any best practice that you ran into on how to map this elegantly
+> into Lucene?
+>
+> Thanks a ton for any pointers,
+> Emanuel Schleussinger
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

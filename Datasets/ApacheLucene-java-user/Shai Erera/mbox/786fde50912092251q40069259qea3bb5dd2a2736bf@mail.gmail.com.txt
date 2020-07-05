@@ -1,0 +1,76 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: Converting HitCollector to Collector
+DATE: 10 Dec 2009
+
+Hi Max,
+
+In 3.0.0 (actually in 2.9.0 already), Lucene moved to execute its searches
+one sub-reader at a time. As a consequence, absolute docIDs are not passed
+to the collect method anymore, but instead the relative docIDs of that
+reader. An example, suppose you have 2 segments, with 6 documents total,
+each segment has 3. Prior to 2.9, collect would receive doc IDs 0 .. 5.
+Starting w/ 2.9, collect receives 0, 1, 2 and then 0, 1, 2 again from the
+second segment reader. setNextReader passes the docBase for that reader, so
+you can re-base the IDs passed to collect. Your implementation is correct,
+by that you always add the docBase to the passed in doc. For the first
+reader, docBase would be 0. For the second - 3.
+BTW, some collectors may not care at all about doc IDs, for example a
+Collector who simply keeps track of the max score.
+
+As for the out-of-order, again, your implementation is right by returning
+true. Using this method, the Collector declares whether it cares about the
+documents passed to its collect() to be in-order or out of order. For the
+example above, I could pass the documents as 0, 1, 2 or 1, 0, 2 if I have an
+implementation of a query that can perform better that way. Lucene has such
+query, BooleanQuery which uses BooleanScorer or BooleanScorer2. BQ performs
+better if allowed to pass documents out-of-order - it uses BooleanScorer for
+that.
+
+Hope that helps,
+Shai
+
+On Wed, Dec 9, 2009 at 8:58 PM, Max Lynch <ihasmax@gmail.com> wrote:
+
+> Hi,
+> I have a HitCollector that processes all hits from a query.  I want all
+> hits, not the top N hits.  I am converting my HitCollector to a Collector
+> for Lucene 3.0.0, and I'm a little confused by the new interface.
+>
+> I assume that I can implement by new Collector much like the code on the
+> API
+> Docs:
+>
+>  Searcher searcher = new IndexSearcher(indexReader);
+>  final BitSet bits = new BitSet(indexReader.maxDoc());
+>  searcher.search(query, new Collector() {
+>   private int docBase;
+>
+>   *// ignore scorer*
+>   public void setScorer(Scorer scorer) {
+>   }
+>
+>   *// accept docs out of order (for a BitSet it doesn't matter)*
+>   public boolean acceptsDocsOutOfOrder() {
+>     return true;
+>   }
+>
+>   public void collect(int doc) {
+>     bits.set(doc + docBase);
+>   }
+>
+>   public void setNextReader(IndexReader reader, int docBase) {
+>     this.docBase = docBase;
+>   }
+>  });
+>
+>
+> But I'm confused what the docBasing is (I need to get fields from each
+> document from my index searcher).  Do I need to use the doc base or
+> setNextReader?  Also, what is the purpose of acceptsDocsOutOfOrder?  I
+> see the docs note on it but I'm not sure how I could apply that or if
+> I should care about it.
+>
+> Thanks,
+> Max
+>
+

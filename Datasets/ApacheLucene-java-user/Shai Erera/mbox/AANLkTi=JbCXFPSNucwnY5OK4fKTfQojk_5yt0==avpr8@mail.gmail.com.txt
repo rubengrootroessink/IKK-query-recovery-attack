@@ -1,0 +1,96 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: IndexWriter.close() performance issue
+DATE: 2 Nov 2010
+
+When you close IndexWriter, it performs several operations that might have a
+connection to the problem you describe:
+
+* Commit all the pending updates -- if your update batch size is more or
+less the same (i.e., comparable # of docs and total # bytes indexed), then
+you should not see a performance difference between closes.
+
+* Consults the MergePolicy and runs any merges it returns as candidates.
+
+* Waits for the merges to finish.
+
+Roughly, IndexWriter.close() can be substituted w/:
+writer.commit(false); // commits the changes, but does not run merges.
+writer.maybeMerge(); // runs merges returned by MergePolicy.
+writer.waitForMerges(); // if you use ConcurrentMergeScheduler, the above
+call returns immediately, not waiting for the merges to finish.
+writer.close(); // at this point, commit + merging has finished, so it does
+very little.
+
+As your index grows in size, so does its # of segments, and the segments
+size as well. So tweaking some parameters on the MergePolicy (such as
+mergeFactor, maxMergeMB etc.) can result in not attempting to merge too
+large segments.
+
+Alternatively, you can try the following:
+
+1) Replace the call to writer.close() w/ the above sequence. Then, measure
+each call and report back which of them takes the suspicious amount of time.
+
+2) Not running optimize() on a regular basis doesn't mean merges don't
+happen in the background. So if you want close() to return as fast as
+possible, you should call close(false). Note though that from time to time
+you should allow merges to finish, in order to reduce the # of segments.
+
+3) If you want to control when the merges are run, you can open IndexWriter
+with NoMergePolicy, which always returns 0 merges to perform, or
+NoMergeScheduler which never executes merges. But be aware that this is
+dangerous as the # of segments in the index will continue to grow and search
+performance will degrade.
+
+The answers above is relevant for 3x, but most of them are also relevant for
+2.9. If you have an older version of Lucene, then some of the solutions
+might still apply (such as close(false)).
+
+Hope this helps,
+Shai
+
+On Tue, Nov 2, 2010 at 12:55 AM, Mark Kristensson <
+mark.kristensson@smartsheet.com> wrote:
+
+> Hello,
+>
+> One of our  Lucene indexes has started misbehaving on indexWriter.close and
+> I'm searching for ideas about what may have happened and how to fix it.
+>
+> Here's our scenario:
+> - We have seven Lucene indexes that contain different sets of data from a
+> web application are indexed for searching by end users
+> - A java service runs twice a minute to pull changes from SQL DB queue
+> tables and update the relevant Lucene index(es)
+> - The two largest indexes (3.4GB and 3.8GB in size with 8 million and 6
+> million records, respectively) contain similar sets of data, but are
+> structured differently for different consumption (e.g. one has an All field
+> for general purpose searching, the other does not; one has numeric fields
+> for ranges, the other does not, etc.)
+> - We expunge deletes from our indexes twice per day
+> - A  couple of weeks ago, one of the two large indexes became very slow to
+> close after each round of changes is applied by our indexing service.
+> Specifically, all of our indexes usually close in no more than 200
+> milliseconds, but this one index is now taking 6 to 8 seconds to close with
+> every single pass (and is leading to delays which are affecting end users).
+>
+> Questions from my attempts to troubleshoot the problem:
+> - Has anyone else seen behavior similar to this? What did you do to resolve
+> it?
+> - Does the size of an index or its documents (record count, disk size, avg
+> document size, max document size, etc.) have any correlation to the length
+> of time it takes to close an index?
+> - We are not currently optimizing any of our indexes on a regular basis,
+> could that have any impact upon indexing operations (e.g.
+> indexWriter.close())? My understanding is that optimization only affects
+> search performance, not indexing performance and to date we have not seen
+> any need to optimize based upon the performance of the search queries.
+>
+> Thanks,
+> Mark
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,70 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Deeply nested boolean query performance
+DATE: 1 Apr 2005
+
+On Friday 01 April 2005 18:14, Erik Hatcher wrote:
+> I will soon create some tests for this scenario, but wanted to run this 
+> by the list as well....
+
+Great, see below.
+
+> What performance differences would be seen between a query like this:
+> 
+> 	a AND b AND c AND d
+
+This will use a single ConjunctionScorer, and it is the fastest form.
+ 
+> and this one:
+> 
+> 	((a AND b) AND c) AND d
+
+> In other words, will building a query with nested boolean queries be 
+> substantially slower than a single boolean query with many clauses?  Or 
+> might it be the other way around?
+
+This will use a ConjunctionScorer for (a AND b), assuming a and
+b are terms. For the other AND operators a BooleanScorer will be
+used in 1.4.3. The development version will use a ConjunctionScorer
+at each AND operator.
+
+The main difference between a ConjunctionScorer and a BooleanScorer
+is the use of skipTo(), ie. the forwarding information in the term docs
+index, that allows to 'fast forward' to a given document.
+This 'fast forward' is useful for AND queries, and ConjunctionScorer does it,
+BooleanScorer simply uses next() instead. The next() method iterates
+over all documents in a term docs index.
+
+In other words, the nested form should be significantly slower than
+the flat form in 1.4.3, and just a bit slower in the development version.
+
+Another skipTo advantage comes from this form:
+(a OR b) and c
+In 1.4.3, this uses a BooleanScorer for both operators, making this
+as much work as:
+(a OR b) OR c.
+In the development version, the OR operator gets a DisjunctionScorer,
+and the AND operator a ConjunctionScorer, both allowing the use
+of skipTo(), even on the a and b terms.
+
+In this context (a OR b) can also be for example a fuzzy query or a prefix 
+query.
+
+The development version also uses skipTo() on b in the following situations:
++a b
+a -b
+
+So, when you measure, please use both 1.4.3 and the development version
+to see the differences. And, off course, the larger your index, the better.
+As the code is still a bit young, you might be in for some surprises, too.
+skipTo() has the biggest advantages when the index data is not
+available in any cache.
+
+Regards,
+Paul Elschot.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

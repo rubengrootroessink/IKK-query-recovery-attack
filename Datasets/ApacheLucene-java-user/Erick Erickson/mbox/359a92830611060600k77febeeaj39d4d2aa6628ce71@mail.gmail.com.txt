@@ -1,0 +1,163 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: reg : document number
+DATE: 6 Nov 2006
+
+>From the comments in the IndexModifier.java file (didn't see this in the
+"regular" javadoc...
+
+/**
+   * Deletes all documents containing <code>term</code>.
+   * This is useful if one uses a document field to hold a unique ID string
+for
+   * the document.  Then to delete such a document, one merely constructs a
+   * term with the appropriate field and the unique ID string as its text
+and
+   * passes it to this method.  Returns the number of documents deleted.
+   * @return the number of documents deleted
+   * @see IndexReader#deleteDocuments(Term)
+   * @throws IllegalStateException if the index is closed
+   */
+  public int deleteDocuments(Term term) throws IOException {
+
+Unless space constrains you, this seems like a natural mapping for the file
+path (UN_TOKENIZED). That is, just add the full file path to your document
+at index time and delete the doucment with this call. You don't have to
+STORE the path though......
+
+Otherwise, you'd have some process like
+1> search on a known unique field for the doucment
+2> delete that document id
+3> repeat.....
+
+Or, you could get fancy and just inspect the terms in the index and get the
+corresponding doc ID (see TermEnum and TermDocs), but I suspect that's
+waaaay overkill.
+
+But this comment from IndexReader Javadoc finally makes sense to me.....
+
+<<<
+
+For efficiency, in this API documents are often referred to via *document
+numbers*, non-negative integers which each name a unique document in the
+index. These document numbers are ephemeral--they may change as documents
+are added to and deleted from an index. Clients should thus not rely on a
+given document having the same number between sessions.
+
+An IndexReader can be opened on a directory for which an IndexWriter is
+opened already, but it cannot be used to delete documents from the index
+then.
+
+>>>
+
+I've wondered for a while why you delete documents through an IndexReader.
+Seemed kind of funky. It finally makes sense. An IndexReader is a snapshot
+of an index, so while you have that reader open, the DocIDs won't change for
+that reader. Indeed, you don't get to see updates to the index until you
+close/reopen your reader. But you can't delete through a reader while a
+writer is open. Because the writer may change DocIDs. So you can't do both
+at once..
+
+The caution is relying on DocIDs between sessions, especially storing DocIDs
+somewhere else and trying to go back and use them with a different
+indexreader. While the reader is open, you can freely delete documents
+without fear of doc IDs changing is how I read it.
+
+Erick
+
+P.S. This would be yet another fine time for folks who really know to tell
+me I just don't get it <G>.
+
+On 11/5/06, Jin Yiqing <yiqing.jin@gmail.com> wrote:
+>
+> I used to have this question too. My solution is use "searcher" to get the
+> document then detele it. To do this you should know how to give a query
+> that
+> could get the exact one doc you wanted.  Hope  this  could  do some help
+> to
+> u.
+>
+> 2006/11/6, mukkamalla rama kumar <mukkamalla_r@yahoo.co.in>:
+> >
+> > Thanks for your reply,
+> >
+> >       Actually what my concern was that,
+> >   I have a file repository, when files are added to this repository i
+> > would be updating the index by the corresponding document.
+> >
+> >   But during deletion of the file in the file repository i have to
+> delete
+> > the document from the index that i have built. The IndexModifer provides
+> the
+> > option
+> >
+> >   public void deleteDocument(int docNum)
+> >
+> >   but this docNum will be varying for the documents, so how can i delete
+> > the document when the files they represent are deleted in my file
+> repository
+> >
+> >   Thanks in advance for your reply
+> >
+> >
+> >
+> > Erick Erickson <erickerickson@gmail.com> wrote:
+> >   Do NOT rely on the Lucene document number. It changes periodically. As
+> I
+> > understand it the general algorithm is that each doc gets an ID one
+> > greater
+> > than the current max doc ID at INDEX time. However, when you delete
+> > documents and optimize your index, the document IDs change.
+> > Simplistically,
+> > say you have docs indexed with IDs 1, 2, 3, 4, 5, remove 2 and
+> reoptimize.
+> > You then have IDs 1, 2, 3, 4 where 2, 3, 4 were 3, 4, 5 respectively.
+> >
+> > WARNING: I have no idea whether that's exactly how it works. The point
+> is
+> > that the doc IDs change. I wouldn't count on trying to match any
+> algorithm
+> > that Lucene uses....
+> >
+> > But you don't need to anyway. Just assign your own document ID that
+> *you*
+> > can guarantee doesn't change (no relation to the Lucene ID) and store
+> that
+> > wherever you want, then search on that. I believe you'll find that you
+> can
+> > search fast enough on such an ID that you won't notice the time. At any
+> > rate, that's how I'd start out and only get fancier if performance
+> proves
+> > unacceptable.
+> >
+> > Best
+> > Erick
+> >
+> > On 11/5/06, mukkamalla rama kumar wrote:
+> > >
+> > > Hi,
+> > >
+> > > How is this document number assigned to documents. Can i give my own
+> > > document number.
+> > >
+> > > I would like to get the document number for a particular file that i
+> > > added to an index.
+> > >
+> > >
+> > > ---------------------------------
+> > > Find out what India is talking about on - Yahoo! Answers India
+> > > Send FREE SMS to your friend's mobile from Yahoo! Messenger Version 8.
+> > Get
+> > > it NOW
+> > >
+> >
+> >
+> >
+> > ---------------------------------
+> > Find out what India is talking about on  - Yahoo! Answers India
+> > Send FREE SMS to your friend's mobile from Yahoo! Messenger Version 8.
+> Get
+> > it NOW
+> >
+>
+>
+

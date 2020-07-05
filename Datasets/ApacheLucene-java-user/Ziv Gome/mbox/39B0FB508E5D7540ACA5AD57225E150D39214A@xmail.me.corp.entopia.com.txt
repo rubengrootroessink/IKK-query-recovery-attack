@@ -1,0 +1,119 @@
+FROM: "Ziv Gome" <zg...@entopia.com>
+SUBJECT: RE: Search for synonyms - implemenetation for review
+DATE: 13 Mar 2006
+
+Hi Mark, thanks for your response.
+
+Here are my thoughts on your suggestion:
+
+I believe it would be a good idea to merge similar query expansion code.
+I also agree that the situation of fuzzy query is similar to the synonym
+query use-case, in the sense of having a root term and some related,
+de-boosted, terms around it. However, I also see some significant
+difference in the two scenarios. I'll try to explain my view, but first,
+I'll briefly divide our solution to sub elements:
+1. Expanding the root term to related terms.
+	1.a.	creating a de-boosted additional term.
+	1.b 	making sure the IDF normalization
+(sumOfSquares/normalize) for 		root terms (entered by the user)
+will take into account only the 		original term, and will
+normalize the expanded term accordingly.
+2. Result aggregation for different terms, generated from the same root.
+	2.a	In the synonym solution, we attempted to sum occurrences
+of 		all terms, generated from same root, as if it was the
+same term, 		and only then apply tf function upon this
+frequency. 
+		i.e. if "car" and "automobile" appeared 5 times each in
+the same 		document, calculate term frequency for a
+frequency of 10 
+		(=2X5:-). This replaces the OR (aggregated as either max
+or sum) 		approach usually taken in such cases.
+	2.b 	Applying 2.a alone carries with it a problem - How do
+you count 		together rare and common terms? If applied as
+is, it may bonus 		common terms, whose frequency is
+presumed to be "cheap" and in 		Lucene is compensated with a low
+IDF value. However, here it is 		counted under the IDF of the
+root term. The solution was to 		normalize the frequencies to the
+root term (BTW - an inverse 		normalization to 1.b)
+
+Going back to the discussion on how similar FuzzyLikeThisQuery and
+SynonymsQuery are, I believe that part 1 of our solution applies also
+for the fuzzy case, with the addition of differential boost factor (your
+suggestion of edit distance as a measure for this deboost makes perfect
+sense to me). On the other hand, part 2 of our solution, does not seem
+to me helpful in the Fuzzy case, I would assume that different fuzzy
+forms, will not appear in the same document, but will tend to appear in
+different documents. Say you are looking for my surname "gome". Some
+people may misspell it to "gomeh" or "goma", but I would dare to state
+that if both "gomeh" and "gome" appears together in the same document,
+the author meant two different things. Naturally, the possibility of
+typos exists, but would probably not generate a lot of occurrences. For
+that reason, I would not adopt part 2 for the fuzzy case, but stick to
+aggregating the results in an OR fashion (I.e. "gome" OR "gomeh" OR
+"goma"). Applying part 2 of the synonym solution is harmless IMHO, but
+the scorer works harder (a lot of SQR/SQRT).  
+BTW, in my other post on this matter, I referred to another case we
+applied part 1 of this solution, the case of searching thru 2 fields,
+main and secondary (for example - content text Vs title). Here we are
+talking about the same term, but it is expanded to different fields,
+with very different IDF values (sometimes). The problem here is again
+similar to the synonym and fuzzy cases, as IDFs tend to mix across
+fields, and yield unexpected results.
+
+Summary :-)
+
+My feeling is that part 1 makes sense to other query expansion cases
+from a root term, such as the fuzzy case, but part 2 does not, although
+it will still generate valid results. Part 2 is in general implemented
+as a specialized scorer, so perhaps the Query class can be unified, but
+the synonym specialized scorer be constructed only for the case where
+you wish to "count as one term", which I believe is not the case for the
+fuzzy situation.
+
+Thanx for your time,
+Ziv Gome
+
+-----Original Message-----
+From: mark harwood [mailto:markharw00d@yahoo.co.uk] 
+Sent: Monday, March 06, 2006 5:22 PM
+To: java-user@lucene.apache.org
+Subject: Re: Search for synonyms - implemenetation for review
+
+Sounds like you've been tackling a number of the
+issues I was concerned with "fuzzy" searching. It's
+essentially the same problem - the user types one word
+and the engine searches for several variants.
+
+The FuzzyLikeThisQuery class in the "queries" module
+of the contrib area in SVN contains similar code. It
+addresses idf and coord issues introduced with fuzzy
+variants. 
+
+It's probably worth considering having one
+implementation for generically scoring variants
+whether they are produced by fuzzy algorithms or
+synonyms or any other means. In either case there
+could be a "cost" factor associated with variants
+which could be based on the fuzzy edit distance from
+the root term or synonym "relatedness" to the root
+term.
+
+I'll have a look at your implementation with this in
+mind when I have a bit more time.
+
+Cheers,
+Mark
+
+
+
+		
+___________________________________________________________ 
+To help you stay safe and secure online, we've developed the all new
+Yahoo! Security Centre. http://uk.security.yahoo.com
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

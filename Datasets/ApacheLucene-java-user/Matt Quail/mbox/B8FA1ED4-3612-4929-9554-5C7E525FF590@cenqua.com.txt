@@ -1,0 +1,91 @@
+FROM: Matt Quail <m...@cenqua.com>
+SUBJECT: Doing a Join across indexes [was Documents returned by Scorer]
+DATE: 7 Jun 2005
+
+
+On 08/06/2005, at 1:33 AM, Paul Elschot wrote:
+
+> On Tuesday 07 June 2005 11:42, Matt Quail wrote:
+>
+>> I've been playing around with a custom Query, and I've just realized
+>> that my Scorer is likely to return the same document more then once.
+>> Before I delve a bit further, can anyone tell me if this is this a
+>> Bad Thing?
+>>
+>
+> Normally, yes. A query is expected to provide a single score for
+> each matching document. The Hits class depends on this.
+> One can suppress later 'hits' by using a BitVector.
+
+
+Yes, further delving revealed that returning a document multiple  
+times, and returning doc-ids out-of-order, is a bad idea.
+
+
+What I'm actually trying to implement is an efficient join between  
+two indices. I'll describe my current strategy, all comments welcome.
+
+Imagine you have two indices, and they have some field in common.  
+This might often be a "primary key" field, giving you a 1-1  
+relationship between documents in the two indices, but it general it  
+could be any 1-N, N-1 or M-N relationship.
+
+(Why are there two indices? There could be many reasons, one that was  
+mentioned on this list recently was an ACL index. You could update/ 
+delete/add from the ACL index without having to re-index the  
+"primary" index).
+
+Lets call the two indices Left and Right. We want to find documents  
+in Left, where leftdoc.leftfield == rightdoc.rightfield, for some set  
+of rightdoc's satisfying some query.
+
+Here is the pseudo-code for first attempt, which works but is not  
+necessarily that efficient:
+
+Inputs:
+- leftJoinField name
+- rightJoinField name
+- rightQuery
+
+1) Compute a BitSet of all the docids that match the given query in  
+the right, call it rightDocs.
+2) Create a TermDocs for the left index
+3) Create a TermEnum and a TermDocs, for iterating through all the  
+<term,docid> pairs in the right index for the rightJoinField
+4) for each rterm on the right where there is a <rterm, docid> pair  
+that is in rightDocs:
+4.1) initialize the left termdoc to new Term(leftField, rterm.text())
+4.2) iterate through those left docs ids for that term. These are our  
+matching left documents
+
+
+Consider the case of a 1-1 relationship, where rightDocs just  
+contains one document. Step 4 requires us to iterate through all the  
+terms on the rightJoinField (effectively, all the documents), just to  
+find the term corresponding to that one document This is not very  
+efficient. For a small number of rightDocs (for some value of  
+'small'), it would be better to iterate through the Documents, and  
+extract the (stored) term that way.
+
+However, for a large number of rightDocs, the "bitset" approach in  
+the above algorithm might be better.
+
+In my second attempt, I might choose between the bitset and extract- 
+document approach, depending on some threshold.
+
+One cute thing you might be able to do with the extract-document  
+approach is to actually use a Hits object (or HitCollector), which  
+gives you a score for each document. You could feed this score into  
+the join by returning the left documents via a custom Query/Scorer.  
+(okay, I agree this might be troublesome to implement efficiently.)
+
+
+Any comments? Has anyone ever attempted something similar?
+
+=Matt
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,119 @@
+FROM: Mark Harwood <markharw...@yahoo.co.uk>
+SUBJECT: Re: DuplicateFilter question
+DATE: 31 May 2010
+
+The DuplicateFilter passed to the searcher does not have visibility of the text query and is
+therefore evaluated independently from all other criteria.
+Sounds like the behaviour you want is to get the last duplicate that also matches your criteria,
+which seems like something fairly common to need to do but unfortunately something DuplicateFilter
+will not help with. For this requirement you would need to have a new de-duping query that
+wraps a child query and takes the latest match for a given field. Unfortunately if the documents
+are not  sequenced in URL-order this will either involve using a lot of expensive disk seeks
+or a lot of ram to evaluate efficiently.
+
+If your documents are stored in URL order (ie the URL is just the host part and all docs from
+a site are held together) you could look at the PerParentLimitingQuery I created as part of
+the NestedDocumentQuery package in Lucene 2454. It is designed to return the top N docs for
+a given parent (in this case, site). With some small modification it could return the last
+child for a parent. Take a look at the junit example that gets the best n chapters for each
+book.  
+Cheers,
+Mark
+
+On 31 May 2010, at 08:15, Паша Минченков <chardex@gmail.com> wrote:
+
+df (DuplicateFilter) is the second parameter in the searcher.search metod.
+ScoreDoc[] hits = searcher.search(q, df, 1000).scoreDocs;
+
+This varians doesn't hit too:
+ScoreDoc[] hits = searcher.search(new FilteredQuery(tq, df), new
+QueryWrapperFilter(new TermQuery(new Term("text", "now"))),
+1000).scoreDocs;
+Or:
+ScoreDoc[] hits = searcher.search(new FilteredQuery(tq, new
+QueryWrapperFilter(new TermQuery(new Term("text", "now")))), df,
+1000).scoreDocs;
+
+2010/5/31, Uwe Schindler <uwe@thetaphi.de>:
+Where is df (the DuplicateFilter) used in your code?
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+-----Original Message-----
+From: Паша Минченков [mailto:chardex@gmail.com]
+Sent: Monday, May 31, 2010 8:27 AM
+To: java-user@lucene.apache.org
+Subject: DuplicateFilter question
+
+Hi,
+
+Why DuplicateFilter doesn't work together with other filters? For example,
+if
+a little remake of the test DuplicateFilterTest, then the impression that
+the
+filter is not applied to other filters and first trims results:
+
+public void testKeepsLastFilter()
+	throws Throwable {
+	DuplicateFilter df = new DuplicateFilter(KEY_FIELD);
+	df.setKeepMode(DuplicateFilter.KM_USE_LAST_OCCURRENCE);
+
+	Query q = new ConstantScoreQuery(new ChainedFilter(new Filter[]{
+	new QueryWrapperFilter(tq),
+	// new QueryWrapperFilter(new TermQuery(new Term("text",
+"out"))), // works right, it is the last document.
+	new QueryWrapperFilter(new TermQuery(new Term("text",
+"now"))) // why it doesn't work? It is the third document.
+
+	}, ChainedFilter.AND));
+
+	ScoreDoc[] hits = searcher.search(q, df, 1000).scoreDocs;
+
+	assertTrue("Filtered searching should have found some matches",
+hits.length > 0);
+	for (int i = 0; i < hits.length; i++) {
+	Document d = searcher.doc(hits[i].doc);
+	String url = d.get(KEY_FIELD);
+	TermDocs td = reader.termDocs(new Term(KEY_FIELD, url));
+	int lastDoc = 0;
+	while (td.next()) {
+	lastDoc = td.doc();
+	}
+	assertEquals("Duplicate urls should return last doc", lastDoc,
+hits[i].doc);
+	}
+}
+
+--
+С уважением,
+Минченков Павел
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+-- 
+С уважением,
+Минченков Павел
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+      

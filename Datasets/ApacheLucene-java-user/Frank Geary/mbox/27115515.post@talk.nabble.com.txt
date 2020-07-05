@@ -1,0 +1,104 @@
+FROM: Frank Geary <fge...@acquiremedia.com>
+SUBJECT: Index corruption using Lucene 2.4.1 - thread safety issue?
+DATE: 11 Jan 2010
+
+
+Hi,
+
+I'm using Lucene 2.4.1 and am seeing occasional index corruption.  It shows
+up when I call MultiSearcher.search().  MultiSearcher.search() throws the
+following exception:
+
+ArrayIndexOutOfBoundsException.  The error is: Array index out of range: ###
+where ### is a number representing an index into the deletedDocs BitVector
+in SegmentTermDocs.  the stack trace is as follows:
+
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.util.BitVector.get(BitVector.java:91)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java:125)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.index.MultiSegmentReader$MultiTermDocs.next(MultiSegmentReader.java:554)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldCacheImpl$10.createValue(FieldCacheImpl.java:384)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldCacheImpl$Cache.get(FieldCacheImpl.java:71)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldCacheImpl.getStringIndex(FieldCacheImpl.java:351)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldSortedHitQueue.comparatorString(FieldSortedHitQueue.java:415)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldSortedHitQueue$1.createValue(FieldSortedHitQueue.java:206)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldCacheImpl$Cache.get(FieldCacheImpl.java:71)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldSortedHitQueue.getCachedComparator(FieldSortedHitQueue.java:167)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.FieldSortedHitQueue.<init>(FieldSortedHitQueue.java:55)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.TopFieldDocCollector.<init>(TopFieldDocCollector.java:43)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:122)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.MultiSearcher.search(MultiSearcher.java:232)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+org.apache.lucene.search.Searcher.search(Searcher.java:86)
+2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+com.acquiremedia.opens.index.searcher.HybridIndexSearcher.search(HybridIndexSearcher.java:311)
+.
+.
+.
+
+That makes sense, but I'm trying to understand what could be causing the
+corruption. 
+
+Here's what I'm doing:
+
+1) I have an IndexWriter created usnig a RAMDirectory.  
+
+2) I have a single thread processing index adds and index deletes.  This
+thread is rather simple and calls IndexWriter.addDocument() followed by
+IndexWriter.commit() or IndexWriter.deleteDocuments() followed by
+IndexWriter.commit().  The commits are done at this point because we want
+the documents available for searching immediately.  
+
+3) I also have 4 search threads running at the same time as the index write
+thread.  Each time a search thread executes a search it calls
+IndexReader.reopen()  on the existing IndexReader for the index created
+using the RAMDirectory above, gets an existing index reader for another
+on-disk index and then calls MultiSearcher.search() (this brings together
+the RamDirectory index and an on-disk index) to execute the search.
+
+It generally works fine, but every few days or so I get the above
+ArrayIndexOutOfBoundsException.   My suspicion is that when the
+IndexWritert.commit() call happens due to a delete at the exact same time as
+the IndexReader.reopen() call happens, the IndexReader has a deleteDocs
+BitVector which reflects the delete, but something else internal to the
+IndexReader is not reflecting the delete.  
+
+So, I implemented a semaphore mechanism to prevent IndexWriter.commit() from
+happening at the same time as IndexReader.reopen().  I only implemented the
+semaphores in the delete case because my guess was that an add would be
+unlikely to affect the deleteDocs Bit Vector.  Unfortunately, the problem
+continues to happen.
+
+I believe I read somewhere that a similar thread saftey issue had been fixed
+in Lucene 2.4, but I suspect there may still be an issue in 2.4.1.  
+
+Does anyone have any knowledge or insight into what I may be doing wrong or
+how I can correct/avoid the problem?  Upgrading to Lucene 3.0 or using Solr
+are not really options for me at least in the short term.
+
+Thanks for any information you can provide!
+
+Frank
+-- 
+View this message in context: http://old.nabble.com/Index-corruption-using-Lucene-2.4.1---thread-safety-issue--tp27115515p27115515.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

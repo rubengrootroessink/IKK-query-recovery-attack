@@ -1,0 +1,57 @@
+FROM: Clemens Wyss <clemens...@mysign.ch>
+SUBJECT: "Umlaute" getting lost
+DATE: 21 Apr 2011
+
+I keep my search terms in a dedicated RAMDirectory (the termIndex). 
+In there I palce all the term of my real index. When putting the terms into the 
+termIndex I can still see [using the debugger] the Umlaute (äöü). Unfortunately when searching
+the 
+termIndex the documents no more contain these Umlaute.
+
+Populating the termIndex:
+termIndex = new RAMDirectory();
+IndexWriterConfig config = new IndexWriterConfig( Version.LUCENE_31, new TermAnalyzer( locale
+) );
+termIndexWriter = new IndexWriter( termIndex, config );
+TermEnum tEnum = realIndexReader.terms();
+while ( tEnum.next() )
+{
+	Term t = tEnum.term();
+	String termText = t.text();
+	Document termDocument = new Document();
+	Field field = new Field( FIELDNAME_TERM, termText, Field.Store.YES, Field.Index.ANALYZED
+);
+	termDocument.add( field );
+	// and add term into the index
+	termIndexWriter.addDocument( termDocument );
+}
+termIndexWriter.commit();
+termIndexWriter.optimize();
+termIndexWriter.close();
+
+termIndexReader = IndexReader.open( termIndex, true );
+---------- searching terms
+Query q = fuzzy ? new FuzzyQuery( new Term( FIELDNAME_TERM, termFilter.toLowerCase() ) ) :
+					new WildcardQuery( new Term( FIELDNAME_TERM, "*" + termFilter.toLowerCase() + "*" ) );
+TopDocs topDocs = new IndexSearcher( getTermIndexReader() ).search( q, 100 );				
+for ( ScoreDoc hit : topDocs.scoreDocs )
+{
+	Document doc = getTermIndexReader().document( hit.doc );
+	String indexTerm = doc.get( FIELDNAME_TERM );
+	if ( !returnValue.contains( indexTerm  ) )
+	{
+		returnValue.add( indexTerm );
+	}
+}
+----------
+The TermAbnalyzer is the same analyzer as the main index analyzer with the exception that
+a LowerCaseFilter is applied.
+I have unit tests for my Umlaute which work as expected. 
+Unfortunately this is not the case when I debug my real app...
+What could possibly cause the "loss"?
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

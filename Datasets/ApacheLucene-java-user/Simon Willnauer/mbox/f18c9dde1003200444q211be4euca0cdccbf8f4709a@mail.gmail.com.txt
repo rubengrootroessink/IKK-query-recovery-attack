@@ -1,0 +1,120 @@
+FROM: Simon Willnauer <simon.willna...@googlemail.com>
+SUBJECT: Re: incorrect hits when using multiple threads
+DATE: 20 Mar 2010
+
+On Sat, Mar 20, 2010 at 11:52 AM, Ruben Laguna <ruben.laguna@gmail.com> wrote:
+> Hi,
+> I'm getting incorrect results from IndexSearcher, hopefully somebody can
+> give me a hand.
+>
+> I have a single IndexWriter instance shared by several threads that invoke
+> addDocument on the IW. I also have another thread that invokes commit()
+> periodically (every 10s). Then I have another thread that repeats the same
+> search shortly after each commit (it creates a new IndexSearcher and reopens
+> the IndexReader). The hits that I get from the IndexSearch are incorrect
+> (some hits really contain the search term and some not), and some of the
+> hits disappear or are replaced by others between searches.
+>
+>
+>
+>      T1   T2    T3                 T4
+>       |    |     |                  |
+>       |    |     |                  |
+>      add  add    |                  |
+>       |    |   commit               |
+>      add  add    |               search1
+>       |    |   commit               |
+>      add  add    |               search2
+>       |    |   optimize             |
+>       |    |     |               search3
+>       |    |   close                |
+>       |    |     |               search4
+>       |    |     |                  |
+>    +------------------+  +----------------------+
+>    |     IndexWriter  |  | IndexSearcher/Reader |
+>    +------------------+  +----------------------+
+>
+>    +--------------------------------------------+
+>    |              Directory                     |
+>    +--------------------------------------------+
+> Figure [1]
+>
+>
+> After optimizing and closing the IndexWriter the IndexSearcher gives the
+> correct hits though . So in figure [1] search1 and search2 gives incorrect
+> results (almost random sometimes) but search3 almost correct results and
+> search4 is OK (to be accurate search4 is performed after restarting the
+> JVM).
+>
+> I tried this in Lucene 2.9 and 3.0.1 with the same results. I tried
+> CFS/noCFS and I tried also the real-time reader (IndexWriter.getReader())
+> and I get the same results. The strange thing is that if  close the
+> IndexWriter before optimizing and terminate my application I can  open the
+> index with luke 1.0.0 and see the correct results. But when I try to open
+> the same index with IndexSearcher/IndexReader I get different (incorrect
+> results). So clearly there is a problem on how I create the IndexSearcher
+> but I can't figure out what the problem, can anyone take a look to the find
+> method in [2] and tell me what am I doing wrong?
+>
+>
+>
+> BTW, this is the results that I get with my IndexSearcher
+>
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: using index
+> version: 1269075783764
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: query
+> =all:httpunit*
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 115
+> matches the search.
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 695
+> matches the search.
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 703
+> matches the search.
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 1094
+> matches the search.
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 2177
+> matches the search.
+> INFO [com.rubenlaguna.en4j.searchlucene.NoteFinderLuceneImpl]: doc id 4436
+> matches the search.uceneImpl]: find took 1.027 secs. 7 results found
+>
+>
+> My app's IndexSearchers gives (115,695,03,1094,2177,4436) compared with the
+> results that I get from the same search with luke
+> (9489,12961,9481,9780,12025,12732,7967). They are totally different!. The
+> IndexSearcher in my app says that the index version is 1269075783764 whereas
+> Luke says that the version is 1277acfb054??
+
+Briefly looking at your collector implementation yields that you are
+using the "top-level" searcher to retrieve documents by ID while
+the id passed to your collector is relative for you current reader.
+int scoreId = doc;
+Document document = searcher.doc(scoreId);
+final String stringValue = document.getField("id").stringValue();
+int docId = Integer.parseInt(stringValue);
+
+you should use the reader / docbase given to
+   @Override
+    public void setNextReader(IndexReader reader, int docBase) throws
+IOException { }
+
+This would be my first guess.
+
+Simon
+
+>
+>
+>
+>
+> [2]
+> http://github.com/ecerulm/en4j/blob/experimental/NBPlatformApp/SearchLucene/src/com/rubenlaguna/en4j/searchlucene/NoteFinderLuceneImpl.java
+> [3]
+> http://github.com/ecerulm/en4j/blob/experimental/NBPlatformApp/SearchLucene/src/com/rubenlaguna/en4j/searchlucene/IndexWriterFactory.java
+> --
+> /Rubén
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

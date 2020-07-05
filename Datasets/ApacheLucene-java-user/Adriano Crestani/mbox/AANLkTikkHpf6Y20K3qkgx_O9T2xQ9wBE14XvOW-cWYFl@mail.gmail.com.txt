@@ -1,0 +1,123 @@
+FROM: Adriano Crestani <adrianocrest...@gmail.com>
+SUBJECT: Re: Questions about the new query parser framework
+DATE: 3 May 2010
+
+Hi Daniel,
+
+ 1. Is it intentional that query nodes do not implement equals()?  I
+had rather a lot of overhead when writing unit tests due to being
+unable to use it - it's either (a) define a Matcher for every single
+QueryNode class, or (b) toString() it and perform some sanitisation
+(which is what we're doing.)
+
+Good point! QueryNode(s) are data objects, and it makes sense to override
+their equals method. But before, we need to define what is a QueryNode
+equality. Should two nodes be considered equal if they represent
+syntactically or semantically the same query? e.g. an ORQueryNode created
+from the query <a OR b OR c> will not have the same children ordering as the
+query <b OR c OR a>, so they are syntactically not equal, but they are
+semantically equal, because the order of the OR operands (usually) does not
+matter when the query is executed. I say it usually does not matter, because
+it's up to the Query object implementation built from that ORQueryNode
+object, for this reason, I vote for defining that two query nodes should be
+equals if they are syntactically equal.
+
+I also vote for excluding query node tags from the equality check, because
+they are not meant to represent the query structure, but to attach extra
+info to the node, which is usually used for communication between
+processors.
+
+
+ 2. Is there a plan to introduce a QuerySyntaxFormatter interface as
+a counterpart to QuerySyntaxParser, for generating the same query
+format using the nodes that would have been generated when parsing it
+(obviously with a small change in format in some situations)?
+
+I actually never liked how QueryNode -> query string is done today, using
+QueryNode.toQueryString(...) method. A QueryNode shouldn't be responsible
+for converting itself back to the string format, because different
+SyntaxParser(s) may create, e.g., an ORQueryNode from a <OR(a, b)> or <a OR
+b> syntax, so what should orQueryNode.toQueryString(...) return? So a
+QuerySyntaxFormatter makes sense, now we need to start working on how this
+interface should look like, so SyntaxParser implementors can start
+implementing equivalent QuerySyntaxFormatter(s).
+
+ 3. I have been parsing a lot of boolean queries, and have noticed
+that there is *always* a GroupQueryNode around any BooleanQueryNode.
+Is this really required, given that BooleanQueryNode is already
+implicitly a grouping type of query?
+
+ 4. If GroupQueryNode is specifically a cue to whether the user
+specified parentheses or not (i.e. if it is supposed to be cosmetic,
+for the purposes of getting back to what the user typed in) then why
+is it that "tag:a tag:b" and "tag:(a b)" both parse to the same node
+structure (making it impossible to figure out which the user actually
+used)?
+
+Yes, it's created when parentheses are defined. The standard query
+processors needs to know where parentheses were typed, so they can enforce
+Lucene operator precedence, which is not that trivial and rely on some
+conditions on whether the user typed or not the parentheses.
+
+StandardSyntaxParser generate <tag:a tag:b> and <tag:(a b)> different query
+node trees for these two queries, one with GroupQueryNode and the other
+without. However, after the query node tree is sent through the
+StandardQueryNodeProcessorPipeline, the query node tree is optimized and
+usually GroupQueryNode(s) are removed.
+
+Best Regards,
+Adriano Crestani
+
+On Sun, May 2, 2010 at 7:47 PM, Daniel Noll <daniel@nuix.com> wrote:
+
+> Hi all.
+>
+> I have been using the new query parser framework fairly heavily,
+> although our use case is largely for *generating* queries rather than
+> parsing them - the intermediate query nodes happened to be a very good
+> model for doing this without all the usual nightmares of thinking
+> about the escape syntax, and without having to think about how each
+> query is encoded, which is the usual drawback of using Query objects
+> directly.
+>
+> But I have some questions.
+>
+>  1. Is it intentional that query nodes do not implement equals()?  I
+> had rather a lot of overhead when writing unit tests due to being
+> unable to use it - it's either (a) define a Matcher for every single
+> QueryNode class, or (b) toString() it and perform some sanitisation
+> (which is what we're doing.)
+>
+>  2. Is there a plan to introduce a QuerySyntaxFormatter interface as
+> a counterpart to QuerySyntaxParser, for generating the same query
+> format using the nodes that would have been generated when parsing it
+> (obviously with a small change in format in some situations)?
+>
+>  3. I have been parsing a lot of boolean queries, and have noticed
+> that there is *always* a GroupQueryNode around any BooleanQueryNode.
+> Is this really required, given that BooleanQueryNode is already
+> implicitly a grouping type of query?
+>
+>  4. If GroupQueryNode is specifically a cue to whether the user
+> specified parentheses or not (i.e. if it is supposed to be cosmetic,
+> for the purposes of getting back to what the user typed in) then why
+> is it that "tag:a tag:b" and "tag:(a b)" both parse to the same node
+> structure (making it impossible to figure out which the user actually
+> used)?
+>
+> Daniel
+>
+>
+>
+> --
+> Daniel Noll                            Forensic and eDiscovery Software
+> Senior Developer                              The world's most advanced
+> Nuix                                                email data analysis
+> http://nuix.com/                                and eDiscovery software
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

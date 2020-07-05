@@ -1,0 +1,171 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: IndexWriter.deleteDocuments(Query query)
+DATE: 1 Apr 2009
+
+a code snippet is worth 1000 words :)
+
+
+private static final Term UID_TERM = new Term("uid_payload", "_UID");
+
+private static class SinglePayloadTokenStream extends TokenStream {
+
+   private Token token = new Token(UID_TERM.text(), 0, 0);
+
+   private byte[] buffer = new byte[4];
+
+   private boolean returnToken = false;
+
+
+   void setUID(int uid) {
+
+     buffer[0] = (byte) (uid);
+
+     buffer[1] = (byte) (uid >> 8);
+
+     buffer[2] = (byte) (uid >> 16);
+
+     buffer[3] = (byte) (uid >> 24);
+
+     token.setPayload(new Payload(buffer));
+
+     returnToken = true;
+
+   }
+
+
+   public Token next() throws IOException {
+
+     if (returnToken) {
+
+       returnToken = false;
+
+       return token;
+
+     } else {
+
+       return null;
+
+     }
+
+   }
+
+ }
+
+
+When building docs:
+
+f=new Field(UID_TERM.field(), singlePayloadTokenStream);
+
+   doc.add(f);
+
+
+When we load the index, we do:
+
+
+int maxDoc = reader.maxDoc();
+
+_uidArray = new int[maxDoc];
+
+TermPositions tp = null;
+
+byte[] payloadBuffer = new byte[4];       // four bytes for an int
+
+try
+
+{
+
+          tp = reader.termPositions(UID_TERM);
+
+          int idx = 0;
+
+          while (tp.next())
+
+          {
+
+            int doc = tp.doc();
+
+            assert doc < maxDoc;
+
+
+
+            while(idx < doc) _uidArray[idx++] = -1; // fill the gap
+
+
+
+            tp.nextPosition();
+
+            tp.getPayload(payloadBuffer, 0);
+
+            int uid = bytesToInt(payloadBuffer);
+
+            if(uid < _minUID) _minUID = uid;
+
+            if(uid > _maxUID) _maxUID = uid;
+
+            _uidArray[idx++] = uid;
+
+      }
+
+}
+
+finally
+
+{
+
+          if (tp!=null)
+
+          {
+
+          tp.close();
+
+          }
+
+}
+
+
+
+This is actually code Mike B. posted a while back.
+
+
+-John
+
+
+On Wed, Apr 1, 2009 at 2:29 PM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> On Wed, Apr 1, 2009 at 5:22 PM, John Wang <john.wang@gmail.com> wrote:
+> > Hi Michael:
+> >
+> >    1) Yes, we use TermDocs, exactly what
+> IndexWriter.deleteDocuments(Term)
+> > is doing under the cover.
+>
+> This part I understand :)
+>
+> >    2) We iterate the docid->uid mapping, for each docid, get the
+> > corresponding ui and check that to see if that is in the deleted set. If
+> so,
+> > add the docid to the list. There is no uid->docid lookup needed.
+>
+> Does this mean you iterate all docs in the index, and only when you
+> come across a UID that's deleted, you add to deleted set?
+>
+> Do you have a separate payload field per document?  (I'm still unclear
+> how you use payloads to encode the full docID -> UID map).
+>
+> >      However, in our sharded architecture, we partition by continuous
+> uids,
+> > in which case we keep both mappings since we know the range of the the
+> uid.
+> > In which case, uid->docid mapping is available.
+>
+> OK
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

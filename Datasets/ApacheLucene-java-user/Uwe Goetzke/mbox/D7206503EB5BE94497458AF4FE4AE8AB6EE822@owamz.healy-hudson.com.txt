@@ -1,0 +1,215 @@
+FROM: "Uwe Goetzke" <uwe.goet...@healy-hudson.com>
+SUBJECT: AW: Implement a relaxed PhraseQuery?
+DATE: 24 Mar 2008
+
+Hi Cuong ,
+
+I have written a TolerantPhraseScorer starting with the code from PhraseScorer but I think
+I have modified it to much to be generally useful. We use it with bigramm clusters and therefore
+does not need the slop factor for scoring but have a tolerance factor (depending on the length
+of the phrase). Here are the most relevant code fragments to start with... 
+So the idea is to keep queue ordered (calling firstToLast2 and moveLast). I have not yet checked
+the code for optimisations. If you find one, I would be glad to hear about it... ;-)
+
+
+protected TolerantPhrasePositions first, last, reallast; // last point to the last tpp for
+the doc varying from tolerance to phrase size (reallast)
+
+protected int tolerance;
+
+/**
+	 * similar to PhraseScorer but with a tolerance factor
+	 *
+	 * @see PhraseScorer
+	 */
+	TolerantPhraseScorer(Weight weight, TermPositions[] tps, int[] positions, Similarity similarity,
+	                     byte[] norms, int tolerance)
+	{
+		super(similarity);
+		this.norms = norms;
+		this.weight = weight;
+		this.value = weight.getValue();
+		this.tolerance = tolerance;
+		termsize = 0;
+		// convert tps to a list
+		for (int i = 0; i < tps.length; i++) {
+			if (tps[i] != null) {
+				TolerantPhrasePositions pp = new TolerantPhrasePositions(tps[i], positions[i]);
+				termsize++;
+				if (reallast != null) {			  // add next to end of list
+					reallast.next = pp;
+					pp.previous = reallast;
+				}
+				else
+					first = pp;
+				reallast = pp;
+				if ((termsize >= tolerance) && (last == null))
+					last = pp;
+			}
+		}
+		pq = new TolerantPhraseQueue(termsize);             // construct empty pq
+	}
+
+
+public boolean next() throws IOException
+	{
+		if (firstTime) {
+			init();
+			firstTime = false;
+		}
+		else if (more) {
+			int doc = last.doc;
+			while (doc == last.doc) {
+				more = last.next();                     // trigger further scanning
+				moveLast();
+			}
+		}
+		return doNext();
+	}
+
+	// next without initial increment
+	private boolean doNext() throws IOException
+	{
+		while (more) {
+			while (more && first.doc < last.doc) {      // find doc w/ all the terms
+				more = first.skipTo(last.doc);            // skip first upto last
+				firstToLast2();                            // and move it to the end
+			}
+			if (more) {
+				// found a doc with all of the terms
+				freq = phraseFreq();                      // check for phrase
+				if (freq == 0.0f) {                        // no match
+					int doc = last.doc;
+					while (doc == last.doc) {
+						more = last.next();                     // trigger further scanning
+						moveLast();
+					}
+				}
+				else
+					return true;                            // found a match
+			}
+		}
+		return false;                                 // no more matches
+	}
+
+
+private void firstToLast2()
+	{
+		TolerantPhrasePositions newfirst = first.next;
+		TolerantPhrasePositions test = last;
+		TolerantPhrasePositions insertp = test;
+		while ((test != null) && (first.doc >= test.doc)) {
+			insertp = test;
+			test = test.next;
+		}
+		if (insertp == null) { // last elem should not happen
+			System.out.println("firstToLast2->insertp==null");
+		}
+		else {
+			first.previous = insertp;  // einkoppeln
+			first.next = insertp.next;
+			if (first.next != null)
+				first.next.previous = first;
+			insertp.next = first;
+			if (test == null) {
+				reallast = first;
+				reallast.next = null;
+			}
+		}
+		last = last.next;
+		first = newfirst;
+		first.previous = null;
+	}
+
+private void moveLast()
+	{
+		TolerantPhrasePositions test = last;
+		TolerantPhrasePositions insertp = null;
+		while ((test != null) && (last.doc >= test.doc)) {
+			insertp = test;
+			test = test.next;
+		}
+		if (insertp == null) { // last elem should not happen
+			System.out.println("insertp==null");
+		}
+		else {
+			if (insertp != last) {
+				TolerantPhrasePositions prev = last.previous;   // dequeue
+				if (prev != null) { // if only 1 character!
+					prev.next = last.next;
+					prev.next.previous = prev;
+				}
+				last.previous = insertp;  // enqueue
+				last.next = insertp.next;
+				if (last.next != null)
+					last.next.previous = last;
+				insertp.next = last;
+
+				if (test == null) {
+					reallast = last;
+					reallast.next = null;
+				}
+				if (prev != null) { // if only 1 character!
+					last = prev.next;
+				}
+			}
+		}
+	}
+
+Best Regards
+
+Uwe
+
+
+-----Ursprüngliche Nachricht-----
+Von: climbingrose [mailto:climbingrose@gmail.com] 
+Gesendet: Montag, 24. März 2008 00:37
+An: java-user
+Betreff: Implement a relaxed PhraseQuery?
+
+Hi all,
+
+I posted this in Solr mailing but then I thought it would be more
+appropriate to have it here.
+
+I thought many people would encounter the situation I'm having here.
+Basically, we'd like to have a PhraseQuery with "minimum should match"
+property similar to BooleanQuery. Consider the query "Senior Java
+Developer":
+
+1) I'd like to do a PhraseQuery on "Senior Java Developer" with a slop of
+say 2, so that the query only matches documents with these words located in
+proximity. I don't want to match documents like "Senior <Huge block of text>
+Java <Huge block of Text> Developer".
+2) I also want to relax PhraseQuery a bit so that it not only match "Senior
+Java Developer"~2 but also matches "Java Developer"~2 but of course with a
+lower score. I can programmatically generate on the combination but it's not
+gonna be efficient if user issues query with many terms.
+
+It looks like the only solution is to hack PhraseScorer and its subclasses.
+Has anyone done this before? If yes, please share your experience.
+
+
+-- 
+Regards,
+
+Cuong Hoang
+
+-----------------------------------------------------------------------
+Healy Hudson GmbH - D-55252 Mainz Kastel
+Geschäftsführer Christian Konhäuser - Amtsgericht Wiesbaden HRB 12076
+
+Diese Email ist vertraulich. Wenn Sie nicht der beabsichtigte Empfänger sind, dürfen Sie
+die Informationen nicht offen legen oder benutzen. Wenn Sie diese Email durch einen Fehler
+bekommen haben, teilen Sie uns dies bitte umgehend mit, indem Sie diese Email an den Absender
+zurückschicken. Bitte löschen Sie danach diese Email.
+This email is confidential. If you are not the intended recipient, you must not disclose or
+use this information contained in it. If you have received this email in error please tell
+us immediately by return email and delete the document.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

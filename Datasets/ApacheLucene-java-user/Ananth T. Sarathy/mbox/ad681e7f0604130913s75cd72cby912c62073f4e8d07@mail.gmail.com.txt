@@ -1,0 +1,195 @@
+FROM: "Ananth T. Sarathy" <ananth.t.sara...@gmail.com>
+SUBJECT: Re: Lucene Seaches VS. Relational database Queries
+DATE: 13 Apr 2006
+
+Sorry, hit submit in mid email
+
+Ok,
+ Some of the stuff makes  some sense. I was a little loopy from lack of
+sleep and some of these solutions don't really cover my concerns....
+
+
+Let's take this movie example. If each member of a production Crew can have
+multiple titles that come from a lookup table of Distinct Jobs
+
+Titles
+Assistant Producer
+Producer
+Executive Producer
+Director
+Director Trainee
+Stunt Director
+
+In the Database there would be an Association Table Linking each Crew member
+to the titles they had
+
+Crew_Titles
+Crew_ID   Title
+1             Director
+ 1             Producer
+1             Director
+2             Stunt Director
+2             Producer
+3             Director Trainee
+3             Assistant Producer
+4             Producer
+5             Executive Producer
+
+So when I turn a Crew Member into a java object, each producer has a
+collection of Titles. I want one field that is searchable so if I am looking
+for "Director" all directors. I take the collection of title and make a
+String out of them so for Crew Member 1 the Title String will "Executive
+Producer Director". This is so that on an Text Search box people can find
+Crew Members by title with a natural language search.
+
+Now, what we want to do is switch to out a database Query to Lucene Search.
+Is there anyway to get the Equivalent of
+select count(distinct Crew_ID) from Crew_TItles where Title="Producer" which
+would give you a result of 3
+
+If you do that as a Lucene Search You will get hits for  Producer,Executive
+Producer, and Assistant Producer. You would get 5 hits instead of three.  We
+can't make it a key word field since it is a multi value field, and we need
+all the values searchable (IE Producer Director should return for a search
+of Producer or Director).  Also we can't really add Special Characters the
+Certain Titles that are contained in other titles since we want to use it as
+a query field for users searching for Crew Members. We use the hits to get
+Counts of unique Crew Members, and then Use a Stored Field called Crew_ID to
+pull the appropriate Crew Member from the Database.
+
+Also, I assume this wouldn't be a problem if all titles were Unique in a way
+that none are contained in other Title (I.E If there is A Title Director,
+there would be Director Trainee or Stunt Director).
+
+Also, I assume that I would have to be Responsible to ensure that the Index
+Contained one and only one Document per Crew ID, as well as ensuring
+Crew_IDs that were not in the Database anymore were removed from the Index.
+Now, we have been Using Lucene for over two years and I am aware of most of
+the things in regards to creating and maintaining the Index. My Issue is
+that I have never seen Lucene as a replacement for a Database, but rather a
+supplemental tool that allows for better native language search.   We have
+had some performance issues with our Database, and thus the Discussion of
+changing it out to use Lucene. I am of the Opinion that the Database and
+Lucene are two separate things, and that The Database is always going to be
+accurately reflect whatever data we have (whether or not the data is correct
+it's still what we would use) and the Lucene Index, no matter what steps you
+take to ensure synchronization can be incorrect and there for the most
+accurate results will always come from the DB, and we need to continue
+trying to performance tune the DB.
+
+Other issues I would see that wouldn't allow for replacing of DB queries
+would include multi sort (IE order by Date1, Date2, Name), as well as range
+searches, unless the Too ManyOpenClauses has been fixed in 1.9.
+
+Hopefully this explains what we are trying to do here. Please let me know
+where I have gone wrong and what else I have missed (pros and con)
+
+Much Thanks,
+Ananth
+
+
+
+
+On 4/13/06, Ananth T. Sarathy <ananth.t.sarathy@gmail.com> wrote:
+>
+>  Ok,
+>  Some of the stuff makes  some sense. I was a little loopy from lack of
+> sleep and some of these solutions don't really cover my concerns....
+>
+>
+> Let's take this movie example. If each member of a production Crew can
+> have multiple titles that come from a lookup table of Distinct Jobs
+>
+> Titles
+> Assistant Producer
+> Producer
+> Executive Producer
+> Director
+> Director Trainee
+> Stunt Director
+>
+> In the Database there would be a Assocation Table Linking each Crew member
+> the titles they had
+>
+> Crew_Titles
+> Crew_ID   Title
+> 1             Producer
+> 1
+>
+>  On 4/12/06, Nadav Har'El <NYH@il.ibm.com> wrote:
+> >
+> > Chris Hostetter <hossman_lucene@fucit.org> wrote on 12/04/2006 01:41:37
+> > AM:
+> > > : them in one field).  One of the problems I see would be with values
+> > that
+> > > : over lap (Example, name where one name is Jason Bateman, and one is
+> > Jason
+> > > : Bateman Black, and it would be hard to replicate the Discrete Search
+> >
+> > for
+> > >
+> > > they way field values are "analyzed" is extremely configurable -- down
+> > to
+> > > the individual field level.  Which means that while you can have an
+> > actor
+> > > field where you can do loose text searching for "bateman" and get back
+> >
+> > > movies staring "Jason Bateman" and "Jason Bateman Black" (and even
+> > Guido
+> > > Batemans" if you use stemming) you can also have another field using a
+> > > KeywordAnalyzer such that a record with teh values "Jason Bateman" and
+> >
+> > > "Jack Black" will only be matched if hte user searches for "Jason
+> > Bateman"
+> > > or "Jack Black" ... searching for "Bateman Jack" or "Black Jason" will
+> > not
+> > > work.
+> >
+> > Another possible trick is to have one field, but mark its end with
+> > special
+> > tokens, say "^" and "$", so that "Jason Bateman" gets indexed as four
+> > tokens:
+> >      ^ Jason Bateman $
+> > Then, if you want to search for the name Jason Bateman and that name
+> > only,
+> > just search for the phrase "^ Jason Bateman $" - and only this entry
+> > will
+> > match. (you can also continue to search this field normally)
+> >
+> > If you'll think about this, you'll notice that you don't actually need
+> > the beginning-of-field marker ("^") because it's easy to recognize the
+> > beginning of a field because the position there is 0. Unfortunately,
+> > I don't know how to match position 0 using the standard QueryParser,
+> > but you can do it with the SpanFirstQuery: for example if we index
+> > Jason Bateman as the three tokens
+> >      Jason Bateman $
+> > then we can search for it using something like
+> >      SpanQuery[] terms = {
+> >            new SpanTermQuery(new Term("actor", "Jason")),
+> >            new SpanTermQuery(new Term("actor", "Bateman")),
+> >            new SpanTermQuery(new Term("actor", "$")) };
+> >      new SpanFirstQuery(new SpanNearQuery(terms, 0, true), 3);
+> > (or something like that... I didn't test this)
+> >
+> >
+> > --
+> > Nadav Har'El
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+> --
+>
+> Ananth T Sarathy
+>
+
+
+
+--
+Ananth T Sarathy
+

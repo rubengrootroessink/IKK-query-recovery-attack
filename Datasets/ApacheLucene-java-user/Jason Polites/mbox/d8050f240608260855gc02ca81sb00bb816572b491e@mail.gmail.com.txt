@@ -1,0 +1,77 @@
+FROM: "Jason Polites" <jason.poli...@gmail.com>
+SUBJECT: Re: java.io.IOException: Access is denied on java.io.WinNTFileSystem.createFileExclusively
+DATE: 26 Aug 2006
+
+On 8/26/06, Michael McCandless <lucene@mikemccandless.com> wrote:
+>
+> Are you also running searchers against this index?  Are they re-init'ing
+> frequently or being opened and then held open?
+
+
+No searches running in my initial test, although I can't be certain what is
+happening under the Compass hood.
+
+This looks similar to http://issues.apache.org/jira/browse/LUCENE-665
+> (that was just opened) as well as other issues in the past, but in these
+> cases there are usually also IndexReaders/Searchers against the index.
+> Could you try the patch to FSDirectory.java (in that issue) and see if
+> it helps?
+
+
+Does look related, although I'm not sure I like the suggested fix.
+Detecting a specific exception is always a tricky deal (if only Sun
+described error codes in the spec!), but whilst the solution suggested will
+almost certainly fix my problem, it seems a little "loose".
+
+I think that bug is probably a different issue.
+
+
+Roger that.
+
+Good question ... however, in your use case (the commits that
+> IndexWriter is doing) the code above Lock.obtain is already
+> synchronized(directory) so it's only one thread that can make it down
+> into the Lock.obtain method.  So I don't believe adding synchronization
+> in this method will help you.
+
+
+Maybe I'm off-base here, but I'm not sure how you were able to determine
+that.  I had to double check, but didn't have the original stack trace (only
+the snippet I posted).  When I looked at the source, it seemed that the
+Lock.obtain() method (in my case) is being called by "public Lock
+makeLock(String name)"  (FSDirectory: line 344); which in turn is called by:
+
+    mergeSegments(int, int) - org.apache.lucene.index.IndexWriter (2
+matches)
+    unlock(Directory) - org.apache.lucene.index.IndexReader (2 matches)
+    IndexWriter(Directory, Analyzer, boolean, boolean) -
+org.apache.lucene.index.IndexWriter (2 matches)
+    open(Directory, boolean) - org.apache.lucene.index.IndexReader
+    isCurrent() - org.apache.lucene.index.IndexReader
+    aquireWriteLock() - org.apache.lucene.index.IndexReader
+    getCurrentVersion(Directory) - org.apache.lucene.index.IndexReader
+    addIndexes(IndexReader[]) - org.apache.lucene.index.IndexWriter (2
+matches)
+    isLocked(Directory) - org.apache.lucene.index.IndexReader (2 matches)
+    commit() - org.apache.lucene.index.IndexReader
+
+Not all of which synchronize on the Directory object.  In my case, the call
+is made by:
+
+org.apache.lucene.index.TransIndex.<init>(TransIndex.java:137)
+
+(which oddly enough is not actually part of Lucene, but part of Compass).
+
+This does not appear to provide any index-relative synchronization.
+
+Synchronization at this low level would ensure that outer application layers
+would be guaranteed of IO isolation.
+
+Obviously you shouldn't have to bother.  Windows should take care of it, but
+in this case it doesn't appear to.
+
+I'll have a deeper look into the Compass source to see if there are any
+obvious problem areas in this regard.
+
+Thanks for your help.
+

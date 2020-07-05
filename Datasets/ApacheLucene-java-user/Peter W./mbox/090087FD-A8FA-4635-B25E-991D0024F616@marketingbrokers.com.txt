@@ -1,0 +1,96 @@
+FROM: Peter W. <pe...@marketingbrokers.com>
+SUBJECT: Re: Range search in numeric fields
+DATE: 5 Apr 2007
+
+Andy,
+
+MemoryCachedRangeFilter looks nice, can't wait for it to be
+included with other goodies in the next 2.x point release!
+
+Numeric range search questions come up often for Lucene,
+best practices probably include working with BitSets directly
+(which I have been unable to grok), using queries like RangeQuery
+and ConstantScoreRangeQuery or using a Filter.
+
+The first approach Ivan mentioned(that requires re-indexing) might be  
+the best
+short term solution because you can use a filter to perform something  
+like:
+
+FilteredQuery fq=new FilteredQuery(query,cstm_range("size",30L,1300L));
+
+    private static Filter cstm_range(String sfld,long lmin,long lmax)
+       {
+       Filter lessthn_f=RangeFilter.Less(sfld,NumberTools.longToString 
+(lmax));
+       Filter morethn_f=RangeFilter.More(sfld,NumberTools.longToString 
+(lmin));
+       Filter[] fa=new Filter[]{lessthn_f,morethn_f};
+
+       Filter rf=new ChainedFilter(fa,ChainedFilter.AND);
+       return rf;
+       }
+
+It's more expensive at index time, has a bigger storage requirement and
+is slower than in-memory but should give the desired functionality.
+
+Regards,
+
+Peter W.
+
+
+
+On Apr 3, 2007, at 10:59 AM, Andy Liu wrote:
+
+> You can try using MemoryCachedRangeFilter.
+>
+> https://issues.apache.org/jira/browse/LUCENE-855
+>
+> It stores field values in memory as longs so your values don't have  
+> to be
+> lexigraphically comparable.  Also, MemoryCachedRangeFilter can be  
+> orders of
+> magnitude faster than standard RangeFilter, depending on your data.
+>
+> Andy
+>
+> On 4/3/07, Ivan Vasilev <ivasilev@sirma.bg> wrote:
+>>
+>> Hi All,
+>> I have the following problem:
+>> I have to implement range search for fields that contain numbers. For
+>> example the field size that contains file size. The problem is  
+>> that the
+>> numbers are not kept in strings with strikt length. There are field
+>> values like this: "32", "421", "1201". So when makeing search like  
+>> this:
+>> +size:[10 TO 50], as the order for string is lexicorafical the result
+>> contains the documents with size 32 and 1201. I can see the following
+>> possible aproaches:
+>> 1. Changing indexing process so that all data entered in those  
+>> fields is
+>> with fixed length. Example 0000032, 0000421, 0001201.
+>> Disadvantages here are:
+>>     - Have to be reindexed all existng indexes;
+>>     - The index will grow a bit.
+>>
+>> 2. Generating query without ranges but including all numbers  
+>> between the
+>> bounds - +size=10 +size=11 +size=12........ +size=49 + size=50. For
+>> narrow ranges it makes sense but for large ones... :)
+>>
+>> 3. Generating query with intervals (inclusive and exclusive) but the
+>> number of this intervals will be the same (or one more) than the
+>> conditions in point 2. +size:[10 TO 50] -size:[10 TO 11999999999] -
+>> size:[11 TO 129999999999] ... etc.
+>>
+>> So if someone can help with some new oportunity please mail.
+>>
+>> Thanks in advance.
+>> Ivan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

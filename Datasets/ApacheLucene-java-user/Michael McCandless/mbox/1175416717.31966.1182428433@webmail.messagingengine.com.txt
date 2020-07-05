@@ -1,0 +1,62 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Lock files in a read-only application
+DATE: 1 Apr 2007
+
+"Chris Hostetter" <hossman_lucene@fucit.org> wrote:
+>
+> : locks without upgrading to 2.1. Our application uses its own custom
+> : locking mechanism, so that lucene locking is actually redundant. We
+> : are currently using Lucene version 2.0.
+> 
+> since before the 2.0.0 release there has been a static
+> FSDirectory.setDisableLocks that can be called before opening any indexes
+> to prevent locking -- it's only intended to be used on indexes on read
+> only disk -- which is not the case in your situation, since a seperate
+> process is in fact modifying the index, but if you are confident in your
+> own locking mechanism you can use it.
+
+You need to be really certain your own locking protects Lucene
+properly.  Specifically, no IndexReader can be created (restarted)
+while a writer is open against the index, and, only one writer can be
+open on the index at once (it sounds like you already have that).  If
+you're sure about that then disabling the locks as Hoss describes
+above is OK.
+
+> : The application has multiple threads (different web requests) reading
+> : the same index simultaneously (say 20 concurrent threads). Can that be
+> : a reason of this problem. Sometimes the lockfiles remain there for
+> : long periods of time (more than a few minutes, which is bad).
+> 
+> mutliple reader threads should not cause the commit lock to stay arround
+> that long, even if each thread is opening it's on IndexReader (which they
+> should not do, it's better to open one and reuse it among many threads)
+
+This part (commit lock staying around for so long) is definitely odd
+and I'd like to get to the root cause.  Multiple threads are fine
+(though, you should share one IndexReader).  The only way I know of
+for this to happen is if JVM crashes while IndexReader or IndexWriter
+is being initialized.  Even then it's quite unlikely because JVM has
+to crash right when segments file is being read or written.
+ 
+> : Yes, JVM sometimes crashes when it runs out of memory. There should be
+> : someway that the lock files are removed after such crash (any fixes is
+> : 2.1?).
+> 
+> As Michael said, in 2.1 the commit lock doesn't even exist, and in general
+> there is a much more robust lock management system that lets you decide
+> what type of lock mechanism to use.
+
+In fact with 2.1 we have a new optional locking implementation called
+NativeFSLockFactory.  One of its big benefits over the default Lucene
+locking (SimpleFSLockFactory) is that if the JVM crashes then the lock
+file(s) are correctly released (ie, no more "stale lock files" left in
+the filesystem).  This way if the JVM of the writer crashes then the
+write.lock that it held is properly freed by the OS.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

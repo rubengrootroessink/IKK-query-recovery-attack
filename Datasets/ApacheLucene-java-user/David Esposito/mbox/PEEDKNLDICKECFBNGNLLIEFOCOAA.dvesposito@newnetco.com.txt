@@ -1,0 +1,170 @@
+FROM: "David Esposito" <dvespos...@newnetco.com>
+SUBJECT: RE: Lucene and the numbers (again!)
+DATE: 13 Nov 2001
+
+FWIW, i had a similar problem a while back (wanting to index the "model #"
+in my index and then let people that searched for model # get what they were
+expecting ... ) ... So i had to stop using the stock LowerCaseTokenizer and
+I made up my own (cutting and pasting all of the stuff from
+LowerCaseTokenizer) ... minus the removal of numerics ...
+
+My analyzer is:
+
+public class PorterAnalyzer extends Analyzer
+{
+  public TokenStream tokenStream(Reader reader)
+  {
+    TokenStream stream = new PorterStemFilter(new StopFilter(new
+LowerCaseNumericTokenizer(reader),StopAnalyzer.ENGLISH_STOP_WORDS));
+  }
+}
+
+My tokenizer is as follows (still haven't recompiled with the jakarta
+lucene):
+
+package mypackage.index;
+import java.io.Reader;
+import com.lucene.analysis.Tokenizer;
+import com.lucene.analysis.Token;
+
+/* This class is identical to the com.lucene.analysis.LowerCaseTokenizer
+ * class except that it will not trim off numbers
+ */
+public final class LowerCaseNumericTokenizer extends Tokenizer {
+  public LowerCaseNumericTokenizer(Reader in) {
+    input = in;
+  }
+
+  private int offset = 0, bufferIndex=0, dataLen=0;
+  private final static int MAX_WORD_LEN = 255;
+  private final static int IO_BUFFER_SIZE = 1024;
+  private final char[] buffer = new char[MAX_WORD_LEN];
+  private final char[] ioBuffer = new char[IO_BUFFER_SIZE];
+
+  public final Token next() throws java.io.IOException {
+    int length = 0;
+    int start = offset;
+    while (true)
+    {
+      final char c;
+
+      offset++;
+      if (bufferIndex >= dataLen)
+      {
+        dataLen = input.read(ioBuffer);
+        bufferIndex = 0;
+      };
+
+      if (dataLen == -1)
+      {
+        if (length > 0)
+          break;
+        else
+          return null;
+      }
+      else
+        c = (char) ioBuffer[bufferIndex++];
+
+      if (Character.isLetterOrDigit(c))
+      {      // if it's a letter
+
+        if (length == 0)        // start of token
+          start = offset-1;
+
+        buffer[length++] = Character.toLowerCase(c);
+                                    // buffer it
+        if (length == MAX_WORD_LEN)      // buffer overflow!
+          break;
+
+      }
+      else if (length > 0)        // at non-Letter w/ chars
+        break;            // return 'em
+
+    }
+
+    return new Token(new String(buffer, 0, length), start, start+length);
+  }
+}
+
+> -----Original Message-----
+> From: Steven J. Owens [mailto:puffmail@darksleep.com]
+> Sent: Tuesday, November 13, 2001 2:07 PM
+> To: Lucene Users List; David Bonilla
+> Subject: Re: Lucene and the numbers (again!)
+>
+>
+> David,
+>
+>
+> > Yeah I know that i?m not very original and maybe the FAQ can resolve
+> > my problems but I didn?t find any real help there. Ok... here we go:
+>
+>      This is indeed a FAQ, and it also comes up often on the list, if
+> you check the archives.
+>
+>      Come to think of it, where *are* the archives now?  I'm looking
+> at http://www.mail-archive.com/ and I don't see the more recent
+> (post-move-to-jakarta) postings there.  The archive seems to end on
+> October 5th.  Are we using a new archive now?  Are the messages from
+> the old archive there?
+>
+> > The problem is... I have a J2EE application working with LUCENE and
+> > the basic searching works properly but when I try to use a query
+> > with a number, Lucene gives me back all my indexed documents and I
+> > don?t understand why.
+> >
+> > I?m using the SimpleAnalyzer. If I have for example a document with
+> > a field named "name". How can I search for example a name like '456'?
+>
+>      If you look into... hm, well, I was going to say if you look into
+> the API docs, but it's not that simple.  I remember somebody in the
+> past saying (on this list) to simply use StandardAnalyzer instead of
+> StopAnalyzer.  I don't know if this works (I'll have to take time
+> later this afternoon and check the source code - this is one of the
+> things that's been on my to-do list for a month or so, but I've been
+> preoccupied with other areas of my project).
+>
+>      I guess I should note the following details:
+>
+> StandardAnalyzer is not listed in the "Package
+> org.apache.lucene.analysis" page of the API docs (from the
+> lucene-1.2-rc2 checkout), just SimpleAnalyzer and StopAnalyzer.
+>
+> When I track down the API docs for StandardAnalyzer and compare them,
+> neither StandardAnalyzer or StopAnalyzer says anything about numbers.
+>
+> Nor do StandardFilter or StopFilter mention numbers.
+>
+> Searching for "numeric" turns up nothing, searching for "number" turns
+> up:
+>
+> "27. How does Lucene handle numbers and special characters ?
+>
+> This depends of the analyzer you are using for indexing an searching."
+>
+>
+>
+>      I checked out the Lucene FAQ source in the past,with the intent
+> of going through it and checking for typos, etc, as a good way to
+> force myself to read it all as well as contributing something back to
+> Lucene.  I think that was from the pre-jakarta days, I should probably
+> get a fresh, jakarta-based checkout.  Is all of that stuff still in
+> the "website" checkout?
+>
+> Steven J. Owens
+> puff@darksleep.com
+>
+>
+> --
+> To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+>
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

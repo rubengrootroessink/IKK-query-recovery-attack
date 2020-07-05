@@ -1,0 +1,68 @@
+FROM: "Greg Shackles" <gshack...@gmail.com>
+SUBJECT: Re: Lucene implementation/performance question
+DATE: 26 Nov 2008
+
+Sure, I'm happy to give some insight into this.  My index itself has a few
+fields - one that uniquely identifies the page, one that stores all the text
+on the page, and then some others to store characteristics.  At indexing
+time, the text field for each document is manually created by concatenating
+each word together, separated by spaces.  Then the IndexWriter runs the
+document through a custom filter that attaches payloads to each token.  The
+payloads here include all the attributes I need regarding that word, and
+most importantly, the index of that word on the page.  The tricky part here
+was that one of my "words" could map to more than one Lucene token, so I
+first create a quick map from my words to which token they should correspond
+to, by running each word through an Analyzer (StandardAnalyzer in my case).
+This makes it easy to only attach the payload to the first token for each of
+my words.
+
+For searching, I pass the search query to a PayloadSpanUtil which gets the
+payloads for every match throughout the entire index.  I take these results
+and put them into a Collection of custom objects, and then sort them first
+by page identifier, and then by index on the page.  Once I have this list, I
+can quickly iterate through it to find the groupings of payloads that match
+the search term (this also helps weed out the occasional bad result that
+comes back).  I wasn't sure initially if this would be a performance hit but
+it is very quick.  Basically what I do is tokenize the search string, then
+concatenate all tokens together without spaces into one string.  Then when
+iterating through I see if the word matches the start of the tokenized
+string - if so, chop it off and keep going til the whole string is found.
+Then repeat, and so on.  It's certainly not the most elegant solution but I
+didn't see a better way since PSU doesn't group or sort on its own.
+
+One other solution I might try if I have time is to take each document from
+the original search, put them one at a time into a MemoryIndex and then let
+PSU act on that.  I'm not sure if this would help/hurt performance but might
+be worth trying.  I will also say to make sure you apply Mark's latest patch
+(see the case here: https://issues.apache.org/jira/browse/LUCENE-1465) since
+it fixed some important bugs I had come across.
+
+I hope this made sense, I haven't finished my morning coffee yet so I can't
+be too sure : )  Let me know if you have any more questions.
+
+- Greg
+
+
+
+On Wed, Nov 26, 2008 at 3:19 AM, Eran Sevi <eransevi@gmail.com> wrote:
+
+> Hi,
+> Can you please shed some light on how your final architecture looks like?
+> Do you manually use the PayloadSpanUtil for each document separately?
+> How did you solve the problem with phrase results?
+> Thanks in advance for your time,
+> Eran.
+> On Tue, Nov 25, 2008 at 10:30 PM, Greg Shackles <gshackles@gmail.com>
+> wrote:
+>
+> > Just wanted to post a little follow-up here now that I've gotten through
+> > implementing the system using payloads.  Execution times are phenomenal!
+> > Things that took over a minute to run in my old system take fractions of
+> a
+> > second to run now.  I would also like to thank Mark for being very
+> > responsive in fixing/patching some bugs I encountered along the way.
+> >
+> > - Greg
+> >
+>
+

@@ -1,0 +1,184 @@
+FROM: "Marcus Falk" <marcus.f...@cision.com>
+SUBJECT: SV: SV: SV: Integrating dynamic data into Lucene search/ranking
+DATE: 17 Jan 2008
+
+I think that would work. But I'm not 100% sure of what you are trying to achieve. 
+
+Just a notice:
+Sorting on results has poor performance, if you have a large index, we ran into severe performance
+problems with just a coupe of million articles which lead us to modify the ranking instead.
+
+Code for merge without optimize:
+
+        public virtual void AddIndexesWithoutMerge(Directory dir)
+		{
+			lock (this)
+			{			
+				int start = segmentInfos.Count;
+				
+		
+				SegmentInfos sis = new SegmentInfos(); // read infos from dir
+				sis.Read(dir);
+				for (int j = 0; j < sis.Count; j++)
+				{
+					segmentInfos.Add(sis.Info(j)); // add each info
+			    }
+				
+				
+				// merge newly added segments in log(n) passes
+				while (segmentInfos.Count > start + mergeFactor)
+				{
+					for (int base_Renamed = start + 1; base_Renamed < segmentInfos.Count; base_Renamed++)
+					{
+						int end = System.Math.Min(segmentInfos.Count, base_Renamed + mergeFactor);
+						if (end - base_Renamed > 1)
+							MergeSegments(base_Renamed, end);
+					}
+				}
+
+                MaybeMergeSegments();
+			}
+		}
+
+(in indexwriter class (C# code as you notice, will probably look about the same in java))
+
+
+There is a AddIndexes method in the original implementation of indexwriter, however that would
+cause a merge of files on disc my version causes the directory to be writed to a new file
+(so if you put in a RamDirectory containing 10.000 docs you will get a new file with 10.000
+docs on disk, which later will be merged by lucene when mergefactor is triggered on FS indexwriter).
+
+/
+Regards 
+Marcus
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----Ursprungligt meddelande-----
+Från: Tobias Lohr [mailto:TobiasLohr@gmx.de] 
+Skickat: den 17 januari 2008 15:15
+Till: java-user@lucene.apache.org
+Ämne: Re: SV: SV: Integrating dynamic data into Lucene search/ranking
+
+Thanks for your hint. If its possible I would take a look into the code, but the approach
+is interesting.
+
+What would you say to this approach I developed in my mind:
+
+- Having an additional quite smaller index, were only the dynamic data resides and is incorporated
+every N seconds with incremental index updates.
+- Documents of the additional index have the same semantical "id" field, to model a relation
+between them.
+- A search is actually based on the index containing the searchable content, but the sorting/ranking
+is done using a SortComparatorSource, which "extracts" the information and calculates the
+score for the documents  of the content index.
+
+What do you say?
+
+-------- Original-Nachricht --------
+> Datum: Thu, 17 Jan 2008 14:26:53 +0100
+> Von: "Marcus Falk" <marcus.falk@cision.com>
+> An: java-user@lucene.apache.org
+> Betreff: SV: SV: Integrating dynamic data into Lucene search/ranking
+
+> In our solution we used a RAMDir for the newest incoming articles and a
+> FSDir for older ones. Then we had a limit for the ramdir  like 10.000
+> documents when that limit were hit we used mergesegments to move the content from
+> ramdir -> fsdir, actually we had to do some modification in the
+> mergesegment method since it always seemed to do an optimize on the index after the
+> merge, I have the code if u want it.
+> 
+> If you use RAMDir + FSDir you can use 2 indexserchers and one
+> multisearcher on top. The indexsearcher that uses the small RAMDir can be rebinded
+> quite often. 
+> 
+> /
+> Regards
+> M
+> 
+> 
+> -----Ursprungligt meddelande-----
+> Från: Andrzej Bialecki [mailto:ab@getopt.org] 
+> Skickat: den 17 januari 2008 10:55
+> Till: java-user@lucene.apache.org
+> Ämne: Re: SV: Integrating dynamic data into Lucene search/ranking
+> 
+> Tobias Lohr wrote:
+> > I'm not really sure, if this approach is possible for working in changes
+> every - let's say - 30 seconds!?
+> 
+> The conventional wisdom is to use RAMDirectory in such scenarios. I.e. 
+> you commit frequent updates to a RAMDirectory and frequently reopen its 
+> Searcher (which should be fast). Periodically, merge the RAMDirectory 
+> index with your on-disk index - you need to open a new IndexSearcher in 
+> the background, warm it up with the latest N queries, and when it's 
+> ready you swap searchers, i.e. you close the old one, purge the 
+> RAMDirectory (since it was synced to the on-disk index), and start using 
+> the new IndexSearcher.
+> 
+> And again, start accumulating new docs in the RAMDirectory, etc, etc ...
+> 
+> -- 
+> Best regards,
+> Andrzej Bialecki     <><
+>   ___. ___ ___ ___ _ _   __________________________________
+> [__ || __|__/|__||\/|  Information Retrieval, Semantic Web
+> ___|||__||  \|  ||  |  Embedded Unix, System Integration
+> http://www.sigram.com  Contact: info at sigram dot com
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> > Datum: Thu, 17 Jan 2008 05:35:13 +0100
+> > Von: "Marcus Falk" <marcus.falk@cision.com>
+> > An: java-user@lucene.apache.org, java-user@lucene.apache.org
+> > Betreff: SV: Integrating dynamic data into Lucene search/ranking
+> 
+> > We did this in our system, indexing a constant flow of news articles, 
+> > by doing as Otis described (reopened the indexsearcher)..
+> >  
+> > Every 3:d minute we are creating a new indexsearcher in the background 
+> > after this searcher has been created we are fireing some warm up 
+> > queries against it and after that we change the old searcher to point to
+> the new one.
+> > Works fine for us and we got large indexes (several millions of
+> articles)... 
+> >  
+> > /Regards
+> > Marcus
+> >  
+> >  
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+-- 
+Der GMX SmartSurfer hilft bis zu 70% Ihrer Onlinekosten zu sparen! 
+Ideal für Modem und ISDN: http://www.gmx.net/de/go/smartsurfer
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

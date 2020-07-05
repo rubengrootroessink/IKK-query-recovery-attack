@@ -1,0 +1,101 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: question about Scorer.freq()
+DATE: 4 Oct 2010
+
+Hmm are you only gathering the MUST_NOT TermScorers?  (In which case
+I'd expect that the .docID() would not match the docID being
+collected).  Or do you also see .docID() not matching for SHOULD and
+MUST sub queries?
+
+Also, are you sure you are getting BooleanScorer2?  Because I think
+this feature (LUCENE-2590) is not going to work correctly if
+BooleanScorer is used.... getting that working isn't really possible
+since BooleanScorer isn't doc-at-once.  I'll open an issue for this...
+
+And, yes, you should be able to get which field a match occurred in,
+because at the lowest level the atomic (TermQuery, PhraseQuery,
+SpanTermQuery, AtomatonQuery, etc.) all operate on a single field.  So
+when you find a sub that "matches", you should just check the field of
+that query.
+
+Hmm... but not all queries make it easy/possible to get the field
+right?  MultiTermQuery has getField, TermQuery has getTerm, but
+PhraseQuery doesn't have a .getField (oh but you can .getTerms() and
+then get the field).
+
+Mike
+
+2010/10/3 Koji Sekiguchi <koji@r.email.ne.jp>:
+> Hello,
+>
+> I'd like to know which field got hit in each doc in the hit results.
+> To implement it, I thought I could use Scorer.freq() which
+> was introduced 3.1/4.0:
+>
+> https://issues.apache.org/jira/browse/LUCENE-2590
+>
+> But I didn't become successful so far. What I did is:
+>
+> - in each visit methods in MockScorerVisitor (borrowed TestSubScorerFreqs),
+>  if child query is TermQuery (for simple PoC), add the pair of
+>  child query and scorer in a collection:
+>
+>    if (collect.contains(Occur.MUST_NOT) && child instanceof TermQuery)
+>      tqsSet.add( new TermQueryScorer( (TermQuery)child, scorer ) );
+>
+>  where tqsSet is:
+>
+>    Set<TermQueryScorer> tqsSet = new HashSet<TermQueryScorer>();
+>
+>  and TermQueryScorer is:
+>
+>    private static class TermQueryScorer {
+>      private TermQuery query;
+>      private Scorer scorer;
+>      public TermQueryScorer( TermQuery query, Scorer scorer ){
+>        this.query = query;
+>        this.scorer = scorer;
+>      }
+>    }
+>
+> - in collector.collect() method:
+>
+>    public void collect(int doc) throws IOException {
+>      int freq = 0;
+>      for( TermQueryScorer tqs : tqsSet ){
+>        Scorer scorer = tqs.scorer;
+>        int matchId = scorer.docID();
+>        if( matchId == doc ){
+>          freq += scorer.freq();
+>        }
+>      }
+>      docCounts.put(doc + docBase, freq);
+>      collector.collect(doc);
+>    }
+>
+> But freq was always zero.
+>
+> In collect() method of TestSubScorerFreqs, scorer is BooleanScorer2,
+> then the matchId == doc condition is true. But in my case, matchId which is
+> got from TermScorer never equal to doc.
+>
+> Can I use the feature of LUCENE-2590 to know not only freq but also
+> which field got hit?
+>
+> Thank you,
+>
+> Koji
+> --
+> http://www.rondhuit.com/en/
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

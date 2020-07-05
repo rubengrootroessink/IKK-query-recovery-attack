@@ -1,0 +1,131 @@
+FROM: "Karsten F." <karsten-luc...@fiz-technik.de>
+SUBJECT: Re: Merging indexes - which is best option?
+DATE: 8 Sep 2008
+
+
+Hi Antony,
+
+I decided first to delete all duplicates from master(iW) and then to insert
+all temporary indices(other).
+Any other opinions?
+
+Best regards
+  Karsten
+
+<code>
+    public static synchronized void merge(IndexWriter iW, Directory[] other,
+final String uniqueID_FieldName) throws IOException{
+        final Term firstFieldTerm = new Term(uniqueID_FieldName, "");
+        boolean rollback = true;
+        try {
+            Term[] possibleDuplicates;
+            for(Directory toAddDir : other){
+                IndexReader toAddIR = IndexReader.open(toAddDir);
+                try{
+                    int indexSize = toAddIR.numDocs();
+                    possibleDuplicates = new Term[indexSize];
+
+                    int cnt = 0;
+                    TermEnum possibleDuplicateTerms =
+toAddIR.terms(firstFieldTerm);
+                    Term possibleDuplicateTerm =
+possibleDuplicateTerms.term();
+                    while(true){
+                        if(possibleDuplicateTerm == null){
+                            break;
+                        }
+                        if(possibleDuplicateTerm.field() !=
+uniqueID_FieldName){
+                            assert
+!possibleDuplicateTerm.field().equals(uniqueID_FieldName);
+                            break;
+                        }
+                        //assert: 
+                        if(moreThenOneDocument(toAddIR,
+possibleDuplicateTerm)){
+                        	System.out.println( "please use then unique id
+unique! " + possibleDuplicateTerm);
+                        }
+                        assert cnt < indexSize : "please don't use more then
+one unique id for each document";
+                        possibleDuplicates[cnt++]=possibleDuplicateTerm;
+                        possibleDuplicateTerms.next();
+                        possibleDuplicateTerm =
+possibleDuplicateTerms.term();
+                    }
+                    if( indexSize != cnt ){
+                        possibleDuplicates =
+Arrays.copyOf(possibleDuplicates, cnt);
+                        System.out.println("log: " + indexSize  + " != " +
+cnt);
+                    }
+                } finally {
+                    toAddIR.close();
+                }
+                iW.deleteDocuments(possibleDuplicates);
+            }
+            iW.addIndexes(other);
+            rollback = false;
+        } finally {
+            if(rollback){
+                iW.abort();
+            } else {
+                iW.flush();
+            }
+        }
+    }
+    public static boolean moreThenOneDocument(IndexReader iR, Term term)
+throws IOException{
+    	TermDocs tDoc = iR.termDocs(term);
+    	if(tDoc.next()){
+    		if(tDoc.next()){
+    			return true;
+    		}
+    	}
+    	return false;
+    }
+</code>
+
+Antony Bowesman wrote:
+> 
+> I am creating several temporary batches of indexes to separate indices and 
+> periodically will merge those batches to a set of master indices.  I'm
+> using 
+> IndexWriter#addIndexesNoOptimise(), but problem that gives me is that the
+> master 
+> may already contain the index for that document and I get a duplicate.
+> 
+> Duplicates are prevented in the temporary index, because when adding
+> Documents, 
+> I call IndexWriter#deleteDocuments(Term) with my UID, before I add the
+> Document.
+> 
+> I have two choices
+> 
+> a) merge indexes then clean up any duplicates in the master (or vice
+> versa). 
+> Probably IndexWriter.deleteDocuments(Term[]) would suit here with all the
+> UIDs 
+> of the incoming documents.
+> 
+> b) iterate through the Documents in the temporary index and add them to
+> the master
+> 
+> b sounds worse as it seems an IndexWriter's Analyzer cannot be null and I
+> guess 
+> there's a penalty in assembling the Document from the reader.
+> 
+> Any views?
+> Antony
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Merging-indexes---which-is-best-option--tp19325185p19380709.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,445 @@
+FROM: "Stephen Halsey" <st...@moreover.com>
+SUBJECT: Sort regeneration in multithreaded server
+DATE: 8 Oct 2004
+
+Hi,
+
+I was wondering if anyone could help with a problem (or should that be
+"challenge"?) I'm having using Sort in Lucene over a large number of records
+in multi-threaded server program on a continually updated index.
+
+I am using lucene-1.4-rc3.
+
+Question in more general terms:- Is it possible to write a multithreaded
+search program which uses a Sort object that is updated at regular intervals
+(e.g. every 5 minutes, taking 5 seconds to regenerate) while the searching
+threads continue to do their sorted searching without any 5 seconds
+interruption?
+
+Question in quick specific format: Can I generate a new updated Sort object
+in a separate Thread of my search server program while the original Sort
+object continues to be used in the other Threads of the program and then
+switch the searching Threads to the new Sort object?
+
+More details: We are using Lucene to index about one million news articles
+and the index size is about 3Gb and needs to be continually updated with new
+news records.  I have written a search server which performs sorted searches
+on the index.  The "challenge" is that the Sort object does not update in
+memory as the index is updated on disk and so has to be regenerated.  This
+takes about 5 seconds and so cannot be done for every single search.  I
+thought I would be able to regenerate the Sort and Searcher objects in a
+separate Thread and then pass them to the searcher Threads for searching,
+but have found that there seems to be some kind of memory locking that stops
+this from being possible.
+
+I have written a simple test program (attached, with output) that
+demonstrates this problem by running a sorted search in one or two threads.
+If you run it with one thread it runs fine, with the searches that
+regenerate the Sort object taking about 5 seconds and the searches
+themselves taking only 0.25 seconds.  But if you run it with two threads
+then every search takes about 10 seconds, which implies that the Sort object
+is being regenerated for every single search.  I am guessing that this is
+because Lucene has been written in a Thread safe way and so to be safe the
+Sort object is being regenerated every time?
+
+If it turns out that what I am trying to do is not possible then I will
+probably just restart the search server program every 5 minutes and load
+balance the searches across a number of servers, but that seems a bit messy
+compared to regenerating it in memory in a continually running program?
+Thanks in advance, and don't worry - its not urgent and if I don't get the
+answer I think it should be OK(ish) doing it the messy restarting server
+way.
+
+ta
+
+
+Steve
+
+
+testDoTwoSeparateThreadsWithSorts.java:-
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.FilterIndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.queryParser.QueryParser;
+
+import java.net.*;
+import java.io.*;
+import java.util.*;
+import java.lang.*;
+
+//*********************************************************************//
+//
+// This program tests running two separate threads each running searches and
+then refreshing the Sort object
+// every so often.  This is needed in our search server since it runs
+continuously in multiple threads and
+// never dies and so as the lucene index is updated the Sort and Searcher
+objects in each thread have to be updated.
+// I find with this program that when two threads are running the Sort
+object seems to be regererated every time
+// which causes each search to take about 10 seconds.  With only one thread
+the regeneration of the Sort object takes
+// about 5 seconds and then each search only takes 200 milliseconds or so.
+//
+// cd /home1/moreover/lucene/test_programs/; javac
+testDoTwoSeparateThreadsWithSorts.java; java -ms100m -mx200m
+testDoTwoSeparateThreadsWithSorts
+/home1/moreover/lucene_indexes/testKeepSortInMemoryIndex/ news
+dontRunSecondThread
+//
+// cd /home1/moreover/lucene/test_programs/; javac
+testDoTwoSeparateThreadsWithSorts.java; java -ms100m -mx200m
+testDoTwoSeparateThreadsWithSorts
+/home1/moreover/lucene_indexes/testKeepSortInMemoryIndex/ news
+doRunSecondThread
+//
+//
+//
+//**********************************************************************//
+
+
+class testDoTwoSeparateThreadsWithSorts {
+
+    public static void main(String[] args) {
+
+ try {
+     // initialise variables
+     String indexDirectory = args[0];
+     String query = args[1];
+     String runSecondThread = args[2];
+
+     System.out.println(": Starting first thread to do searches then
+sort...");
+     doSearchesThenSort doSearchesThenSort = new
+doSearchesThenSort(indexDirectory, query);
+     java.util.Date threadCreationDate1 = new java.util.Date();
+     Thread doSearchesThenSortThread = new Thread(doSearchesThenSort,
+String.valueOf(threadCreationDate1.getTime()));
+     doSearchesThenSortThread.start();
+
+     if(runSecondThread.equals("doRunSecondThread"))
+  {
+      System.out.println(": Starting second thread to do searches then
+sort...");
+      doSearchesThenSort doSearchesThenSort2 = new
+doSearchesThenSort(indexDirectory, query);
+      java.util.Date threadCreationDate2 = new java.util.Date();
+      Thread doSearchesThenSortThread2 = new Thread(doSearchesThenSort2,
+String.valueOf(threadCreationDate1.getTime()));
+      doSearchesThenSortThread2.start();
+  }
+     else
+  {
+      System.out.println(": Not starting second thread.");
+  }
+
+ } catch (Exception e) {
+     System.out.println("Caught Exception : "+e.getMessage());
+ }
+    }
+}
+
+
+class doSearchesThenSort implements Runnable{
+
+    Thread myThread;
+    String indexDirectory;
+    String query;
+
+    // Constructor
+    public doSearchesThenSort(String indexDirectory, String query) throws
+Exception
+    {
+ this.myThread = Thread.currentThread();
+ this.indexDirectory = indexDirectory;
+ this.query = query;
+    }
+
+    public void run()
+    {
+ try
+     {
+  String myThreadId = myThread.toString();
+  Searcher searcher = new IndexSearcher(indexDirectory);
+  Sort sort = new Sort();
+  sort.setSort("sortID");
+  for(int j=0;j<500;j++)
+      {
+   if(j%10 == 0)
+       {
+    System.out.println("Creating new sort and searcher objects so sort is
+regenerated.");
+    searcher = new IndexSearcher(indexDirectory);
+    sort = new Sort();
+    sort.setSort("sortID");
+       }
+   Analyzer analyzer = new StandardAnalyzer();
+   Query luceneQuery = QueryParser.parse(query, "fulltext_index", analyzer);
+   System.out.println("Doing normal search for: " +
+luceneQuery.toString("fulltext_index"));
+   long startOfQuery = System.currentTimeMillis();
+   Hits hits = searcher.search(luceneQuery, sort);
+   System.out.println(myThreadId + " : " + j + ": Normal search took:
+"+(System.currentTimeMillis()-startOfQuery)+" milliseconds and matched " +
+hits.length() + " documents");
+   Thread.currentThread().sleep(500);
+      }
+
+     }
+ catch (Exception e) {
+     System.out.println(" caught a " + e.getClass() +
+          "\n with message: " + e.getMessage());
+ }
+    }
+}
+
+
+
+
+testDoTwoSeparateThreadsWithSorts.java_one_thread_out.txt:-
+
+[moreover@linux24-1 test_programs]$ cd
+/home1/moreover/lucene/test_programs/; javac
+testDoTwoSeparateThreadsWithSorts.java; java -ms100m -mx200m
+testDoTwoSeparateThreadsWithSorts
+/home1/moreover/lucene_indexes/testKeepSortInMemoryIndex/ news
+dontRunSecondThread
+: Starting first thread to do searches then sort...
+: Not starting second thread.
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Thread[main,5,] : 0: Normal search took: 5246 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 1: Normal search took: 185 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 2: Normal search took: 184 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 3: Normal search took: 185 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 4: Normal search took: 184 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 5: Normal search took: 186 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 6: Normal search took: 183 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 7: Normal search took: 183 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 8: Normal search took: 182 milliseconds and matched 712356
+documents
+Doing normal search for: news
+Thread[main,5,] : 9: Normal search took: 264 milliseconds and matched 712356
+documents
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Thread[main,5,] : 10: Normal search took: 5303 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 11: Normal search took: 192 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 12: Normal search took: 196 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 13: Normal search took: 192 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 14: Normal search took: 194 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 15: Normal search took: 183 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 16: Normal search took: 176 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 17: Normal search took: 175 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 18: Normal search took: 187 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 19: Normal search took: 176 milliseconds and matched
+712356 documents
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Thread[main,5,] : 20: Normal search took: 5831 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 21: Normal search took: 329 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 22: Normal search took: 382 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 23: Normal search took: 320 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 24: Normal search took: 305 milliseconds and matched
+712356 documents
+.....etc. etc.
+
+
+testDoTwoSeparateThreadsWithSorts.java_two_threads_out.txt:_
+
+[moreover@linux24-1 test_programs]$ cd
+/home1/moreover/lucene/test_programs/; javac
+testDoTwoSeparateThreadsWithSorts.java; java -ms100m -mx200m
+testDoTwoSeparateThreadsWithSorts
+/home1/moreover/lucene_indexes/testKeepSortInMemoryIndex/ news
+doRunSecondThread
+: Starting first thread to do searches then sort...
+: Starting second thread to do searches then sort...
+Creating new sort and searcher objects so sort is regenerated.
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 0: Normal search took: 10799 milliseconds and matched
+712356 documents
+Thread[main,5,] : 0: Normal search took: 10791 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 1: Normal search took: 10346 milliseconds and matched
+712356 documents
+Thread[main,5,] : 1: Normal search took: 10210 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 2: Normal search took: 10244 milliseconds and matched
+712356 documents
+Thread[main,5,] : 2: Normal search took: 10076 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 3: Normal search took: 10339 milliseconds and matched
+712356 documents
+Thread[main,5,] : 3: Normal search took: 10138 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 4: Normal search took: 10116 milliseconds and matched
+712356 documents
+Thread[main,5,] : 4: Normal search took: 10080 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 5: Normal search took: 10273 milliseconds and matched
+712356 documents
+Thread[main,5,] : 5: Normal search took: 10171 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 6: Normal search took: 10208 milliseconds and matched
+712356 documents
+Thread[main,5,] : 6: Normal search took: 10027 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 7: Normal search took: 10431 milliseconds and matched
+712356 documents
+Thread[main,5,] : 7: Normal search took: 10335 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 8: Normal search took: 10091 milliseconds and matched
+712356 documents
+Thread[main,5,] : 8: Normal search took: 9968 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 9: Normal search took: 9950 milliseconds and matched
+712356 documents
+Thread[main,5,] : 9: Normal search took: 9891 milliseconds and matched
+712356 documents
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Creating new sort and searcher objects so sort is regenerated.
+Doing normal search for: news
+Thread[main,5,] : 10: Normal search took: 9635 milliseconds and matched
+712356 documents
+Thread[main,5,] : 10: Normal search took: 10712 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 11: Normal search took: 172 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 11: Normal search took: 15506 milliseconds and matched
+712356 documents
+Thread[main,5,] : 12: Normal search took: 15772 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 12: Normal search took: 14678 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 13: Normal search took: 14799 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 13: Normal search took: 25466 milliseconds and matched
+712356 documents
+Thread[main,5,] : 14: Normal search took: 25030 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 15: Normal search took: 9865 milliseconds and matched
+712356 documents
+Thread[main,5,] : 14: Normal search took: 10219 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Doing normal search for: news
+Thread[main,5,] : 16: Normal search took: 348 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 15: Normal search took: 9126 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 17: Normal search took: 10071 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 16: Normal search took: 10214 milliseconds and matched
+712356 documents
+Doing normal search for: news
+Thread[main,5,] : 18: Normal search took: 9106 milliseconds and matched
+712356 documents
+.....etc. etc.
+
+
+· Stephen Halsey
+Senior Systems Engineer
+· Moreover Technologies
+12 Greenhills Rents, Farringdon, London EC1M 6BN, United Kingdom
+Phone: +44 (0)20 7253 5003
+Fax:     +44 (0)20 7336 0249
+
+Email: steve@moreover.com
+Press Room: http://w.moreover.com/site/press/index.html
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

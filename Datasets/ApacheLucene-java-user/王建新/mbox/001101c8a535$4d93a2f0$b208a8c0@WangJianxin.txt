@@ -1,0 +1,80 @@
+FROM: 王建新 <lieut...@gmail.com>
+SUBJECT: A problem about additonal info(after some modification for lucene)
+DATE: 23 Apr 2008
+
+I modified some lucene's code to make lucene have the new use like:
+
+    doc=new Document();
+    byte[] additionalInfo=new byte[]{'x','x','x'};
+    doc.add(new Field("field1","aa aa",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+
+I change the *.frp file as:
+        if (1 == termDocFreq) {
+          freqOut.writeVInt(newDocCode|1);
+        } else {
+          freqOut.writeVInt(newDocCode);
+          freqOut.writeVInt(termDocFreq);
+        }
+        Iterator<Integer> it=minState.fieldnos.iterator();//fieldnos is a set containing
+all filed no about the term in a specified field.
+        while(it.hasNext()) 
+        {
+         int fieldno=it.next();
+         freqOut.writeVInt(fieldno);//##
+        }
+        freqOut.writeVInt(0);
+I use 0 to mark the end of filednos.for example:
+
+doc.add(new Field("field1","aa aa",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+doc.add(new Field("field1","aa aa",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+
+the *.frq file is(one record):
+     docid(?)    4(freq)    1,2
+
+1,2 : the first(1) and second(2) fields has  term "aa".
+
+It works correctly, if count<480000 as the following code. but if count>=48000, error
+occurs.
+int count=480000;
+for(int i=0;i<count;i++)
+  {
+  doc=new Document();
+  byte[] additionalInfo=new byte[]{'x','x','x'};
+  doc.add(new Field("field1","aa aa",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  additionalInfo=new byte[]{'y','y','y'};
+  doc.add(new Field("field1","aa  aa",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  doc.add(new Field("field2","bb cc",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  writer.addDocument(doc);
+  
+  doc=new Document();
+  additionalInfo=new byte[]{'c','c','c','c'};
+  doc.add(new Field("field1","aa bb",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  additionalInfo=new byte[]{'b','b','b','b'};
+  doc.add(new Field("field1","bb",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  doc.add(new Field("field1","cc bb",Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.NO,additionalInfo));
+  writer.addDocument(doc);
+}
+
+I think it will merge index if count>=480000. the error may be in  class SegmentMerger.
+private final int mergeTermInfo(SegmentMergeInfo[] smis, int n)
+          throws CorruptIndexException, IOException {
+    long freqPointer = freqOutput.getFilePointer();
+    long proxPointer = proxOutput.getFilePointer();
+
+    int df = appendPostings(smis, n);    // append posting data
+
+    long skipPointer = skipListWriter.writeSkip(freqOutput);
+    System.err.println("long skipPointer = skipListWriter.writeSkip(freqOutput);");
+
+    if (df > 0) {
+      // add an entry to the dictionary with pointers to prox and freq files
+      termInfo.set(df, freqPointer, proxPointer, (int) (skipPointer - freqPointer));
+      termInfosWriter.add(smis[0].term, termInfo);
+    }
+
+    return df;
+  }
+
+I cannot understand the process of here.
+Could you give me any help?
+Thanks.

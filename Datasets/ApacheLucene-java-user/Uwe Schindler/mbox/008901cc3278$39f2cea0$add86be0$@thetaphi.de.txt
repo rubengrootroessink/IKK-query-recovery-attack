@@ -1,0 +1,78 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Does {Filter}ing is faster than {Query}ing in Lucene?
+DATE: 24 Jun 2011
+
+Hi,
+
+If you dont cache filters, queries will be faster, as the ConjunctionScorer
+in Lucene has optimizations, which are currently not used for Filters.
+Filters are fine, if you cache them (e.g. if you always have the same access
+restrictions for a specific user that are applied to all his queries). In
+that case the Filter is only executed once and cached for all further
+requests and then intersected with the query result set.
+
+If you only want to e.g. randomly "filter" e.g. by a variable numeric range
+like a bounding box in a geographic search, use queries, queries are in most
+cases faster (e.g. Range Queries and similar stuff - called MultiTermQueries
+- are internally also implemented by the same BitSet algorithm like the
+Filter - in fact they are only Filters wrapped by a Scorer-impl). But the
+Scorer that ANDs the query and your "filter" query together
+(ConjunctionScorer) is generally faster than the code that applies the
+filter after searching. This may some improvement possible, but in general
+filters are something in Lucene that is not really needed anymore, so there
+were already some approaches to make Filters and Queries the same, and
+instead then be able to also cache non-scoring queries. This would make lots
+of code easier.
+
+Filters can bring a huge speed improvement with  Lucene 4.0, if they are
+plugged ontop of the IndexReader to filter the documents *before* scoring,
+but that's not yet implemented (see
+https://issues.apache.org/jira/browse/LUCENE-3212) - I am working on it. We
+may also make Filters random access (it's easy as they are bitsets), which
+could improve also the after-query filtering. But I would then also make
+Queries partially random access, if they could support it (like queries that
+are only based on FieldCache).
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Denis Bazhenov [mailto:dotsid@gmail.com]
+> Sent: Friday, June 24, 2011 3:21 AM
+> To: java-user@lucene.apache.org
+> Subject: Does {Filter}ing is faster than {Query}ing in Lucene?
+> 
+> While reading "Lucene in Action 2nd edition" I came across the description
+of
+> Filter classes which are could be used for result filtering in Lucene.
+Lucene
+> has a lot of filters repeating Query classes. For example,
+NumericRangeQuery
+> and NumericRangeFilter.
+> 
+> The book says that NRF does exactly the same as NRQ but without document
+> scoring. Does this means that if I do not need scoring or sort documents
+by
+> document field value I should preferFiltering over Querying from
+> performance point of view?
+> 
+> ---
+> Denis Bazhenov <dotsid@gmail.com>
+> 
+> 
+> 
+> 
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

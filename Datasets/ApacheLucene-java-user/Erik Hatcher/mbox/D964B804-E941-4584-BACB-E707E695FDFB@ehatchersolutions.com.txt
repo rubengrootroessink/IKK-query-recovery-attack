@@ -1,0 +1,67 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: "Starts with" query?
+DATE: 6 Jan 2006
+
+
+On Jan 5, 2006, at 7:01 PM, Paul Smith wrote:
+> first off response to my own post, I meant PhraseQuery instead.
+>
+> But, since we're only tokenizing this field ,and not storing the  
+> entire contents of the field, I'm not sure this is ever going to  
+> work, is it?
+
+Sure it will :)
+
+> I notice that if I have a title "auto update", then the phrase  
+> query trick works if it searches on
+>
+> 	title:"0start0 auto*"
+>
+> but does not find any matches for
+>
+> 	title:"0start0 aut*"
+>
+> I'm a bit stuck.
+
+PhraseQuery does not handle wildcards.  Unfortunately this is common  
+misunderstanding.
+
+The MultiPhraseQuery could do this provided you expand "aut*" into  
+all the matching terms yourself.  But here is an alternative using  
+the new SpanRegexQuery (in contrib/regex):
+
+     RAMDirectory directory = new RAMDirectory();
+     IndexWriter writer = new IndexWriter(directory, new  
+SimpleAnalyzer(), true);
+     Document doc = new Document();
+     doc.add(new Field("field", "auto update", Field.Store.NO,  
+Field.Index.TOKENIZED));
+     writer.addDocument(doc);
+     doc = new Document();
+     doc.add(new Field("field", "first auto update", Field.Store.NO,  
+Field.Index.TOKENIZED));
+     writer.addDocument(doc);
+     writer.optimize();
+     writer.close();
+
+     IndexSearcher searcher = new IndexSearcher(directory);
+     SpanRegexQuery srq = new SpanRegexQuery(new Term("field",  
+"aut.*"));
+     SpanFirstQuery sfq = new SpanFirstQuery(srq, 1);
+     Hits hits = searcher.search(sfq);
+     assertEquals(1, hits.length());
+
+Notice that the query is "aut.*", not "aut*" such that it is a valid  
+regular expression for what you want.  In my current project, my  
+custom query parser handles * and ? like WildcardQuery, but under the  
+covers I simply convert that into a regex by replacing ? with . and *  
+with .*
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

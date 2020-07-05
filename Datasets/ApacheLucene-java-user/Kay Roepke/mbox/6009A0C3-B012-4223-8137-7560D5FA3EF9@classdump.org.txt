@@ -1,0 +1,152 @@
+FROM: Kay Roepke <kroe...@classdump.org>
+SUBJECT: Re: Making document numbers persistent
+DATE: 14 Jan 2007
+
+
+On 14. Jan 2007, at 7:10 , Chris Hostetter wrote:
+
+> if you're talking about multiple identical servers used for load
+> balancing, then there is no reason why those indexes wouldn't be  
+> kept in
+> sync (the merge model is deterministic, so if you apply the same
+> operations to every server in the same order, you'll get identical
+> indexes) ... so you could concievably use a shared cache -- if you  
+> aren't
+> talking about indentical copies of hte index, then i'm not sure i
+> understand your situation -- since it would seem you'd need  
+> something to
+> ensure that the query got sent to the *right* server, and that  
+> would imply
+> that subsequent requests would be able to talk advantage of the cache.
+
+In principle the servers would have the exact same index, but it  
+might be possible
+for them to be out of sync temporarily, say when one or more servers  
+are down
+for one reason or another. They would be restarted and then would be  
+feed the
+changes they missed. Thus I could end up with different indices  
+across the
+servers. This is pretty much like database replication.
+We have thought about doing some kind of connection persistence like you
+suggest, but that has some nasty production level problems. We could  
+deal
+probably, but I rather would like to avoid that.
+
+> practically speaking, there is a differnce between the rate at which
+> updates come in, and the rate at which you have to make updates  
+> available
+> to your users ... reopening an indexreader no more frequently then  
+> once
+> ever X minutes -- and not reopening at all unless the index has  
+> changed --
+> can drasticly improve your ability to cache things effectively.
+
+mmh, that sounds like something that I have missed ;) I'll have to do  
+some
+testing to see at what repopening interval I would end up and still  
+have a
+decent cache usage. Thanks for the refresher!
+
+> i'm not a fileformat guy, i don't really get into those internals  
+> much,
+> but the document number isn't "esentially" the offest -- it *is* the
+> offset -- each segment maintains it's own list of documents from 1  
+> to size
+> of segment, and the document number for a given doc is the number  
+> used to
+> identify it in it's segment, plus the offset of that segment in the  
+> index
+> as a whole -- i don't believe the document number you use when calling
+> reader.document(docId) is ever stored in the index (unless your index
+> happens to have a single segment.
+
+Ok, then I haven't read the code the wrong way :)
+
+
+> :    My question for this solution would be: Where, in general terms,
+> : would I have to look to change the meaning of the document id,  
+> codewise?
+>
+> Don't take this the wrong way, but i read that question the same way i
+> would read "Where, in general terms, would i have to look to change  
+> the
+> meaning of integer addition, codewise?" ... there is no
+> DocumentNumberFactory, no getNextDocId() ... the concept of  
+> document ids
+> is so ingrained and pervasive i can't even imagine what it would  
+> take to
+> change it.
+
+I get it ;) Of course I know that there isn't a  
+DocumentNumberFactory, but at some
+point it must be decided which document number a document will have  
+for a given point
+in time, right? Now this doesn't have to be spelled out in code, and  
+indeed is very implicit,
+but if I was able to hook into that and maybe record the changing  
+document numbers how they relate
+to our unique ids, I could look up the docid from that table without  
+enumerating terms.
+
+> As i recall, everytime you open a new IndexWriter (which you would  
+> need to
+> do frequently since you have to close your old IndexWriter for your
+> multiple updates a second to be visible) a new segment is  
+> opened ... if
+> you really manage to competely eliminate segment merges you are  
+> talking
+> about potentially having 100,000 segments after 24 hours ... I  
+> think the
+> search performance cost there would breaty significantly outway your
+> current Filter building costs ... but that's just speculation since  
+> i've
+> never seen an index with that many segments -- at least not on a  
+> machine
+> that was acctually *functioning* :)
+
+Ok, that confirms my suspicions. I was afraid that it would seriously  
+affect
+query time and general performance (number of open files). Then that  
+solution
+is out.
+
+> it's inherent to the idea of an Inverted Index -- there is no single
+> document stored anywhere, the indexed terms are stored and they  
+> refrence
+> the list of docIds (as offsets in the current segment) that the are  
+> in ...
+> deleting a document just adds the docId to a list of documents to be
+> ignored (because they are deleted) when searchers are performed ...  
+> if you
+> really wanted to update in place, you would need to scan every  
+> term, see
+> if it was mapped to the doc, and then zero out that mapping, and then
+> apend the list of <term,doc> mappings for hte terms that are in the
+> updated doc -- which would take a lot longer then the current
+> delete/update approach.
+
+Ok, it was just that I couldn't find the explanation in the archives.
+I agree, it would probably be a performance nightmare to do updates  
+that way.
+
+
+Thanks very much for your input!
+
+cheers,
+
+-k
+
+-- 
+Kay Röpke
+http://classdump.org/
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

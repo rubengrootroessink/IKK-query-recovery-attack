@@ -1,0 +1,220 @@
+FROM: "Marcus Falck" <marcus.fa...@observer.se>
+SUBJECT: SV: Lucene hits.length()
+DATE: 10 Aug 2006
+
+Hi again Erick.
+
+Yes I know the hits exists in the index at all time.
+
+I will illustrate exactly with approximently values for the hits.length():
+
+Mergefactor 10.
+MinMergeDocs 5000.
+
+Searching for a very common Swedish word ("han" which equals to "he" in English).
+
+Indexing 100000 docs.
+
+After 1000 docs I do a search. Lets say I hit 200 docs. 
+Now my searcher will be hold for 3 minutes time.
+
+After those three minutes lets say I got the following index structur:
+5 x 5000 docs in FSDir
+And 1000 docs in RAMDir
+Total : 26000 docs
+
+The search now yields 220 results, but since I'm sorting on date and adding the oldest first
+I see the newest added hits. 
+
+Holding this searcher for 3 minutes.
+
+After three minutes lets say I have the following index structure:
+1 x 50000 docs in FSDir
+2000 docs in RAMDir
+
+The search now yields 10000 hits. Which seems a lot more appropriate.
+
+3 minutes later:
+
+1x50000
+5x5000
++ 1000 RAMDir
+
+Search hits count: 10111.
+
+And after the big 100 000 merge ( 2 x 50000 ) I will get approximately 20000 hits.
+
+---
+As you can see it's a very strange behavior. At some points the hits.length() can even temporary
+decrease from the previous length. 
+
+I will have to point out that I have a minMergeSize for the IndexWriter working on the FSDir
+set to 5000. I also have a separate RAMDir and another IndexWriter that is writing to that
+RAMDir until my own RAMDir have 5000 docs. Then I flush it into the FS IndexWriter ( which
+will result in a immediate disc write ). This way I have total control over when the disc
+writes occurs. 
+
+And yes I'm afraid that this will affect my system in a very negative way. Cause my clients
+will browse the index on their stored search profiles.
+
+
+/
+Regards
+Marcus Falck
+
+-----Ursprungligt meddelande-----
+Från: Erick Erickson [mailto:erickerickson@gmail.com] 
+Skickat: den 9 augusti 2006 19:49
+Till: java-user@lucene.apache.org
+Ämne: Re: Lucene hits.length()
+
+I think, but am not certain (chime in here guys) that this is expected
+behavior. As I remember from various threads, internally indexing uses a
+RAMdir to accumulate data until it merges it with the FSDir. Since the
+searcher and indexer are separate, I assume that the searcher is looking at
+the snapshot that is on disk and missing that in the RAMdir. After you
+merge, the RAMdir data has been added to that on disk, and the two are "in
+synch".
+
+So I guess my real question is "why do you care"? Is this affecting your
+application or is this an anomaly that you want to understand so you don't
+get surprised? If the latter, I think you're OK if you open your index after
+merging, you'll have the data available....
+
+BTW, I assume that when you say hits.length() is not correct, you're getting
+fewer hits than you *know* are in the index (including the stuff you're
+currently indexing but haven't merged yet).
+
+Best
+Erick
+
+
+
+On 8/9/06, Marcus Falck <marcus.falck@observer.se> wrote:
+>
+> Still worried =)
+> You see it doesn't update the hits.length() in a correct way when I create
+> a new searcher. The correct update does just occur in the merges. =/
+>
+> -----Ursprungligt meddelande-----
+> Från: Erick Erickson [mailto:erickerickson@gmail.com]
+> Skickat: den 9 augusti 2006 15:34
+> Till: java-user@lucene.apache.org
+> Ämne: Re: Lucene hits.length()
+>
+> Then you won't see anything added to your index between times. Does this
+> identify your problem or are you still worried?
+>
+> Erick
+>
+> On 8/9/06, Marcus Falck <marcus.falck@observer.se> wrote:
+> >
+> > I'm opening a new searcher every 3:rd minute.
+> >
+> > -----Ursprungligt meddelande-----
+> > Från: Erick Erickson [mailto:erickerickson@gmail.com]
+> > Skickat: den 8 augusti 2006 18:58
+> > Till: java-user@lucene.apache.org
+> > Ämne: Re: Lucene hits.length()
+> >
+> > I'll take a stab at it.... When are you opening/closing your searcher?
+> > When
+> > you open a searcher, you get a snapshot of the index at that instant,
+> and
+> > subsequent modifications aren't visible until you open a new searcher
+> (at
+> > least I think I've got this right).
+> >
+> > And I'm sure this also interacts with the writer merge settings
+> > "interestingly".
+> >
+> > Personally, I'd worry about this a lot more if it happened after I'd
+> > closed
+> > my writer and opened a new reader <G>...
+> > Of course, my app has an index that is updated rarely (every two weeks),
+> > so
+> > I haven't dug into too many details in this area...
+> >
+> >
+> > Best
+> > Erick
+> >
+> > On 8/8/06, Marcus Falck <marcus.falck@observer.se> wrote:
+> > >
+> > > I have noticed some strange behavior when searching my lucene index.
+> > >
+> > >
+> > >
+> > > I'm adding 500.000 docs to an index.
+> > >
+> > >
+> > >
+> > > MergeFactor = 10
+> > >
+> > > MinMerge = 5000
+> > >
+> > >
+> > >
+> > > When 49999 have been added ( just before the first 10 * 5000 merge )
+> the
+> > > hits.length() is reporting around 1000 hits for a keyword (which by
+> the
+> > > way is around the same count as with 5000 docs added). After the
+> 10*5000
+> > > merge the hits.length() returns around 8000 hits, which seems to be a
+> > > lot more reasonable. Since I'm adding content in date order ( oldest
+> > > first ) I have also tried to sort the hits (newest date first) and
+> > > display the top 10 hits.
+> > >
+> > >
+> > >
+> > > According to that output it seems that the documents are added
+> > > correctly.
+> > >
+> > >
+> > >
+> > > I'm using a multisearcher on top of a RAMDir and an FSDir. Using
+> > > Lucene1.4.3
+> > >
+> > >
+> > >
+> > > Anybody that has any idea about why the hit count is so misleading?
+> > >
+> > >
+> > >
+> > > /
+> > >
+> > > Regards
+> > >
+> > > Marcus
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

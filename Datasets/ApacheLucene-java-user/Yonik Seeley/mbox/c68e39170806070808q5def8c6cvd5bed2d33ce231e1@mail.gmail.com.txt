@@ -1,0 +1,73 @@
+FROM: "Yonik Seeley" <yo...@apache.org>
+SUBJECT: Re: IndexDeletionPolicy and IndexCommitPoint
+DATE: 7 Jun 2008
+
+OK, does this mean it's now relatively safe/lightweight now to hold
+references to IndexCommit objects long term (across different
+IndexWriter objects on the same Directory?)
+
+I also notice that IndexCommit.equals() only compares the segment fine
+name... should it compare version also?  If index files were deleted,
+and a new IndexWriter was opened, one could end up with a different
+index but the same segment file name.
+
+-Yonik
+
+On Thu, Feb 21, 2008 at 1:25 PM, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> Good questions!
+>
+> Yes, it's best to use the segments filename to compare commit points
+> across close/reopen of IndexWriter as long as you ensure you're always
+> working with the same index / Directory.
+>
+> You could change snapshot to be a String (the segments file name) and
+> do all comparisons on that basis instead of holding the
+> IndexCommitPoint.  This breaks the reference to the non-static inner
+> class CommitPoint in IndexFileDeleter.
+>
+> I like this simplification ... I've opened LUCENE-1184 for this and
+> attached a patch:
+>
+>    https://issues.apache.org/jira/browse/LUCENE-1184
+>
+> Thanks Tim!
+>
+> Mike
+>
+> Tim Brennan <tim@zimbra.com> wrote:
+>> When implementing a custom IndexDeletionPolicy, is it sufficient to just use the
+segments filename (returned by IndexCommitPoint.getSegmentsFilename()) to compare CommitPoints
+to see if they are equal?
+>>
+>>  I've looked at the code in SnapshotDeletionPolicy and it works by keeping a pointer
+to the snapshot IndexCommitPoint and comparing that against the listed commit points in onCommit.
+ This strategy doesn't seem to work if the IndexWriter is closed and re-opened: you get all
+new CommitPoint instances from the new Writer even if they refer to the same logical commit,
+and furthermore holding onto IndexCommitPoint references across generations of IndexWriters
+will cause significant memory pressure (an IndexCommitPoint is an instance of the *non-static*
+inner class IndexFileDeleter$CommitPoint so it points to the IndexFileDeleter which points
+to the DocumentsWriter which points to the Posting[] array.....so holding onto a commit point
+effectively keeps the Posting[] array around)
+>>
+>>  Am I going completely wrong here, trying to IndexDeletionPolicy across Writer generations?
+>>
+>>  --tim
+>>
+>>  ---------------------------------------------------------------------
+>>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

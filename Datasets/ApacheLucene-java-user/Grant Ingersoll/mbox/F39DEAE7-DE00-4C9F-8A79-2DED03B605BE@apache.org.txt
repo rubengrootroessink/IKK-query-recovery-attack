@@ -1,0 +1,180 @@
+FROM: Grant Ingersoll <gsing...@apache.org>
+SUBJECT: Re: How do TeeTokenizer and SinkTokenizer work?
+DATE: 22 Aug 2008
+
+
+On Aug 22, 2008, at 3:47 PM, Teruhiko Kurosaka wrote:
+
+> Hello,
+> I'm interested in knowing how these tokenizers work together.
+> The API doc for TeeTokenizer
+> http://lucene.apache.org/java/2_3_1/api/org/apache/lucene/analysis/TeeTokenFilter.html
+>
+> has this sample code:
+> SinkTokenizer sink1 = new SinkTokenizer(null);
+> SinkTokenizer sink2 = new SinkTokenizer(null);
+>
+> TokenStream source1 = new TeeTokenFilter(new TeeTokenFilter(new  
+> WhitespaceTokenizer(reader1), sink1), sink2);
+> TokenStream source2 = new TeeTokenFilter(new TeeTokenFilter(new  
+> WhitespaceTokenizer(reader2), sink1), sink2);
+>
+> TokenStream final3 = new EntityDetect(sink1);
+> TokenStream final4 = new URLDetect(sink2);
+>
+> with an explanation that reads "sink1 and sink2 will both get tokens  
+> from both reader1 and reader2 after whitespace tokenizer",
+> but I don't understand how the input from reader1 and reader2 are  
+> mixed together.
+> Will sink1 first reaturn the reader1 text, and reader2?
+
+It depends on the order the fields are added.  If source1 is used  
+first, then reader1 will be first.
+
+Try out the code at the bottom.  I get the following if source1 is  
+first:
+
+------
+final 1
+(a,0,1)
+(b,2,3)
+(c,4,5)
+(d,6,7)
+(f,8,9)
+(g,10,11)
+-------- end final 1 -------
+------
+final 2
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+(m,10,11)
+-------- end final 2 -------
+------
+final 3
+(a,0,1)
+(c,4,5)
+(F,8,9)
+(g,10,11)
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+(m,10,11)
+-------- end final 3 -------
+------
+final 4
+(a,0,1)
+(b,2,3)
+(c,4,5)
+(d,6,7)
+(F,8,9)
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+-------- end final 4 -------
+
+and this if final2 is first:
+
+------
+final 2
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+(m,10,11)
+-------- end final 2 -------
+------
+final 1
+(a,0,1)
+(b,2,3)
+(c,4,5)
+(d,6,7)
+(f,8,9)
+(g,10,11)
+-------- end final 1 -------
+------
+final 3
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+(m,10,11)
+(a,0,1)
+(c,4,5)
+(F,8,9)
+(g,10,11)
+-------- end final 3 -------
+------
+final 4
+(h,0,1)
+(i,2,3)
+(J,4,5)
+(k,6,7)
+(L,8,9)
+(a,0,1)
+(b,2,3)
+(c,4,5)
+(d,6,7)
+(F,8,9)
+-------- end final 4 -------
+
+
+
+
+public class SinkTest extends TestCase {
+public class SinkTest extends TestCase {
+   public void testSink() throws Exception {
+     StringReader reader1 = new StringReader("a b c d F g");
+     StringReader reader2 = new StringReader("h i J k L m");
+
+     SinkTokenizer sink1 = new SinkTokenizer(null);
+     SinkTokenizer sink2 = new SinkTokenizer(null);
+
+     TokenStream source1 = new TeeTokenFilter(new TeeTokenFilter(new  
+WhitespaceTokenizer(reader1), sink1), sink2);
+     TokenStream source2 = new TeeTokenFilter(new TeeTokenFilter(new  
+WhitespaceTokenizer(reader2), sink1), sink2);
+
+     TokenStream final1 = new LowerCaseFilter(source1);
+     TokenStream final2 = source2;
+     String[] stops1 = {"b", "d"};
+     TokenStream final3 = new StopFilter(sink1, stops1);
+     String[] stops2 = {"m", "g"};
+     TokenStream final4 = new StopFilter(sink2, stops2);
+
+
+
+     printTokens(final1, "final 1");
+     printTokens(final2, "final 2");
+
+     printTokens(final3, "final 3");
+     printTokens(final4, "final 4");
+
+
+   }
+   private void printTokens(TokenStream input, String label) throws  
+IOException {
+     Token next = new Token();
+     System.out.println("------");
+     System.out.println(label);
+     while ((next = input.next(next)) != null) {
+       System.out.println(next);
+     }
+     System.out.println("-------- end " + label + " -------");
+   }
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,223 @@
+FROM: Winton Davies <wdav...@overture.com>
+SUBJECT: RE: Maximum file size problem
+DATE: 9 Nov 2001
+
+ From http://developer.java.sun.com/developer/bugParade/bugs/4116672.html
+
+It looks like Java 1.2 had a bug at least... and its in RandomFile as well.
+  I'm trying 1.3...
+
+Cheers,
+  Winton
+
+
+
+Bug Id	4116672
+
+Votes	1
+
+Synopsis	java.io does not support large files >2GB
+
+Category	java:classes_io
+
+Reported Against	1.1.5, 1.1.3, 1.2beta2
+
+Release Fixed	1.2beta4
+
+State	Closed, fixed
+
+Related Bugs	4100321, 4110555
+
+Submit Date	Mar 02, 1998
+
+Description
+Java cannot handle files >2GB.
+
+
+------------------------------------------------------------------------
+
+SunSoft bug 4109867.
+
+Java cannot handle files >2GB.
+
+(1) **API Problems which need immediate attention**
+
+   + The method FileInputStream.available() (for disk files) returns the
+     number of bytes remaining in the file as an int.  The actual value for
+     a large file may not fit in an int (needs a long).
+
+   + The RandomAccessFile class has a skipBytes(int) method,
+     rather than the skip(long) method which the InputStreams have.
+
+(2) Implementation - these methods have problems:
+
+   + java.io.FileInputStream.skip()
+   + java.io.FileInputStream.available()
+   + java.io.RandomAccessFile.getFilePointer()
+   + java.io.RandomAccessFile.length()
+   + java.io.RandomAccessFile.setlength()  [JDK1.2]
+   + java.io.File.length()
+
+
+
+
+
+Workaround
+None.
+
+Evaluation
+>		How do you plan to manage the API change required for
+>		the available method?  To just change the signature
+>		seems like an incompatible change.
+
+People often assume that the FileInputStream.available method is supposed to
+return the total number of bytes remaining in the file, but this is incorrect.
+The specification in the JLS (22.3.5) says:
+
+     The general contract of available is that it returns an integer k; the next
+     caller of a method for this input stream, which might be the same thread or
+     another thread, can then expect to be able to read or skip up to k bytes
+     without blocking (waiting for input data to arrive).
+
+Now there well may be a bug in that available returns a nonsense value if there
+are more than 2GB remaining; if so, we'll certainly fix that.  I don't see a
+pressing need, however, to change the signature of the available method (which,
+actually, we cannot do) or to provide some other method.  We already have the
+File.length method, which returns a long; this isn't exactly the same as having
+an available method that returns a long, but it's pretty close.
+
+>		Do you plan to manage the API change for skip as suggested
+>		in the "Suggested Fix"?
+
+We can certainly consider adding a skip(long) method to RandomAccessFile as you
+suggest, but only in 1.2.
+
+>		Do you plan not to address this in the 1.1 release
+>		sequence?  Its a bug both places.
+
+We can fix bugs in the 1.1 implementation, but we cannot add to APIs.
+
+-- xxxxx@xxxxx 3/4/1998
+
+
+xxxxx@xxxxx 1998-03-05
+I think getting a consistant semantic/syntax for the "available" family of
+methods is critical.  The intended use is clear from the language specification
+quotation above, but the syntax is in conflict with the semantic specification.
+There are two ways to resolve this.  Either we change the syntax or we change
+the semantic.  There are a couple of variations of each theme:
+
+Change the syntax:
+
+    1)	If this were Java 0.9 (i.e.: before any FCS) the simple solution would
+	be to retain the simple existing semantic and provide a syntax which
+	matched appropriately.  This implies changing the syntax of the
+	entire family of "available()" methods to return a long rather than
+	an int.  This is probably inapproprate at this time as being too
+	significant of an incompatible change.
+
+    2)	A related and palatable solution is to define a new set of 
+"available()"
+	methods (say, "bytesAvailable()") and deprecate (but support) the
+	existing "available()" family of methods.  This must be accompanied
+	by a semantic definition of the behavior of "available" when the
+	current semantic definition can't be accomodated by the syntax.
+	Either option A or B below could be used.
+
+Change the semantics:
+
+    A)	Augment the semantics of available() such that if the number of bytes
+	available without blocking exceeds the value Integer.MAX_VALUE the
+	value Integer.MAX_VALUE will be returned.  On the surface this may
+	seem a bit kludgy, but if you realize that the intent of the
+	available method is to feed its result as the third operand of a
+	subsequent invokation of a read(byte b[], int off, int len) method,
+	it kinda makes sense.
+
+     B)	Augment the semantics of available such that a "file too large" io
+	exception is the specified behavior.  This probably isn't ideal, but
+	it is clear.
+
+My preference is A) or 2) combined with A).  Note that both of these have the
+property of not being able to break any existing applications.  A) by itself
+is probably sufficient.
+
+The solution for the randomAccessFile.skipBytes(int) is also less than obvious.
+First one needs to note that the semantics of skip(long) and skipBytes(int)
+are different.  skipBytes is guarenteed to skip the appropriate number of
+bytes while skip is very explicit about not extending such a guarentee.  I
+think I can guess that the "must" semantic of skipBytes was determined to
+be necessary for some classes (such as ObjectInputStream), but don't see
+why it was appropriate for RandomAccessFile.  I might further guess that
+because the "must" semantic could be easily delivered for this class it was
+chosen even though skip(long) would be more regular.  (The other classes
+which have skipBytes are reading structured types, rather than a byte stream.)
+
+Considering the above, it would be good and increase the regularity of the
+platform if a skip(long) method were to be added to the RandomAccessFile
+class.  Considering the differing semantics, I would suggest not deprecating
+the skipBytes method (although, if it didn't exist, I'd not suggest adding it).
+
+However (as has always been acknowledged) this isn't a required change for
+the correct implementation of large file support.  A resolution of the
+available() method semantics is.
+
+
+Re. FileInputStream.available: I wasn't sufficiently clear in my earlier
+comment.  The JLS text quoted above does not imply that the available method
+must return the total number of bytes remaining in the file.  The value
+returned by an available method may, in fact, be much less than the total
+number of bytes that can be read without pausing.  A valid, though not
+particularly useful, implementation of available can return zero every time
+it's invoked.
+
+So we don't need to change the signature or the specification of any of the
+available methods.  Since the true meaning of available is so widely
+misunderstood, we should clarify the specifications on this point.  We should
+note in particular that if more than 2GB are immediately available, then
+Integer.MAX_INT will be returned.
+
+Re. RandomAccessFile.skipBytes(int): RandomAccessFile implements the DataInput
+interface, which is why it must have a skipBytes method.  The JLS does not
+require "must" semantics for skipBytes; the old javadoc, which is in the
+process of being updated to contain the JLS text, was incorrect on this point.
+
+We could add a skip(long) method to RandomAccessFile, but it's roughly
+equivalent to this idiom, assuming raf is a RandomAccessFile:
+
+     raf.seek(raf.getFilePointer() + offset);
+
+The only difference is that skip(long) wouldn't throw an IOException if you try
+to skip past the end of the file.  If you think this functionality is 
+important,
+
+please file a separate RFE.  I'd like to use this bug report just to track the
+implementation bugs.
+
+-- xxxxx@xxxxx 3/9/1998
+
+
+xxxxx@xxxxx 1998-03-09
+
+I pretty much agree with the above.  I got thrown for a major loop by the
+out-of-sync and incorrect javadoc entries.  Note that skipBytes() javadoc
+has already been fixed in 1.2.
+
+I don't know if I'd go as far as specifying that available() return
+Integer.MAX_INT.  I believe that taking the JLS diescription of available
+and inserting it into javadoc would be sufficient.
+
+
+Winton Davies
+Lead Engineer, Overture (NSDQ: OVER)
+1820 Gateway Drive, Suite 360
+San Mateo, CA 94404
+work: (650) 403-2259
+cell: (650) 867-1598
+http://www.overture.com/
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

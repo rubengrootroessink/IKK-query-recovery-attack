@@ -1,0 +1,77 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: deleteDocuments() does not work
+DATE: 3 Nov 2009
+
+On Tue, Nov 3, 2009 at 4:24 AM, Dinh <pcdinh@gmail.com> wrote:
+> Hi Michael,
+>
+> Thank a lot for your advice
+>
+>> Can you verify you are in fact reopening the reader that's reading the
+>> same Directory the writer is writing to?
+>
+> Yes. I have a single and configurable index path. So I can not make a
+> mistake here
+
+OK.
+
+>> Also, you are failing to close the old reader after opening a new one.
+>> This shouldn't cause the issue you're seeing, but, will lead
+>> eventually to OOME or file descriptor exhaustion.
+>
+> I have rewritten the method as follows
+>
+>    /**
+>     * Reloads searchers after index is changed (added, deleted or updated).
+>     */
+>    public static synchronized void reload() {
+>
+>        Set<Map.Entry<String, IndexSearcher>> set = searchers.entrySet();
+>
+>        for (Map.Entry<String, IndexSearcher> entry : set) {
+>            try {
+>                IndexSearcher searcher = entry.getValue();
+>                IndexReader oldReader = searcher.getIndexReader();
+>                IndexReader newReader = oldReader.reopen(true);
+>
+>                if (newReader != oldReader) {
+>                    oldReader.close();
+>                    searcher.close();
+>                    searchers.put(entry.getKey(), new
+> IndexSearcher(newReader));
+>                }
+>            } catch (Exception e) {
+>                log.warn(e.getMessage(), e);
+>            }
+>        }
+>    }
+
+Your reload method looks better now!  (You are now closing the old reader).
+
+> And it works now.
+
+Does that mean you no longer see the original problem (changes not
+being reflected)?
+
+>> Finally, are you sure the iteration over the Map entries, that
+>> overwrites each entry, is safe?
+>
+> Do you think that my iteration is safe now? At least I have closed the
+> previous searcher and oldReader before creating new ones. However, I don't
+> know if it is a good practice to do so.
+
+You get the entrySet from the Map, you then iterate over its
+Map.Entry, then you replace in your original map some entries (the
+ones that are opened).  So, you are modifying a Java collection while
+iterating over elements from its Set view... I just don't know if
+that's safe (anyone?).  Would be good to instrument/debug and confirm
+that the precise IndexReader that's searching the Directory your
+IndexWriter just committed to, is in fact reopened.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

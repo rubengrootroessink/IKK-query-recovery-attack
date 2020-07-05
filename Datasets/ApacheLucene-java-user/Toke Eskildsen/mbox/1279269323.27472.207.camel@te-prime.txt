@@ -1,0 +1,73 @@
+FROM: Toke Eskildsen ...@statsbiblioteket.dk>
+SUBJECT: RE: Best practices for searcher memory usage?
+DATE: 16 Jul 2010
+
+On Thu, 2010-07-15 at 20:53 +0200, Christopher Condit wrote:
+
+[Toke: 140GB single segment is huge]
+
+> Sorry - I wasn't clear here. The total index size ends up being 140GB
+> but to try to help improve performance we build 50 separate indexes 
+> (which end up being a bit under 3gb each) and then open them with a 
+> parallel multisearcher.
+
+Ah! That is an whole other matter then. Now I understand why you go for
+single segment indexes.
+
+[Toke (assuming a single index): Why not optimize to 10 segments?]
+
+> Is preferred(in terms of performance) to the above approach (splitting
+> into multiple indexes)?
+
+It's been 2 or 3 years since I experimented with the MultiSearcher, so
+this is mostly guesswork from my part. Searching on a single index with
+multiple segments and multiple indexes of single segments has the same
+penalties: The weighting of the query requires a merge of query term
+statistics from the parts. In principle it should be the same but as
+always the devil is in the details.
+
+
+50 parts do sound like a lot though. Even without range searches or
+similar query-exploding searches, there is an awful lot of seeks to be
+done. The logarithmic nature of term lookups work against you here.
+
+A rough estimate: A simple boolean query with 5 field/terms is weighted
+by each searcher. Each index has 50K terms (conservative guess) so for
+each condition, the searchers performs ~log2(50K) = 16 lookups. With 50
+indexes that's 50 * 5 * 16 = 4000 lookups.
+
+The 4K lookups does of course not all result in a remote NFS request but
+with 10-12GB of RAM on the search machine taken already, I would guess
+that there is not much left for caching of the 140GB of index data?
+
+Is it possible for you to measure the number of read requests that your
+NFS server receives for a standard search? Another thing to try would be
+to measure the same slow query 5 times after each other, thereby
+ensuring that everything is fully cached. This should indicate if the
+remote I/O is the main bottleneck or not.
+
+The other extreme, a single fully optimized index, would (pathological
+worst case compared to the rough estimate above) require 1 * 5 *
+log2(50*50K) ~= 110 lookups for the terms.
+
+I would have guessed that the 50 indexes is partly responsible for your
+speed problems, but it sounds like you started out with a lower number
+and later increased it?
+
+> Not yet! I've added some benchmarking code to keep track of all 
+> performance as I add these changes. Do you happen to know if the 
+> Lucene benchmark package is still in use / a good thing to toy around with?
+
+Sorry, no. The only performance testing we've done extensively is for
+searches and for that we used our standard setup with logged queries in
+order to emulate the production setting.
+
+Regards,
+Toke Eskildsen
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

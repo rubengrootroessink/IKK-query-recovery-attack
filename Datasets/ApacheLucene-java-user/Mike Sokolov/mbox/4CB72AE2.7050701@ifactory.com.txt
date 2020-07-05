@@ -1,0 +1,70 @@
+FROM: Mike Sokolov <soko...@ifactory.com>
+SUBJECT: proposed change to CharTokenizer
+DATE: 14 Oct 2010
+
+Background: I've been trying to enable hit highlighting of XML documents 
+in such a way that the highlighting preserves the well-formedness of the 
+XML.
+
+I thought I could get this to work by implementing a CharFilter that 
+extracts text from XML (somewhat like HTMLStripCharFilter, except I am 
+using an XML parser - however I think the concept is also applicable to 
+HTMLStripCharFilter) while preserving the offsets of the text in the 
+original XML document so as to enable highlighting.
+
+I ran into a problem in CharTokenizer.incrementToken(), which calls 
+correctOffset() as follows:
+
+     offsetAtt.setOffset(correctOffset(start), correctOffset(start+length));
+
+The issue is that the end offset is computed as the offset of the 
+beginning of the *next* block of text rather than the offset of the end 
+of *this* block of text.
+
+In my test case:
+
+<p><b>bold text</b> regular text</p>
+
+I get tokens like this ([] showing token boundaries):
+
+                [bold] [text</b>][regular][text</p>]
+
+instead of:
+
+                [bold][text][regular][text]
+
+I don't think this problem can be fixed by jiggling offsets, or indeed 
+by wrapping or extending CharTokenizer in any straightforward way.  The 
+fix I found is to change the line in CharTokenizer.incrementToken() to:
+
+     offsetAtt.setOffset(correctOffset(start), 
+correctOffset(start+length-1)+1);
+
+Again, conceptually, this computes the corrected offset of the last 
+character in the token, and then marks the end of the token as the 
+immediately following position, rather than including all the garbage 
+characters in between the end of this token and the beginning of the next.
+
+My impression is that this change should be completely 
+backwards-compatible since its behavior will be identical for 
+CharFilters that don't actually perform character deletion, and AFAICT 
+the only existing CharFilter performs replacements and expansions (of 
+ligatures and the like).  But my knowledge of Lucene is far from 
+comprehensive.
+Does this seem like a reasonable patch?
+
+-Mike
+
+Michael Sokolov
+Engineering Director
+www.ifactory.com
+@iFactoryBoston
+
+PubFactory: the revolutionary e-publishing platform from iFactory
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

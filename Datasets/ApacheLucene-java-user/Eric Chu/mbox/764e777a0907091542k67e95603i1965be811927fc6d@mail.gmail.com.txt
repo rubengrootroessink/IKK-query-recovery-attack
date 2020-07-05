@@ -1,0 +1,115 @@
+FROM: Eric Chu <eric....@gmail.com>
+SUBJECT: Lucene boosting only on matching field values
+DATE: 9 Jul 2009
+
+Hi all,
+
+I was wondering if there is any way to do a boost on the document based on
+which value is in a field matched by a query.
+
+ie, (Sample code below)
+- You have a document that contains 1 field with multiple values.
+- Field has value ABC boosted by 2.0
+- Field has value XYZ boosted by 3.0
+- I want the query that matches value XYZ to be ranked higher then the query
+that matches value ABC
+
+Is there a way to do this without slotting each value into a different
+field?
+
+Thanks for your time,
+Eric
+
+*Sample Code:*
+import org.apache.lucene.document.Field;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocCollector;
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.ScoreDoc;
+
+public class LuceneScoreTest {
+
+    public static void main (String[] args){
+
+    try {
+
+        // build index
+        Directory index = buildIndex();
+        Searcher searcher = new IndexSearcher(index);
+
+        // query index
+        String[] queries = new String[2];
+        queries[0] = "+F1:(ABC)";
+        queries[1] = "+F1:(XYZ)";
+
+        for (int i=0 ; i<queries.length ; i++){
+        String query = queries[i];
+        System.out.println("==="+query+"===");
+        Query q = new QueryParser("", new StandardAnalyzer()).parse(query);
+        TopDocCollector hitCollector = new TopDocCollector(100);
+        searcher.search(q,null,hitCollector);
+        TopDocs topDocs = hitCollector.topDocs();
+
+        // analyze results
+        if (topDocs!=null && topDocs.totalHits>0){
+            int totalHits = topDocs.totalHits;
+            ScoreDoc[] docs = topDocs.scoreDocs;
+            ScoreDoc doc;
+            Document document;
+
+System.out.println("topDocs.getMaxScore():"+topDocs.getMaxScore());
+            System.out.println("topDocs.totalHits:"+totalHits);
+            if (docs!=null && docs.length>0){
+            for (int j = 0 ; j < docs.length ; j++){
+                doc = docs[j];
+                System.out.println("SCOREDOC[:"+j+"] score:"+doc.score);
+                document = searcher.doc(doc.doc);
+                System.out.println("DOCUMENT[:"+j+"]:"+document.get("F1"));
+                System.out.println("DOCUMENT[:"+j+"]
+boost:"+document.getBoost());
+            }
+            }
+        }else{
+            System.out.println("No docs found.");
+        }
+        }
+    }catch (Exception e){
+        e.printStackTrace();
+    }
+    }
+
+    static Directory buildIndex () {
+    Directory index = new RAMDirectory();
+    IndexWriter w = null;
+    Document doc = null;
+    try {
+        w = new IndexWriter(index, new StandardAnalyzer(), true);
+        doc = new Document();
+        Field f2 = new Field("F1", "XYZ", Field.Store.YES,
+Field.Index.TOKENIZED);
+        f2.setBoost(10.0f);
+        doc.add(f2);
+        Field f1 = new Field("F1", "ABC", Field.Store.YES,
+Field.Index.TOKENIZED);
+        f1.setBoost(1.0f);
+        doc.add(f1);
+        w.addDocument(doc);
+        w.flush();
+    }catch (Exception e){
+        e.printStackTrace();
+    }finally{
+        try { if (w!=null) w.close(); }catch (Exception e){}
+    }
+    return index;
+    }
+
+}
+

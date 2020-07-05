@@ -1,0 +1,48 @@
+FROM: Paul Cowan <co...@aconex.com>
+SUBJECT: Possible bug in FieldSortedHitQueue?
+DATE: 17 Mar 2006
+
+Hi all,
+
+I'm loath to stick this in a Jira issue yet, until I've run it past you. 
+I've been looking at it for a while so I'd like to make sure I haven't 
+confused myself beyond belief and it IS actually a problem.
+
+It seems to me that there's a possible bug in FieldSortedHitQueue, 
+specifically in getCachedComparator(). This is showing up on our 1.4.3 
+install, but it seems from source code inspection that if it's a bug, 
+it's in 1.9.1 also.
+
+The issue shows up when you need to sort results from a given 
+IndexReader multiple times, using different locales. On line 180 (all 
+line numbers from the 1.9.1 code), we have this:
+
+ScoreDocComparator comparator = lookup (reader, fieldname, type, factory);
+
+Then, if no comparator is found in the cache, a new one is created (line 
+193) and then stored in the cache (line 202). HOWEVER, both the cache 
+lookup() and store() do NOT take into account locale; if we, on the same 
+index reader, try to do one search sorted by Locale.FRENCH and one by 
+Locale.ITALIAN, the first one will result in a cache miss, a new French 
+comparator will be created, and stored in the cache. Second time 
+through, lookup() finds the cached French comparator -- even though this 
+time, the locale parameter to getCachedComparator() is an Italian 
+locale. Therefore, we don't create a new comparator and we use the wrong 
+one to sort the results.
+
+It looks to me (unless I'm mistaken) that the FieldCacheImpl.Entry class 
+should have an additional property, .locale, to ensure that different 
+locales get different comparators.
+
+Does this make sense? Or am I totally full of it (it's Friday, it's 
+possible).
+
+Cheers,
+
+Paul Cowan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

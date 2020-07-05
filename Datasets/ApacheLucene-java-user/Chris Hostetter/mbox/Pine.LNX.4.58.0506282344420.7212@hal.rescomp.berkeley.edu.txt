@@ -1,0 +1,100 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Sorting on an occasionally empty field
+DATE: 29 Jun 2005
+
+
+FYI: if there's only one fieled you have to (occasionally) worry about
+being absent from all docs, you can circumvent the whole issue (and avoid
+needing to patch) by using a TermEnum to check if you date field has any
+values before doing the search, if not - sort on something else.
+
+
+: Date: Tue, 28 Jun 2005 11:02:27 -0400
+: From: Chris D <brogar@gmail.com>
+: Reply-To: java-user@lucene.apache.org, Chris D <brogar@gmail.com>
+: To: java-user@lucene.apache.org
+: Subject: Sorting on an occasionally empty field
+:
+: Hello,
+:
+: I'm indexing one lucene document in a couple of steps, For a short
+: period of time the sorted field (a date in this case) may be empty,
+: depending on the order the files are indexed. It's perfectly
+: acceptable (and likely ideal) for that document to not be returned.
+: There are other cases where I would like to sort on a field that isn't
+: always present.
+:
+: This has been dicussed before in bug 34477
+: (http://issues.apache.org/bugzilla/show_bug.cgi?id=34477).
+:
+: I was wondering is this going to be implemented in 1.9/2.0?
+:
+: I tried implementing the template patch to all of the places in
+: FieldCacheImpl to see how that works, and got snagged on getAuto().
+: (see starred lines)
+:
+:   public Object getAuto (IndexReader reader, String field)
+:   throws IOException {
+:     field = field.intern();
+:     Object ret = lookup (reader, field, SortField.AUTO);
+:     if (ret == null) {
+:       TermEnum enumerator = reader.terms (new Term (field, ""));
+:       try {
+:         Term term = enumerator.term();
+:         if (term == null) {
+:           /*********I'm pretty sure this one doesn't matter*********/
+:           throw new RuntimeException ("no terms in field " + field + "
+: - cannot determine sort type");
+:         }
+:         if (term.field() == field) {
+:           String termtext = term.text().trim();
+:
+:           // Java 1.3 level code:
+:           try {
+:             Integer.parseInt (termtext);
+:             ret = getInts (reader, field);
+:           } catch (NumberFormatException nfe1) {
+:             try {
+:               Float.parseFloat (termtext);
+:               ret = getFloats (reader, field);
+:             } catch (NumberFormatException nfe2) {
+:               ret = getStringIndex (reader, field);
+:             }
+:           }
+:           if (ret != null) {
+:             store (reader, field, SortField.AUTO, ret);
+:           }
+:         } else {
+:           throw new RuntimeException ("field \"" + field + "\" does
+: not appear to be indexed");
+:           /***************What should be returned here??******************/
+:         }
+:       } finally {
+:         enumerator.close();
+:       }
+:
+:     }
+:     return ret;
+:   }
+:
+:
+: Any suggestions?
+:
+: Thanks,
+: Chris
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

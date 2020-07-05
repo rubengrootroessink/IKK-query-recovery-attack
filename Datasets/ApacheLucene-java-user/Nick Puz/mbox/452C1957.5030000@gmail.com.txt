@@ -1,0 +1,131 @@
+FROM: Nick Puz <nick.mailingli...@gmail.com>
+SUBJECT: Re: corrupt index: .fdx and stored norms
+DATE: 10 Oct 2006
+
+Hi Doron,
+sorry, forgot to include env... Here is env for test machine that create 
+the index:
+- lucene 1.9.1
+- ibm jdk 1.5 sr2
+- RedHat enterprise linux release 4 (kernel 2.6.9-34ELsmp on x86_64)
+- 8GB RAM
+- 2 dual core xeon 3.4ghz.
+- indexes on local disks, locks also on local (/tmp)
+
+ From the existing files it is easy to reproduce (just open index writer 
+and call optimize). I haven't been able to reproduce it yet and the 
+tester is currently re-running, it actually takes a long time to get 
+this far (index is about 5GB) and a lot happens before getting to lucene.
+
+i spent a little time looking through the merge code and didn't see the 
+code path that would result in this situation (.fdx has different docs 
+then norms). i'm hoping that the long running tests is able to repro.
+
+has anyone seen a similar problem, or does someone w/ more experience of 
+lucene src know a scenario that should be able to create this situation?
+
+thanks,
+-nick
+
+Doron Cohen wrote:
+> I meant ~182K files ...
+> 
+>> Nick, could you provide additional info:
+>> (1) Env info - Lucene version, Java version, OS, JVM args (e.g. -XmNNN),
+>> etc...
+>> (2) is this reproducible? By the file sizes there seem to be ~182 indexed
+>> docs when the problem occur, so, if this is reproducible it would
+> hopefully
+>> not take too long. If reproducible, I wonder if you can also create it
+>> without storing any field... (should go faster).
+>>
+>> - Doron
+>>
+>> "NIck P" <nick.mailinglists@gmail.com> wrote on 10/10/2006 12:24:19:
+>>
+>>> Hi, i sent this 30 min ago and it didn't seem to go through so i'm
+>>> trying again, i apologize if two copies finally arrive.
+>>>
+>>> I am working on the development of a product that is using Lucene. A
+>>> corrupt index was reported by testers and it is in an odd state.
+>>> The indexes are built in batches (to multiple ram indexes in parallel)
+>>> and then eventually merged into a disk index with
+>>> IndexWriter.addIndexes(Directory[]).
+>>> Somehow the index got corrupted, there were no indications of a crash
+> or
+>>> errors in log. The failure in SegmentMerger.mergeNorms:
+>>>   private void mergeNorms() throws IOException {
+>>>     for (int i = 0; i < fieldInfos.size(); i++) {
+>>>       FieldInfo fi = fieldInfos.fieldInfo(i);
+>>>       if (fi.isIndexed && !fi.omitNorms) {
+>>>         IndexOutput output = directory.createOutput(segment + ".f" +
+> i);
+>>>         try {
+>>>           for (int j = 0; j < readers.size(); j++) {
+>>>             IndexReader reader = (IndexReader) readers.elementAt(j);
+>>>             int maxDoc = reader.maxDoc();
+>>>             byte[] input = new byte[maxDoc];
+>>>             reader.norms(fi.name, input, 0);  <==== ERROR HERE
+>>>             for (int k = 0; k < maxDoc; k++) {
+>>>               if (!reader.isDeleted(k)) {
+>>>                 output.writeByte(input[k]);
+>>>               }
+>>>             }
+>>>           }
+>>>         } finally {
+>>>           output.close();
+>>>         }
+>>>       }
+>>>     }
+>>>   }
+>>>
+>>> The problem is that the maxDoc() returned by the indexReader
+>>> (FieldsReader in this case) is larger then the size, in bytes, of the
+>>> norms file. then there is an error in IndexInput.read(byte[], int,
+>>> int) because there is not enough data in file to read.
+>>> Here is part of the directory listing (there are many stored fields of
+>>> the same size so omitting all but first 3):
+>>>
+>>> -rw-r--r--  1 icmadmin db2grp1        811 Sep 27 20:48 _a4.fnm
+>>> -rw-r--r--  1 icmadmin db2grp1    1451696 Sep 27 20:49 _a4.fdx
+>>> -rw-r--r--  1 icmadmin db2grp1   12736304 Sep 27 20:49 _a4.fdt
+>>> -rw-r--r--  1 icmadmin db2grp1 5648544509 Sep 27 21:30 _a4.prx
+>>> -rw-r--r--  1 icmadmin db2grp1 1695149231 Sep 27 21:30 _a4.frq
+>>> -rw-r--r--  1 icmadmin db2grp1   45688880 Sep 27 21:30 _a4.tis
+>>> -rw-r--r--  1 icmadmin db2grp1     673588 Sep 27 21:30 _a4.tii
+>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f2
+>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f1
+>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f0
+>>>
+>>> from looking at the code the sizeof(.fdx)/8 should equal sizeof(.f0)
+>>> but it doesn't in this case.
+>>>
+>>> any ideas? Also, I'm wasn't sure if this was more appropriate for dev
+>>> or user so i guessed user.
+>>>
+>>> -Nick
+>>> (programmer working @ ibm)
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,116 @@
+Message-ID: <25284026.1075852264924.JavaMail.evans@thyme>
+Date: Mon, 13 Aug 2001 13:13:36 -0700 (PDT)
+From: dutch.quigley@enron.com
+To: colin.tonks@enron.com
+Subject: 
+Mime-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+X-From: Quigley, Dutch </O=ENRON/OU=NA/CN=RECIPIENTS/CN=DQUIGLE>
+X-To: Tonks, Colin </O=ENRON/OU=NA/CN=RECIPIENTS/CN=Ctonks>
+X-cc: 
+X-bcc: 
+X-Folder: \DQUIGLE (Non-Privileged)\Quigley, Dutch\Sent Items
+X-Origin: QUIGLEY-D
+X-FileName: DQUIGLE (Non-Privileged).pst
+
+Public Sub ReloadData()
+    Dim ODBCstring As String
+    Dim ws As Workspace, db As Database
+    Dim rs As Recordset
+    Dim curProd, oldProd As String
+    Dim sql, strWhere, strOrderBy, strWhereTmp, tmp As String
+    Dim RowOffset As Integer
+    Dim totalrow, tmpCount, i As Integer
+    Dim today As String
+    'Dim next_date As String
+    Dim userid As String
+    Dim password As String
+    
+    
+    Sheet1.Range("EOLReloading").Value = "RELOADING EOL"
+    
+    Application.Calculation = xlCalculationManual
+    userid = "gasplasma"
+    password = "gasplasma"
+        ' ODBC connection string and database connection
+    ODBCstring = "ODBC;DSN=EOLPROD;UID=" & userid & ";PWD=" & password
+    Set ws = DBEngine.CreateWorkspace("EOL", "", "", dbUseODBC)
+    
+    Set db = ws.OpenDatabase("", , , ODBCstring)
+    db.QueryTimeout = 600
+    If Err.Number <> 0 Then
+        Sheet1.Range("EOLReloading").ClearContents
+        Application.Calculation = xlCalculationAutomatic
+        MsgBox "Fail to login to the database"
+        Exit Sub
+    End If
+
+    ' get the total row that is used
+    totalrow = Sheets("EOL").UsedRange.Rows.Count
+    'clear the old contents
+    'ClearData "EOL", "Product", totalrow
+    'ClearData "EOL", "Net_Qty", totalrow
+    Sheets("EOL").Range("A5:E500").ClearContents
+    Sheets("EOL").Range("gdt").ClearContents
+    
+    sql = "select REF_PERIOD_ENGLISH_SHORT_DESC,BUY_SELL_CD,reference_period_end_dtm,sum(transaction_qty) " & _
+        " from eol.TRADING_TRANSACTIONS " & _
+        " WHERE TO_CHAR(transaction_dtm,'DD-MON-YYYY') = TO_CHAR(SYSDATE,'DD-MON-YYYY') and ref_period_english_short_desc like 'US Gas Swap%Nymex%' " & _
+        " GROUP BY REF_PERIOD_ENGLISH_SHORT_DESC,BUY_SELL_CD,reference_period_end_dtm " & _
+        " order by reference_period_end_dtm,BUY_SELL_CD "
+
+    
+    
+    Set rs = db.OpenRecordset(sql, dbOpenSnapshot)
+    
+    
+    RowOffset = 1
+    Worksheets("EOL").Range("gdt").Value = "Generated on: " + Format(Date, "mm/dd/yy") + " " + Format(Time, "hh:mm:ss AMPM")
+    
+    
+    While Not rs.EOF
+        tmp = rs("ref_period_english_short_desc").Value
+        With Worksheets("EOL")
+                .Range("Product").Offset(RowOffset, 0).Value = rs("ref_period_english_short_desc").Value
+                .Range("BS").Offset(RowOffset, 0).Value = rs("buy_sell_cd").Value
+                'If rs("buy_sell_cd").Value = "B" Then
+                 '   .Range("Buy_Sell").Offset(RowOffset, 0).Value = "Buy"
+                'Else
+                 '   .Range("Buy_Sell").Offset(RowOffset, 0).Value = "Sell"
+                'End If
+                If .Range("BS").Offset(RowOffset, 0).Value = "B" Then
+                    .Range("Net_Qty").Offset(RowOffset, 0).Value = rs(3).Value
+                Else
+                    .Range("Net_Qty").Offset(RowOffset, 0).Value = (-1) * rs(3).Value
+                End If
+        End With
+        RowOffset = RowOffset + 1
+        rs.MoveNext
+    Wend
+    rs.Close
+    
+    db.Close
+    ws.Close
+    
+    oldProd = ""
+    tmpCount = 0
+    With Worksheets("EOL")
+    For i = 1 To RowOffset - 1
+        curProd = .Range("Product").Offset(i, 0).Value
+        
+        If oldProd <> curProd Then
+            oldProd = curProd
+            tmpCount = tmpCount + 1
+            .Range("rProduct").Offset(tmpCount, 0).Value = curProd
+            .Range("rNet_Qty").Offset(tmpCount, 0).Value = .Range("Net_Qty").Offset(i, 0).Value
+        Else
+            .Range("rNet_Qty").Offset(tmpCount, 0).Value = .Range("rNet_Qty").Offset(tmpCount, 0).Value + .Range("Net_Qty").Offset(i, 0).Value
+        End If
+    Next i
+    End With
+    Application.Calculation = xlCalculationAutomatic
+    Sheet1.Range("EOLReloading").ClearContents
+       Application.StatusBar = False
+
+End Sub

@@ -1,0 +1,201 @@
+FROM: "Barry Forrest" <bforres...@gmail.com>
+SUBJECT: Re: Optimizing index takes too long
+DATE: 12 Nov 2007
+
+Thanks very much for all your suggestions.
+
+I will work through these to see what works.  Appreciate that indexing takes
+many hours, so it will take me a few days.  Working with a subset isn't
+really indicative, since the problems only manifest with larger indexes.
+ (Note that this might be a solution to my problem - simply subdivide the
+collection even further).  I will reduce the merge factor and increase the
+max merge docs.
+
+No, I am not using the compound index format.
+
+Apologies for my confusing use of the word "stored".  Most fields are not
+stored at all, although some are indexed twice.
+
+I am using the 2.3-dev version only because LUCENE-843 suggested that this
+might be a path to faster indexing.  I started out using 2.2 and can easily
+go back. I am using default MergePolicy and MergeScheduler.
+
+The field constructions are something like the following.
+
+// Stored bibliographic fields.
+document.add(new Field(FieldName.FIELD1.name(), documentBean.getField1()
+Field.Store.COMPRESS,
+Field.Index.UN_TOKENIZED, Field.TermVector.NO));
+...
+// Unstored content fields - stemmed and unstemmed versions.
+document.add(new Field(Fields.FIELD5_STEMMED.name(),
+documentBean.getField5Stemmed() Field.Store.NO,
+Field.Index.TOKENIZED, Field.TermVector.NO));
+document.add(new Field(Fields.FIELD5_UNSTEMMED.name(),
+documentBean.getField5Unstemmed() Field.Store.NO,Field.Index.TOKENIZED,
+Field.TermVector.NO));
+...
+
+Let me do some more experiments and I'll report back.
+
+Thanks
+Barry.
+
+
+On Nov 12, 2007 1:30 PM, Grant Ingersoll <gsingers@apache.org> wrote:
+> Not sure the numbers are off w/ documents that big, although I imagine
+> you are hitting the token limit w/ docs that big.  Is this all on one
+> machine as you described, or are you saying you have a couple of
+> these?  If one, have you tried having just one index?
+>
+> Since you are using 2.3 (note to other readers, 2.3 is NOT released
+> yet, he really means 2.3-dev), are which MergeScheduler and
+> MergePolicy are you using?  Can you do some profiling to see where is
+> spending time?
+>
+> Also, maybe Mike M. can chime in w/ how compressed fields are merged
+> now.  I want to say that with the new indexing changes, they are all
+> done right away and not revisited so that shouldn't be an issue.
+> Having said that, I am a bit confused by some of your terminology.
+> You say some Fields are stored twice, but then say they are not
+> stored.  Can you share what the actual Field constructions are?
+> There probably isn't a reason to compress the short biblio fields.
+> Lucene Field compression, while not deprecated, really isn't
+> recommended, b/c it doesn't give the application much control (since
+> it uses the highest level of compression and is not tunable.)  The
+> better approach is to do the compression yourself and store as a
+> binary.  Again, though, it doesn't sound like you need compression for
+> those fields.
+>
+> Are you using compound file format or not?
+>
+> Also, were you using 2.2 before and upgraded, or is this an
+> application built on 2.3 to begin with?  If on 2.2, did you see these
+> problems before?
+>
+> Cheers,
+> Grant
+>
+>
+> On Nov 11, 2007, at 8:49 PM, Mark Miller wrote:
+>
+> > For a start, I would lower the merge factor quite a bit. A high
+> > merge factor is over rated :) You will build the index faster, but
+> > searches will be slower and an optimize takes much longer.
+> > Essentially, the time you save when indexing is paid when optimizing
+> > anyway. You might as well amortize the cost with a lower merge factor.
+> >
+> > Grant seems to think the numbers are off anyway, so you may have
+> > more to do -- just a suggestion about the merge factor. How much RAM
+> > are you giving your application?
+> >
+> > With a machine with 8 cores and 15,000rpm, days does seem a little
+> > ridiculous.
+> >
+> > - Mark
+> >
+> > Barry Forrest wrote:
+> >> Hi,
+> >>
+> >> Thanks for your help.
+> >>
+> >> I'm using Lucene 2.3.
+> >>
+> >> Raw document size is about 138G for 1.5M documents, which is about
+> >> 250k per document.
+> >>
+> >> IndexWriter settings are MergeFactor 50, MaxMergeDocs 2000,
+> >> RAMBufferSizeMB 32, MaxFieldLength Integer.MAX_VALUE.
+> >>
+> >> Each document has about 10 short bibliographic fields and 3 longer
+> >> content fields and 1 field that contains the entire contents of the
+> >> document.  The longer content fields are stored twice - in a stemmed
+> >> and unstemmed form.  So actually there are about 8 longer content
+> >> fields.  (The effect of storing stemmed and unstemmed versions is to
+> >> approximately double the index size over storing the content only
+> >> once).  About half the short bibliographic fields are stored
+> >> (compressed) in the index.  The longer content fields are not stored,
+> >> and no term vectors are stored.
+> >>
+> >> The hardware is quite new and fast: 8 cores, 15,000 RPM disks.
+> >>
+> >> Thanks again
+> >> Barry
+> >>
+> >> On Nov 12, 2007 10:41 AM, Grant Ingersoll <gsingers@apache.org>
+> >> wrote:
+> >>
+> >>> Hmmm, something doesn't sound quite right.  You have 10 million
+> >>> docs,
+> >>> split into 5 or so indexes, right?  And each sub index is 150
+> >>> gigabytes?  How big are your documents?
+> >>>
+> >>> Can you provide more info about what your Directory and IndexWriter
+> >>> settings are?  What version of Lucene are you using?  What are your
+> >>> Field settings?  Are you storing info?  What about Term Vectors?
+> >>>
+> >>> Can you explain more about your documents, etc?  10 million doesn't
+> >>> sound like it would need to be split up that much, if at all,
+> >>> depending on your hardware.
+> >>>
+> >>> The wiki has some excellent resources on improving both indexing and
+> >>> search speed.
+> >>>
+> >>> -Grant
+> >>>
+> >>>
+> >>>
+> >>> On Nov 11, 2007, at 6:16 PM, Barry Forrest wrote:
+> >>>
+> >>>
+> >>>> Hi,
+> >>>>
+> >>>> Optimizing my index of 1.5 million documents takes days and days.
+> >>>>
+> >>>> I have a collection of 10 million documents that I am trying to
+> >>>> index
+> >>>> with Lucene.  I've divided the collection into chunks of about
+> >>>> 1.5 - 2
+> >>>> million documents each.  Indexing 1.5 documents is fast enough
+> >>>> (about
+> >>>> 12 hours), but this results in an index directory containing about
+> >>>> 35000 files.  Optimizing this index takes several days, which is
+> >>>> a bit
+> >>>> too long for my purposes.  Each sub-index is about 150G.
+> >>>>
+> >>>> What can I do to make this process faster?
+> >>>>
+> >>>> Thanks for your help,
+> >>>> Barry
+> >>>>
+> >>>> ---------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>
+> >>>>
+> >>> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >>
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

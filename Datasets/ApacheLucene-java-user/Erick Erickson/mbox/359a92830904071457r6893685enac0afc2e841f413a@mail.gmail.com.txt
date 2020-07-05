@@ -1,0 +1,236 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: How to search a phrase using quotes in a query ???
+DATE: 7 Apr 2009
+
+Well, nothing jumps out at me, although I confess that I've not
+used MultiFieldQueryParser. So here's what I'd do.
+
+1> drop back to a simpler way of doing things. Forget about
+MultiFieldQueryParser for instance. Get the really simple case
+working then build back up. I'd also drop back to a very
+basic analyzer (perhaps SimpleAnalyzer). Get that very simple
+case to work. Then substitute your EnglishAnalyzer back in. etc.
+
+I'm guessing that one of these steps will suddenly fail and you'll have
+a good place to start.
+
+2> Print out query.toString() and paste the results into Luke and
+see what it gives you. The Explain (in Luke) should help.
+
+Sorry I can't be more help, but I've often found that getting the easy
+way of doing things to work then adding my complications back in
+produces one of those "I didn't think *that* could possibly fail" moments
+<G>.
+
+Best
+Erick
+
+On Tue, Apr 7, 2009 at 5:12 PM, Ariel <isaacrc82@gmail.com> wrote:
+
+> Here is my code for indexing:
+> [code]
+>    public static void main(String[] args) throws IOException {
+>
+>        if(args.length==2){
+>            String docsDirectory =args[0];
+>            String indexFilepath = args[1];
+>            int numIndexed = 0;
+>            IndexWriter writer;
+>            ArrayList<String> arrayList = new ArrayList<String>();
+>            try {
+>                Analyzer Analyzer = new EnglishAnalyzer();
+>                writer = new IndexWriter(indexFilepath,   Analyzer , true);
+>                writer.setUseCompoundFile(true);
+>                File directory = new File(docsDirectory);
+>                String[] list = directory.list();
+>                for (int i = 0; i < list.length; i++) {
+>                    File doc = new File(docsDirectory, list[i]);
+>                    BufferedReader reader;
+>                    try {
+>                        reader = new BufferedReader(new FileReader(doc));
+>                        String linea = reader.readLine();
+>                        StringBuffer texto = new StringBuffer();
+>                        while (linea != null){
+>                            // Aquí lo que tengamos que hacer con la línea
+> puede ser esto
+>                            texto.append(linea);
+>                            linea = reader.readLine();
+>                        }
+>                        System.out.println(i);
+>                        indexFile(writer,
+> texto.toString(),doc.getAbsolutePath() );
+>                        arrayList.add(new String(new byte[1000]));
+>                        reader.close();
+>                    } catch (FileNotFoundException e) {
+>                        e.printStackTrace();
+>                    } catch (IOException e) {
+>                        e.printStackTrace();
+>                    }
+>                }
+>                numIndexed = writer.docCount();
+>                writer.optimize();
+>                writer.close();
+>            } catch (CorruptIndexException e1) {
+>                e1.printStackTrace();
+>            } catch (LockObtainFailedException e1) {
+>                e1.printStackTrace();
+>            } catch (IOException e1) {
+>                e1.printStackTrace();
+>            }
+>
+>        } else {
+>            System.err.println("You need to provide arguments ");
+>        }
+>    }
+>
+>    // method to actually index a file using Lucene
+>    private static void indexFile(IndexWriter writer, String content, String
+> title)  throws IOException {
+>        long init = System.currentTimeMillis();
+>        Document doc = new Document();
+>        doc.add(new Field("content", content, Field.Store.YES ,
+> Field.Index.TOKENIZED, Field.TermVector.YES));
+>        doc.add(new Field("title", title, Field.Store.YES ,
+> Field.Index.TOKENIZED, Field.TermVector.YES));
+>        writer.addDocument(doc);
+>        long end = System.currentTimeMillis();
+>        System.out.println("ms " + (end - init));
+>    }t
+> [/code]
+>
+> And for searching:
+> [code]
+>    public static void main(String[] args) {
+>        String path = "C:\\index";
+>        try {
+>            IndexSearcher indexSearcher = new IndexSearcher(path );
+>            String[] fields = new String[]{"title","content"};
+>            Analyzer analyzer = new EnglishAnalyzer();
+>            String[] textFields = new String[]{"\"The Bank of
+> America\"","\"The Bank of America\""};;
+>            Query query = MultiFieldQueryParser.parse(textFields, fields,
+> analyzer);
+>            Hits hits = indexSearcher.search(query );
+>            System.out.println("Founded: " + hits.length());
+>
+>            QueryScorer scorer = new QueryScorer(query);
+>            Highlighter highlighter = new Highlighter(scorer);
+>            Fragmenter fragmenter = new SimpleFragmenter(100);
+>            highlighter.setTextFragmenter(fragmenter);
+>
+>            for (int i = 0; i < hits.length(); i++) {
+>                Document document = hits.doc(i);
+>                String body = hits.doc(i).get("content");
+>                System.out.println((i+1)+ " " + body.substring(0, 20));
+>                System.out.println(document.get("path"));
+>                if (body==null) body ="";
+>                TokenStream stream =  analyzer.tokenStream("content",new
+> StringReader(body));
+>                //System.out.println(highlighter.getBestFragment(stream,
+> body));
+>                String[] fragment = highlighter.getBestFragments(stream,
+> body, 3);
+>                if (fragment.length == 0){
+>                    fragment = new String[1];
+>                    fragment[0] = "";
+>                }
+>                StringBuilder buffer = new StringBuilder();
+>                for (int I = 0; I < fragment.length; I++){
+>                    buffer.append(fragment[I] + "...\n");
+>                }
+>                String stringFragment = buffer.toString();
+>                System.out.println(stringFragment);
+>            }
+>        } catch (CorruptIndexException e) {
+>            e.printStackTrace();
+>        } catch (IOException e) {
+>            // TODO Auto-generated catch block
+>            e.printStackTrace();
+>        } catch (ParseException e) {
+>            // TODO Auto-generated catch block
+>            e.printStackTrace();
+>        }
+>
+>    }
+> [/code]
+>
+>
+> English Analyzer is a custom analyzer that have all these
+> filters:SynonymFilter, SnowballFilter, StopFilter, LowerCaseFilter,
+> StandardFilter and StandardTokenizer.
+>
+> So, I don't know why when I do a search like "the bank of america" the
+> search results doesn't return the documents that have the exact phrase "the
+> bank of america".
+> Could you help me please ???
+> Regards
+> Ariel
+>
+>
+> On Mon, Apr 6, 2009 at 5:26 PM, Erick Erickson <erickerickson@gmail.com
+> >wrote:
+>
+> > If you have luke, you should be able to submit your query and use
+> > the explain functionality to gain some insights into what the query
+> > actually looks like as well....
+> >
+> > Best
+> > Erick
+> >
+> > On Mon, Apr 6, 2009 at 5:24 PM, Ariel <isaacrc82@gmail.com> wrote:
+> >
+> > > Well I have luke lucene, the index has been build fine.
+> > > The field where I am searching is the content field.
+> > >
+> > > I am using the same analyzer in query and indexing time: SnowBall
+> English
+> > > Analyzer.
+> > >
+> > > I am going to submit later the snippet code.
+> > >
+> > > Regards
+> > > Ariel
+> > >
+> > >
+> > > On Mon, Apr 6, 2009 at 4:37 PM, Erick Erickson <
+> erickerickson@gmail.com
+> > > >wrote:
+> > >
+> > > > We really need some more data. First, I *strongly* recommend you
+> > > > get a copy of Luke and examine your index to see what is
+> > > > *actually* there. Google "lucene luke". That often answers
+> > > > many questions.
+> > > >
+> > > > Second, query.toString is your friend. For instance, if the query
+> > > > you provided below is all that you're submitting, it's going against
+> > > > the default field you might have specified when you instantiated
+> > > > your query parser.
+> > > >
+> > > > Third, what analyzers are you using at index and query time?
+> > > >
+> > > > Code snippets would also help.
+> > > >
+> > > > Best
+> > > > Erick
+> > > >
+> > > > On Mon, Apr 6, 2009 at 4:32 PM, Ariel <isaacrc82@gmail.com> wrote:
+> > > >
+> > > > > Hi every body:
+> > > > >
+> > > > > Why when I make a query with this search  query : "the fool of the
+> > > hill"
+> > > > > doesn't appear documents in the search results that contains the
+> > entire
+> > > > > phrase "the fool of the hill" and it does exist documents that
+> > contain
+> > > > that
+> > > > > phrase, I am using snowball analyzer for English ???
+> > > > > Could you help with this please ???
+> > > > > Regards
+> > > > > Ariel
+> > > > >
+> > > >
+> > >
+> >
+>
+

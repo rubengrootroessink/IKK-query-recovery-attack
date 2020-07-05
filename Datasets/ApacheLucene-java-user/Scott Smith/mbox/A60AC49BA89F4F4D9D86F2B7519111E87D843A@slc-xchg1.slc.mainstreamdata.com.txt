@@ -1,0 +1,159 @@
+FROM: "Scott Smith" <ssm...@mainstreamdata.com>
+SUBJECT: RE: Deletes and Hits
+DATE: 5 May 2005
+
+Starting with your example, I added some code to get a better
+understanding of what's going on (see attached).  Assuming I coded
+everything right, I found some unexpected results.
+
+Before the optimization, if you use IndexReader.isDeleted() to see if
+the document you deleted is really gone, Lucene properly reports that it
+is.  After the optimization, it will tell you that the document with the
+deleted id is not deleted.  In fact based on an earlier version of the
+attached code, I believe that if the index is outside the range of valid
+docIDs, it still reports the document is not deleted (it probably
+searches the deleted list but doesn't look to see if it's a valid
+docID).  
+
+I assume that the explanation is that after the optimization, Lucene has
+renumbered everything and thrown away the deletion list.  Therefore, it
+has no record of the deleted document. 
+
+The other thing I was surprised about was that if I index 1000 documents
+and do the delete, I seem to get the right document as I move through
+the list.  Based on an admittedly brief look at the Lucene code base,
+the Hits object caches the last 200 hits you access.  So, if you access
+more than that, it has to go to the index to get the information.  After
+optimization, as I understand it, the docIDs have changed (because a
+document was deleted) and so I would have expected you would get the
+wrong Document for a specified docID.  That didn't seem to happen for
+reasons I don't understand.
+
+The bigger issue is that if your indexer is running in a different
+process than the search code (common on a website I would assume) and
+the indexer is adding and deleting Documents (and periodically
+optimizing), there is a problem.  If the search gets a hit list, there
+is no way of telling what documents are still there.  
+
+If an optimization occurs between the time I get the Hits object and the
+time I go to display it, I could be sitting with several deleted
+documents and have no way of determining they are gone short of going
+back to the original documents themselves.  Even if an optimization
+hasn't occurred, I still need to look at each hit to determine if it
+still exists.  Complicated when you are running 24x7.
+
+This doesn't sound like a problem unique to Lucene.  I assume one
+strategy is to check before you go to display a document to ensure it
+still exists and report some error ("The document you are looking for no
+longer exists in the system") to the user.
+
+Any other solutions or comments?
+
+
+
+-----Original Message-----
+From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com] 
+Sent: Thursday, April 28, 2005 8:47 PM
+To: java-user@lucene.apache.org
+Subject: Re: Deletes and Hits
+
+Let's see:
+
+import org.apache.lucene.search.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+
+
+public class HitDocDeleteTest {
+
+    static String indexDir = "/tmp/hddt";
+    static int numDocsAdd = 2;
+    static int docId = 0;
+
+    public static void main(String[] args) throws Exception {
+        index();
+        search();
+    }
+
+    static void index() throws Exception {
+        IndexWriter writerMain = new IndexWriter(indexDir, new
+SimpleAnalyzer(), true);
+        for (docId = 0; docId < numDocsAdd; docId++)
+        {
+            Document doc = new Document();
+            doc.add(Field.Text("Content", "This is for document number
+" + docId));
+            doc.add(Field.Keyword("DocID", Integer.toString(docId)));
+            writerMain.addDocument(doc);
+        }
+        writerMain.optimize();
+        writerMain.close();
+    }
+
+    static void search() throws Exception {
+        IndexSearcher isearcher = new IndexSearcher(indexDir);
+        Hits hits = isearcher.search(new TermQuery(new Term("Content",
+"document")));
+
+        System.out.println("HITS: " + hits.length());
+        System.out.println("DOC0: " + hits.doc(0));
+        System.out.println("DOC1: " + hits.doc(1));
+
+        IndexReader reader = IndexReader.open(indexDir);
+        reader.delete(1);
+        reader.close();
+        
+        System.out.println("HITS: " + hits.length());
+        System.out.println("DOC0: " + hits.doc(0));
+        System.out.println("DOC1: " + hits.doc(1));
+    }
+}
+
+java HitDocDeleteTest
+HITS: 2
+DOC0: Document<stored/uncompressed,indexed,tokenized<Content:This is
+for document number 0> stored/uncompressed,indexed<DocID:0>>
+DOC1: Document<stored/uncompressed,indexed,tokenized<Content:This is
+for document number 1> stored/uncompressed,indexed<DocID:1>>
+HITS: 2
+DOC0: Document<stored/uncompressed,indexed,tokenized<Content:This is
+for document number 0> stored/uncompressed,indexed<DocID:0>>
+DOC1: Document<stored/uncompressed,indexed,tokenized<Content:This is
+for document number 1> stored/uncompressed,indexed<DocID:1>>
+
+
+See also:
+http://lucene.apache.org/java/docs/api/org/apache/lucene/index/IndexRead
+er.html#isDeleted(int)
+
+Otis
+
+
+--- Scott Smith <ssmith@mainstreamdata.com> wrote:
+> Suppose I do a search and get a hit list.  Before I access the hit
+> list,
+> my delete routine (running in another thread) comes along and deletes
+> some documents.  What happens if I now try to access documents that
+> have
+> been deleted?
+> 
+>  
+> 
+> Scott 
+> 
+>  
+> 
+>  
+> 
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+

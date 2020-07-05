@@ -1,0 +1,169 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: One (large) field shared by many documents
+DATE: 19 May 2007
+
+You're right, your index will bloat considerably. In fact, I'm surprised
+it's only a factor of 5....
+
+The only thing that comes to mind is really a variant on your approach
+from your first e-mail. But I wouldn't use document ids because document
+IDs can change. So using doc IDs is...er.... fraught.
+
+So here's the variant. Go ahead and index your "collection vector",
+but index it with a second field that is your "collection ID". Then, add
+that collection ID to each document in your original index. So, you have
+something like
+
+a: text:{look, a, cat}  collectionID:32
+b: text:{my, chimpansee, is , hairy} collectionID:32
+c: text:{dogs, are, playful} collectionID:32
+
+Your other index has
+collectionID:32 collectionVector:{look, a, cat, my, chimpansee, is , hairy,
+dogs, are, playful}
+
+Now, you essentially make two queries, one to get a set of
+collection IDs from your second index (that is, querying your terms
+against collectionVector) and using that set of collectionIDs in a
+query against your first index.
+
+You might be able to do some interesting things with boosts
+to score either query more to your liking.
+
+This will come close to doubling the size of your index, but your
+first approach could bloat it by an arbitrary factor depending upon
+how many documents were in your largest collection.....
+
+One thing to note, however, is that there is no need to have
+two separate physical indexes. Lucene does not require that
+all  documents have the same fields. So this could all be in one
+big happy index. As long as the fields are different in the two
+sets of documents, the queries won't interfere with each other. In
+that case, you'd have to name the "foreign key" field differently for
+the sets of documents, say collectionID1 and collectionID2.
+
+
+All that said, this approach bothers me because it's mixing
+some database ideas with a Lucene index. I suppose in a controlled
+situation where you won't be trying to do arbitrary joins it's probably
+a misplaced unease. But I'm leery of trying to make Lucene act
+like a database. But that may just be a personal problem <G>
+
+The only other consideration is "how many collections do you have?"
+The reason I ask is that in the worst case scenario, you'll have an
+OR clause for every collection ID you have. Lucene can easily handle
+many thousands of terms in an OR, but your search time will suffer.
+And you'll have to take special action (really, just set MaxBooleanClauses)
+if this is over 1024 or you'll get a TooManyClauses exception.
+
+Best
+Erick
+
+
+On 5/19/07, Peter Bloem <p@peterbloem.nl> wrote:
+>
+> I'm sorry, I should have explained the intended behavior more clearly.
+>
+> The basic idea (without the collection fields) is that there are very
+> simple documents in the index with one content field each. All I do with
+> this index is a standard search in this text field. To improve the
+> search results, I want to also add the concatenation of all documents in
+> a collection as a field to every single document. I then search the
+> index using both fields, and diminishing the effect of the collection
+> field. This should improve the search results.
+>
+> As an example, say I have the documents a:"look a cat" b:"my chimpansee
+> is hairy" c:"dogs are playful" and many others. These three documents
+> are grouped into one collection (of many). The term vectors for the
+> documents would then be
+> a: {look, a, cat}
+> b: {my, chimpansee, is , hairy}
+> c: {dogs, are, playful}
+> If I create a term vector for the whole collection: {look, a, cat, my,
+> chimpansee, is , hairy, dogs, are, playful} and add it to each of the
+> documents as a separate field, the query "my hairy cat" scores well
+> against document a because of the match on cat, but also because of the
+> match on both cat and hairy on the collection field. Documents about the
+> linux command 'cat' do not have the word "hairy" in their collection
+> field (because they're part of a different collection), and so would not
+> get this benefit. It's essentially a smoothing technique, since it
+> allows query words that aren't in the document to still have some effect.
+>
+> The problem of course is that storing these collection term vectors for
+> each document greatly increases the size of the index and the indexing
+> time. It would be alot faster if I could somehow use a second index to
+> store the collections as documents, so I would only have to store one
+> term vector per collection. (This isn't my own idea btw, I'm trying to
+> replicate the results from some other research that used this method).
+>
+> I hope this is more clear,
+> Peter
+>
+> Erick Erickson wrote:
+> > This seems kind of kludgy, but that may just mean I don't understand
+> > your problem very well.
+> >
+> > What is it that you're trying to accomplish? Searching constrained
+> > by topic or groups?
+> >
+> > If you're trying to search by groups, search the archive for the
+> > word "facet" or "faceted search".
+> >
+> > Otherwise, could you describe what behavior you're after and maybe
+> > there'd be more ideas....
+> >
+> > Best
+> > Erick
+> >
+> > On 5/19/07, Peter Bloem <p@peterbloem.nl> wrote:
+> >>
+> >> Hi,
+> >>
+> >> I have the following problem. I'm indexing documents that belong to
+> some
+> >> collection (ie. the dataset is divided into collections, which are
+> >> divided into documents). These documents become my lucene documents,
+> >> with some relatively small string that becomes the field I want to
+> >> search. However, I would also like to add to document d the
+> >> concatenation of all documents in d's collection as a field (mainly as
+> a
+> >> smoothing technique, because documents correspond roughly to topics).
+> >> I'm currently doing just that, adding an extra field for the entire
+> >> concatenated collection to each document in that collection. Of course
+> >> this increases the index size and indexing time greatly (about
+> >> five-fold).
+> >>
+> >> There must be a better way to do this. My idea was to create a second
+> >> index where the collections are indexed as (lucene) documents. This
+> >> index would have the text as a field, and a list of document id's
+> >> referring back to the main index. I could then retrieve the term vector
+> >> for each collection from this second index for each search result from
+> >> the original index.
+> >>
+> >> My question is if this is a smart approach. And if it is, which of
+> >> Lucene's classes should I use for this. The best I could find was the
+> >> FilterIndexReader. If extending the FilterIndexReader is really the
+> best
+> >> way to go, could I simply override the document(int, FieldSelector)
+> >> method, or is there more to it? I doubt I'm the first person that's
+> ever
+> >> wanted a many to one relation between fields and documents, so I hope
+> >> there's a simpler way about this.
+> >>
+> >> Thank you,
+> >> Peter
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

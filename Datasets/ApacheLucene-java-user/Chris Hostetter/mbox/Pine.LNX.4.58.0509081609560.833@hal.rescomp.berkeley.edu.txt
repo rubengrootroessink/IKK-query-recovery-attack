@@ -1,0 +1,135 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Weird time results doing wildcard queries
+DATE: 8 Sep 2005
+
+
+As Yonik pointed out in his reply, the batching/caching done by Hits is
+worse then i remembered.  It's not just batching up the retrieval of
+stored fields -- it's re-executing the underlying search to pull back the
+id,score pairs for docs 0->N*2 anytime you ask for any information about
+result N if N is not already in it's cache.
+
+Compare the timing info you have now with this...
+
+  int start = ...
+  Hits hits = searcher.search(query);
+  int queryTime = ...
+  int trash = hits.id(hits.length());
+  int prefetchTime = ...
+  for (int i = 0; i < hits.length(); i++) {
+     int id = hits.id(i);
+  }
+  int loopTime = ...
+
+...and i think you'll see what i mean.
+
+Yonik is probably right: if you really need to loop over allthe results, I
+would use one of hte more expert methods (a HitCollector would probably be
+best)
+
+
+
+
+
+
+: Date: Thu, 8 Sep 2005 17:05:18 -0600
+: From: Richard Krenek <richard.krenek@gmail.com>
+: Reply-To: java-user@lucene.apache.org
+: To: java-user@lucene.apache.org
+: Subject: Re: Weird time results doing wildcard queries
+:
+: I did the change and here are the results:
+:
+: Query (default field is COMP_PART_NUMBER): 2444*
+: Query: COMP_PART_NUMBER:2444*
+: Query Time: 328 ms - time for query to run.
+: 383 total matching documents.
+: Cycle Time: 141 ms - time to run through hits.
+:
+:
+: Query (default field is COMP_PART_NUMBER): *91822*
+: Query: COMP_PART_NUMBER:*91822*
+: Query Time: 9375 ms
+: 251 total matching documents.
+: Cycle Time: 20094 ms
+:
+: On 9/8/05, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+: >
+: > : is if the query starts with a wildcard. In the case where it starts with
+: > a
+: > : wildcard, lucene has no option but to linearly go over every term in the
+: > : index to see if it matches your pattern. It must visit every singe term
+: > in
+: >
+: > That would explain why the search itself takes a while, but not why
+: > accessing the hits after the call to search would take a while. note
+: > where the timing code is in his example.
+: >
+: > There are two possible explanations i can think of...
+: >
+: > : >>It seems when I have a wilcard query like *abcd* vs weqrew*, the
+: > *abcd*
+: > : query will always take longer to retrieve the documents even if they are
+: > of
+: > : simular result sizes. We are talking a big difference 1 second vs 16. It
+: > is
+: >
+: > 1) How similar, and how many? ... If i remember correctly, the Hits
+: > constructor does some work to pre-fetch the first 100 results. So if you
+: > are iterating over all of the results, the first 100 are free. On the
+: > 101st iteration the prefetching method is called again to fetch N more (i
+: > don't remember what N is off the top of my head.
+: >
+: > what this means is that if you are only timing the method calls on Hits,
+: > then the first 100 documents are free -- if one wildcard search returns 99
+: > results, and the other returns 105 results, those numbers may not seemthat
+: > different, but in the first case the code you are timing is accessing
+: > nothing but memory, and in the second case it has to read from disk.
+: >
+: > 2) The second idea also requires you to answer a question" the number of
+: > results returned for each query might be identicle, but are the
+: > results themselves identical?
+: >
+: > I'm guessing that either the documents from the "slow" case are either
+: > much bigger (ie: larger stored fields) or the results from the fast case
+: > are all documents that are "near" eachother on disk, so fetching back all
+: > of hte stored fields would require less IO then if the results are stored
+: > farther apart. If i remember correctly, the stored fields of documents
+: > are kept in order that the documents are added, so hypothetically, the
+: > query you did was on a "name" field, and the documents were added to the
+: > index in alphabetical order by "name" then by definition the results for
+: > "weqrew*' will all be close together, while the results for "*abcd*" will
+: > be spread out throughout the index.
+: >
+: > an easy way to disprove that 2nd theory would be to change your timing
+: > code to this and see what happens...
+: >
+: >
+: > Hits hits = searcher.search(query);
+: > long startTime = System.currentTimeMillis();
+: > for (int i = 0; i < hits.length(); i++) {
+: > int id = hits.id(i);
+: > }
+: >
+: >
+: >
+: > -Hoss
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

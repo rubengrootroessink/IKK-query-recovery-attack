@@ -1,0 +1,127 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Reviving a dead index
+DATE: 23 Nov 2006
+
+Aleksander M. Stensby wrote:
+> Hey, saw this old thread, and was just wondering if any of you solved 
+> the problem? Same has happened to me now. Couldn't really trace back to 
+> the origin of the problem, but the segments file references a segment 
+> that is obviously corrupt/not complete...
+> 
+> I thought i might remove the uncomplete segment, but then i guess this 
+> would f* up my segments file. Any taker on how to remove the segment in 
+> question, and make the rest of the index work again?.. Since i guess its 
+> not as straightforward to just remove the segmentname from the segments 
+> file without changing some of the other crytic bytes aswell..?
+
+I don't think the root cause was ever uncovered on this thread.
+
+Do you have any copying process to move your index from one machine to
+another, or across mount points on the same machine, or anything?  A
+copying step has been the cause of similar corruption in past issues.
+I would really like to get to the root cause of any and all
+corruption.
+
+To recover your index, it would be fairly simple to write a tool that
+reads the segments files, removes the known bad segments, and writes
+the segments file back out.  Something like this (I haven't tested!):
+
+   Directory dir = FSDirectory.getDirectory("/path/to/my/index", false);
+   SegmentInfos sis = new SegmentInfos();
+   sis.read(dir);
+   for(int i=0;i<sis.size();i++) {
+     SegmentInfo si = (SegmentInfo) sis.elementAt(i);
+     if (si.name.equals("_XXXX")) {
+       sis.removeElementAt(i);
+       break;
+     }
+   }
+   sis.write(dir);
+
+Please make a backup copy of your index before running this in case
+it messes anything up!!
+
+And note that by removing an entire segment, many documents are now
+gone from your index.  Determining which ones are gone and must be
+reindexed is not particularly easy unless you have a way to do so in
+your application...
+
+Also note that Lucene will not delete the now un-referenced (bad)
+segment file (ie, _XXXX.cfs, and other _XXXX files like _XXXX.del if
+it exists) so you will have to do that step manually.  (The current
+"trunk" version of Lucene does in fact remove unreferenced index
+files correctly but this hasn't been released yet).
+
+Mike
+
+> 
+> - Aleksander
+> 
+> 
+> On Thu, 31 Aug 2006 03:42:28 +0200, Michael McCandless 
+> <lucene@mikemccandless.com> wrote:
+> 
+>> Stanislav Jordanov wrote:
+>>
+>>> For a moment I wondered what exactly do you mean by "compound file"?
+>>> Then I read http://lucene.apache.org/java/docs/fileformats.html and 
+>>> got the idea.
+>>> I do not have access to that specific machine that all this is 
+>>> happening at.
+>>> It is a 80x86 machine running Win 2003 server;
+>>> Sorry, but they neglected my question about the index is stored on a 
+>>> Local FS or on a NFS.
+>>> I was only able to obtain a directory listing of the index dir and 
+>>> guess what - there's no a /*_1j8s.cfs * /file at all!
+>>> Pitty, I can't have a look at segments file, but I guess it lists the 
+>>> _1j8s
+>>> Given these scarce resources, can you give me some further advise 
+>>> about what has happened and what can be done to prevent it from 
+>>> happening again?
+>>
+>> I'm assuming this is easily repeated (question from my last email) and
+>> not a transient error?  If it's transient, this could be explained by
+>> locking not working properly.
+>>
+>> If it's not transient (ie, happens every time you open this index),
+>> it sounds like indeed the segments file is referencing a segment that
+>> does not exist.
+>>
+>> But, how the index got into this state is a mystery.  I don't know of
+>> any existing Lucene bugs that can do this.  Furthermore, crashing
+>> an indexing process should not lead to this (it can lead to other things
+>> like only have a segments.new file and no segments file).
+>>
+>> Were there any earlier exceptions (before indexing hit an "improper
+>> shutdown") in your indexing process that could give a clue as to root
+>> cause?  Or for example was the machine rebooted and did windows to run
+>> a "filesystem check" on rebooting this box (which can remove corrupt
+>> files)?
+>>
+>> Mike
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> 
+> 
+> --Aleksander M. Stensby
+> Software Developer
+> Integrasco A/S
+> aleksander.stensby@integrasco.no
+> Tlf.: +47 41 22 82 72
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

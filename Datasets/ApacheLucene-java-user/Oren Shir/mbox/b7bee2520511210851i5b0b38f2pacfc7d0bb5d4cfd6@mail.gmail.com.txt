@@ -1,0 +1,85 @@
+FROM: Oren Shir <sho...@gmail.com>
+SUBJECT: Re: Throughput doesn't increase when using more concurrent threads
+DATE: 21 Nov 2005
+
+Thanks Jay Booth,
+
+I thought as much. I just verified that I'm not reaching 100% CPU, and I
+found out that when using RAMDirectory and 100 threads the CPU usage is 60%,
+avarage request time 40 times more that one thread, but number of requests
+the same. I think I'll have to do somthing like you suggested. Any thoughts
+about adding this functionality to Lucene core?
+
+Thanks again,
+Oren Shir
+
+On 11/21/05, Jay Booth <jbooth@net-temps.com> wrote:
+>
+> I had a similar problem with threading, the problem turned out to be that
+> in
+> the back end of the FSDirectory class I believe it was, there was a
+> synchronized block on the actual RandomAccessFile resource when reading a
+> block of data from it... high-concurrency situations caused threads to
+> stack
+> up in front of this synchronized block and our CPU time wound up being
+> spent
+> thrashing between blocked threads instead of doing anything useful.
+>
+> Making multiple IndexSearchers and FSDirectories didn't help because in
+> the
+> back end, lucene consults a singleton HashMap of some kind (don't remember
+> implementation) that maintained a single FSDirectory for any given index
+> being accessed from the JVM... multiple calls to FSDirectory.getDirectory
+> actually return the same FSDirectory object with synchronization at the
+> same
+> point.
+>
+> Our solution was to subclass FSDirectory to skip this lookup step, and
+> then
+> create several distinct FSDirectories reading the same index. This was in
+> a
+> read only context so it worked out for us, although memory consumption was
+> higher... we put a pooling class in front of the whole thing and added a
+> refresh method to re-instantiate the IndexSearchers and associated
+> FSDirectories when the index was modified... we also needed some
+> catch(FileNotFoundException) blocks to hack around the case where the
+> index
+> was being modified while an IndexSearcher was trying to search.
+>
+> -----Original Message-----
+> From: Yonik Seeley [mailto:yseeley@gmail.com]
+> Sent: Monday, November 21, 2005 11:08 AM
+> To: java-user@lucene.apache.org; shoren@alum.cs.huji.ac.il
+> Subject: Re: Throughput doesn't increase when using more concurrent
+> threads
+>
+>
+> On 11/21/05, Oren Shir <shoren@gmail.com> wrote:
+> > It is rather sad if 10 threads reach the CPU limit. I'll check it and
+> get
+> > back to you.
+>
+> It's about performance and throughput though, not about number of
+> threads it takes to reach saturation.
+>
+> In a 2 CPU box, I would say that the ideal situation is where it only
+> takes two threads to reach 100% CPU utilization. Normally it takes
+> more because of some kind of IO (disk or network).
+>
+> -Yonik
+> Now hiring -- http://forms.cnet.com/slink?231706
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

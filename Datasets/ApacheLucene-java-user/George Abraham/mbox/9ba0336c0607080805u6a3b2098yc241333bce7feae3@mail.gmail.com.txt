@@ -1,0 +1,153 @@
+FROM: "George Abraham" <george.abraham.luc...@gmail.com>
+SUBJECT: Re: Sorting & SQL-Database
+DATE: 8 Jul 2006
+
+Dominik,
+Sorry I saw this a little late, but I asked a similar question back in Dec
+2005 and Jeff Rodenburg gave me some splendid help which we are implementing
+even now. Here is the gist of his solution.
+
+- Include the Lucene Doc's score (or sequential order, as an int) with the
+list of id values.
+- Create an XML string, then pass as it as a text parameter to a stored
+procedure.  The XML string contains a set of id values and their associated
+document score or order value.
+- Read the text parameter within a stored procedure into a declared table
+using OPENXML
+- Join the declared table with your existing resultset code on the id values
+- Order the resultset by the order value included in the XML
+
+Here is some sample code for the stored procedure:
+
+/*******************************************************/
+create procedure dbo.Get_Records_ByXml (
+    @xmlSource    text
+)
+as
+
+/*
+<Documents>
+    <Doc>
+        <Id>123</Id>
+        <ScoreOrder>1</ScoreOrder>
+    </Doc>
+    <Doc>
+        <Id>456</Id>
+        <ScoreOrder>2</ScoreOrder>
+    </Doc>
+    <Doc>
+        <Id>789</Id>
+        <ScoreOrder>3</ScoreOrder>
+    </Doc>
+</Documents>
+*/
+
+set nocount on
+/* xmlHandle */
+declare    @xmlHandle            int
+
+-- SQL's internal stored procedure to prep the @xmlSource stream for reading
+by OPENXML
+exec sp_xml_preparedocument @xmlHandle OUTPUT, @xmlSource
+
+declare    @docs table (
+    Id            int,
+    ScoreOrder    int
+)
+
+-- Use OPENXML to populate declared table
+insert into @docs
+select    Id,    ScoreOrder
+from    openxml (@xmlHandle, '/Documents/Doc',1)
+        with    (
+            Id                int        'Id',
+            ScoreOrder        int        'ScoreOrder'
+        )
+
+-- Declared table is populated, ready to be joined with other tables
+select    Id, ScoreOrder
+from    @docs
+order by ScoreOrder asc
+
+-- SQL's internal stored procedure to drop the @xmlSource stream handle from
+memory
+exec sp_xml_removedocument @xmlHandle
+
+set nocount off
+go
+
+
+declare @text varchar(8000)
+
+select    @text =
+'<Documents>' +
+' <Doc>' +
+'  <Id>123</Id>' +
+'  <ScoreOrder>1</ScoreOrder>' +
+' </Doc>' +
+' <Doc>' +
+'  <Id>456</Id>' +
+'  <ScoreOrder>2</ScoreOrder>' +
+' </Doc>' +
+' <Doc>' +
+'  <Id>789</Id>' +
+'  <ScoreOrder>3</ScoreOrder>' +
+' </Doc>' +
+'</Documents>'
+
+exec Get_Records_ByXml @xmlSource=@text
+
+/*
+-- Returns this result
+
+Id    ScoreOrder
+----  ----------
+123   1
+456   2
+789   3
+*/
+
+Hope that helps!
+
+George
+
+
+On 6/30/06, Dominik Bruhn <dominik@dbruhn.de> wrote:
+>
+> Hy,
+> i use Lucene to index a SQL-Table which contains three fields: a
+> index-field,
+> the text to search in and another field. When adding a lucene document I
+> let
+> Lucene index the search-field and also save the id along with it in the
+> lucene index.
+>
+> Uppon searching I collect all ids and add them to a java-string with
+> commas in
+> between to issue a SQL-Query like this one:
+>
+> SELECT id,addfield FROM table WHERE id IN ([LUCENERESULT]);
+>
+> Where LUCENERESULT is like 2,3,19,3,5.
+>
+> This works fine but got one problem: The Search-Result of Lucene is order
+> by
+> relevance and so the id-list is also sorted by relevance. But the result
+> of
+> the SQL-Query is sorted by the id which destroys the relevance-sorting.
+>
+> Does anybody know a work-arround?
+>
+>
+> Thanks
+> --
+> Dominik Bruhn
+> mailto: dominik@dbruhn.de
+> http://www.dbruhn.de
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

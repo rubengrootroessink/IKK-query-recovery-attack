@@ -1,0 +1,84 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: telling one version of the index from another?
+DATE: 7 Sep 2004
+
+Bill Janssen wrote:
+> Hi.
+
+Hey, Bill.  It's been a long time!
+
+> I've got a Lucene application that's been in use for about two years.
+> Some users are using Lucene 1.2, some 1.3, and some are moving to 1.4.
+> The indices seem to behave differently under each version.  I'd like
+> to add code to my application that checks the current user's index
+> version against the version of Lucene that they are using, and
+> automatically re-indexes their files if necessary.  However, I can't
+> figure out how to tell the version, from the index files.
+
+Prior to 1.4, there were no format numbers in the index.  These are 
+being added, file-by-file, as we change file formats.  As you've 
+discovered, there is currently no public API to obtain the format number 
+of an index.  Also, the formats of different files are revved at 
+different times, so there may not be a single format number for the 
+entire index.  (Perhaps we should remedy this, by, e.g., always revving 
+the "segments" version whenever any file changes format.)
+
+> The documentation on the file formats, at
+> http://jakarta.apache.org/lucene/docs/fileformats.html, directs me to
+> the "segments" file.  However, when I look at a version 1.3 segments
+> file, it seems to bear little relationship to the format described in
+> fileformats.html. 
+
+Have a look at the version of fileformats.html that shipped with 1.3. 
+You can find this by browsing CVS, looking for the 1.3-final tag.  But 
+let me do it for you:
+
+http://cvs.apache.org/viewcvs.cgi/*checkout*/jakarta-lucene/docs/fileformats.html?rev=1.15
+
+According to CVS tags, that describes both the 1.3 and 1.2 index file 
+formats.
+
+> But the part of fileformats.html dealing with the
+> segments file contains no "compatibility notes", so I assume it hasn't
+> changed since 1.3. 
+
+I wrote the bit about "compatibility notes" when I first documented file 
+formats, and then promptly forgot about it.  So, until someone 
+contributes them, there are no compatibility notes.  Sorry.
+
+> Even if it had, what's the idea of using -1 as the
+> format number for 1.4?
+
+The idea is to promptly break 1.3 and 1.2 code which tries to read the 
+index.  Those versions of Lucene don't check format numbers (because 
+there were none).  Positive values would give unpredictable errors.  A 
+negative value causes an immediate failure.
+
+> So, anyone know a way to tell the difference between the various
+> versions of the index files?  Crufty hacks welcome :-).
+
+The first four bytes of the "segments" file will mostly do the trick. 
+If it is zero or positive, then the index is a 1.2 or 1.3 index.  If it 
+is -2, then it's a 1.4-final or later index.
+
+There was a change in formats between 1.2 and 1.3, with no format number 
+change.  This was in 1.3 RC1 (note #12 in CHANGES.txt).  The semantics 
+of each byte in norm files (.f[0-9]) changed.  In 1.3 each byte 
+represented 0.0-255.0 on a linear scale.  In 1.3 and later they're 
+eight-bit floats (three-bit mantissa, five-bit exponent, no sign bit). 
+The net result is that if you use a 1.2 index with 1.3 or later then the 
+correct documents will be returned, but scores and rankings will be wacky.
+
+With the exception of this last bit, 1.4 should be able to correctly 
+handle indexes from earlier releases.  Please report if this is not the 
+case.
+
+Cheers,
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

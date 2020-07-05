@@ -1,0 +1,85 @@
+FROM: apa...@lucene.com
+SUBJECT: RE: FileNotFoundException: Too many open files
+DATE: 7 May 2002
+
+Thanks, Dmitry.  Here's a little more detail:
+
+> From: Dmitry Serebrennikov
+>
+> The index directory has the following files:
+>     deletable    - one, lists segment ids that can be deleted when no 
+> longer locked by the filesystem because they are open
+>     segments    - one, lists segment ids of the current set 
+> of segments
+>     _<n>.tii      - one per segment, "term index" file
+
+This is the term infos index file.  It contains every 128th entry from the
+"tis" file, along with its location in the "tis" file.  This is read
+entirely into memory and is used to provide random access to the "tis" file.
+
+>     _<n>.tis     - one per segment, "term infos" file
+
+This is the term infos file.  Its logical format is <t,df,freqLoc,proxLoc>*,
+where t is the term, df is the "document frequency", or count of documents
+containing t, freqLoc is the location of t's data in the "frq" file, and
+proxLoc is the location of t's data in the "prx" file.
+
+>     _<n>.frq    - one per segment, "term frequency" file
+
+This is the frequency file.  It contains the frequency of each term in each
+document.  Its logical format is <<d,f>*>*, where d is a document number,
+and f is the number of times the term ocurred in that document.  The
+TermDocs interface is used to access this data.
+
+>     _<n>.prx   - one per segment, "term positions" file
+
+This is the proximity file.  It contains the positions of each term in each
+document.  Its logical format is <<p>*>*, where p is an ordinal position of
+a term.  The TermPositions interface is used to access this data.
+
+>     _<n>.fdx    - one per segment, "field index" file
+
+This is the field index file.  It contains the location of each document's
+stored fields in the "fdt" file.  Its logical format is <docLoc>*, where
+docLoc_i is the location in the "fdt" of document i.  This is read entirely
+into memory and is used to provide random access to a document's stored
+fields.
+
+>     _<n>.fdt     - one per segment, "field infos" file
+
+This is the field data file.  It contains each document's stored fields.
+Its logical format is <<field,value>*>*.
+
+>     _<n>.fnm   - one per segment, "field infos" file
+
+This is the field info file.  It contains the names of the fields.
+
+>     _<n>.f<m> - one per segment per stored field, "field data" file
+
+These are the normalization files.  They contain one byte for each field in
+each document that is multiplied into the score of hits on that field of
+that document.
+
+> <n> - is the segment number, encoded using numbers and letters
+> <m> - is the field number, which is a unique field id in that segment.
+
+> An index should have 2 + n *  (7 + m) files, where n is the number of 
+> segments and m is the number of stored fields. For an optimized index 
+> with one stored field this gives 10 files (not a 100!).
+
+The maximum number of segments an unoptimized index can have is:
+  (m-1) *  (log_m(n)-1)
+Where m is the mergeFactor, 10 by default and n is the number of documents
+added since the index was last optimized.  The average number of segments is
+about half that.  So a ~1M document index that is never optimized can have,
+at most, 45 segments.  If you optimize every 10k documents, then you can
+limit things to 27 segments.  Or you can manage things more explicitly with
+tools like RAMDirectory and IndexWriter.addIndexes().
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

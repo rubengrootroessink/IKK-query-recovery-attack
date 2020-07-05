@@ -1,0 +1,170 @@
+FROM: p...@darksleep.com (Steven J. Owens)
+SUBJECT: Re: Hi Steven
+DATE: 22 Jan 2002
+
+Ravi,
+
+> By the way, I really got some useful tips from you mail which helped
+> me in doing what I wanted to do. But, I still have a few more
+> doubts/clarifications in my mind. It would be really great if you
+> took time to elaborate on them.
+
+     I'm cc'ing this to lucene-user@jakarta.apache.org, so that:
+
+a) people who know more than I do can correct me if necessary,
+b) people who know less than I do can learn from this discussion, and
+c) people who know the same as I do can kibbitz :-).
+
+     For those just tuning in, the original exchange went:
+
+Ravi:
+> > > I would like to implement a Search facilty in my application
+> > > using Lucene. My requirement is that, I have to search the
+> > > database/table based on the search criterea and display the
+> > > results.
+> > >
+> > > Can this be done using Lucene ?
+
+Steve:
+> >      Basically, yes.  I'm not sure if it *should* be done with
+> > Lucene, however, since you're already using a database.
+> > 
+> >      Lucene is not a search tool, it is a search API.  This means
+> > that you use Lucene by writing your own code to feed your
+> > documents (in this case, database rows) into a Lucene IndexWriter
+> > and your own code to take text search request strings, feed them
+> > to the Lucene QueryParser to convert them into queries, and feed
+> > the parsed query into a Lucene IndexSearcher.  Then you need to
+> > write code to take the results (returned as Lucene Hits objects
+> > that contain the documents you fed into Lucene to begin with) and
+> > display them.  This is some work, but it's surprisingly easy to
+> > do.
+> >
+> >      However, since you requirement is to use a database I'm not
+> > sure how useful Lucene would be to you.  You'd have to re-index
+> > every row from your database into a Lucene index.  If your search
+> > criteria are pretty simple, you might be better off just taking
+> > the search criteria and constructing an SQL SELECT query and
+> > submitting it to your database via JDBC.
+
+And now: 
+> Right now, what I am doing is, I am creating indexes for ALL the
+> records in the database.                     ~~~~~~~
+
+     I am going to assume that you mean you are creating index
+entries (i.e. lucene Document objects, which you add to the index)
+for each record.  If that's not what you're doing, it's what you
+*should* be doing.
+
+> I am doing this since the user's search criterea will be either a
+> subset of this data or this data itself. Nothing more than
+> that. This process of creating indexes will be a scheduled process
+> since new records that might be added should also get reflected in
+> the search. The indexing process will run daily at 12AM (lets
+> say). So, for that whole day, the search will be done on the indexes
+> thus created.
+
+     That's a good, basic way to do things to start.  Later on you can
+work on dynamically updating the lucene index.
+ 
+> Now, my doubts are as follows :
+>
+> 1. If the database contains about 1 million records, how much time
+> would be required to create indexes for the whole data.
+
+     I don't have any hard numbers, but I know people on the list are
+using lucene for data sets that big and much larger.  Lucene indexes
+pretty fast, but if you usually have a data set that big, make sure
+you're smart about only updating the entries that need to be updated.
+You should search the list archive for discussions about benchmarking
+and indexing speed (or hopefully somebody on the list will post a
+comment in response to this).
+ 
+> 2. For any sort of data retrival irrespective of whether the query
+> is simple or complex, which is more advantageous - Using Lucene or
+> using SQL via JDBC ?
+
+     This sentence doesn't really make logical sense.  Which one is
+better will highly depend on a bunch of variables, so asking
+"irrespective of the variables, which is better?" is pointless.  The
+data, the queries, and the environment you're using (which database
+server software, what driver, what kind of production hardware, etc).
+The two are really different solutions for different problems.  Again,
+I will have to hope that somebody out on the list can post some
+general comments comparing jdbc and lucene and advice on how to choose
+which to use.
+
+     My own general comment is that lucene is much better when you
+want to do searches - or more to the point, allow the user to do
+searches - on the *contents* oof the column.  JDBC/SQL is better when
+your searches are more about relating different column values.
+
+> 3. When I create indexes, a file called "write.lock" is
+> created. What is the significance of this file ?
+
+     I haven't had to get too deeply into the lucene indexing engine,
+but my guess would be that lucene creates the file "write.lock" so
+that other lucene programs running will be able to see that it is
+working on the index.  Creating temporary files as a way to announce
+to other possibly-running versions of your program that you are
+accessing a file is a common technique.  In fact, java.io.File even
+mentions this in the API documentation for the "createNewFile()"
+method:
+
+createNewFile
+public boolean createNewFile()
+       throws IOException
+
+Atomically creates a new, empty file named by this abstract pathname
+if and only if a file with this name does not yet exist. The check for
+the existence of the file and the creation of the file if it does not
+exist are a single operation that is atomic with respect to all other
+filesystem activities that might affect the file. This method, in
+combination with the deleteOnExit() method, can therefore serve as the
+basis for a simple but reliable cooperative file-locking protocol.
+
+> 4. Right now, I have written the code as a JSP using Tomcat as the
+> Servlet Engine. When I try to create indexes again, I get an error
+> saying the indexes can't be deleted. What is the problem ?  Does
+> Tomcat get a lock on those files? Is Ques 3, the answer to this
+> question ?
+
+     Are you developing this on windows?  I've seen similar behavior,
+but only on windows.  On solaris it works fine.  I suspect that there
+is something finicky going on with windows, sort of like a poorly
+implemented garbage collection scheme, where your program tells
+windows to delete the file, but windows doesn't actually delete it.
+Or more to the point, I suspect that the lack of delete happens
+because your program has the file open, and it closes the file, but
+windows doesn't realize that it is closed, and still has some sort of
+phantom file handle hanging around.  Then when the code *should* have
+told the system to delete write.lock, it doesn't.  After that, there
+is nothing that is responsible for deleting write.lock, so the code
+just aborts when it finds write.lock there.
+
+     It has been about two months since I was working with Lucene (I
+still have to go back and improve the way I'm using Lucene).  There
+have been some changes recently to support multithreading better, and
+I had hoped that this problem had gone away recently.  To further
+debug this, sooner or later somebody's gotta chase it down and figure
+out precisely when and where the problem is happening.  Until that
+happens, none of the people who can really fix it (who have plenty of
+their own stuff to do, which is why *they* aren't chasing it down) can
+really spare the time to fix it.
+
+> I am really sorry for troubling you by making you read such a long
+> mail.
+> 
+> I usually don't write such long mails. But right now, I lack the
+> time to make it short.
+
+     I know exactly what you mean.
+
+Steven J. Owens
+puff@darksleep.com
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

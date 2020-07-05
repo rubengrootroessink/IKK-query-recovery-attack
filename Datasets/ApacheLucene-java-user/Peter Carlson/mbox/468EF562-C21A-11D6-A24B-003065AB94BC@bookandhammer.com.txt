@@ -1,0 +1,264 @@
+FROM: Peter Carlson <carl...@bookandhammer.com>
+SUBJECT: Re: SearchBean - search on index with deleted documents
+DATE: 7 Sep 2002
+
+Great,
+
+Kelvin,
+Do you think we can integrate this feature in Indyo?
+
+--Peter
+
+
+On Friday, September 6, 2002, at 08:46 PM, Terry Steichen wrote:
+
+> Peter,
+>
+> I found/fixed the problem.  Basically, when you create a new sorted 
+> field
+> array after a deletion, the size of the array must now equal the total 
+> of
+> all valid documents *plus* the total number of deleted documents 
+> (because
+> IndexReader returns them as well, so you need to keep the array index 
+> in
+> sync with the new documents added).  I've written the code to do this 
+> and it
+> appears to work fine.  I've also written a routine to automatically 
+> remove
+> the existing sorted field array(s) when a document is added to the 
+> index.  I
+> don't have time right now (I'm on a dial-up connection in a remote
+> location), but will send it to you soon.
+>
+> Regards,
+>
+> Terry
+>
+> ----- Original Message -----
+> From: "Peter Carlson" <carlson@bookandhammer.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Friday, September 06, 2002 8:18 PM
+> Subject: Re: SearchBean - search on index with deleted documents
+>
+>
+>> Hi Terry,
+>>
+>> I looked this over and did some testing.
+>>
+>> I don't get the array out of range error.
+>>
+>> I do throw an out of range exception when you try to access a page 
+>> that
+>> is bigger than the total number of pages.
+>>
+>> Can you send me an example of how you get this error. I created a 
+>> JUnit
+>> test to test this and it is working fine for me for unoptimized and
+>> optimized indexes.
+>>
+>> Maybe my example of two documents doesn't capture the problem.
+>>
+>> --Peter
+>>
+>> On Thursday, September 5, 2002, at 10:44 AM, Terry Steichen wrote:
+>>
+>>> Peter,
+>>>
+>>> I've done some more checking and it appears that the problem is in
+>>> HitsIterator.sortByField() in creating the arrayOfIndividualHits[],
+>>> which
+>>> throws an array out of bounds exception.  I'm a bit stumped about 
+>>> what
+>>> to do
+>>> from here, as I don't fully understand the logic.  Perhaps you have
+>>> some
+>>> idea?
+>>>
+>>> Regards
+>>>
+>>> Terry
+>>>
+>>> ----- Original Message -----
+>>> From: "Terry Steichen" <terry@net-frame.com>
+>>> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>>> Sent: Tuesday, September 03, 2002 1:12 PM
+>>> Subject: Re: SearchBean - search on index with deleted documents
+>>>
+>>>
+>>>> Peter,
+>>>>
+>>>> I just implemented the change you recommended below but to no avail.
+>>>>
+>>>> The challenge is that when I 'reindex' a changed document (deleting
+>>>> and
+>>>> adding from the index) and then optimize for each such change
+>>>> process, it
+>>>> takes far too long.  But if I skip the optimization step, the search
+>>>> no
+>>>> longer works.  I get no error messages, a query simply returns
+>>>> nothing.
+>>> If
+>>>> I then invoke optimize, the search capability is completely 
+>>>> restored.
+>>>>
+>>>> So, basically, for my purposes, the suggested change - for whatever
+>>> reason -
+>>>> simply doesn't work.  If you have any other ideas on how to get
+>>>> around the
+>>>> optimize delay (which, in my case, is about 30 seconds or more), I'd
+>>>> sure
+>>>> appreciate it.
+>>>>
+>>>> Best regards,
+>>>>
+>>>> Terry
+>>>>
+>>>>
+>>>> ----- Original Message -----
+>>>> From: "Peter Carlson" <carlson@bookandhammer.com>
+>>>> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>>>> Cc: <piyush@merito.co.nz>
+>>>> Sent: Monday, July 29, 2002 9:54 AM
+>>>> Subject: Re: SearchBean - search on index with deleted documents
+>>>>
+>>>>
+>>>>> Thanks for the feedback.
+>>>>>
+>>>>> Please direct all Lucene related questions to the Lucene User's 
+>>>>> List.
+>>>> You'll
+>>>>> get more people to help and hopefully help other too.
+>>>>>
+>>>>>
+>>>>> I think if you change the SortedField.addField method to
+>>>>>
+>>>>>     /** adds the data from the index into a string array
+>>>>>      */
+>>>>>     private void addSortedField(String fieldName, IndexReader ir)
+>>>>> throws
+>>>>> IOException{
+>>>>>         int numDocs = ir.numDocs();
+>>>>>         fieldValues = new String[numDocs];
+>>>>>         for (int i=0; i<numDocs; i++) {
+>>>>>             if(ir.isDeleted(i) == false){
+>>>>>                 fieldValues[i] = ir.document(i).get(fieldName);
+>>>>>             } else {
+>>>>>                 fieldValues[i] = "";
+>>>>>             }
+>>>>>         }
+>>>>>         ir.close();
+>>>>>     }
+>>>>>
+>>>>>
+>>>>> I think this will work. I'm not yet sure if this is the best way to
+>>>>> go,
+>>>> but
+>>>>> I think it will get around the bug. It removes any field values you
+>>>>> are
+>>>>> sorting on in the field so you should never run into a problem.
+>>>>>
+>>>>> I don't have an unoptimized index at hand, and unfortunately no 
+>>>>> time
+>>>>> to
+>>>>> test. Please let me know if this works.
+>>>>>
+>>>>>
+>>>>> Thanks
+>>>>>
+>>>>> --Peter
+>>>>>
+>>>>>
+>>>>> On 7/29/02 7:23 AM, "piyush@merito.co.nz" <piyush@merito.co.nz>
+>>>>> wrote:
+>>>>>
+>>>>>> Hi Peter,
+>>>>>>
+>>>>>> I've found the SearchBean very useful for our project, but seem to
+>>> have
+>>>> run
+>>>>>> into problems when it comes to searching an index which has had
+>>>> documents
+>>>>>> removed using the IndexReader.delete method (without calling the
+>>>>>> IndexWriter.optimize method).
+>>>>>>
+>>>>>> In particular the error returned is:
+>>>>>> "java.lang.IllegalArgumentException: attempt to access a deleted
+>>>> document"
+>>>>>>
+>>>>>> This occurs in the SortedField.addField method and I believe has
+
+>>>>>> to
+>>>>>> do
+>>>> with
+>>>>>> the fact that IndexReader returns all documents - whether deleted
+
+>>>>>> or
+>>>> not.
+>>>>>> When the index is optimized the deleted documents are actually
+>>>>>> removed
+>>>> and
+>>>>>> the problem does not occur (ie if the *.del file is removed from
+
+>>>>>> the
+>>>> index).
+>>>>>>
+>>>>>> Any thoughts on a work-around for this?
+>>>>>>
+>>>>>> Apologies if my understanding is flawed here - I'm new to this, 
+>>>>>> and
+>>>> thanks
+>>>>>> very much for your help.
+>>>>>>
+>>>>>
+>>>>>
+>>>>> --
+>>>>> To unsubscribe, e-mail:
+>>>> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>>>>> For additional commands, e-mail:
+>>>> <mailto:lucene-user-help@jakarta.apache.org>
+>>>>>
+>>>>
+>>>>
+>>>> --
+>>>> To unsubscribe, e-mail:
+>>> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>>>> For additional commands, e-mail:
+>>> <mailto:lucene-user-help@jakarta.apache.org>
+>>>>
+>>>>
+>>>
+>>>
+>>>
+>>> --
+>>> To unsubscribe, e-mail:
+>>> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>>> For additional commands, e-mail:
+>>> <mailto:lucene-user-help@jakarta.apache.org>
+>>>
+>>>
+>>
+>>
+>> --
+>> To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+>>
+>>
+>
+>
+> --
+> To unsubscribe, e-mail:   
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail: 
+> <mailto:lucene-user-help@jakarta.apache.org>
+>
+>
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

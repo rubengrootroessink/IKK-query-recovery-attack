@@ -1,0 +1,58 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: Memory Usage?
+DATE: 10 Nov 2001
+
+I'm surprised that your memory use is that high.
+
+An IndexReader requires:
+  one byte per field per document in index (norms)
+  one open file per file in index
+  1/128 of the Terms in the index
+    a Term has two pointers (8 bytes)
+     and a String (4 pointers = 24 bytes, one to 16-bit chars)
+
+A Search requires:
+  1 1024 byte buffer per TermQuery
+  2 128 int buffers per TermQuery
+  2 1024 byte buffers per PhraseQuery term
+  1 1024 element bucket array per BooleanQuery
+    each bucket has 5 fields, and hence requires ~20 bytes
+  1 bit per document in index per DateFilter
+
+A Hits requires:
+  up to n+100 ScoreDocs (float+int, 8 bytes)
+    where n is the highest Hits.doc(n) accessed
+  up to 200 Document objects
+
+I may have forgotten something...
+
+Let's assume that your 1M document index has 2M unique terms, and that you
+only look at the top-100 hits, that your index has three fields, and that
+the typical document has two stored fields, each 20 characters.  Your
+30-term boolean query over a 1M document index should use around the
+following numbers of bytes:
+  IndexReader:
+    3,000,000 (norms)
+    1,000,000 (1/128 of 2M terms, each requiring ~50 bytes)
+  during search
+       50,000 (TermQuery buffers)
+       20,000 (BooleanQuery buckets)
+      100,000 (DateFilter bit vector)
+  in Hits
+        2,000 (200 ScoreDocs)
+       30,000 (up to 200 cached Documents)
+
+So searches should run in a 5Mb heap.  Are my assumptions off?
+
+You can also see why it is useful to keep a single IndexReader and use it
+for all queries.  (IndexReader is thread safe.)
+
+You could also 'java -Xrunhprof:heap=sites' to see what's using memory.
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

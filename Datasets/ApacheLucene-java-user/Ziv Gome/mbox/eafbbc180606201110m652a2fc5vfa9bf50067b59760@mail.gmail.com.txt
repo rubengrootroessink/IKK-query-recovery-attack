@@ -1,0 +1,868 @@
+FROM: "Ziv Gome" <ziv.g...@gmail.com>
+SUBJECT: Re: SynonymsQuery
+DATE: 20 Jun 2006
+
+  Hi All, NG Vinny.
+
+
+
+----- Written in response to NG Vinny post from 12-Jun, for some reason I
+could not add it to the thread. :-(
+
+
+
+The problem lies in versions. The published code for SynonymsQuery was
+originally written on Lucene 1.4.3. It did not compile as is with Lucene 2.0.
+The required changes are very simple really; it includes the addition of
+"throws IOException" at:
+
+(Line 102)
+
+    public SynonymsWeight( Searcher searcher ) throws IOException {
+
+
+
+and
+
+(line 231)
+
+  protected Weight createWeight( Searcher searcher ) throws IOException {
+
+
+
+In order to verify the code in Lucene 2.0, I have written a small unit test
+class, written for the 1.4.3 and then verified for 2.0. I'm including it
+here, hoping it may simplify the understanding of what the SynonymQuery
+actually does. The test performs searches using the SynonymQuery, and then
+simulates the same searches directly (finding term frequencies for all
+synonyms using the IndexReader and and computes the final score). If you are
+interested in how it works, follow the "simulateSearch" track. Hope it's not
+too much of a mess…
+
+Sorry for the late response.
+
+Thanx,
+
+Ziv G.
+
+
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+
+SynonymsQueryTest class, requires junit.jar to be included
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+package org.apache.lucene.search.synonyms;
+
+
+
+import junit.framework.Assert;
+
+import junit.framework.TestCase;
+
+import org.apache.lucene.index.IndexReader;
+
+import org.apache.lucene.index.Term;
+
+import org.apache.lucene.index.TermDocs;
+
+import org.apache.lucene.index.IndexWriter;
+
+import org.apache.lucene.search.*;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+
+import org.apache.lucene.document.Document;
+
+import org.apache.lucene.document.Field;
+
+
+
+import java.io.IOException;
+
+import java.io.File;
+
+import java.io.StringReader;
+
+import java.util.*;
+
+
+
+public class SynonymsQueryTest extends TestCase {
+
+  private static final boolean VERY_VERBOSE = true;
+
+
+
+  /**
+
+   * Allowed difference between expected and actual scores
+
+   */
+
+  private static final float ALLOWED_DELTA = 0.0001f;
+
+
+
+  private static final String INDEX_PATH = "./testIndex";
+
+
+
+  /**
+
+   * Boost (or penalty) factor applied to synonyms
+
+   */
+
+  private static float SYNONYM_TERM_BOOST = 0.8f;
+
+
+
+  /**
+
+   * Name of contents field
+
+   */
+
+  private static final String CONTENTS_FIELD = "contents";
+
+
+
+  /**
+
+   * strings to be searched
+
+   */
+
+  private static final String[] simpleQueryStrs = {
+
+    "source", // with synonyms
+
+    "direct", // without synonyms
+
+  };
+
+
+
+  private static HashMap SYNONYM_MAP = new HashMap();
+
+
+
+
+
+  /**
+
+   * @param name name of this test
+
+   */
+
+  public SynonymsQueryTest(String name) {
+
+    super(name);
+
+  }
+
+
+
+  protected void setUp() throws Exception {
+
+    super.setUp();
+
+    ArrayList synForDirect = new ArrayList();
+
+    synForDirect.add("beginning");
+
+    synForDirect.add("origin");
+
+    synForDirect.add("root");
+
+    SYNONYM_MAP.put("direct", synForDirect);//With synonyms
+
+    createTestIndex();
+
+  }
+
+
+
+  private void createTestIndex() throws Exception {
+
+    File indexDir = new File(INDEX_PATH);
+
+    if (indexDir.exists() && !deleteRecuresive(indexDir)){
+
+      throw new Exception("The index path " + indexDir.getAbsolutePath() + "
+exists and could not be deleted");
+
+    }
+
+    IndexWriter indexWriter = new IndexWriter(indexDir, new
+StandardAnalyzer(), true);
+
+    for (String s : TEST_FILES) {
+
+      Document doc = new Document();
+
+      doc.add(new Field(CONTENTS_FIELD, new StringReader(s)));
+
+      indexWriter.addDocument(doc);
+
+    }
+
+    indexWriter.optimize();
+
+  }
+
+
+
+  private boolean deleteRecuresive(File deleteIt) {
+
+    if (!deleteIt.exists())
+
+      return true;
+
+    if (deleteIt.isDirectory()){
+
+      for (File file : deleteIt.listFiles()) {
+
+        if (!deleteRecuresive(file))
+
+          return false;
+
+      }
+
+    }
+
+    return deleteIt.delete();
+
+  }
+
+
+
+  /**
+
+   * For running from outside
+
+   */
+
+  public static void main(String[] args) {
+
+    SynonymsQueryTest tester = new SynonymsQueryTest("main");
+
+    try {
+
+      tester.setUp();
+
+      tester.testSearchWithSynonyms();
+
+      tester.tearDown();
+
+    } catch (Exception e) {
+
+      e.printStackTrace();
+
+    }
+
+  }
+
+
+
+  /**
+
+   * Tests scoring in synonyms/no synonyms scenarios
+
+   */
+
+  public void testSearchWithSynonyms() {
+
+    System.out.println("Starting testSearchWithSynonyms()...");
+
+    try {
+
+      runSearchScoring(simpleQueryStrs);
+
+      System.out.println("...success!");
+
+    } catch (Exception e) {
+
+      System.out.println(e);
+
+      Assert.fail(e.toString());
+
+    }
+
+  }
+
+
+
+
+
+  /**
+
+   * Tests scoring
+
+   */
+
+  private void runSearchScoring(String[] queryStrs) throws Exception {
+
+    IndexReader reader = IndexReader.open(INDEX_PATH);
+
+    IndexSearcher searcher = new IndexSearcher(reader);
+
+
+
+    for (int i = 0, counter = 0; i < queryStrs.length; i++) {
+
+      StringBuffer dispStr = new StringBuffer();
+
+      dispStr.append(++counter).append(": search for
+'").append(queryStrs[i]).append("'");
+
+      Hits searchHits = search(searcher, queryStrs[i]);
+
+      Hashtable simulatedHits = simulateSearch(searcher, reader,
+queryStrs[i]);
+
+      reportResults(dispStr, searchHits, simulatedHits);
+
+      assertEquals("number of actually found hits", simulatedHits.size(),
+searchHits.length());
+
+      checkResults(searchHits, simulatedHits);
+
+    }
+
+  }
+
+
+
+  private void reportResults(StringBuffer dispStr, Hits searchHits,
+Hashtable simulatedHits) throws IOException {
+
+    if (VERY_VERBOSE) {
+
+      System.out.println(dispStr.toString());
+
+      System.out.println("search hits:");
+
+      displayHits(searchHits.length(), searchHits);
+
+      System.out.println("Simulated hits:");
+
+      SearchHit[] hits = new SearchHit[simulatedHits.size()];
+
+      simulatedHits.values().toArray(hits);
+
+      Arrays.sort(hits);
+
+      displayHits(hits.length, hits);
+
+    } else {
+
+      System.out.println(dispStr.toString() + " => search hits: " +
+searchHits.length () + ", Simulated hits: " + simulatedHits.size());
+
+    }
+
+  }
+
+
+
+  protected void displayHits(int totHits, Hits hits) throws IOException {
+
+    if (null == hits || hits.length() <= 0) {
+
+      System.out.println("  no results\n");
+
+    } else {
+
+      StringBuffer dispBuf= new StringBuffer();
+
+      dispBuf.append("\ttotal num hits: "+totHits+"\n");
+
+      dispBuf.append("\tRank\tScore\tID\tKey\n");
+
+      for (int i = 0; i < hits.length(); i++) {
+
+        dispBuf.append('\t').
+
+          append(i+1).append('\t').
+
+          append(hits.score(i)).append('\t').
+
+          append(hits.id(i)).append('\t');
+
+      }
+
+      System.out.println(dispBuf.toString());
+
+    }
+
+  }
+
+
+
+  protected void displayHits(int totHits, SearchHit[] hits) throws
+IOException {
+
+    if (null == hits || hits.length <= 0) {
+
+      System.out.println("  no results\n");
+
+    } else {
+
+      StringBuffer dispBuf= new StringBuffer();
+
+      dispBuf.append("\ttotal num hits: "+totHits+"\n");
+
+      dispBuf.append("\tRank\tScore\tID\tKey\n");
+
+      for (int i = 0; i < hits.length; i++) {
+
+        dispBuf.append('\t').
+
+          append(i+1).append('\t').
+
+          append(hits[i].score).append('\t').
+
+          append(hits[i].id).append('\t');
+
+      }
+
+      System.out.println(dispBuf.toString());
+
+    }
+
+  }
+
+
+
+
+
+  private static void checkResults(Hits searchHits, Hashtable simulatedHits)
+throws IOException {
+
+    for (int k = 0; k < searchHits.length(); ++k) {
+
+      SearchHit hit = (SearchHit) simulatedHits.get(new Integer(
+searchHits.id(k)));
+
+      assertTrue("Doc ID in position " + k + " is missing", hit != null);
+
+      assertEquals("Score in position " + k, hit.score,
+searchHits.score(k), ALLOWED_DELTA);
+
+    }
+
+  }
+
+
+
+  /**
+
+   * Perform the search using Lucene queries
+
+   */
+
+  private Hits search(IndexSearcher searcher, String queryStr) throws
+Exception {
+
+    SynonymsQuery synQuery = new SynonymsQuery();
+
+    for (Iterator iterator = getSynonyms(queryStr).iterator();
+iterator.hasNext();) {
+
+      String s = (String) iterator.next();
+
+      addTerm(synQuery, s, !s.equals(queryStr));
+
+    }
+
+    Hits hits = searcher.search(synQuery);
+
+    return hits;
+
+  }
+
+
+
+  private void addTerm(SynonymsQuery synQuery, String queryStr, boolean
+synonym) {
+
+    synQuery.add(new TermQuery(new Term(CONTENTS_FIELD, queryStr)), synonym
+? SYNONYM_TERM_BOOST : 1f, synonym);
+
+  }
+
+
+
+  private static ArrayList getSynonyms(String word){
+
+    ArrayList result = new ArrayList();
+
+    result.add(word);
+
+    ArrayList synonms = (ArrayList)SYNONYM_MAP.get(word);;
+
+    if (synonms != null)
+
+      result.addAll(synonms);
+
+    return result;
+
+  }
+
+
+
+  private static Term[] getSynonymTerms(String field, String word) throws
+Exception {
+
+    ArrayList words = getSynonyms(word);
+
+    if ((words == null) || (words.size() <= 0))
+
+      return null;
+
+    Term[] ret = new Term[words.size()];
+
+    for (int i = 0; i < ret.length; ++i) {
+
+      ret[i] = new Term(field, (String) words.get(i));
+
+    }
+
+    return ret;
+
+  }
+
+
+
+  /**
+
+   * Perform the search using simulation of the calulation
+
+   */
+
+  private Hashtable simulateSearch(IndexSearcher searcher, IndexReader
+reader, String queryStr) throws Exception {
+
+    try {
+
+      Similarity sim = searcher.getSimilarity();
+
+      Term[] synonymsTerms = getSynonymTerms(CONTENTS_FIELD, queryStr);
+
+      // calculate IDF and field weights
+
+      int docCount = reader.numDocs();
+
+      int originalDocFreq = reader.docFreq(synonymsTerms[0]); // doc
+requency of the original word in content
+
+      float originalIdf = sim.idf(originalDocFreq, docCount); // idf of the
+original word in content
+
+      // get term vectors and calculate the raw scores
+
+      Hashtable rawContentResults = new Hashtable();
+
+      for (int i = 0; i < synonymsTerms.length; ++i) {
+
+        float boost = 1; // for the original word it is 1
+
+        if (i != 0) { // synonym
+
+          int docFreq = reader.docFreq(synonymsTerms[i]);
+
+          float idf = sim.idf(docFreq, docCount);
+
+          boost *= (idf * idf) / (originalIdf * originalIdf);
+
+          boost *= SYNONYM_TERM_BOOST;
+
+        }
+
+        Hashtable hits = getTermDocScores(reader, synonymsTerms[i], boost);
+
+        mergeSynonyms(rawContentResults, hits);
+
+      }
+
+      float contentBoost = originalIdf;
+
+      Hashtable contentResults = calculateScores(rawContentResults, reader,
+sim, contentBoost, Float.MAX_VALUE);
+
+      return contentResults;
+
+    } finally {
+
+    }
+
+  }
+
+
+
+  private static class ScoreCollector {
+
+    public int id = -1;
+
+    public float scoreSum = 0;
+
+    public float scoreMax = 0;
+
+    public int count = 0;
+
+
+
+    public ScoreCollector(int id, float score) {
+
+      this.id = id;
+
+      this.scoreSum = score;
+
+      this.scoreMax = score;
+
+    }
+
+
+
+    public void add(float score) {
+
+      this.scoreSum += score;
+
+      if (this.scoreMax < score)
+
+        this.scoreMax = score;
+
+    }
+
+  }
+
+
+
+
+
+  /**
+
+   * Returns documents and their scores for the given term.
+
+   *
+
+   * @param rawResults Hashtable<Integer=Lucene Doc ID, ScoreCollector>
+
+   * @param reader     IndexReader for searching
+
+   * @param sim        Similarity object
+
+   * @param boost      boost factor for normalization factors
+
+   * @param limit      maximum allowed value for the score
+
+   * @return Hashtable<Integer=Lucene Doc ID, SearchHit>, where SearchHit's
+score is zero,
+
+   *         and rawScore contains the calculated document score
+
+   */
+
+  private static Hashtable calculateScores(Hashtable rawResults, IndexReader
+reader, Similarity sim,
+
+                                           float boost, float limit) throws
+Exception {
+
+    Hashtable results = new Hashtable();
+
+    byte[] norms = reader.norms(CONTENTS_FIELD);
+
+    Enumeration keys = rawResults.keys();
+
+    while (keys.hasMoreElements()) {
+
+      Integer id = (Integer) keys.nextElement();
+
+      ScoreCollector rawHit = (ScoreCollector) rawResults.get(id);
+
+      float score = sim.tf(rawHit.scoreSum) * boost *
+Similarity.decodeNorm(norms[
+rawHit.id]);
+
+      if (score > limit)
+
+        score = limit;
+
+      SearchHit hit = new SearchHit(score, id.intValue());
+
+      results.put(id, hit);
+
+    }
+
+    return results;
+
+  }
+
+
+
+  private static class SearchHit implements Comparable{
+
+
+
+    float score;
+
+    int id;
+
+
+
+    public SearchHit(float score, int id) {
+
+      this.score = score;
+
+      this.id = id;
+
+    }
+
+
+
+    public int compareTo(Object o) {
+
+      return (int)(100*(((SearchHit)o).score - this.score));
+
+    }
+
+  }
+
+
+
+  /**
+
+   * Appends the new search hits into the search results collection.
+
+   * The scores are simply summarized.
+
+   *
+
+   * @param results Hashtable<Integer=Lucene Doc ID, ScoreCollector>
+
+   * @param hits    Hashtable<Integer=Lucene Doc ID, SearchHit>, where
+SearchHit's score is zero,
+
+   *                and rawScore contains the term document frequency with
+boost (needed for synonyms)
+
+   */
+
+  private static void mergeSynonyms(Hashtable results, Hashtable hits) {
+
+    Enumeration keys = hits.keys();
+
+    while (keys.hasMoreElements()) {
+
+      Integer id = (Integer) keys.nextElement();
+
+      SearchHit searchHit = (SearchHit) hits.get(id);
+
+      ScoreCollector contentHit = (ScoreCollector) results.get(id);
+
+      if (contentHit == null) {
+
+        results.put(id, new ScoreCollector(searchHit.id, searchHit.score));
+
+      } else {
+
+        contentHit.add(searchHit.score);
+
+      }
+
+    }
+
+  }
+
+
+
+  /**
+
+   * Returns documents and their scores for the given term.
+
+   *
+
+   * @param reader IndexReader for searching
+
+   * @param term   term to search
+
+   * @param boost  boost (intended for synonyms, as we want to summarize raw
+the term frequences here,
+
+   *               and apply some boost to synonyms)
+
+   * @return Hashtable<Integer=Lucene Doc ID, SearchHit>, where SearchHit's
+score is zero,
+
+   *         and rawScore contains the term document frequency with boost
+(needed for synonyms)
+
+   */
+
+  private static Hashtable getTermDocScores(IndexReader reader, Term term,
+float boost) throws Exception {
+
+    Hashtable results = new Hashtable();
+
+    TermDocs docs = reader.termDocs(term);
+
+    try {
+
+      while (docs.next()) {
+
+        int docLuceneId = docs.doc();
+
+        int freq = docs.freq();
+
+        float score = freq * boost;
+
+        SearchHit hit = new SearchHit(score, docLuceneId);
+
+        results.put(new Integer(docLuceneId), hit);
+
+      }
+
+    } finally {
+
+      docs.close();
+
+    }
+
+    return results;
+
+  }
+
+
+
+
+
+  private static String[] TEST_FILES = {
+
+    "First document is here with both terms, but without synonyms: source
+and direct are both here. source appears twice",
+
+    "Second document is here with both terms, and with synonym for the term
+source (direct is also here): the terms beginning, root and origin are all
+synonyms of the term source (which appears twice)",
+
+    "Third document should never be found. none of therms are here.",
+
+    "4th document is here to illustrate finding a document only by synonym.
+there for the term origin is here.",
+
+  };
+
+
+
+}
+

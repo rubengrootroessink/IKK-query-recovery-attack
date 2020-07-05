@@ -1,0 +1,119 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: IndexWriter.deleteDocuments(Query query)
+DATE: 1 Apr 2009
+
+Hi Michael:
+
+    Let me first share what I am doing w.r.t deleting by docid:
+
+I have a customized index reader that stores a mapping of docid -> uid in
+the payload (something Michael Bush and Ning Li suggested a while back) And
+that mapping is loaded a IndexReader load time and is shared by searchers.
+
+I do realtime update, so I get a batch of updates with a uid associated with
+each batch. So I do deleted on the uid and add the document. And I
+implemented using IndexWriter.deleteDocuments(Term[])
+
+I realized I have an IndexReader around already with a docId->uid mapping, I
+can just find out the docid from that list and simply call
+IndexReader.deleteDocument(int). So out of curiosity, I compare the times
+doing deletes with these two mechanisms with 1 batch of 10000 deletes. And
+on my macbook pro, I see a difference/overhead of 3-4 seconds (with various
+runs and how much term table is cached etc.) And that is something I would
+expect because we essentially doing a "query" per element in the batch,
+albeit posting list length is only 1, but still...
+
+Now to me that is significant enough to move away from
+IndexWriter.deleteDocuments().
+
+However, to actually implement the delete with IndexWriter on docids, I have
+to create a customized Query object that iterates my int[] of docids. Which
+is kinda silly, since IndexWriter calls delete on the docid anyway. I don't
+want to open an IndexReader for the deletes (cuz that's where the api is at)
+and then open another IndexWriter to add documents because:
+1) seems like we are moving away from this paradigm with the delete apis on
+IndexWriter
+2) I want to have delete and add in 1 commit.
+
+Here is my use-case, and I don't think it is that far-fetched.
+
+Having IndexWriter.deleteDocuments take a Filter than DocIdSet makes sense.
+For me at lease, IndexWriter.deleteDocument(int) would be useful.
+
+Just my $0.02.
+
+-John
+
+On Wed, Apr 1, 2009 at 1:02 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> John,
+>
+> I think this has the same problem as exposing delete by docID, ie, how
+> would you produce that docIdSet?
+>
+> We could consider delete by Filter instead, since that exposes the
+> necessary getDocIdSet(IndexReader) method.
+>
+> Or, with near real-time search, we could enhance it to allow deletions
+> via the obtained reader (the first approach doesn't).
+>
+> Mike
+>
+> On Tue, Mar 31, 2009 at 10:23 PM, John Wang <john.wang@gmail.com> wrote:
+> > So do you think it is a good addition/change to the current api now?
+> >
+> > -John
+> >
+> > On Tue, Mar 31, 2009 at 2:18 PM, Yonik Seeley <
+> yonik@lucidimagination.com>wrote:
+> >
+> >> On Tue, Mar 31, 2009 at 4:58 PM, John Wang <john.wang@gmail.com> wrote:
+> >> > I fail to see the difference of exposing the api to allow for a Query
+> >> > instance to be passed in vs a DocIdSet.
+> >>
+> >> I was commenting specifically on your idea to allow deletion by int[]
+> >> (docids) on the IndexWriter.
+> >>
+> >> DocIdSet is a different issue - it didn't exist when the conversation
+> >> to add deleteByQuery was going on.
+> >>
+> >> -Yonik
+> >> http://www.lucidimagination.com
+> >>
+> >>
+> >>  In this specific case, Query is
+> >> > essentially a factory to produce a DocIdSetIterator (or Scorer) Isn't
+> it
+> >> > what DocIdSet is?
+> >> > Thanks
+> >> >
+> >> > -John
+> >> >
+> >> > On Tue, Mar 31, 2009 at 12:57 PM, Yonik Seeley
+> >> > <yonik@lucidimagination.com>wrote:
+> >> >
+> >> >> On Tue, Mar 31, 2009 at 3:41 PM, John Wang <john.wang@gmail.com>
+> wrote:
+> >> >> > Also, can we expose  IndexWriter.deleteDocuments(int[] docids)?
+> >> >>
+> >> >> Exposing internal ids from the IndexWriter may not be a good idea
+> >> >> given that they are transient.
+> >> >>
+> >> >>
+> >> >> -Yonik
+> >> >> http://www.lucidimagination.com
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

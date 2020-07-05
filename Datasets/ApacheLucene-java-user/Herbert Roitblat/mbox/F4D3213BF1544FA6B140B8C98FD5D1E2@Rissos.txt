@@ -1,0 +1,367 @@
+FROM: "Herbert Roitblat" <h...@orcatec.com>
+SUBJECT: Re: java.lang.OutOfMemoryError: GC overhead limit exceeded
+DATE: 14 Apr 2010
+
+Thanks, Michael.
+
+I have not had a chance to try your whittled example yet. Another problem 
+captured my attention.
+
+What I have done, is use a single reader over and over.  It does not seem to 
+make any difference. I don't close it at all, now.  It sped up my process a 
+bit (12 docs/second rather than 11, but most of that is network wait time, I 
+think), but otherwise seems to have made no difference.  If I keep that, I 
+will have to provide a method to close it eventually, but closing it does 
+not make the heap give up its bloated representation of all the docs it's 
+seen before.
+
+I also took a look in more detail at the data that are stored.  They are the 
+data from the documents whose vectors have been requested.  What I would 
+like is to have just one document in the heap at a time and have it deleted 
+when I am done with it.  Having them stick around is the problem. 
+Everything else works fine.  I get no errors.  Is this a Lucene bug?
+
+http://lucene.apache.org/pylucene/documentation/readme.html says that 
+.cast_:
+
+Downcasting is a common operation in Java but not a concept in Python. 
+Because the wrapper objects implementing exactly the APIs of the declared 
+type of the wrapped object, all classes implement two class methods called 
+instance_ and cast_ that verify and cast an instance respectively.
+
+I am not a Lucene or pyLucene expert.
+
+I appreciate your help.  This is really an important barrier for me right 
+now.
+
+Thanks,
+Herb
+
+----- Original Message ----- 
+From: "Michael McCandless" <lucene@mikemccandless.com>
+To: <java-user@lucene.apache.org>
+Sent: Tuesday, April 13, 2010 2:46 AM
+Subject: Re: java.lang.OutOfMemoryError: GC overhead limit exceeded
+
+
+Can you whittle down your example even more?
+
+EG don't read the term vectors for the first hit.  Just open a single
+reader and do the TermQuery search over and over?
+
+BTW what does this line in PyLucene do?:
+
+   tfvP = lucene.TermFreqVector.cast_(tfv)
+
+You never hit exceptions in this code right?  (Because this'd cause
+your close to not be called -- really you should move the .close()
+calls into a finally clause).
+
+Mike
+
+On Mon, Apr 12, 2010 at 10:54 AM, Herbert Roitblat <herb@orcatec.com> wrote:
+> Update:
+> reusing the reader and searcher made almost no difference. It still eats 
+> up
+> the heap.
+> ----- Original Message ----- From: "Herbert L Roitblat" <herb@orcatec.com>
+> To: <java-user@lucene.apache.org>
+> Sent: Monday, April 12, 2010 6:50 AM
+> Subject: Re: java.lang.OutOfMemoryError: GC overhead limit exceeded
+>
+>
+>> Thank you Michael. Your suggestions are helpful. I inherited all of
+>> the code that uses pyLucene and don't consider myself an expert on it,
+>> so I very much appreciate your suggestions.
+>>
+>> It does not seem to be the case that these elements represent the index
+>> of the collection. TermInfo and Term grow as I retrieve more documents.
+>> There was no trouble building the index.
+>>
+>> The contents of these fields are the tokens (some fields are tokenized,
+>> others not) of the document fields. In the tokenized fields, there is
+>> one object for each word. They seem to be in order of the documents for
+>> which the term vectors are being sought. So these objects seem to
+>> represent a "concatenation" of all of the documents being considered in
+>> order, and if they are never removed, would always overwhelm the heap
+>> with a large document set. They are not the index in the usual sense, I
+>> think. Before I start retrieving documents, there is barely anything in
+>> these objects.
+>>
+>> What is holding the document contents in the heap after the fields
+>> information is returned?
+>>
+>> Can you say more about incRef/decRef? I deleted all variables that
+>> interacted with Lucene and it seems to have made no difference
+>>
+>> There are not a lot of different fields, I would say on the order of 50
+>> with about 20 of them in virtually every document.
+>>
+>> It uses:
+>> lucene.IndexReader.open(self._store)
+>>
+>>
+>> One suggestion I got is to put the reader code in the class init
+>> function and then reuse it. I have not tried that one yet (next on the
+>> agenda). You suggested something similar and I will try that.
+>>
+>> Thanks,
+>> Herb
+>>
+>>
+>> Michael McCandless wrote:
+>>>
+>>> The large count of TermInfo & Term is completely normal -- this is
+>>> Lucene's term index, which is entirely RAM resident.
+>>>
+>>> In 3.1, with flexible indexing, the RAM efficiency of the terms index
+>>> should be much improved.
+>>>
+>>> While opening a new reader/searcher for every query is horribly
+>>> inefficient, it should not leak memory. (Are you using
+>>> IndexReader.reopen? I see calls to getReader, but this Lucene API
+>>> (near-real-time search) wasn't added until 2.9, and you're on 2.4, so
+>>> I think that's your own method?).
+>>>
+>>> What do your get/getReader/getSearcher calls do? Are you using
+>>> incRef/decRef at all to manage the lifetime of your readers? How many
+>>> unique field names do you have, across all docs that you index?
+>>>
+>>> If you change your test to open a single reader, but run that
+>>> TermQuery over and over and over again, do you still hit OOME?
+>>>
+>>> Mike
+>>>
+>>> On Sun, Apr 11, 2010 at 1:28 PM, Herbert L Roitblat <herb@orcatec.com>
+>>> wrote:
+>>>
+>>>> Hi, Folks. Thanks, Ruben, for your help. It let me get a ways down the
+>>>> road.
+>>>>
+>>>> The problem is the the heap is filling up when I am doing a
+>>>> lucene.TermQuery. What I am trying to accomplish is to get the terms in
+>>>> one
+>>>> field of each document and their frequency in the document. A code
+>>>> snippet
+>>>> is attached below. It yields the results I want.
+>>>>
+>>>> I managed to get a small enough heap dump into jhat. Now I could use
+>>>> some
+>>>> help understanding what I have found and some help figuring out what to
+>>>> do
+>>>> about it. I am a noobi at understanding the details of Lucene,
+>>>> pyLucene,
+>>>> and Java debugging.
+>>>>
+>>>> If I understand correctly, the heap is filling up because it is keeping
+>>>> instances of objects around after there is no longer any need for them.
+>>>> I
+>>>> thought that it might be the case that Python was somehow keeping them
+>>>> around, but that does not seem to be the case (true?).
+>>>>
+>>>> From jhat, I got a class instance histogram:
+>>>>
+>>>> 290163 instances <http://192.168.1.155:7000/instances/0x7fbf693bb990>
+
+>>>> of
+>>>> class org.apache.lucene.index.TermInfo
+>>>> <http://192.168.1.155:7000/class/0x7fbf693bb990>
+>>>> 289988 instances <http://192.168.1.155:7000/instances/0x7fbf69412d80>
+
+>>>> of
+>>>> class org.apache.lucene.index.Term
+>>>> <http://192.168.1.155:7000/class/0x7fbf69412d80>
+>>>> 1976 instances <http://192.168.1.155:7000/instances/0x7fbf693f1300>
+of
+>>>> class
+>>>> org.apache.lucene.index.FieldInfo
+>>>> <http://192.168.1.155:7000/class/0x7fbf693f1300>
+>>>> 1976 instances <http://192.168.1.155:7000/instances/0x7fbf6940a1a8>
+of
+>>>> class
+>>>> org.apache.lucene.index.SegmentReader$Norm
+>>>> <http://192.168.1.155:7000/class/0x7fbf6940a1a8>
+>>>> 1081 instances <http://192.168.1.155:7000/instances/0x7fbf6928d460>
+of
+>>>> class
+>>>> org.apache.lucene.store.FSDirectory$FSIndexInput
+>>>> <http://192.168.1.155:7000/class/0x7fbf6928d460>
+>>>> 1048 instances <http://192.168.1.155:7000/instances/0x7fbf693ef958>
+of
+>>>> class
+>>>> org.apache.lucene.index.CompoundFileReader$CSIndexInput
+>>>> <http://192.168.1.155:7000/class/0x7fbf693ef958>
+>>>> 540 instances <http://192.168.1.155:7000/instances/0x7fbf69400510>
+of
+>>>> class
+>>>> org.apache.lucene.index.TermBuffer
+>>>> <http://192.168.1.155:7000/class/0x7fbf69400510>
+>>>> 540 instances <http://192.168.1.155:7000/instances/0x7fbf694011c8>
+of
+>>>> class
+>>>> org.apache.lucene.util.UnicodeUtil$UTF16Result
+>>>> <http://192.168.1.155:7000/class/0x7fbf694011c8>
+>>>> 540 instances <http://192.168.1.155:7000/instances/0x7fbf693bc168>
+of
+>>>> class
+>>>> org.apache.lucene.util.UnicodeUtil$UTF8Result
+>>>> <http://192.168.1.155:7000/class/0x7fbf693bc168>
+>>>> ...
+>>>>
+>>>> There are way too many instance of index.TermInfo and index.indexTerm.
+>>>> So,
+>>>> I tracked down some instances and looked for rootset references. There
+>>>> were
+>>>> none. If I understand correctly, this instance should be garbage
+>>>> collected
+>>>> if there are no rootset references. True?
+>>>>
+>>>> Here's an example from jhat:
+>>>>
+>>>> Rootset references to org.apache.lucene.index.TermInfo@0x7fbf6e3f8218
+>>>> (includes weak refs)
+>>>>
+>>>> References to org.apache.lucene.index.TermInfo@0x7fbf6e3f8218 (40
+>>>> bytes)
+>>>> Other queries
+>>>> Exclude weak refs
+>>>> ---
+>>>> There is at least one reference to the object, it is an element in an
+>>>> array,
+>>>> but the array does not have rootset references either.
+>>>>
+>>>> Am I misinterpreting these results? In any case, what can I do about
+>>>> getting rid of these? Is it a bug in this version of Lucene? Is there
+>>>> a
+>>>> known fix? I think that I should be able to do an unlimited number of
+>>>> queries without filling up the heap.
+>>>> I am using pyLucene version 2.4.
+>>>>
+>>>> Thanks for your help.
+>>>>
+>>>> Herb
+>>>>
+>>>> -------------------------------
+>>>> Code snippet:
+>>>> reader = self.index.getReader()
+>>>> lReader = reader.get()
+>>>> searcher = self.index.getSearcher()
+>>>> lSearcher = searcher.get()
+>>>> query = lucene.TermQuery(lucene.Term(OTDocument.UID_FIELD_ID, uid))
+>>>> hits = list(lSearcher.search(query))
+>>>> if hits:
+>>>> hit = lucene.Hit.cast_(hits[0])
+>>>> tfvs = lReader.getTermFreqVectors(hit.id)
+>>>>
+>>>> if tfvs is not None: # this happens if the vector is not stored
+>>>> for tfv in tfvs: # There's one for each field that has a
+>>>> TermFreqVector
+>>>> tfvP = lucene.TermFreqVector.cast_(tfv)
+>>>> if returnAllFields or tfvP.field in termFields: # add
+>>>> only
+>>>> asked fields
+>>>> tFields[tfvP.field] = dict([(t,f) for (t,f) in
+>>>> zip(tfvP.getTerms(),tfvP.getTermFrequencies()) if f >=minFreq])
+>>>> else:
+>>>> # This shouldn't happen, but we just log the error and march on
+>>>> self.log.error("Unable to fetch doc %s from index"%(uid))
+>>>> ## if self.opCount % 1000 == 0:
+>>>> ## print lucene.JCCEnv._dumpRefs(classes=True).items()
+>>>>
+>>>> #http://lists.osafoundation.org/pipermail/pylucene-dev/2008-January/002171.html
+>>>> ## self.opCount += 1
+>>>>
+>>>> lReader.close()
+>>>> lSearcher.close()
+>>>> retFields = copy.deepcopy(tFields) #return a copy of tFields to
+>>>> free
+>>>> up references to it and its contents
+>>>>
+>>>>
+>>>>
+>>>> Herbert Roitblat wrote:
+>>>>
+>>>>> Hi, folks.
+>>>>> I am using PyLucene and doing a lot of get tokens. lucene.py reports
+>>>>> version 2.4.0. It is rpath linux with 8GB of memory. Python is 2.4.
+>>>>> I'm not sure what the maxheap is, I think that it is maxheap='2048m'.
+
+>>>>> I
+>>>>> think that it's running in a 64 bit environment.
+>>>>> It indexes a set of 116,000 documents just fine.
+>>>>> Then I need to get the tokens from these documents and near the end,
+I
+>>>>> run
+>>>>> into:
+>>>>>
+>>>>> java.lang.OutOfMemoryError: GC overhead limit exceeded
+>>>>>
+>>>>> If I wait a bit and ask again for the same document's tokens, I can 
+>>>>> get
+>>>>> them, but it then is somewhat likely to post the same error on a
+>>>>> certain
+>>>>> number of other documents. I can handle these errors and ask again.
+>>>>>
+>>>>> I have read that this error message means that the heap is getting
+>>>>> filled
+>>>>> up and garbage collection removes only a small amount of it. Since all
+>>>>> I am
+>>>>> doing is retrieving, why should the heap be filling up? I restarted
+>>>>> the
+>>>>> system before starting the retrieval.
+>>>>>
+>>>>> My guess is that there is some small memory leak because memory
+>>>>> assigned
+>>>>> to my python program grows slowly as I request more document tokens.
+>>>>> Since
+>>>>> I'm not intending to change anything in either my python program or in
+>>>>> Lucene, any growth is unintentional. I'm just getting tokens.
+>>>>>
+>>>>> we use lucene.TermQuery as the query object to get the terms.
+>>>>>
+>>>>> I cannot share the documents nor the application code, but I might be
+>>>>> able
+>>>>> to provide snippets.
+>>>>>
+>>>>> One last piece of information, the time needed to retrieve documents
+>>>>> slows
+>>>>> throughout the process. In the beginning I was getting about 10
+>>>>> documents
+>>>>> per second. Towards the end, it is down to about 5 with about 5 second
+>>>>> pauses from time to time, perhaps due to garbage collection?
+>>>>>
+>>>>> Any idea of why the heap is filling up and what I can do about it?
+>>>>>
+>>>>> Thanks,
+>>>>> Herb
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

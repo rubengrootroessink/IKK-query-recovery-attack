@@ -1,0 +1,111 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: Searching doubt
+DATE: 4 Aug 2009
+
+Well, if you have more cases like "aboutus", then I think the TokenFilter
+approach will help you. You should create your own Analyzer which receives
+another Analyzer as argument, and impl it's tokenStream() like this (it's
+the general idea):
+
+public TokenStream tokenStream(String fld, Reader reader) {
+  TokenStream ts = wrappedAnalyzer.tokenStream(fld, reader);
+  ts = new SynonymTokenFilter(ts);
+  return ts;
+}
+
+You can look in contrib/highlighter for a SynonymAnalyzer (an inner class of
+HighlighterTest.java). Maybe you can copy some of the code from there.
+
+The idea for this SynonymTokenFilter is to get a map like this:
+aboutus --> [about us]
+creditcards --> [credit cards], [visa] (the latter is just an example for
+another synonym you can use)
+....
+Then when the filter encounters a Token, it looks it up in the map and
+replaces it w/ the ones in the map, or returns it and its synonyms. You
+should make sure all synonyms are placed in the same position (i.e.,
+setPositionIncrement(0)).
+
+If you know these strings appear just in a "url" field, you can apply this
+token filter for just the url field, and save a lot of unnecessary token
+lookups in the map. To do this, you should extend Analyzer and override
+tokenStream and return this filter for just the "url" field (notice
+tokenStream receives the field name as arg).
+
+Hope this helps,
+
+Shai
+
+On Tue, Aug 4, 2009 at 10:29 AM, m.harig <m.harig@gmail.com> wrote:
+
+>
+> Thanks for your reply,
+>
+>  my original code snippet is
+>
+>                 IndexSearcher searcher = new IndexSearcher(indexDir);
+>                Analyzer analyzer = new StopAnalyzer();
+>
+>                 BooleanClause.Occur[] flags = { BooleanClause.Occur.SHOULD,
+>                                BooleanClause.Occur.SHOULD,
+> BooleanClause.Occur.SHOULD,
+>                                BooleanClause.Occur.SHOULD,
+> BooleanClause.Occur.SHOULD };
+>
+>                // for multiple keyword search
+>                Query query = MultiFieldQueryParser.parse(qryStr, new
+> String[] {
+>                                "title", "path", "contents", "summary",
+> "size" }, flags,
+>                                analyzer);
+>
+>                Hits hits = getHits(qryStr, searcher, query, "path");
+>
+>
+>                for (int inc = 0; inc < hits.length(); inc++) {
+>
+>                        Document doc = hits.doc(inc);
+>                                ///////
+>
+>                }
+>
+>
+>         // private method to get hits by using phrase query
+>
+>        private Hits getHits(String qryStr, Searcher searcher, Query
+> queryNorm,
+>                        String phraseQryTerm) throws Exception {
+>
+>                Hits hits = null;
+>
+>                // for single word search
+>                PhraseQuery queryPhrase = new PhraseQuery();
+>                queryPhrase.setBoost(4.0f);
+>                queryPhrase.setSlop(1);
+>                queryPhrase.add(new Term(phraseQryTerm,
+> qryStr.toLowerCase()));
+>
+>                hits = searcher.search(queryPhrase);
+>
+>                return hits;
+>        }
+>
+>
+>   if i use this code for my search , it gives me the unwanted search hits ,
+>
+>      as i mentioned , if i search for "about us" , this is an example ,
+> there may be more number of urls like this ,  for example , "credit cards"
+> ,
+> "book marks" , how do i handle it ?
+> --
+> View this message in context:
+> http://www.nabble.com/Searching-doubt-tp24802552p24803560.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

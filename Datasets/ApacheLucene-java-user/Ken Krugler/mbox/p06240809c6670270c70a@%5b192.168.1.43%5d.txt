@@ -1,0 +1,108 @@
+FROM: Ken Krugler <kkrugler_li...@transpac.com>
+SUBJECT: Re: Analyzing performance and memory consumption for boolean queries
+DATE: 23 Jun 2009
+
+Hi Chris,
+
+Others on this list will be able to provide much better optimization 
+suggestions, but based on my experience with some large indexes...
+
+1. For search time to vary from < 1 second => 20 seconds, the only 
+two things I've seen are:
+
+* Serious JVM garbage collection problems.
+* You're in Linux swap hell.
+
+We tracked similar issued down by creating a testbed that let us run 
+a set of real-world queries, such that we could trigger these types 
+of problems when we had appropriate instrumentation on and recording.
+
+2. 250M/4 = 60M docs/index. The old rule of thumb was 10M docs/index 
+as a reasonable size. You might just need more hardware.
+
+3. We had better luck running more JVMs per system, versus one JVM 
+with lots of memory. E.g. run 3 32-bit JVMs with 1.5GB/JVM. Though 
+this assumes you've got one drive/JVM, to avoid disk contention.
+
+4. I'm assuming, since you don't care about scoring, that you've 
+turned of field norms. There are other optimizations you can do to 
+speed up query-style searches (find all docs that match X) when you 
+don't care about scores, but others on the list are much better 
+qualified to provide input in this area.
+
+5. It seems like storing content outside the index helps with 
+performance, though I can't say for certain what the impact might be. 
+E.g. only store a single unique ID field in the index, and use that 
+to access the content (say, from a MapFile) when you're processing 
+the matched entries.
+
+6. Having most of the index loaded into the OS cache was the biggest 
+single performance win. So if you've got 3 GB of unused memory on a 
+server, limiting the size of the index to some low multiple of 3GB 
+would be a good target.
+
+-- Ken
+
+>Our query performance is surprisingly inconsistent, and I'm trying to figure
+>out why.  I've realized that I need to better understand what's going on
+>internally in Lucene when we're searching.  I'd be grateful for any answers
+>(including pointers to existing docs, if any).
+>
+>Our situation is this: We have roughly 250 million docs spread across four
+>indexes.  Each doc has about a dozen fields, all stored and most indexed.
+>(They're the usual document things like author, date, title, contents,
+>etc.)  Queries differ in complexity but always have at least a few terms in
+>boolean combination, up to some larger queries with dozens or even hundreds
+>of terms combined with ands, ors, nots, and parens.  There's no sorting,
+>even by relevance: we just want to know what matches.  Query performance is
+>often sub-second, but not infrequently it can take over 20 seconds (we the
+>time-limited hit collector, so anything over 20 seconds is stopped).
+>Obviously the more complex queries are slower on average, but a given query
+>can sometimes be much slower or much faster.
+>
+>My assumption is that we're having memory problems or disk utilization
+>problems or both.  Our app has a 5gb JVM heap on an 8gb server with no other
+>user processes running, so we shouldn't be paging and should have some room
+>for Linux disk cache.  The server is lightly loaded and concurrent queries
+>are the exception rather than the norm.  Two of the four indexes are updated
+>a few times a day via rsync and subsequently closed and re-opened, but poor
+>query performance doesn't seem to be correlated with these times.
+>
+>So, getting to some specific questions:
+>
+>1) How is the inverted index for a given field structured in terms of what's
+>in memory and what's on disk?  Is it dynamic, based on available memory, or
+>tuneable, or fixed?  Is there a rule of thumb that could be used to estimate
+>how much memory is required per indexed field, based on the number of terms
+>and documents?  Likewise, is there a rule of thumb to estimate how many disk
+>accesses are required to retrieve the hits for that field?  (I'm thinking,
+>by perhaps false analogy, of how a database maintains a b-tree structure
+>that may reside partially in RAM cache and partially in disk pages.)
+>
+>2) When boolean queries are searched, is it as simple as iterating the hits
+>for each ANDed or ORed term and applying the appropriate logical operators
+>to the results?  For example, is searching for "foo AND bar" pretty much the
+>same resource-wise as doing two separate searches, and therefore should the
+>query performance be a linear function of the number the number of search
+>terms?  Or is there some other caching and/or decision logic (perhaps kind
+>of like a database's query optimizer) at work here that makes the I/O and
+>RAM requirements more difficult to model from the query?  (Remember that
+>we're not doing any sorting.)
+>
+>I'm hoping that with some of this knowledge, I'll be able to better model
+>the RAM and I/O usage of the indexes and queries, and thus eventually
+>understand why things are slow or fast.
+>
+>Thanks,
+>Chris
+
+
+-- 
+Ken Krugler
++1 530-210-6378
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

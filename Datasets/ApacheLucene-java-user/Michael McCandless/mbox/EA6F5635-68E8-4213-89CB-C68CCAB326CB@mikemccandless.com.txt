@@ -1,0 +1,65 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: FileNotFoundException in ConcurrentMergeScheduler
+DATE: 30 May 2008
+
+
+Paul J. Lucas wrote:
+
+> On May 29, 2008, at 6:35 PM, Michael McCandless wrote:
+>
+>> Can you use lsof (or something similar) to see how many files you  
+>> have?
+>
+> FYI: I personally can't reproduce this; only a coworker can and  
+> even then it's sporadic, so it could take a little while.
+
+If possible, could you call IndexWriter.setInfoStream(...) and  
+capture the log produced leading up to the exception?  It could help  
+see if there is a bug here, by showing whether IndexWriter actually  
+deleted that file or not.
+
+>> Merging, especially several running at once, can greatly increase  
+>> open file count, and especially if mergeFactor is increased.
+>
+> That raises a few questions:
+>
+> 1. Should I lower my mergeFactor?
+
+What is your mergeFactor set to now?
+
+You can lower mergeFactor, but, if file exhaustion is the cause here,  
+it simply may not be enough.
+
+> 2. Is there any way to insist that only one merger runs?
+
+Yes, you can do this:
+
+   ConcurrentMergeScheduler cms = (ConcurrentMergeScheduler)  
+writer.getMergeScheduler();
+   cms.setMaxThreadCount(1)
+
+This way only one BG merge may run.  The next one that wants to kick  
+off will stall until the first one is done.
+
+>
+> 3. Is there any way to insist that all merges happen synchronously,  
+> i.e., on IndexWriter.close() only and not to use a separate merge  
+> thread?
+
+You can fallback to SerialMergeScheduler, which matches the behavior  
+pre-2.3.  In this case a merge kicks off, synchronously, in an add/ 
+updateDocument call after flushing a segment.
+
+Doing so only at close() is trickier.  Maybe, you could 1) use  
+SerialMergeScheduler, 2) set mergeFactor to something immense (to  
+prevent merging on a normal basis), 3) when you want to merge, set  
+mergeFactor to something normal (eg the default, 10) and then call  
+writer.maybeMerge().  Then call close().
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

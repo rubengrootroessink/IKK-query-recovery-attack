@@ -1,0 +1,100 @@
+FROM: Lokesh Bajaj <lokesh_ba...@yahoo.com>
+SUBJECT: issues building a large index
+DATE: 25 Jun 2005
+
+
+Hi;
+
+I am a newcomer to this list and trying out Lucene for the first time. It looks really useful
+and I am evaluating it for a potentially very large index that my company might need to build.
+
+ 
+
+As I was investigating using Lucene, I wanted to know what the performance of optimize/index
+merge would be as the index got large. I setup an initial index of size 10GB that I treat
+as my master index. I made a copy of this index as ind1.bak. Than, I keep looping by merging
+this 10GB ind1.bak into my master index. This gives me a good idea of my index merging/optimization
+cost as I merge the 10GB index into my master index. Each merge iteration is a separate Java
+process. I use the following API to merge in the 10GB index:
+
+IndexWriter.addIndexes (Directory[] dirs)
+
+ 
+
+I have plenty of disk space (1.7 TB). I am using JDK 1.5 on 64-bit Linux: 
+
+$ uname -srvio
+
+Linux 2.6.9-5.0.3.ELsmp #1 SMP Sat Feb 19 15:45:14 CST 2005 x86_64 GNU/Linux
+
+ 
+
+I can get to an index of size 70GB where the merge process takes 142 minutes. And so far,
+I have observed a linear increase in the time needed for each merge iteration. But my index
+merging slows down to a crawl when going from 70GB to 80GB during the process of creating
+the compound file (*.cfs file). The process was writing to disk at a rate of 1401 MB/minute
+with the CPU being relatively free. After a while, the process changes to the CPU being bound
+at 100% and the disk being written at a rate of 9MB/minute. There is plenty of disk space
+available  so I dont believe thats an issue. I have also seen larger files created on
+disk than the size of the CFS file when the slowdown happens. I have also reproduced this
+twice when trying to go from 70GB to 80GB - so maybe its some size related issue? I took several
+stack trace dumps (using kill -3) and they all show only one runnable thread, which is trying
+to write out the compound file:
+
+ 
+
+"main" prio=1 tid=0x0000000040115dc0 nid=0x48e5 runnable [0x0000007fbfffc000..0x0000007fbfffd400]
+
+        at java.io.RandomAccessFile.writeBytes(Native Method)
+
+        at java.io.RandomAccessFile.write(RandomAccessFile.java:456)
+
+        at org.apache.lucene.store.FSOutputStream.flushBuffer(FSDirectory.java:466)
+
+        at org.apache.lucene.store.OutputStream.flush(OutputStream.java:131)
+
+        at org.apache.lucene.store.OutputStream.writeByte(OutputStream.java:38)
+
+        at org.apache.lucene.store.OutputStream.writeBytes(OutputStream.java:49)
+
+        at org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java:206)
+
+        at org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java:163)
+
+        at org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java:152)
+
+        at org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:100)
+
+        at org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:487)
+
+        at org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:366)
+
+        - locked <0x0000002adf663e20> (a org.apache.lucene.index.IndexWriter)
+
+        at org.apache.lucene.index.IndexWriter.addIndexes(IndexWriter.java:389)
+
+-         locked <0x0000002adf663e20> (a org.apache.lucene.index.IndexWriter)
+
+ 
+
+Besides wondering, what the heck is going on here, I guess my main questions are the following:
+
+1] Does my test case seem valid? Any reason why adding the same data over and over into the
+index would cause this sort of weird or abnormal behavior?
+
+2] Has anyone created a bigger size Lucene index when using the compound file format? Any
+reasons to believe that its a Lucene issue?
+
+3] Does this seem like a JVM issue? Since its always pointing to a native method, I am not
+really sure what to look for or debug.
+
+4] Anything on 64-bit Linux on AMD that might cause this issue?
+
+ 
+
+Thanks for all suggestions and comments,
+
+Lokesh
+
+ 
+

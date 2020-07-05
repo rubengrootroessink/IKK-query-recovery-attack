@@ -1,0 +1,162 @@
+FROM: David Causse <dcau...@spotter.com>
+SUBJECT: Re: InstantiatedIndex questions
+DATE: 8 Oct 2009
+
+On Tue, Oct 06, 2009 at 07:51:44PM +0200, Karl Wettin wrote:
+>
+> 6 okt 2009 kl. 18.54 skrev David Causse:
+>
+> David, your timing couldn't be better. Just the other day I proposed  
+> that we deprecate InstantiatedIndexWriter. The sum of the reasons to  
+> this is that I'm a bit lazy. Your mail makes me reconsider.
+>
+> https://issues.apache.org/jira/browse/LUCENE-1948
+
+Well, so you intended to make InstantiatedIndex impossible to use from
+scratch. What is very nice with the current implementation is that it
+conform to the "normal" lucene usage : index with IW and query with IR.
+It make it very easy to adopt your implementation with legacy
+applications.
+If it is immutable it's like String, I have to deal with
+StringBuffer/StringBuilder, that's nice in some ways but it has some
+drawbacks, it's maybe why all efficient internal analysis API in lucene
+permits the use of char[].
+
+So in the lucene world with II, RAMDirectory will be my StringBuilder,
+so I'll have to wrap InstantiatedIndex to use a RAMDirectory as a
+buffer. Like this :
+
+private IndexWriter buffer;
+private readerIsValid = false;
+private InstanciatedIndexReader reader;
+
+public IIWrapper(Analyzer a) {
+	buffer = new IndexWriter(new RAMDirectory(), a, MaxFieldLength.UNLIMITED);
+}
+
+public void /* writeLock */ addDocument(Document doc) {
+	buffer.addDocument(doc);
+	readerIsValid = false;
+}
+
+public IndexReader /* readLock */ getReader() {
+	if(!readerIsValid) {
+		/* writeLock */
+		reader = new InstantiadedIndex(buffer.getReader()).indexReaderFactory();
+		readerIsvalid = true;
+	}
+	return reader;
+}
+
+So I'll have best indexation time but the first query will suffer the
+IIR creation. It is maybe better than use IIW. But IMHO (as a user point
+of view) it's very convenient to have the choice of multiple store in
+lucene, and it's pretty cool to use them in the same way. If you take a look
+at MemoryIndex, description is very attractive but it's too far (again
+IMHO) from the lucene API.
+
+>
+> > On the index time InstantiatedIndex is behind RAMDirectory, but the  
+> > time
+>
+> Would you mind benchmarking some for me using your corpora? The issue  
+> suggests that people use the InstantiatedIndex(IndexReader) constructor 
+> to create the index rather than using InstantiatedIndexWriter. Is it way 
+> slower for you to produce the index using RAMDirectory/IndexWriter and 
+> pass an IndexReader to InstantiatedIndex?
+>
+>
+> This is what the package level javadocs says about  
+> InstantiatedIndexWriter:
+>
+> "Hardly any effort has been put in to optimizing the  
+> InstantiatedIndexWriter, only minimizing the amount of time needed to  
+> write-lock the index has been considered."
+>
+> I'm sure there are ways to speed it up, I just never managed to find the 
+> time to look in to it. I never really used IIW.
+
+We've processed huge number of documents and didn't see any problems.
+But we don't use all the possibilities lucene stores have to offer.
+
+>
+>
+> It might be worth mentioning that when InstantiatedIndex#commit returns 
+> it has yeilded an optimized "single segment" index. This is not quite how 
+> a Directory/IndexWriter acts.
+
+When I have some times I'll try to bench our system without IIW.
+
+>
+> > gained over queries make it better (for what I see it can be 2 times
+> > faster).
+> >
+> > InstantiatedIndex will be our default volatile mini index store for  
+> > our
+> > next production release.
+>
+> Very cool!!
+>
+> > Whe should have other needs of this index but the lack of addIndexes
+> > support make it impossible for us to use it in other situations. So we
+> > continue to use RAMDirectory in such situations.
+>
+> Have you considered using multiple InstantiatedIndex and a MultiReader? 
+> That would pretty much be the same thing, just that the store wouldn't be 
+> quite as optimized. It would definitly use more RAM than if it was the 
+> same index. You could of course also pass this MultiReader to a new 
+> InstantiatedIndex. I have no real clue about the difference in speed and 
+> RAM consuption between these solutions so you should benchmark all 
+> solutions.
+
+Well, in fact with 2.9 there is awesome number of solutions for us.  We
+might try the new getReader() on IW, we didn't use MultiReader but it
+seems to be a very convenient solution also. I have to take time to think
+about it.
+
+Just a side note for other users who may think about using
+InstantiadedIndex, we've seen that our process that use II can be as I
+said 2 times faster. You have to consider that it is exactly if I said,
+"Hey I switched from MySQL to PostgreSQL and my app is 2 times faster". 
+
+>
+> > Do you think we could reach RAMDirectory index time by tweaking some  
+> > initialCap
+> > stuff inside java.util.Collections you use?
+>
+>
+> Maybe. But I think it would be a relatively small gain. But don't take  
+> my words for granted, benchmark it.
+>
+> Using the InstantiatedIndex(IndexReader) constructor will create rather 
+> optimal size of the collections.
+>
+> As for InstantiatedIndexWriter I think it's pretty much only the  
+> transient collections in #commit that will help you, my guess is that  
+> you should expemient with the dirtyTerms and termsByText attributes.  
+> Count the number of terms in your complete index and see how much it  
+> speeds thing up by creating the collections with this size from the  
+> start.
+
+Well I had a quick look to IIW and your collections size are already near our
+average.
+
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+-- 
+David Causse
+Spotter
+http://www.spotter.com/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

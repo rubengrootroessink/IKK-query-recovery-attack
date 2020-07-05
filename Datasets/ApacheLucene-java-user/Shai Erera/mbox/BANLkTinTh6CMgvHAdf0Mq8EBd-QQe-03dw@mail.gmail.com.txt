@@ -1,0 +1,126 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: multiple small indexes or one big index?
+DATE: 2 Jun 2011
+
+>
+> All indexes together are rather small, ~200MB and 50.000 documents.
+
+
+Then I would definitely consider merging them under one index. Even if you
+don't close the searcher, it will still require 90 x N ms to search them,
+N=ms to search one index.
+
+Also, multi-threading will improve, but only up to a point - because you
+cannot parallelize 90 searches (unless you have some sort of super-computer
+there).
+
+On the other hand, if you merge them into one index then you'll be talking
+about an index that's <20GB and <5M docs, which is definitely reasonable for
+Lucene and performance (depends of course on the search application, but
+generally) is very good.
+
+Starting Lucene 3.1 you can perform your searches in parallel (over one
+index) using IndexSearcher, which comes in handy if your index has multiple
+segments. Look at
+http://lucene.apache.org/java/3_1_0/api/core/org/apache/lucene/search/IndexSearcher.html#IndexSearcher(org.apache.lucene.index.IndexReader,
+java.util.concurrent.ExecutorService).
+
+Having said that, keeping the indexes separate may have advantages that your
+application needs. For example, if those indexes are completely rebuilt very
+frequently, then it's much better to delete and index and rebuild, then to
+delete 50K docs from the merged large index. But that really depends on your
+application needs.
+
+I'd say, if you don't see a strong case for keeping them apart, merge them
+into one. Besides performance, there's also index management overhead, maybe
+synchronizing commits, making sure all are closed/opened together etc., that
+may just be an unnecessary overhead.
+
+BTW, in Lucene in Action 2nd Edition, there's an example class called
+SearcherManager which manages IndexSearcher instances and ensures an
+IndexSearcher instance is closed only after the last thread released it + it
+can manage the reopen() logic for you as well as warming up the index. You
+might want to give it a try too !
+LUCENE-2955<https://issues.apache.org/jira/browse/LUCENE-2955> makes
+use of it, so you can consult it for examples (it's still not committed).
+
+Hope this helps,
+Shai
+
+On Thu, Jun 2, 2011 at 12:37 AM, Alexander Rosemann <
+alexander.rosemann@gmail.com> wrote:
+
+> Many thanks for the tips, Erick! I do close each searcher after a search...
+> I will change that first thing tmrw. and let you know how that went.
+> Multi-threaded searching will be next and if that hasn't helped, I will
+> switch to one big index.
+> All indexes together are rather small, ~200MB and 50.000 documents.
+>
+> -Alex
+>
+>
+> On 01.06.2011 23:26, Erick Erickson wrote:
+>
+>> I'd start by putting them all in one index. There's no penalty
+>> in Lucene for having empty fields in a document, unlike an
+>> RDBMS.
+>>
+>> Alternately, if you're opening then closing searchers each
+>> time, that's very expensive. Could you open the searchers
+>> once and keep them open (all 90 of them)? That alone might
+>> do the trick and be less of a change to your program. You
+>> could also fire multiple threads at the searches, but check if
+>> you're CPU bound first (if you are, multiple threads won't
+>> help much/at all).
+>>
+>> You haven't said how big these indexes are nor how many
+>> documents you're talking about here, so this advice is suspect.
+>>
+>> Do look at putting it all in one index though, let us know if you
+>> have some data indicating how big stuff is/would be.
+>>
+>> Best
+>> Erick
+>>
+>> On Wed, Jun 1, 2011 at 4:35 PM, Alexander Rosemann
+>> <alexander.rosemann@gmail.com>  wrote:
+>>
+>>> Hi all, I was wondering whether you could give me some advice on how to
+>>> improve my search performance.
+>>>
+>>> I have 90 lucene indexes, each having different fields (~5 per Document).
+>>> When I search, I always have to go through all indexes to build my result
+>>> set. Searching one index takes approx. 100ms, thus searching all indexes
+>>> takes 9s in total.
+>>>
+>>> How can I reduce the time it needs to search?
+>>>
+>>> I decided to create this many indexes because putting all data in one
+>>> index
+>>> would mean that a document would have ~400 fields, with most of them left
+>>> empty. Is that ok? Would a single index be faster compared to multiple
+>>> small
+>>> ones?
+>>>
+>>> Any pointers are much appreciated.
+>>>
+>>> Regards,
+>>> Alex
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

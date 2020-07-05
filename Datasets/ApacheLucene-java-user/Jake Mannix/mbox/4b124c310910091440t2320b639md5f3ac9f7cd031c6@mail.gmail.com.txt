@@ -1,0 +1,229 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: Question about how to speed up custom scoring
+DATE: 9 Oct 2009
+
+Hey Scott,
+
+  I'm still not sure I understand what your dynamic boosts are for: they
+are the names of fields, right, not terms in the fields?  So in terms
+of your example { company = microsoft, city = redmond, size = big },
+the three possible choices for keys in your map are company, city,
+or size, right?
+
+  So if you passed in { company => 0.5, size => 0.3 } as your map,
+how would you compute the score for the two documents
+
+  { company: microsoft, city: redmond, size: big } and
+  { company: google, city: mountain view, size: big }
+
+Where is the Float that you have stored in the doc, that you're
+accessing via Float.parseFloat( document.get(fieldName) ) ?
+
+  So is it that you have fields in the index, which basically contain
+numeric data, and then you want to multiply those indexed floats
+by query-time values to make the score?
+
+  I'm sorry if I'm not fully following how this works.  Can you restate
+your example showing what you have in the index, and what comes
+in in the query?
+
+  -jake
+
+On Fri, Oct 9, 2009 at 2:18 PM, scott w <scottblanc@gmail.com> wrote:
+
+> (Apologies if this message gets sent more than once. I received an error
+> sending it the first two times so sent directly to Jake but reposting to
+> group.)
+> Hi Jake --
+>
+> Thanks for the feedback.
+>
+> What I am trying to implement is a way to custom score documents using a
+> scoring function that takes as input a map of fields (which may or may not
+> be in any given document) and weights for those fields supplied at query
+> time, and outputs an aggregate score that is based on taking the numeric
+> field weights that are already stored and indexed and then readjusting
+> those
+> weights based on the map.
+>
+> Another thing I would like to do is the same thing but for fields that do
+> not have weights associated with them in the index and so the query time
+> supplied weights essentially get used directly instead of adjusting the
+> already indexed weights.
+>
+> You can think of this is as implementing a form of personalization where
+> you
+> have a default set of weights and you want to adjust them on the fly
+> although our use case is a little different.
+>
+> thanks,
+> Scott
+>
+> On Fri, Oct 9, 2009 at 10:40 AM, Jake Mannix <jake.mannix@gmail.com>
+> wrote:
+>
+> > Scott,
+> >
+> >  To reiterate what Erick and Andrzej's said: calling
+> > IndexReader.document(docId)
+> > in your inner scoring loop is the source of your performance problem -
+> > iterating
+> > over all these stored fields is what is killing you.
+> >
+> >  To do this a better way, can you try to explain exactly what this Scorer
+> > is
+> > supposed to be doing?  You're extending CustomScoreQuery and which
+> > is usually used with ValueSourceQuery, but you don't use that part, and
+> > ignore the valSrcScore in your computation.
+> >
+> >  Where are the parts of your score coming from?  The termWeight map
+> > is used how exactly?
+> >
+> >  -jake
+> >
+> > On Fri, Oct 9, 2009 at 10:30 AM, scott w <scottblanc@gmail.com> wrote:
+> >
+> > > Thanks for the suggestions Erick. I am using Lucene 2.3. Terms are
+> stored
+> > > and given Andrzej's comments in the follow up email sounds like it's
+> not
+> > > the
+> > > stored field issue. I'll keep investigating...
+> > >
+> > > thanks,
+> > > Scott
+> > >
+> > > On Thu, Oct 8, 2009 at 8:06 AM, Erick Erickson <
+> erickerickson@gmail.com
+> > > >wrote:
+> > >
+> > > > I suspect your problem here is the line:
+> > > > document = indexReader.document( doc );
+> > > >
+> > > > See the caution in the docs
+> > > >
+> > > > You could try using lazy loading (so you don't load all
+> > > > the terms of the document, just those you're interested
+> > > > in). And I *think* (but it's been a while) that if the terms
+> > > > you load are indexed that'll help. But this is mostly
+> > > > a guess.
+> > > >
+> > > > What version of Lucene are you using???
+> > > >
+> > > > Good luck!
+> > > > Erick
+> > > >
+> > > > On Thu, Oct 8, 2009 at 10:56 AM, scott w <scottblanc@gmail.com>
+> wrote:
+> > > >
+> > > > > Oops, forgot to include the class I mentioned. Here it is:
+> > > > >
+> > > > > public class QueryTermBoostingQuery extends CustomScoreQuery {
+> > > > >  private Map<String, Float> queryTermWeights;
+> > > > >  private float bias;
+> > > > >  private IndexReader indexReader;
+> > > > >
+> > > > >  public QueryTermBoostingQuery( Query q, Map<String, Float>
+> > > termWeights,
+> > > > > IndexReader indexReader, float bias) {
+> > > > >    super( q );
+> > > > >    this.indexReader = indexReader;
+> > > > >    if (bias < 0 || bias > 1) {
+> > > > >      throw new IllegalArgumentException( "Bias must be between 0
+> and
+> > 1"
+> > > > );
+> > > > >    }
+> > > > >    this.bias = bias;
+> > > > >    queryTermWeights = termWeights;
+> > > > >  }
+> > > > >
+> > > > >  @Override
+> > > > >  public float customScore( int doc, float subQueryScore, float
+> > > > valSrcScore
+> > > > > ) {
+> > > > >    Document document;
+> > > > >    try {
+> > > > >      document = indexReader.document( doc );
+> > > > >    } catch (IOException e) {
+> > > > >      throw new SearchException( e );
+> > > > >    }
+> > > > >    float termWeightedScore = 0;
+> > > > >
+> > > > >    for (String field : queryTermWeights.keySet()) {
+> > > > >      String docFieldValue = document.get( field );
+> > > > >      if (docFieldValue != null) {
+> > > > >        Float weight = queryTermWeights.get( field );
+> > > > >        if (weight != null) {
+> > > > >          termWeightedScore += weight * Float.parseFloat(
+> > docFieldValue
+> > > );
+> > > > >        }
+> > > > >      }
+> > > > >    }
+> > > > >    return bias * subQueryScore + (1 - bias) * termWeightedScore;
+> > > > >   }
+> > > > > }
+> > > > >
+> > > > > On Thu, Oct 8, 2009 at 7:54 AM, scott w <scottblanc@gmail.com>
+> > wrote:
+> > > > >
+> > > > > > I am trying to come up with a performant query that will allow
+me
+> > to
+> > > > use
+> > > > > a
+> > > > > > custom score where the custom score is a sum-product over a
+set
+> of
+> > > > query
+> > > > > > time weights where each weight gets applied only if the query
+> time
+> > > term
+> > > > > > exists in the document . So for example if I have a doc with
+> three
+> > > > > fields:
+> > > > > > company=Microsoft, city=Redmond, and size=large, I may want
+to
+> > score
+> > > > that
+> > > > > > document according to the following function: city==Microsoft
+?
+> .3
+> > :
+> > > 0
+> > > > *
+> > > > > > size ==large ? 0.5 : 0 to get a score of 0.8. Attached is a
+> > subclass
+> > > I
+> > > > > have
+> > > > > > tested that implements this with one extra component which is
+> that
+> > it
+> > > > > allow
+> > > > > > the relevance score to be combined in.
+> > > > > >
+> > > > > > The problem is this custom score is not performant at all. For
+> > > example,
+> > > > > on
+> > > > > > a small index of 5 million documents with 10 weights passed
+in it
+> > > does
+> > > > > 0.01
+> > > > > > req/sec.
+> > > > > >
+> > > > > > Are there ways to make to compute the same custom score but
+in a
+> > much
+> > > > > more
+> > > > > > performant way?
+> > > > > >
+> > > > > > thanks,
+> > > > > > Scott
+> > > > > >
+> > > > >
+> > > >
+> > >
+> >
+>
+

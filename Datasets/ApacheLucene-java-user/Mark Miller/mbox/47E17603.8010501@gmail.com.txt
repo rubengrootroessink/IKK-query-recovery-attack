@@ -1,0 +1,85 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: java.lang.OutOfMemoryError: Java heap space when sorting the fields
+DATE: 19 Mar 2008
+
+Heres what happens: in order to sort all of the hits you get back on a 
+field, you need to get the value of that field for comparisons right? 
+Well it turns out that reading a field value from the index is pretty 
+slow (its on the disk after all)...so Lucene will read all of the terms 
+in the field off disk once (on the first sort/search request) and cache 
+them. So if your field is an Int your talking numDocs*32 bits for your 
+cache. For a Long field its numDocs*64. For a String field Lucene caches 
+a String array with every unique term and then an int array indexing 
+into the term array.
+
+You might think, if I only ask for the top 10 docs, don't i only read 10 
+field values? But of course you don't know what docs will be returned as 
+each search comes in...so you have to cache them all.
+Like the other answer said, one field is going to be roughly 50 MB. You 
+can do the math yourself...I ripped the 40 doing some rough stuff in my 
+head, but around 50mb is prob closer.
+
+So anyway, you *are* only sorting on the hits you get back...but youll 
+get different hits all the time so you still have to cache all the field 
+values. The FieldCache class does this, and thats whats taking up the 
+RAM. You should have 50 to give it though I would assume...how much RAM 
+are you giving the JVM?
+
+- mark
+
+sandyg wrote:
+> Hi,
+> And is it not passibe to sort on the result we get instead of on all the
+> values like
+> Hits       hits = searcher.search(query);
+> and it will be good if got sorting on the hits i.e on the result
+> because my sorting is based on specific  field and that field should be
+> sorted when i click on it.
+> thanks for the reply
+>
+>
+> markrmiller wrote:
+>    
+>> To sort on 13mil docs will take like at least 400 mb for the field
+>> cache. Thats if you only sort on one field...it can grow fast if you
+>> allow multi field sorting.
+>>
+>> How much RAM are you giving your app?
+>>
+>> sandyg wrote:
+>>      
+>>> this is my search content
+>>>
+>>> QueryParser parser = new QueryParser("keyword",new StandardAnalyzer());
+>>> Query query = parser.parse("1");
+>>>
+>>> Sort sort = new Sort(new SortField(sortField));
+>>>            Hits       hits = searcher.search(query,sort);
+>>>
+>>> And i had huge data about 13 millions of records
+>>> i am not sure y its giving outof memory exception and
+>>> no exception when no sorting is done
+>>> plz some one help me yar
+>>>
+>>> and also if to increase heap space how to increase it programatically i
+>>> had
+>>> command prompt
+>>> java -Xms<initial heap size>   -Xmx<maximum heap size>
+>>> please.....
+>>>
+>>>        
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>      
+>
+>    
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

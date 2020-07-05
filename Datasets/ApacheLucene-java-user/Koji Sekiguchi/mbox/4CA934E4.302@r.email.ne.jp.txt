@@ -1,0 +1,71 @@
+FROM: Koji Sekiguchi <k...@r.email.ne.jp>
+SUBJECT: question about Scorer.freq()
+DATE: 4 Oct 2010
+
+Hello,
+
+I'd like to know which field got hit in each doc in the hit results.
+To implement it, I thought I could use Scorer.freq() which
+was introduced 3.1/4.0:
+
+https://issues.apache.org/jira/browse/LUCENE-2590
+
+But I didn't become successful so far. What I did is:
+
+- in each visit methods in MockScorerVisitor (borrowed TestSubScorerFreqs),
+  if child query is TermQuery (for simple PoC), add the pair of
+  child query and scorer in a collection:
+
+    if (collect.contains(Occur.MUST_NOT) && child instanceof TermQuery)
+      tqsSet.add( new TermQueryScorer( (TermQuery)child, scorer ) );
+
+  where tqsSet is:
+
+    Set<TermQueryScorer> tqsSet = new HashSet<TermQueryScorer>();
+
+  and TermQueryScorer is:
+
+    private static class TermQueryScorer {
+      private TermQuery query;
+      private Scorer scorer;
+      public TermQueryScorer( TermQuery query, Scorer scorer ){
+        this.query = query;
+        this.scorer = scorer;
+      }
+    }
+
+- in collector.collect() method:
+
+    public void collect(int doc) throws IOException {
+      int freq = 0;
+      for( TermQueryScorer tqs : tqsSet ){
+        Scorer scorer = tqs.scorer;
+        int matchId = scorer.docID();
+        if( matchId == doc ){
+          freq += scorer.freq();
+        }
+      }
+      docCounts.put(doc + docBase, freq);
+      collector.collect(doc);
+    }
+
+But freq was always zero.
+
+In collect() method of TestSubScorerFreqs, scorer is BooleanScorer2,
+then the matchId == doc condition is true. But in my case, matchId which is
+got from TermScorer never equal to doc.
+
+Can I use the feature of LUCENE-2590 to know not only freq but also
+which field got hit?
+
+Thank you,
+
+Koji
+-- 
+http://www.rondhuit.com/en/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

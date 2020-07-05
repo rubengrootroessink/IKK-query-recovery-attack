@@ -1,0 +1,80 @@
+FROM: "Vanlerberghe, Luc" <Luc.Vanlerber...@bvdep.com>
+SUBJECT: RE: live update of index used by Tomcat
+DATE: 20 Sep 2005
+
+You should keep your IndexReader open until the merge has finished, but
+also until there are no more Hits Objects that depend on it (tricky in
+multithreaded environments like tomcat).
+
+The fact that the files cannot be deleted immediately after the merge is
+no problem.  The filenames will be stored in the file 'deletable' and
+Lucene will attempt to delete them on the next IndexWriter action (or so
+I assume).
+New IndexReader instances will only open the new files.
+
+I solved the problem like this:
+
+Objects that need the results of a search get an IndexSearcher instance
+from a factory, do the search, use the Hits Object and then close the
+IndexSearcher instance. That is, they behave as if they are using a
+single new IndexReader each time.
+
+The factory doesn't pass a Lucene IndexSearcher Object, but an instance
+of a class called "DelayCloseIndexSearcher" that extends IndexSearcher.
+The same instance is passed to all callers until a change in index
+version is detected (using IndexReader.getCurrentVersion()), but each
+time its usage count is incremented.
+DelayCloseIndexSearcher overrides the close() method so it does not
+close immediately: it only decrements the usage counter.  Only when the
+factory signals that it has become obsolete (by calling mayClose()) and
+after the usage count has dropped to 0, it calls super.close();
+
+In my current implementation the factory checks if the index has changed
+every time an IndexSearcher is required, but this could be changed to
+happen only every few seconds, or even in a separate thread so no
+searchers are blocked while the next DelayCloseIndexSearcher instance is
+opening...
+
+I can post the code and testcases if you're interested.
+
+Luc
+
+
+-----Original Message-----
+From: Daniel Naber [mailto:lucenelist@danielnaber.de] 
+Sent: maandag 19 september 2005 20:49
+To: java-user@lucene.apache.org
+Subject: live update of index used by Tomcat
+
+Hi,
+
+I need to merge two indexes into one which is accessed by a Searcher in 
+Tomcat. Tomcat keeps the searcher (or reader) open for good performance.
+
+However, on Windows you cannot delete a file when it's opened for
+reading, 
+so I cannot do the merge while Tomcat is running and the reader is open.
+
+But I don't want to shut down Tomcat or close the reader (not even for
+10 
+seconds) because the search needs to be up all the time. Does anybody
+have 
+a clever solution for this problem?
+
+Regards
+ Daniel
+
+-- 
+http://www.danielnaber.de
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,288 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: deletion of index-files fails
+DATE: 7 Mar 2009
+
+
+OK I'll go make IndexReader.getRefCount() public for 2.9.
+
+Mike
+
+rolarenfan@earthlink.net wrote:
+
+> FWIW, +1 from me on all this: when I started poking at my little  
+> problem I found as you said that there was really no way to trace  
+> the issue (one can use the debugger of course and I did, which is  
+> how I found the problem). So, getRefCount() would be good!
+>
+> thanks,
+> Paul
+>
+> -----Original Message-----
+>> From: Erick Erickson <erickerickson@gmail.com>
+>> Sent: Mar 6, 2009 9:01 PM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: deletion of index-files fails
+>>
+>> OK, I understand now. Like I said, anything you deem appropriate.
+>>
+>> Best
+>> Erick
+>>
+>> On Fri, Mar 6, 2009 at 5:45 PM, Michael McCandless <
+>> lucene@mikemccandless.com> wrote:
+>>
+>>> If we changed the signature (return value) then on dropping in the  
+>>> JAR
+>>> you'd have to recompile your code, which violates our back compat  
+>>> goals, ie
+>>> "drop in JAR and run".
+>>>
+>>> Mike
+>>>
+>>>
+>>> Erick Erickson wrote:
+>>>
+>>> Why would it break back compat?
+>>>> They just return void now, so
+>>>>
+>>>> IndexReader.incRef();
+>>>>
+>>>> should still compile/run.
+>>>>
+>>>> But that's arguing about angels dancing on pins. My real issue
+>>>> is that by not allowing *some* mechanism to get the refcount
+>>>> developers don't have any tools for figuring out that it's a  
+>>>> refcount
+>>>> issue,
+>>>> so exposing getRefCount() would satisfy that need.
+>>>>
+>>>> I'll totally defer to folks who actually maintain code to
+>>>> cast the deciding ballot.
+>>>>
+>>>> Best
+>>>> Erick
+>>>>
+>>>> On Fri, Mar 6, 2009 at 2:10 PM, Michael McCandless <
+>>>> lucene@mikemccandless.com> wrote:
+>>>>
+>>>>
+>>>>> Yes ref counts are tricky, though these are expert APIs.
+>>>>>
+>>>>> I think changing close, incRef, decRef to return the RC would be  
+>>>>> good,
+>>>>> though that breaks back compat.
+>>>>>
+>>>>> How about exposing getRefCount() instead?
+>>>>>
+>>>>> Mike
+>>>>>
+>>>>>
+>>>>> Erick Erickson wrote:
+>>>>>
+>>>>> Hmmmm, reference counting is always yucky. I looked
+>>>>>
+>>>>>> the IndexReader javadocs over and there isn't any help
+>>>>>> there for managing refcounts. You can't find the current
+>>>>>> refcount, close doesn't indicate the results, etc. Or I
+>>>>>> missed, for the Nth time, perfectly obvious documentation.
+>>>>>>
+>>>>>> What do people think about one or more of these options?
+>>>>>> 1> have IndexReader.close() return some indication
+>>>>>> of what the resulting refcount is. I.e. "did the reader
+>>>>>> *really* close.
+>>>>>> 2> have decRef do the same.
+>>>>>> 3> have incRef do the same (although this seems less useful).
+>>>>>>
+>>>>>>
+>>>>>> It's really, really hard to insure your reference counting is
+>>>>>> correct solely by code inspection <G>!
+>>>>>>
+>>>>>> yeah, yeah, yeah, this probably belongs on the dev list.
+>>>>>> I'll be happy to put it over there and/or raise a JIRA...
+>>>>>>
+>>>>>> Best
+>>>>>> Erick
+>>>>>>
+>>>>>> On Fri, Mar 6, 2009 at 11:40 AM, Michael McCandless <
+>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>
+>>>>>>
+>>>>>> OK, phew!  Thanks for bringing closure.
+>>>>>>>
+>>>>>>> Mike
+>>>>>>>
+>>>>>>>
+>>>>>>> rolarenfan@earthlink.net wrote:
+>>>>>>>
+>>>>>>> I did just now double/triple-check: the IndexWriter is  
+>>>>>>> definitely
+>>>>>>> closed.
+>>>>>>>
+>>>>>>>
+>>>>>>>> However (cough), I did have a bogus call to  
+>>>>>>>> IndexReader.incRef() ...
+>>>>>>>> once
+>>>>>>>> I removed that, the call to IndexReader.close() actually
+ 
+>>>>>>>> worked and
+>>>>>>>> then
+>>>>>>>> the
+>>>>>>>> deletion did so too. Thanks; sorry to trouble you.
+>>>>>>>>
+>>>>>>>> -Paul
+>>>>>>>>
+>>>>>>>> -----Original Message-----
+>>>>>>>>
+>>>>>>>> From: Michael McCandless <lucene@mikemccandless.com>
+>>>>>>>>
+>>>>>>>>> Sent: Mar 6, 2009 4:23 AM
+>>>>>>>>> To: java-user@lucene.apache.org
+>>>>>>>>> Cc: rolarenfan@earthlink.net
+>>>>>>>>> Subject: Re: deletion of index-files fails
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> If truly the IndexWriter & all IndexReaders are closed,
+then  
+>>>>>>>>> they
+>>>>>>>>> should no longer be holding open files.  Maybe triple
+check  
+>>>>>>>>> that
+>>>>>>>>> you've indeed closed everything.
+>>>>>>>>>
+>>>>>>>>> It's remotely possible that some other process (virus
+ 
+>>>>>>>>> checker, source
+>>>>>>>>> control clients, etc) has the file open.
+>>>>>>>>>
+>>>>>>>>> You could try Microsoft's (formerly sysinternals) "Process
+ 
+>>>>>>>>> Monitor"
+>>>>>>>>> to
+>>>>>>>>> see which processes have the files open.
+>>>>>>>>>
+>>>>>>>>> Mike
+>>>>>>>>>
+>>>>>>>>> Ian Lea wrote:
+>>>>>>>>>
+>>>>>>>>> What OS are you running?  What version of lucene?  Are
+you  
+>>>>>>>>> sure that
+>>>>>>>>>
+>>>>>>>>> you have privilege to delete the files that it is failing
+ 
+>>>>>>>>> on? That
+>>>>>>>>>> they are part of the index you are trying to remove?
+ That  
+>>>>>>>>>> something
+>>>>>>>>>> else doesn't have the files open?
+>>>>>>>>>>
+>>>>>>>>>> It seems likely that you are on Windows and that
+something is
+>>>>>>>>>> holding
+>>>>>>>>>> on to the files. I believe that Windows won't let
+you  
+>>>>>>>>>> delete open
+>>>>>>>>>> files.  You could try calling File.deleteOnExit()
+for the  
+>>>>>>>>>> index
+>>>>>>>>>> files.
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> --
+>>>>>>>>>> Ian.
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> On Fri, Mar 6, 2009 at 2:19 AM,  <rolarenfan@earthlink.net>
+ 
+>>>>>>>>>> wrote:
+>>>>>>>>>>
+>>>>>>>>>> So, I have a (small) Lucene index, all fine; I use
+it a  
+>>>>>>>>>> bit, and
+>>>>>>>>>>
+>>>>>>>>>>> then (on app shutdown) want to delete its files
+and the  
+>>>>>>>>>>> containing
+>>>>>>>>>>> directory (the index is intended as a temp object).
+At  
+>>>>>>>>>>> some earlier
+>>>>>>>>>>> time this was working just fine, using  
+>>>>>>>>>>> java.io.File.delete(). Now
+>>>>>>>>>>> however, some of the files get deleted (segments*)
+whereas  
+>>>>>>>>>>> others
+>>>>>>>>>>> fail (no Exn is thrown, just java.io.File.delete()
+returns  
+>>>>>>>>>>> false:
+>>>>>>>>>>> _0.cfs, _0.cfx). I've tried closing the IndexReader
+(no  
+>>>>>>>>>>> IndexWriter
+>>>>>>>>>>> exists at shutdown), but that makes no diff.
+>>>>>>>>>>>
+>>>>>>>>>>> Any ideas?
+>>>>>>>>>>>
+>>>>>>>>>>> thanks
+>>>>>>>>>>> Paul
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>
+>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>
+>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>> help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,119 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Syncing lucene index with a database
+DATE: 26 Mar 2009
+
+You've got a great grasp of the issues, comments below. But before you
+do, a lot of this kind if thing is incorporated in SOLR, which is build on
+Lucene. Particularly updating an index then using it.
+So you might take a look over there. It even has a DataImportHandler...
+
+WARNING: I've only been monitoring the SOLR list, not using it so
+take anything I mention about SOLR with a grain of salt.
+
+On Thu, Mar 26, 2009 at 6:28 PM, Matt Schraeder <MSchraeder@btsb.com> wrote:
+
+> I'm new to Lucene and just beginning my project of adding it to our web
+> app.  We are indexing data from a MS SQL 2000 database and building
+> full-text search from it.
+>
+
+How many rows/columns are we talking here? the answer for
+100,000,000 is different than for 1,000.
+
+
+>
+> Everything I have read says that building the index is a resource heavy
+> operation so we should use it sparingly.  For the most part the database
+> table we are working from is updated once a day so as soon as the table
+> itself is updated we can rebuild our Lucene indexes.  However, there are
+> a few feilds that get updated with a cronjob every 15 minutes.  In terms
+> of speed and efficiency, what would be a better system for keeping our
+> data synced between the database and Lucene?
+>
+
+How many fields is this? And are they searched or displayed? Both?
+Neither? If you don't search these fields, you could keep an auxiliary index
+with your primary key and the new fields. For that matter, if it was
+a small enough amount of data you could keep it in an internal map
+keyed by your DB unique id. Size matters here.....
+
+
+>
+> Of course one option would be to rebuild the Lucene index each time the
+> cronjob runs to keep the database and Lucene index synced.  We could
+> either return the entire database table, loop through the rows, get a
+> row's document in lucene remove/readd it, and do that for each row.
+> Alternatively after we update the main table we return just the rows
+> that were changed, loop through those and remove/readd them in lucene,
+> and do that for just the rows that have changed.
+
+
+I wouldn't rebuild the entire index, just the changed rows. Assuming that
+your 15 minute deltas aren't for a large percentage of the rows.
+
+
+>
+>
+> Alternatively I have thought of using Lucene purely for search to
+> return just the primary key of items from our database table, then query
+> the database for those items and get the most up to date data from the
+> database to actually display our search results.  This would let us use
+> Lucene's superior searching capabilities and searching speed, but would
+> still require us to pull the data to be displayed from the database.
+>
+
+This may be a fine choice. What is the throughput you expect to have to
+satisfy? 1 qpm or 1000 qps? And how many rows of results do you expect
+to display? How fast can you get rows from the DB? I can imagine
+you could write a pretty simple test harness and determine how much
+added overhead getting info from the DB would account for and see if
+that passes a threshold for user angst given a reasonable approximation
+of throughput.
+
+
+>
+> Another option is that we could do the same, but only return the fields
+> that could change frequently.  This would use Lucene to store and index
+> the majority of what is displayed on a search results page, only using
+> the database to return the 2 or 3 fields that might change in a search
+> for each row that lucene returns.
+>
+
+Possible, but it really depends upon whether the difference between
+fetching a few fields really shows up compared to fetching them all. Which
+in turn depends upon the answers for some of the questions above.
+
+
+>
+> I'm honestly not sure what the "proper" choice should be, or if it
+> really depends on our own test cases.  Is it perfectly okay to run an
+> index update every 15 minutes?
+
+
+It depends (tm). How long does it take to build the index in the first
+place? You could conceivably have a background process that builds
+the index every 15 minutes, copies the resulting files to "the right place",
+and notifies your searcher to close the old IndexReaders and open the
+new one, possibly firing up a few warmup searches first. The viability
+here really depends on how long it takes.
+
+
+
+> How much difference would it make in
+> terms of search time to search with lucene AND pull from the database?
+
+
+If you run the test above for just fetching from the DB, that would pretty
+much be your delta,
+
+
+>
+> My main issue with searching with lucene but getting the actual data
+> from the database is that it seems like that would make our current
+> search system that is entirely database driven to run slower.
+>
+
+Maybe, maybe not. Being driven entirely from the database, especially for
+full text searches (depending upon the nature of your data) can be very
+expensive. I'm afraid you'll have to try it....
+

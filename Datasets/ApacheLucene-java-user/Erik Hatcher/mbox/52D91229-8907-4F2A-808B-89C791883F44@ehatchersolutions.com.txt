@@ -1,0 +1,93 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: regex queries
+DATE: 12 Nov 2005
+
+For a consulting engagement, the client needed the ability to query  
+using regular expressions.  I was given permission to contribute it  
+to Lucene and have just committed it to the trunk.  This is not  
+revolutionary at all, and is implemented in the same manner that  
+WildcardQuery is implemented except that the matching uses regular  
+expressions instead of just basic */? matching.  This implementation  
+carries with it the same performance caveats that WildcardQuery has,  
+and is possibly even slower than WildcardQuery for the same types of  
+expressions (I haven't benchmarked it - it isn't meant to replace  
+WildcardQuery as the pattern syntax is different anyway).
+
+Here is a test case showing RegexQuery in action:
+
+public class TestRegexQuery extends TestCase {
+   public void testRegex() throws Exception {
+     RAMDirectory directory = new RAMDirectory();
+     IndexWriter writer = new IndexWriter(directory, new  
+SimpleAnalyzer(), true);
+     Document doc = new Document();
+     doc.add(new Field("field", "the quick brown fox jumps over the  
+lazy dog", Field.Store.NO, Field.Index.TOKENIZED));
+     writer.addDocument(doc);
+     writer.optimize();
+     writer.close();
+
+     IndexSearcher searcher = new IndexSearcher(directory);
+     Query query = new RegexQuery(new Term("field", "q.[aeiou]c.*"));
+     Hits hits = searcher.search(query);
+     assertEquals(1, hits.length());
+   }
+}
+
+The standard Java 1.4 built-in regex Pattern matching is used under  
+the covers.
+
+Beyond the basic RegexQuery, there is also a SpanRegexQuery allowing  
+for sophisticated expressions using spans and regular expression  
+matching all together, as shown in this test case:
+
+public class TestSpanRegexQuery extends TestCase {
+   public void testSpanRegex() throws Exception {
+     RAMDirectory directory = new RAMDirectory();
+     IndexWriter writer = new IndexWriter(directory, new  
+SimpleAnalyzer(), true);
+     Document doc = new Document();
+     doc.add(new Field("field", "the quick brown fox jumps over the  
+lazy dog", Field.Store.NO, Field.Index.TOKENIZED));
+     writer.addDocument(doc);
+     writer.optimize();
+     writer.close();
+
+     IndexSearcher searcher = new IndexSearcher(directory);
+     SpanRegexQuery srq = new SpanRegexQuery(new Term("field", "q. 
+[aeiou]c.*"));
+     SpanTermQuery stq = new SpanTermQuery(new Term("field","dog"));
+     SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {srq,  
+stq}, 6, true);
+     Hits hits = searcher.search(query);
+     assertEquals(1, hits.length());
+   }
+}
+
+There is one fiddlying improvement that is needed under the covers.   
+For this type of query, as with WildcardQuery also, it is vastly more  
+efficient to find the maximum prefix of the regex expression that  
+does not contain any special regex characters in order to narrow down  
+the terms enumerated for consideration.  The current logic is a bit  
+too simplistic and error prone - it simply looks for first occurrence  
+of any of these characters: "*[?.", such that a query for "abc.*"  
+would start the term enumeration at "abc" in the term dictionary  
+rather than scanning all terms.  A pattern such as "abc\*" currently  
+breaks this logic and starts the term enumeration at "abc\" which is,  
+of course, incorrect.  If anyone would like to contribute code to  
+handle this better, I welcome it!
+
+Further on the use of regular expression searching - while this query  
+supports doing this on a standard index, if pattern (wildcard, regex)  
+querying is crucial to your application, consider using term rotation  
+during indexing and clever query creation to optimize further as it  
+can greatly improve query performance.
+
+     Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

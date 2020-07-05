@@ -1,0 +1,52 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: Problems with exact matces on non-tokenized fields...
+DATE: 26 Sep 2002
+
+karl øie wrote:
+> I have a Lucene Document with a field named "element" which is stored 
+> and indexed but not tokenized. The value of the field is "POST" 
+> (uppercase). But the only way i can match the field is by entering 
+> "element:POST?" or "element:POST*" in the QueryParser class.
+
+There are two ways to do this.
+
+If this must be entered by users in the query string, then you need to 
+use a non-lowercasing analyzer for this field.  The way to do this if 
+you're currently using StandardAnalyzer, is to do something like:
+
+   public class MyAnalyzer extends Analyzer {
+     private Analyzer standard = new StandardAnalyzer();
+     public TokenStream tokenStream(String field, final Reader reader) {
+       if ("element".equals(field)) {        // don't tokenize
+         return new CharTokenizer(reader) {
+           protected boolean isTokenChar(char c) { return true; }
+         };
+       } else {                              // use standard analyzer
+         return standard.tokenStream(field, reader);
+       }
+     }
+   }
+
+   Analyzer analyzer = new MyAnalyzer();
+   Query query = queryParser.parse("... +element:POST", analyzer);
+
+Alternately, if this query field is added by a program, then this can be 
+done by bypassing the analyzer for this class, building this clause 
+directly instead:
+
+   Analyzer analyzer = new StandardAnalyzer();
+   BooleanQuery query = (BooleanQuery)queryParser.parse("...", analyzer);
+
+   // now add the element clause
+   query.add(new TermQuery(new Term("element", "POST"))), true, false);
+
+Perhaps this should become an FAQ...
+
+Doug
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

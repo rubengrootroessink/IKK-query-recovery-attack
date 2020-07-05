@@ -1,0 +1,159 @@
+FROM: Jasper de Barbanson <lucene-mailingl...@de-barbanson.com>
+SUBJECT: Re: Best implementation for address searching
+DATE: 20 Oct 2010
+
+Hi Anshum,
+
+1. The unstructured addresses are sometimes separated by comma, but
+most of the time by a single space.
+2. The parts can be in an increasing or decreasing order, but not
+always. Most common combinations are "A street, B housenumber, C
+city", "D zipcode, E housenumber", "C city", "A street, C city", "C
+city, A street". In the Netherlands it's common to put the housenumber
+after the name of the street, but this is not to be considered
+relevant for building the Geocoder. All parts can be in random order;
+the only assumption I am allowed to make is that all words within a
+specific part are in the correct order. E.g. multi-worded street name:
+"A B C street", will always be "A B C street" and never "B street C
+A".
+
+So with those clarifications I don't think indexing with decreasing
+boost is the right solution, but off course I could be wrong, and in
+that case I'll hope you will correct me :)
+
+--
+Jasper
+
+On Wed, Oct 20, 2010 at 9:02 AM, Anshum <anshumg@gmail.com> wrote:
+> Hi Jason,
+> Just a suggestion to start with, was almost an information overload for me
+> but here is what I could think of straight off. Let me know in case you try
+> it or have already tried it.
+>
+> A few point I'd want to know.
+> 1. I understand that the addresses would/could be
+> unstructured/ill-strcutured bu
+> t generally wouldn't parts be seperated by a comma? Also, wouldn't parts be
+> in a
+> n decreasing order of detail i.e. A,B,C would imply that A is a location in
+> B, w
+> hich happens to be in 'C'?
+> If what I just said is correct, how about indexing data with decreasing
+> boost?
+> i.e. A,B,C gets indexed in a single field with A having the max weight/boost
+> fol
+> lowed by B followed by C
+> e.g.
+> Record 1: 123, A Street, B City
+> Record 2: B City
+>
+> For a search for B City, you'd get record 2 ranked higher up as compared to
+> 1. F
+> or  search '123, A Street' you'd get record 1.
+> Also while searching you may tokenize on a comma or whatever set of chars
+> you fi
+> nd appropriate.
+>
+>
+>
+> --
+> Anshum Gupta
+> http://ai-cafe.blogspot.com
+>
+>
+> On Tue, Oct 19, 2010 at 8:59 PM, Jasper de Barbanson <
+> lucene-mailinglist@de-barbanson.com> wrote:
+>
+>> I'm currently working on building a Geocoder. The purpose of a
+>> Geocoder is to find the coordinates belonging to any given input
+>> address. I have a rather simple version based on Lucene working,
+>> however I have a feeling it can be a lot better. Also new
+>> functionality will be added, which is difficult to implement in the
+>> current version. I was hoping to get some input on what would be the
+>> best way to implement searching addresses with Lucene. Below the
+>> relevant requirements and some preconditions:
+>>
+>> - the address is not structured, i.e. it's just a simple string which
+>> contains the address
+>> - a (dutch) address can, but does not have to, consist of the
+>> following parts: province, municipality, city, street name, house
+>> number, house number addition, zip code (4/6/7 chars)
+>> - the order of the parts can be random, so it can be "street name,
+>> city, zip code" or "zip code, street name, city"
+>> - the words in a part are always in the right order, a street name "A
+>> B C" will always be supplied as "A B C" and never "A C B"
+>> - there is no guaranty that the values of each type are unique: e.g.
+>> "Utrecht" is a province, municipality and a city
+>> - none of the parts except zip code (6/7 chars) is recognizable as a
+>> specific part
+>> - it should be possible to find matches if the address contains one or
+>> two typos (fuzzy search)
+>> - the combination zip code (6/7 chars) and house number (+ addition)
+>> uniquely identifies an address
+>> - the combination city, street name, house number (+addition) uniquely
+>> identifies an address
+>> - the results should be a specific as possible, eg. if an specific
+>> address is found, but also the city, just return the coordinates of
+>> the specific address
+>> - there can be multiple results if the given address matches to
+>> multiple parts: search on "Utrecht" will give you the coordinaties of
+>> the city, municipality and province
+>> - the data file consists of all addresses in the Netherlands where
+>> each line represents an address with all the address parts specified
+>> (except house number addition, because most addresses don't have one).
+>> This data can be arranged in any way necessary.
+>> - searching on this data file with address "Amersfoort" (a city) will
+>> result in all addresses in the city Amersfoort, however the Geocoder
+>> should only return the coordinates of the city Amersfoort
+>> - if the given address contains unknown values (eg. a house number
+>> which doesn't exist in the street/zip code), the address should be
+>> processed without those values
+>>
+>> Current implementation consist of multiple database tables each having
+>> a Lucene index. There is a "full address" table which contains all
+>> addresses, a "street name" table with all streets, a "city" table with
+>> all cities and so on. Each table is one level less detailed. I first
+>> check if there is a zip code and house number (direct match), and if
+>> not, I create queries to check if I can find an street, city,
+>> municipality or province. Then some logic is applied to determine
+>> which search results should be returned, eg. if a street and a city
+>> are found, only return the street. This setup does not meet all above
+>> requirements, the same data is stored in multiple tables, and around
+>> 5-6 Lucene queries are executed for each search, which seems
+>> inefficient.
+>>
+>> I think the best approach would be to parse the given address into the
+>> different parts, however I am not sure how to do this. I can verify
+>> each word of the address and a range of combinations of those words
+>> against Lucene indexes (for each address part-type), however the
+>> number of queries will only increase by this approach. Because finding
+>> a match for a word (of combination of words) does not mean I can stop
+>> matching for those word(s), because the word(s) are not unique for
+>> each address part-type.
+>>
+>> I understand that this is not directly a technical question, however I
+>> think this mailinglist is the best shot I have for discussing this
+>> problem :-)
+>>
+>> Undoubtedly there are questions, but feel free to ask for clarification!
+>>
+>> Kind regards,
+>> Jasper
+>>
+>> P.S. I am aware that Google and others have created Geocoders with
+>> this functionality and more, but those companies either have
+>> restrictions which are a problem, or charge per request, which also
+>> isn't an option.
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

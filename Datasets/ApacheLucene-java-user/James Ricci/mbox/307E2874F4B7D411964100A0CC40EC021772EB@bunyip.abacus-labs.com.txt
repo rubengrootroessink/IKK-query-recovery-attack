@@ -1,0 +1,142 @@
+FROM: James Ricci <ja...@riccinursery.com>
+SUBJECT: RE: Numeric Support
+DATE: 26 Jul 2002
+
+Peter,
+
+I did something like this. It's based on a numeric data type we support. The
+only difficulty is that you must specify the size and precision of the
+number in order for it to be normalized and collate properly. The
+alternative is to set a maximum size and normalize all your numeric data to
+this size, but this will result in your data being much larger than you
+probably need. Below is the source for my numeric field. Our own class,
+AbaNumber, extends and completes java.lang.Number. You'll have to replace
+this. Hope you find the code below useful.
+
+James
+
+public class NumericField
+{
+    static protected final char NORM = 'j';
+
+    protected static char fixupChar(char digit, int signMultiplier)
+    {
+        int bias = (digit - '0') * signMultiplier;
+
+        return (char)(NORM + bias);
+    }
+
+    public static String numberToString(AbaNumber num, int leftPlaces, int
+rightPlaces)
+    {
+        String s = num.toString();
+
+        if (s.charAt(0) == '-')
+        {
+            s = s.substring(1);
+        }
+
+        int decimalPos = s.indexOf('.');
+
+        if (decimalPos < 0)
+        {
+            decimalPos = s.indexOf(',');
+        }
+
+        String wholePart = (decimalPos >= 0) ? s.substring(0, decimalPos) :
+s;
+        String fracPart  = (decimalPos >= 0) ? s.substring(decimalPos + 1) :
+"";
+
+        StringBuffer normalizedBuffer = new StringBuffer();
+
+        int signMultiplier = num.signum();
+
+        if (signMultiplier == 0)
+        {
+            signMultiplier = 1;
+        }
+
+        // Build whole portion
+        int length = wholePart.length();
+
+        for (int i = 0; i < leftPlaces; i++)
+        {
+            int offset = i + length - leftPlaces;
+            char c = (offset < 0) ? '0' : wholePart.charAt(offset);
+
+            c = fixupChar(c, signMultiplier);
+            normalizedBuffer.append(c);
+        }
+
+        length = fracPart.length();
+
+        for (int i = 0; i < rightPlaces; i++)
+        {
+            int offset =  i;
+            char c = (offset >= length) ? '0' : fracPart.charAt(offset);
+
+            c = fixupChar(c, signMultiplier);
+            normalizedBuffer.append(c);
+        }
+
+        return normalizedBuffer.toString();
+    }
+
+    public static AbaNumber stringToNumber(String s, int leftPlaces, int
+rightPlaces)
+    {
+        boolean isNegative = false;
+        int totalLength = leftPlaces + rightPlaces;
+
+        for (int i = 0; i < totalLength; i++)
+        {
+            char c = s.charAt(i);
+
+            if (c != NORM)
+            {
+                isNegative = (c < NORM);
+                break;
+            }
+        }
+
+        StringBuffer buffer = new StringBuffer();
+
+        for (int i = 0; i < totalLength; i++)
+        {
+            int value = s.charAt(i) - NORM;
+
+            if (isNegative)
+            {
+                value = -value;
+            }
+
+            buffer.append((char) ('0' + value));
+        }
+
+        if (rightPlaces > 0)
+        {
+            if (leftPlaces == 0)
+            {
+                buffer.insert(0, "0.");
+            }
+            else
+            {
+                buffer.insert(leftPlaces, '.');
+            }
+        }
+
+        if (isNegative)
+        {
+            buffer.insert(0, '-');
+        }
+
+        return new AbaNumber(buffer.toString());
+    }
+}
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

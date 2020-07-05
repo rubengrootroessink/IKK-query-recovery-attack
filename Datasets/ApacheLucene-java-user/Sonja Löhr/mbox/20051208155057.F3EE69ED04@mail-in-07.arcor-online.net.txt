@@ -1,0 +1,342 @@
+FROM: Sonja Löhr <sonjalo...@arcor.de>
+SUBJECT: RE: pdf and highlighting
+DATE: 8 Dec 2005
+
+
+
+Thank you both, I found it 
+(I really asked a bit too early, sorry) 
+
+The highlighter works correct if I use my custom Analyzer during indexing
+(and for QueryParser), BUT
+when preparing the TokenStream to feed the highlighter, I must NOT use it.
+
+TokenStream tStream = new GermanAnalyzer().tokenStream("body", new
+StringReader(bodyText));		
+System.out.println( highlighter.getBestFragments(tStream, bodyText, 4, "
+..... ")); 
+
+works, wheras
+
+TokenStream tStream = new GermanHtmlAnalyzer().tokenStream("body", new
+StringReader(bodyText));		
+System.out.println( highlighter.getBestFragments(tStream, bodyText, 4, "
+..... ")); 
+
+gives rubbish highlighting.
+
+GermanHtmlAnalyzer feeds a normal GermanAnalyzer with a shortened String
+(native characters) if the input contains decimal or html entities, but then
+I'm totally confused why there is a problem with pdf text and not with HTML
+text...
+
+Here is the Analyzer's tokenStream method again, the resolveEntities does
+just String replacement.
+
+public TokenStream tokenStream(String fieldName, Reader reader)  {
+	try {
+		return new GermanAnalyzer().tokenStream(fieldName,
+resolveEntities(reader));
+	}
+	catch(IOException ioe) {
+		return null;
+	}		
+}
+
+
+Greetings!
+sonja
+
+
+
+
+
+> -----Original Message-----
+> From: Erik Hatcher [mailto:erik@ehatchersolutions.com] 
+> Sent: Donnerstag, 8. Dezember 2005 14:02
+> To: java-user@lucene.apache.org
+> Subject: Re: pdf and highlighting
+> 
+> Wow, those were some great details.  But, as I hope you've 
+> seen with some other recent issues, things become so much 
+> clearer when you can isolate the issues.  This is one reason 
+> that test-driven development with unit tests is so amazingly 
+> helpful.  If you could isolate a single PDF going through the 
+> processes, individually, such as parsing, tokenization, 
+> indexing, and then highlighting, you will likely find the 
+> problem.  It is difficult, at best, to follow along the 
+> various layers you have created without really digging with a 
+> lot of time.
+> 
+> If you have a unit test that still fails your expectations, 
+> then a JUnit test and the offending PDF file would likely 
+> yield immediate solutions from this list.
+> 
+> 	Erik
+> 
+> On Dec 8, 2005, at 6:04 AM, Sonja Löhr wrote:
+> 
+> >
+> > Hi, Eric and the other experts!
+> >
+> > I'll try to collect some code fragments.
+> > Many things are configurable and I wrote a Crawler for 
+> indexing, but 
+> > the rest is very close to the examples in "Lucene in 
+> Action". I hope I 
+> > chose the appropriate snippets.
+> >
+> > The analyzer I use is created once and stored in a Config 
+> object made 
+> > available to almost every class, along with other configurable data.
+> >
+> > INDEXING:
+> >
+> > in JTidyHtmlHandler (extends CrawlDocumentHandler):
+> > 	// getBody() extracts the textual content under <body>
+> >     String body = getBody(rawDoc);
+> >     if(body == null) {
+> >     	return null;
+> >     }
+> >     setMainField(doc, body);
+> >
+> > =============================================================
+> > in PdfBoxPDFHandler (extends CrawlDocumentHandler):
+> >
+> >       PDFTextStripper stripper = new PDFTextStripper();
+> >       pddoc = new PDDocument(cosDoc);
+> >       docText = stripper.getText(pddoc);
+> > 	[...]
+> >       if (docText != null) {
+> >         	setMainField(doc, docText);
+> >        }
+> >
+> > =================================================================
+> > in CrawlDocumentHandler implements DocumentHandler (as 
+> found in Eric's
+> > book):
+> > 	public void setMainField(Document doc, String txt) {
+> > 		if (txt == null || txt.equals("")) return;
+> > 		if(conf.storeMainField()) {
+> > 			doc.add(Field.Text(conf.mainFieldName, txt));
+> > 		}
+> > 		else doc.add(Field.UnStored(conf.mainFieldName, txt));
+> >
+> > 	}
+> > ===================================================================
+> >
+> > In CrawlIndexer:
+> > while(crawler.hasNext()) {
+> >    CrawlDocumentHandler handler = getHandler(assoc, suffix, mime);
+> >    ...
+> >    doc = handler.getDocument(onlineDoc.getIn());
+> >     if (doc != null) {
+> > 	    	doc.add(Field.Keyword("url", onlineDoc.getUrl()));
+> > 	    	Iterator writers =
+> > config.getWritersForUrl(onlineDoc.getUrl()).iterator();
+> > 	    	while(writers.hasNext()) {
+> > 	    		((IndexWriter)writers.next()).addDocument(doc);
+> > 	    	}
+> > 		
+> > 	}
+> > }
+> > ====================================================================
+> >
+> > (I have a Set of Index Objects each storing its writer which is 
+> > initialised like this, analyzer again comes from Config:
+> >
+> > this.writer = new IndexWriter(dir, analyzer, true);
+> >
+> > 
+> =====================================================================
+> >
+> > Ok, now the index is made up with stored body text of the 
+> documents, 
+> > each analyzed with my Extension of GermanAnalyzer:
+> >
+> >
+> > GermanHtmlAnalyzer extends Analyzer:
+> > 	public TokenStream tokenStream(String fieldName, Reader 
+> reader)  {
+> > 		try {
+> > 			return new 
+> GermanAnalyzer().tokenStream(fieldName,
+> > resolveEntities(reader));
+> > 		}
+> > 		catch(IOException ioe) {
+> > 			return null;
+> > 		}		
+> > 	}
+> >
+> > ( resovleEntities returns a StringReader in which for 
+> example &#252; 
+> > or &uuml; are replaced by 'ü') 
+> > 
+> ======================================================================
+> > ==
+> >
+> >
+> > SEARCH:
+> >
+> > //Here some snippets of the code that provides the JavaBeans to be 
+> > passed to some JSP page:
+> >
+> > // By now the only implementation is HtmlFragmentDisplay 
+> > FragmentDisplay fragDisp = 
+> > (FragmentDisplay)Class.forName(displayClassName).newInstance();
+> > IndexSearcher searcher = new IndexSearcher(dir);		
+> > Query q = MultiFieldQueryParser.parse(query, new String[]{"body", 
+> > "title"}, conf.getAnalyzer()); Hits hits = searcher.search(q); for( 
+> > [hits to be shown to the user] ) {
+> > 	...
+> > 	if(conf.storeMainField()) {
+> > 		
+> result.setFragment(fragDisp.getDisplayText(doc.get("body"),
+> > q));
+> > 	}
+> > 	else result.setFragment(fragDisp.getDisplayText(new
+> > URL(doc.get("url")), q));
+> > 	...
+> > 	results.add(result);
+> > }
+> >
+> > 
+> ======================================================================
+> > =====
+> >
+> > In HtmlFragmentDisplay:
+> >
+> > public String getDisplayText(String bodyText, Query query) {
+> >
+> > 	QueryScorer scorer = new QueryScorer(query);
+> > 	SimpleHTMLFormatter formatter = new SimpleHTMLFormatter("<span 
+> > class=\"highlighted\">","</span>");
+> > 	Highlighter highlighter = new Highlighter(formatter, scorer);
+> > 	Fragmenter fragmenter = new SimpleFragmenter(60);		
+> > 	highlighter.setTextFragmenter(fragmenter);
+> > 	Analyzer analyzer = conf.getAnalyzer();
+> > 	TokenStream tStream = analyzer.tokenStream("body", new 
+> > StringReader(bodyText));
+> > 	return = highlighter.getBestFragments(tStream, 
+> bodyText, 4, " .....
+> > ");
+> > }
+> >
+> > (getDisplayText(URL url, Query query) fetches the document 
+> by its URL, 
+> > again uses the DocumentHandlers and finally calls the above 
+> method. I 
+> > switched from not storing the body text to storing it, but 
+> that didn't 
+> > affect the highlighting problem.
+> >
+> > 
+> ======================================================================
+> > =====
+> >
+> > So...... Result.getFragment() is what the users sees on the 
+> JSP page.
+> > If it happens to be taken from a JTidy-indexed Lucene document, 
+> > everything is well, if it comes from PdfBox, the wrong text is 
+> > highlighted.
+> > I also tried with QueryParser.parse() instead of 
+> > MultiFieldQueryParser, but the output didn't change.
+> >
+> > Many many thanks if you read until here!
+> >
+> > And even more if you hava an idea where the error is likely to be 
+> > found.
+> >
+> > sonja
+> >
+> >
+> >
+> >
+> >> -----Original Message-----
+> >> From: Erik Hatcher [mailto:erik@ehatchersolutions.com]
+> >> Sent: Donnerstag, 8. Dezember 2005 10:59
+> >> To: java-user@lucene.apache.org
+> >> Subject: Re: pdf and highlighting
+> >>
+> >> Sonja,
+> >>
+> >> Do you have an example, or at least some relevant code, that would 
+> >> help the community in helping resolve this?
+> >>
+> >> 	Erik
+> >>
+> >> On Dec 8, 2005, at 4:24 AM, Sonja Löhr wrote:
+> >>
+> >>>
+> >>> Hi, all!
+> >>>
+> >>> I have a question concerning analysis and highlighting. I'm
+> >> indexing
+> >>> multiple document formats (up to now, only html and pdf
+> >> occured, and
+> >>> use the highlighter from the Lucene sandbox.
+> >>> The documents text is extracted via JTidy and PDFBox, 
+> respectively, 
+> >>> then in both indexing and search analysed with a custom 
+> subclass of 
+> >>> GermanAnalyzer, which replaces character references and
+> >> html entities.
+> >>>
+> >>> Now the funny thing is that, even if I store the body text, 
+> >>> highlighter uses wrong positions with lucene Docs 
+> stemming from pdf 
+> >>> documents, whereas html is hightlighted correctly.  I 
+> really don't 
+> >>> have an explanation for this behaviour - for
+> >> doc.get("body") is simply
+> >>> text, in either case, and stop words were also removed in
+> >> ALL kinds of
+> >>> documents (and through an instance of the same analyzer passed to 
+> >>> QueryParser.
+> >>>
+> >>> Are there any hints to where I could find my error - or 
+> did anybody 
+> >>> else encounter the same problem?
+> >>>
+> >>> Thanks in advance!
+> >>>
+> >>> sonja
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >> 
+> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >> 
+> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> >
+> >
+> > 
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

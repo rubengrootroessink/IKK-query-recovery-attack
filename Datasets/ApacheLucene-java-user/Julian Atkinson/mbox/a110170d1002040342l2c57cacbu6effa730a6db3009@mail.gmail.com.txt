@@ -1,0 +1,462 @@
+FROM: Julian Atkinson <jpa...@gmail.com>
+SUBJECT: Getting an incorrect spatial search - lucene 2.9.1 and 3.0
+DATE: 4 Feb 2010
+
+Hi everyone,
+
+I've been using lucene spatial for the last few months without
+noticing any particular issues with the results...until now.
+
+I'm posting 2 unit tests to demonstrate the issue - the first based on
+2.9.1 and the other in 3.0
+
+Could be I'm missing something obvious and would appreciate anyone's thoughts.
+
+The unit test adds one location to a memory index and searches from
+another. The distance between the 2 locations is calculated as 5ish
+miles
+
+In 2.9.1 it requires a search radius of 20 miles before the search
+returns the hit.
+In 3.0 its somewhat better, requiring a radius of 8 miles
+
+The weird thing is I have seen no issue with my other test data and
+both coordinates validate in Google as I can get a route plan between
+them.
+
+I'm going to start diving into how spatial is working but would
+greatly appreciate any help/direction.
+
+Cheers,
+Julian
+
+/////////// FIRST TEST 2.9.1 //////////////////////////////////////////////
+
+package com.jpa.ispecials.dao.hibernate;
+
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+
+import junit.framework.TestCase;
+
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.Hit;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.function.CustomScoreQuery;
+import org.apache.lucene.search.function.FieldScoreQuery;
+import org.apache.lucene.search.function.FieldScoreQuery.Type;
+import org.apache.lucene.spatial.geohash.GeoHashUtils;
+import org.apache.lucene.spatial.tier.DistanceFieldComparatorSource;
+import org.apache.lucene.spatial.tier.DistanceQueryBuilder;
+import org.apache.lucene.spatial.tier.projections.CartesianTierPlotter;
+import org.apache.lucene.spatial.tier.projections.IProjector;
+import org.apache.lucene.spatial.tier.projections.SinusoidalProjector;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.util.NumericUtils;
+
+
+
+
+public class LuceneDistanceQueryBuilderTest extends TestCase {
+
+	private Directory directory;
+	private IndexSearcher searcher;
+
+	private List<CartesianTierPlotter> ctps = new
+LinkedList<CartesianTierPlotter>();
+	private String geoHashPrefix = "geohash";
+	private IProjector project = new SinusoidalProjector();
+	
+	protected void setUp() throws IOException {
+		
+		directory = new RAMDirectory();
+	
+	    IndexWriter writer = new IndexWriter(directory, new
+WhitespaceAnalyzer(), true);
+	    setUpPlotter( 2, 15);
+	    addData(writer);
+	    searcher = new IndexSearcher(directory);
+	    System.out.println("setup");
+	
+	}
+	
+	private void setUpPlotter(int base, int top) {
+	    for (; base <= top; base ++){
+	      ctps.add(new CartesianTierPlotter(base,project,
+	          CartesianTierPlotter.DEFALT_FIELD_PREFIX));
+	    }
+	  }
+	
+	private void addPoint(IndexWriter writer, String name, double lat,
+double lng) throws IOException {
+	
+	    Document doc = new Document();
+	
+	    doc.add(new Field("name", name,Field.Store.YES, Field.Index.TOKENIZED));
+	    // add a default meta field to make searching all documents easy
+	    doc.add(new Field("metafile", "doc",Field.Store.YES,
+Field.Index.TOKENIZED));
+	
+	    int ctpsize = ctps.size();
+	    for (int i =0; i < ctpsize; i++){
+	      CartesianTierPlotter ctp = ctps.get(i);
+	      doc.add(new Field(ctp.getTierFieldName(),
+	          NumericUtils.doubleToPrefixCoded(ctp.getTierBoxId(lat,lng)),
+	          Field.Store.YES,
+	          Field.Index.NO_NORMS));
+	
+	      doc.add(new Field(geoHashPrefix, GeoHashUtils.encode(lat,lng),
+	    		  Field.Store.YES,
+	    		  Field.Index.UN_TOKENIZED));
+	    }
+	    writer.addDocument(doc);
+	
+	  }
+	
+	private void addData(IndexWriter writer) throws IOException {
+		    addPoint(writer,"A GREAT LOCATION",52.0872846,5.1272173);
+		    writer.commit();
+		    writer.close();
+		  }
+	
+	
+	public void testBasicSearchHitsWithLucene() throws Exception {
+		//Search point Coordinates
+		final double lat = 52.1068245;
+		final double lng = 5.0106074;
+		
+		
+		//the various radius to test with
+		final double[] milesToTest = new double[] {2.0, 7,   18, 20, 30};
+		//and corresponding expected results
+		final int[] expectedHitCount = new int[]  {0,    1,   1,  1,  1};
+		
+		//THE FOLLOWING PASSES
+		//final int[] expectedHitCount = new int[]  {0,    0,   0,  1,  1};
+
+		
+		for(int x=0;x<expectedHitCount.length;x++) {
+		    System.out.println("testing for distance : "+milesToTest[x]);
+		
+			final double miles = milesToTest[x];
+			final DistanceQueryBuilder dq = new DistanceQueryBuilder(lat, lng, miles,
+			        "geohash", CartesianTierPlotter.DEFALT_FIELD_PREFIX, true);
+			
+			Query query = new TermQuery(new Term("metafile","doc"));
+	
+			FieldScoreQuery fsQuery = new FieldScoreQuery("geo_distance", Type.FLOAT);
+		    CustomScoreQuery customScore = new CustomScoreQuery(query,fsQuery) {
+			
+		        @Override
+		          public float customScore(int doc, float subQueryScore,
+float valSrcScore){
+		         // System.out.println(doc);
+		          if (dq.getDistanceFilter().getDistance(doc) == null)
+		            return 0;
+			
+		          double distance = dq.getDistanceFilter().getDistance(doc);
+		
+		          // boost score shouldn't exceed 1
+		          if (distance < 1.0d)
+		            distance = 1.0d;
+		          //boost by distance is invertly proportional to
+		          // to distance from center point to location
+		          float score = new Float((miles - distance) / miles ).floatValue();
+		          return score * subQueryScore;
+		        }
+		      };
+		
+		    // Create a distance sort
+		    // As the radius filter has performed the distance calculations
+		    // already, pass in the filter to reuse the results.
+		    //
+		    DistanceFieldComparatorSource dsort = new
+DistanceFieldComparatorSource(dq.getDistanceFilter());
+		    Sort sort = new Sort(new SortField("geo_distance", dsort));
+			
+		    // Perform the search, using the term query, the serial chain
+filter, and the
+		    // distance sort
+		    Hits hits = searcher.search(customScore, dq.getFilter());
+		
+		
+		    Iterator iter = (Iterator) hits.iterator();
+		    while (iter.hasNext()){
+		    	Hit hit = (Hit) iter.next();
+		    	System.out.println(hit.getId());
+		    	System.out.println(dq.getDistanceFilter().getDistance(hit.getId()));
+		    }
+		
+		    assertEquals(expectedHitCount[x], hits.length());
+		
+		}
+		
+		
+	}
+}
+
+
+////////// SECOND TEST 3.0 ////////////////////////////////////////////
+
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.lucene.spatial.tier;
+
+import java.io.IOException;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+
+import junit.framework.TestCase;
+
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.function.CustomScoreQuery;
+import org.apache.lucene.search.function.FieldScoreQuery;
+import org.apache.lucene.search.function.FieldScoreQuery.Type;
+import org.apache.lucene.spatial.geohash.GeoHashUtils;
+import org.apache.lucene.spatial.geometry.DistanceUnits;
+import org.apache.lucene.spatial.geometry.FloatLatLng;
+import org.apache.lucene.spatial.geometry.LatLng;
+import org.apache.lucene.spatial.tier.projections.CartesianTierPlotter;
+import org.apache.lucene.spatial.tier.projections.IProjector;
+import org.apache.lucene.spatial.tier.projections.SinusoidalProjector;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.util.NumericUtils;
+
+/**
+ *
+ */
+public class TestCartesianIssue extends TestCase{
+
+  /**
+   * @param args
+   */
+
+  private Directory directory;
+  private IndexSearcher searcher;
+  // reston va
+  private double lat = 52.1068245;
+  private double lng= 5.0106074;
+  private String latField = "lat";
+  private String lngField = "lng";
+  private List<CartesianTierPlotter> ctps = new
+LinkedList<CartesianTierPlotter>();
+  private String geoHashPrefix = "_geoHash_";
+
+  private IProjector project = new SinusoidalProjector();
+
+  @Override
+  protected void setUp() throws IOException {
+    directory = new RAMDirectory();
+
+    IndexWriter writer = new IndexWriter(directory, new
+WhitespaceAnalyzer(), true, IndexWriter.MaxFieldLength.UNLIMITED);
+
+    setUpPlotter( 2, 15);
+
+    addData(writer);
+
+  }
+
+  private void setUpPlotter(int base, int top) {
+
+    for (; base <= top; base ++){
+      ctps.add(new CartesianTierPlotter(base,project,
+          CartesianTierPlotter.DEFALT_FIELD_PREFIX));
+    }
+  }
+
+  private void addPoint(IndexWriter writer, String name, double lat,
+double lng) throws IOException{
+
+    Document doc = new Document();
+
+    doc.add(new Field("name", name,Field.Store.YES, Field.Index.ANALYZED));
+
+    // convert the lat / long to lucene fields
+    doc.add(new Field(latField,
+NumericUtils.doubleToPrefixCoded(lat),Field.Store.YES,
+Field.Index.NOT_ANALYZED));
+    doc.add(new Field(lngField,
+NumericUtils.doubleToPrefixCoded(lng),Field.Store.YES,
+Field.Index.NOT_ANALYZED));
+
+    // add a default meta field to make searching all documents easy
+    doc.add(new Field("metafile", "doc",Field.Store.YES, Field.Index.ANALYZED));
+
+    int ctpsize = ctps.size();
+    for (int i =0; i < ctpsize; i++){
+      CartesianTierPlotter ctp = ctps.get(i);
+      doc.add(new Field(ctp.getTierFieldName(),
+          NumericUtils.doubleToPrefixCoded(ctp.getTierBoxId(lat,lng)),
+          Field.Store.YES,
+          Field.Index.NOT_ANALYZED_NO_NORMS));
+
+      doc.add(new Field(geoHashPrefix, GeoHashUtils.encode(lat,lng),
+    		  Field.Store.YES,
+    		  Field.Index.NOT_ANALYZED_NO_NORMS));
+    }
+    writer.addDocument(doc);
+
+  }
+
+
+
+  private void addData(IndexWriter writer) throws IOException {
+    addPoint(writer,"A Great Place",52.0872846,5.1272173);
+
+    writer.commit();
+    writer.close();
+  }
+
+  public void testRange() throws IOException, InvalidGeoException {
+    searcher = new IndexSearcher(directory, true);
+
+    final double[] milesToTest = new double[] {8, 7, 6 };
+    final int[] expected = new int[] {1, 1, 1 };
+    //THE FOLLOWING PASSES
+    //final int[] expected = new int[] {1, 0, 0 };
+
+    for(int x=0;x<expected.length;x++) {
+
+      final double miles = milesToTest[x];
+
+      // create a distance query
+      final DistanceQueryBuilder dq = new DistanceQueryBuilder(lat, lng, miles,
+
+latField, lngField, CartesianTierPlotter.DEFALT_FIELD_PREFIX, true);
+
+      System.out.println(dq);
+      //create a term query to search against all documents
+      Query tq = new TermQuery(new Term("metafile", "doc"));
+
+      FieldScoreQuery fsQuery = new FieldScoreQuery("geo_distance", Type.FLOAT);
+
+      CustomScoreQuery customScore = new
+CustomScoreQuery(dq.getQuery(tq),fsQuery){
+
+          @Override
+            public float customScore(int doc, float subQueryScore,
+float valSrcScore){
+            //System.out.println(doc);
+            if (dq.distanceFilter.getDistance(doc) == null)
+              return 0;
+
+            double distance = dq.distanceFilter.getDistance(doc);
+            // boost score shouldn't exceed 1
+            if (distance < 1.0d)
+              distance = 1.0d;
+            //boost by distance is invertly proportional to
+            // to distance from center point to location
+            float score = (float) ( (miles - distance) / miles );
+            return score * subQueryScore;
+          }
+        };
+      // Create a distance sort
+      // As the radius filter has performed the distance calculations
+      // already, pass in the filter to reuse the results.
+      //
+      DistanceFieldComparatorSource dsort = new
+DistanceFieldComparatorSource(dq.distanceFilter);
+      Sort sort = new Sort(new SortField("foo", dsort,false));
+
+      // Perform the search, using the term query, the serial chain
+filter, and the
+      // distance sort
+      TopDocs hits =
+searcher.search(customScore.createWeight(searcher),null, 1000, sort);
+      int results = hits.totalHits;
+      ScoreDoc[] scoreDocs = hits.scoreDocs;
+
+      // Get a list of distances
+      Map<Integer,Double> distances = dq.distanceFilter.getDistances();
+
+      // distances calculated from filter first pass must be less than total
+      // docs, from the above test of 20 items, 12 will come from the
+boundary box
+      // filter, but only 5 are actually in the radius of the results.
+
+      // Note Boundary Box filtering, is not accurate enough for most systems.
+
+
+      System.out.println("Distance Filter filtered: " + distances.size());
+      System.out.println("Results: " + results);
+      System.out.println("=============================");
+      System.out.println("Distances should be 1 "+ expected[x] + ":" +
+distances.size());
+      System.out.println("Results should be 1 "+ expected[x] + ":" + results);
+
+      assertEquals(expected[x], distances.size()); // fixed a store of
+only needed distances
+      assertEquals(expected[x], results);
+      double lastDistance = 0;
+      for(int i =0 ; i < results; i++){
+        Document d = searcher.doc(scoreDocs[i].doc);
+
+        String name = d.get("name");
+        double rsLat = NumericUtils.prefixCodedToDouble(d.get(latField));
+        double rsLng = NumericUtils.prefixCodedToDouble(d.get(lngField));
+        Double geo_distance = distances.get(scoreDocs[i].doc);
+
+        double distance =
+DistanceUtils.getInstance().getDistanceMi(lat, lng, rsLat, rsLng);
+        double llm = DistanceUtils.getInstance().getLLMDistance(lat,
+lng, rsLat, rsLng);
+        System.out.println("Name: "+ name +", Distance "+ distance);
+//(res, ortho, harvesine):"+ distance +" |"+ geo_distance +"|"+ llm +"
+| score "+ hits.score(i));
+        assertTrue(Math.abs((distance - llm)) < 1);
+        assertTrue((distance < miles ));
+        assertTrue(geo_distance > lastDistance);
+        lastDistance = geo_distance;
+      }
+    }
+  }
+
+
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

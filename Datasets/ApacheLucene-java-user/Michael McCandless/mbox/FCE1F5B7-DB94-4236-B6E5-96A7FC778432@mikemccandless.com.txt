@@ -1,0 +1,217 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: term offsets wrong depending on analyzer
+DATE: 11 Nov 2008
+
+
+Just to followup... I opened these three issues:
+
+   https://issues.apache.org/jira/browse/LUCENE-1441 (fixed in 2.9)
+   https://issues.apache.org/jira/browse/LUCENE-1442 (fixed in 2.9)
+   https://issues.apache.org/jira/browse/LUCENE-1448 (still iterating)
+
+Mike
+
+Christian Reuschling wrote:
+
+> Hi Guys,
+>
+> I currently have a bug of wrong term offset values for fields analyzed
+> with KeywordAnalyzer (and also unanalyzed fields, whereby I assume  
+> that
+> the code may be the same)
+>
+> The offset of a field seems to be incremented by the entry length of  
+> the
+> previously analyzed field.
+>
+> I had a look into the code of KeywordAnalyzer - and have seen it  
+> don't sets
+> the offsets in any case. I wrote my own Analyzer based on  
+> KeywordAnalyzer
+> and added the two lines
+>
+>            reusableToken.setStartOffset(0);
+>            reusableToken.setEndOffset(upto);
+>
+> inside KeywordTokenizer.next(..). It seems to work now (at least the  
+> one scenario
+> with the KeywordAnalyzer)
+>
+> I created a snippet that reproduce both situations, see attachement.
+>
+> This snippet also demonstrates another bug I found for term offsets  
+> according
+> to fields with multiple values. According to the Analyzer, several  
+> letters will
+> recognized as delimiter for Tokenization. In the case these  
+> delimiters are at
+> the end of the first value inside a field, the offsets of all  
+> following field
+> values are decremented by the count of these delimiters.. it seems  
+> the offset
+> calculation forgets them.
+>
+> This makes highlighting of hits from values up to the second one  
+> impossible.
+> Currently I have a workaround where I count the Analyzer-specific  
+> delimiters at
+> the end of all values, and adjust the offsets given from Lucene with  
+> these. It
+> works, but isn't nice of course.
+>
+> These situations appear with the current 2.4RC2
+>
+>
+> I hope this will help a little, greetings
+>
+>
+> Christian Reuschling
+> package org.dynaq;
+>
+> import org.apache.lucene.analysis.KeywordAnalyzer;
+> import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.TermPositionVector;
+> import org.apache.lucene.index.TermVectorOffsetInfo;
+> import org.apache.lucene.store.FSDirectory;
+>
+> public class TestAnalyzers
+> {
+>
+>    public static void main(String[] args) throws Exception
+>    {
+>        String strIndexPath = "/home/reuschling/test";
+>        String strOurTestFieldAnalyzed = "ourTestField_analyzed";
+>        String strOurTestFieldUnanalyzed = "ourTestField_unanalyzed";
+>        String strOurTestField2Tokenize = "ourTestField_2tokenize";
+>
+>
+>
+>        //First we write in a field with value length 4 - twice, each  
+> analyzed and unanalyzed
+>
+>        PerFieldAnalyzerWrapper analyzer = new  
+> PerFieldAnalyzerWrapper(new KeywordAnalyzer());
+>        analyzer.addAnalyzer(strOurTestField2Tokenize, new  
+> WhitespaceAnalyzer());
+>        IndexWriter writer = new IndexWriter(strIndexPath, analyzer,  
+> true, IndexWriter.MaxFieldLength.UNLIMITED);
+>
+>        Document doc = new Document();
+>
+>        Field field2AddAnalyzed =
+>                new Field(strOurTestFieldAnalyzed, "four",  
+> Field.Store.YES, Field.Index.ANALYZED,  
+> Field.TermVector.WITH_POSITIONS_OFFSETS);
+>        doc.add(field2AddAnalyzed);
+>        doc.add(field2AddAnalyzed);
+>
+>        Field field2AddUnanalyzed =
+>                new Field(strOurTestFieldUnanalyzed, "four",  
+> Field.Store.YES, Field.Index.NOT_ANALYZED,  
+> Field.TermVector.WITH_POSITIONS_OFFSETS);
+>        doc.add(field2AddUnanalyzed);
+>        doc.add(field2AddUnanalyzed);
+>
+>        //note that there are trailing whitespaces
+>        Field field2AddTokenized =
+>                new Field(strOurTestField2Tokenize, "1 2     ",  
+> Field.Store.YES, Field.Index.ANALYZED,
+>                        Field.TermVector.WITH_POSITIONS_OFFSETS);
+>        doc.add(field2AddTokenized);
+>        doc.add(field2AddTokenized);
+>
+>
+>
+>        writer.addDocument(doc);
+>
+>        writer.commit();
+>        writer.close();
+>
+>        //Now we read out the calculated term offsets
+>        IndexReader reader =  
+> IndexReader.open(FSDirectory.getDirectory(strIndexPath), true);
+>
+>        System.out.println("Analyzed. Field value(twice) \"four\".  
+> Something appears, Offsets are not set inside KeywordAnalyzer.");
+>
+>        TermPositionVector termPositionVector = (TermPositionVector)  
+> reader.getTermFreqVector(0, strOurTestFieldAnalyzed);
+>
+>        TermVectorOffsetInfo[] termOffsets =  
+> termPositionVector.getOffsets(0);
+>        int[] termPositions = termPositionVector.getTermPositions(0);
+>
+>
+>        for (int iTermPosIndex = 0; iTermPosIndex <  
+> termPositions.length; iTermPosIndex++)
+>        {
+>            System.out.println("TermPosition: " +  
+> termPositions[iTermPosIndex]);
+>            System.out.println("TermOffset: " +  
+> termOffsets[iTermPosIndex].getStartOffset() + "-" +  
+> termOffsets[iTermPosIndex].getEndOffset());
+>        }
+>
+>
+>        System.out.println("\nUnanalyzed. Field value(twice) \"four 
+> \". It seems the first value is calculated twice for the second  
+> one.");
+>
+>        termPositionVector = (TermPositionVector)  
+> reader.getTermFreqVector(0, strOurTestFieldUnanalyzed);
+>
+>        termOffsets = termPositionVector.getOffsets(0);
+>        termPositions = termPositionVector.getTermPositions(0);
+>
+>
+>        for (int iTermPosIndex = 0; iTermPosIndex <  
+> termPositions.length; iTermPosIndex++)
+>        {
+>            System.out.println("TermPosition: " +  
+> termPositions[iTermPosIndex]);
+>            System.out.println("TermOffset: " +  
+> termOffsets[iTermPosIndex].getStartOffset() + "-" +  
+> termOffsets[iTermPosIndex].getEndOffset());
+>        }
+>
+>
+>        System.out.println("\nTokenized with ending delimiter  
+> letters. Field value (twice): \"1 2     \"\nThese are the offsets  
+> for \"1\" (whitespaceanalyzer as example)");
+>
+>        termPositionVector = (TermPositionVector)  
+> reader.getTermFreqVector(0, strOurTestField2Tokenize);
+>
+>        termOffsets = termPositionVector.getOffsets(0);
+>        termPositions = termPositionVector.getTermPositions(0);
+>
+>
+>        for (int iTermPosIndex = 0; iTermPosIndex <  
+> termPositions.length; iTermPosIndex++)
+>        {
+>            System.out.println("TermPosition: " +  
+> termPositions[iTermPosIndex]);
+>            System.out.println("TermOffset: " +  
+> termOffsets[iTermPosIndex].getStartOffset() + "-" +  
+> termOffsets[iTermPosIndex].getEndOffset());
+>        }
+>
+>
+>        reader.close();
+>
+>    }
+>
+>
+> }
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

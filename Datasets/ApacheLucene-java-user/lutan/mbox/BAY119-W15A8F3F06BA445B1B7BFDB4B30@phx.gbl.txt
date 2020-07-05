@@ -1,0 +1,102 @@
+FROM: lutan <ws...@live.cn>
+SUBJECT: RE: Running Lucene in a Clustered Environment
+DATE: 10 Jun 2008
+
+
+I and you have the same problem to solve,and I also research recently.
+ 
+and I heard that:
+<Lucene in a cluster >Lucene is a highly optimized inverted index search engine. It
+stored a number of inverted indexes in a custom file format that is highly optimized to ensure
+that the indexes can be loaded by searchers quickly and searched efficiently. These structures
+are create so that they are almost completely pre-computed. To store the index, Lucene uses
+an implementation of a 'Directory' interface, not to be confused with anything in java.io.
+. The standard implementation if FSDirectory that stored the search index on a file system.
+There a number of other implementations that can bused including ones to split the index on
+the filesystem into smaller chunks, and ones to distribute the index throughout a cluster
+using Map Reduce (see google). There is additionally a database implementation that stored
+the index as blocks in a database. Lucene derives its speed from this index structure, and
+to work really well it needs to be able to seek efficiently into the blocks o
+ f the segments that make up the index. This is trivial where the underlying storage mechanism
+supports seek, but less trivial if the storage mechanism does not. The FSDirectory is based
+on files, and is efficient in this area. If the files are on a local file system, pure seeks
+can be used. If the index is on a shared file system , there will always be some latency and
+potentially increased IO traffic. The Database implementation is highly dependent on the the
+blob implementation in the target database and will nearly always be slower than the FSDirectory.
+Some databases support seekable blobs (Oracle), some emulate this behavior (MySQL with emulateLocators=true),
+others just don't support it and so are really slow. (and I mean really slow) All of this
+impacts how Lucene works in a cluster. Each node performing the search needs access to the
+index. To make search work in a clustered environment we must provide this. There are 3 ways
+of doing this. Use a shared file system be
+ tween all nodes, and use FSDirectory. Use indexes on the nodes local file system and a synchronization
+strategy. Use a database using JDBCDirectory Use a distributed file system (eg Google File
+System, Nutch Distributed File System) Use a local cache with backup in the Database Shared
+filesystem There are a number of issues with a shared file system. Performance is lower than
+a local file system (obviously), unless a SAN is used, but a SAN shared file system must be
+a true SAN file system (eg Redhat Global File System, Apple XSan) as modifications to the
+file system blocks must be mirrored instantly in the block cache of all connected nodes, otherwise
+they will see a corrupted file system. Remember a SAN is just a networked block device, that
+without additional help cannot be shared by multiple compute nodes at the same time. Provided
+the performance of the shared file system is sufficient, Lucene works well like this with
+no modifications using the FSDirectory implementatio
+ n. The implementation of the lock managed in the Sakai Search component eliminates problems
+with locks reported by the Lucene community. This mechanism is available now in Sakai Search.
+Synchronized Local indexes. Where the architecture of the cluster is a shared nothing architecture,
+the Lucene indexes can be written to local disk and synchronized at the end of each index
+cycle. This is an optimal deployment of Lucene in a cluster as it ensures that all the IO
+is from the local disk and is hence fast. To ensure that there is always a back up copy of
+the index, the synchronization would also target a backup location. The difficulty with this
+approach is that without support in the implementation of the search engine, it requires some
+deployment support. This may involve include making hard link mirrors to speed up the synchronization
+process. Lucene indexes are suitable for synchronizing with rsync which is a block based synchronization
+mechanism. The main drawback of this a
+ pproach is that the full index is present on the local machine. In large search environments,
+this duplication will be wastefully, however in search engine terms, a single deployment of
+Sakai will probably never get into the large space ( large > 100M documents, 2TB index)
+This mechanism is available, but requires local configuration Database hosted search index.
+Where a simple cluster setup is required, a database hosted search index is straightforward
+option. There are however significant drawbacks with this approach, most notable being the
+drop in performance. The index is stored as blocks in blobs inside the database. These blobs
+are stored in a block structure to eliminate most of the unnecessary loading however each
+blob bypasses any local disk block cache on the local machine and has to be streamed over
+the network. If the database supports seekable blobs, within the database itself, it is possible
+to minimize unnecessary network traffic. Oracle has this support. Howe
+ ver where the database only emulated this behavior (MySQL) the performance is poor as the
+complete blob needs to be streamed over the network. In addition to this the speed of access
+is slower since a SQL statement has to be executed for each data access. The net result is
+slower performance. This mechanims is available, but performance is probably unacceptable
+Distributed File System Real Search Engines use a distributed file system that provides a
+self healing file system where the data itself is distributed across multiple nodes in such
+a way that the file system can recover from the loss of one or more nodes. The original file
+system of this form is the Google File System and the Nutch Distributed File System is modeled
+on Google File System. Both implementations use a gather scatter algorithm detailed by Google
+in Map-Reduce (see Google labs). This approach results in every node containing a part of
+the file system. Where the index size has grown to such an extent to ma
+ ke the storage of the complete index on every node in the cluster, this approach becomes
+more attractive. At the moment there are no plans to provide an implementation of a distributed
+file system within Sakai. Database Clustered Local Search In this approach, indexes are used
+from local disk, but backed up to the database as Lucene Segments. A cluster app node is installed,
+it synconizes the local copy of the search index with the database. When new content is added
+by one of the cluster app nodes, it updates the backup copy in the database. On reciept of
+the index reload events, all cluster app nodes resyncronize the with the database downloading
+changed and new search segments. This mechanism in in the process of being tested, I exhibits
+the same performance as a local basaed search for a 200MB index with 80,000 documents. Once
+this mechanism is completely tested it will become the default OOTB mechanism, as it works
+where there is a single cluster node or more than one c
+ luster node. The added advantage of this mechanism is that the index is stored in the database.
+It will also be possible to implement this mechanism with a shared filestore acting as the
+backup location. 
+> Date: Mon, 9 Jun 2008 19:21:06 +0530> From: kalanir@gmail.com> To: java-user@lucene.apache.org>
+Subject: Running Lucene in a Clustered Environment> > Hi all,> > I'm new to Lucene.
+I need to run Lucene in a clustered environment. So> creating the index in the local file
+system is not an option and it is> better if I can create the index in the database as
+all nodes can share it.> > Can anyone of you please suggest me a way to do this? I got
+to know about> org.apache.lucene.store.jdbc.JdbcDirectory from mailing list archives.>
+However, since it's not part of the Lucene release itself I'd be pleased if> someone can
+point me where to find an implementation of it.> > Additionally, instead of keeping
+the index inside the database, is there any> other way to work Lucene in a clustering environment?>
+> Thanks in advance> > Kalani> > > > -- > Kalani Ruwanpathirana>
+Department of Computer Science & Engineering> University of Moratuwa
+_________________________________________________________________
+新年换新颜，快来妆扮自己的MSN给心仪的TA一个惊喜！
+http://im.live.cn/emoticons/?ID=18

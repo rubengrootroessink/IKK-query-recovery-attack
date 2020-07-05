@@ -1,0 +1,136 @@
+FROM: Rebecca Watson <bec.wat...@gmail.com>
+SUBJECT: Re: Problem using TopFieldCollector
+DATE: 12 Jun 2010
+
+hi,
+
+i had similar issues migrating to using the new collectors... we use a custom
+hitcollector too where we accessed document fields to aid in scoring docs.
+
+when migrating - i chose to extend the Collector class where:
+.collect method still extended pretty much as before
+
+in the new  abstract method setNextReader:
+public void setNextReader(IndexReader reader, int docBase) {
+     ...
+}
+
+i keep a copy of the current indexreader + docBase, and used the
+indexreader.document
+method to get the doc/field values required in the collect method.
+
+note that the docBase is used to keep/get the global docid but the doc passed
+to the .collect method relates to the current indexreader. i.e.
+global-docid = docBase + docid
+
+you sort in the collector anyway? -- using a custom hitqueue? in which
+case you'd
+use the global docid in the hitqueue / any filters created through the
+collector.
+
+also, we ended up having to re-engineer our system so that we didn't
+use field-loads
+as this was a bottleneck in our system... maybe you should think about merging
+the two advanced/text documents together even if this duplicates
+information in your
+index so you don't have to do field loads...
+not sure if you've profiled to see the difference in cost?
+
+hope that helps,
+
+bec :)
+
+On 12 June 2010 02:31, Sirish Vadala <sirishreddy@gmail.com> wrote:
+>
+> Currently I am on Lucene 2.2, migrating to 2.9 before eventually plan to move
+> to 3.1.
+>
+> In Lucene 2.2, I have a custom hit collector that does both filtering and
+> sorting my search results.
+>
+> Let me put the functionality achieved. When a user includes advance search
+> criteria with text search, I execute a query to fetch the advance search
+> results. Now, I have this collection of advance search result ids, that need
+> to match with the text search result ids.
+>
+> Successfully implemented in 2.2 using the below collector:
+>
+> ----------------------------------------------------------------------
+>
+> public class ResultHitCollector extends TopFieldDocCollector{
+>
+>        private IndexSearcher searcher;
+>        private AnalysisTextSearchBean textSearchBean;
+>
+>        public ResultHitCollector(IndexSearcher searcher, int numHits,
+>                        AnalysisTextSearchBean textSearchBean, Sort sort)
+>                        throws IOException {
+>                super(searcher.getIndexReader(), sort, numHits);
+>                this.searcher = searcher;
+>                this.textSearchBean = textSearchBean;
+>        }
+>
+>        public void collect(int doc, float score) {
+>                try {
+>                        HashMap<String, String> advanceSearchIds = textSearchBean
+>                                        .getAdvanceSearchIds();
+>                        if (advanceSearchBills == null) {
+>                                super.collect(doc, score);
+>                        } else {
+>                                Document document = searcher.doc(doc);
+>                                if (document != null) {
+>                                        String id = document.get(IFIELD_ID);
+>                                        if (advanceSearchIds.containsKey(id))
+{
+>                                                super.collect(doc,
+score);
+>                                        }
+>                                }
+>                        }
+>                } catch (CorruptIndexException e) {
+>                        System.err.println("ERROR: " + e.getMessage());
+>                } catch (IOException e) {
+>                        System.err.println("ERROR: " + e.getMessage());
+>                }
+>        }
+> }
+>
+> ----------------------------------------------------------------------
+> Calling the hit collection as below:
+>
+>
+> String[] sortOrder = {IFIELD_YEAR, IFIELD_TYPE, IFIELD_NUM, IFIELD_SESSION};
+> Sort sort = new Sort(sortOrder);
+> ResultHitCollector collector = new ResultHitCollector(indexSearcher, 100000,
+> analysisTextSearchBean, sort);
+> indexSearcher.search(booleanQuery, collector);
+> ScoreDoc[] hitScore = collector.topDocs().scoreDocs;
+> Utility.Log(Level.INFO, this, "Hits found: "+ hitScore.length);
+>
+> ----------------------------------------------------------------------
+>
+> Since in Lucene 2.9, TopFieldDocCollector is deprecated, the documentation
+> suggests me to use TopFieldCollector instead. I am not really sure how to
+> get this to work using this, as TopFieldCollector doesn't have any public
+> constructors to extend this object. Any hints on how to implement this would
+> be highly appreciated.
+>
+> However, using Collector in 2.9, this can be achieved without sort the
+> functionality. I also need to sort the results after filtering the search.
+>
+> Thanks.
+> --
+> View this message in context: http://lucene.472066.n3.nabble.com/Problem-using-TopFieldCollector-tp889310p889310.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

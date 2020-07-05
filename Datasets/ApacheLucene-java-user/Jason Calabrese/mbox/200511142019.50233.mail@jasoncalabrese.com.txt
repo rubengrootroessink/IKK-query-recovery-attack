@@ -1,0 +1,54 @@
+FROM: Jason Calabrese <m...@jasoncalabrese.com>
+SUBJECT: Re: De-duping MultiSearcher results
+DATE: 15 Nov 2005
+
+Maybe I'm missing something simple, but I don't see how this will work.
+
+It looks like this filter will just filter out documents that don't have guid 
+field, but in my case every document has a guid.  
+
+In a single index there are no duplicates.  Duplicates are only a problem when 
+I search multiple indexes.
+
+--Jason
+
+> You probably want to build a Filter.
+>
+> I've been planning to do exactly this on our own system, only our
+> duplicates are indicated by documents having the same value in an MD5
+> digest field, instead of a GUID field.
+>
+> For a single Reader, such a filter would work something like this:
+>
+>     public class UniqueFilter extends Filter {
+>         public BitSet bits(IndexReader reader) throws IOException {
+>             BitSet result = new BitSet(reader.maxDoc());
+>             TermDocs termDocs = reader.termDocs();
+>             TermEnum terms = reader.terms(new Term("guid", ""));
+>             while (terms.next() && terms.term().field().equals("guid")) {
+>                 termDocs.seek(terms.term());
+>                 if (termDocs.next()) {
+>                     result.set(termDocs.doc());
+>                 }
+>             }
+>             return result;
+>        }
+>     }
+>
+> If you were to wrap this in a CachingWrapperFilter, the hard work would
+> only be executed once, and that's the main benefit of using a filter.
+>
+> However, for multiple indexes it might be more tricky.  If you're not
+> willing to switch to MultiReader (we're in the same boat, if that's the
+> case) then you'll have to build a different set of bits for each reader,
+> and loop through all readers' TermEnums at once.  If you step them all
+> through one at a time, you can get fairly good efficiency as you can
+> skip calling termDocs on readers where the term didn't occur.
+>
+> Daniel
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

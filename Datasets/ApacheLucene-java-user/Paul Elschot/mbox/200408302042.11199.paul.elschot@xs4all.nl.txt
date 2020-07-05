@@ -1,0 +1,105 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Does lucene support greater than/less than on strings
+DATE: 30 Aug 2004
+
+On Monday 30 August 2004 19:50, Kipping, Peter wrote:
+> I'm guessing the answer to this is no.  However I am looking at inverted
+> indexes and there may be a way to support this.  What if you replaced
+> the Hashtable of terms(assuming that lucene uses a hashtable) with a
+> tree.  Since a tree is an ordered data structure, it would be possible
+> to return all elements of a tree that were less than (or greater than)
+> your query.  Do you think this is possible, if so how difficult would it
+> be?
+
+Lucene uses a tree like data structure to store the search terms
+(by field, as a Lucene Term).
+
+One can walk this tree using IndexReader.terms().
+For each term, one can get the documents that contain the term
+by IndexReader.termDocs().
+From these doc nrs, one can set bits in a Filter, and use this
+filter to limit the results of another query via IndexSearcher.search(Query,Filter).
+Some example code to create a Filter is below.
+
+The difference between this and a Query with all the terms is that
+this uses the results of IndexReader.termDocs() one by one,
+whereas a query search would have to
+use all Term's in parallel leading to a high clause count.
+
+>
+> Thanks,
+> Peter
+>
+> -----Original Message-----
+> From: Kipping, Peter
+> Sent: Thursday, August 26, 2004 10:20 AM
+> To: lucene-user@jakarta.apache.org
+> Subject: Does lucene support greater than/less than on strings
+>
+> I'm converting numbers into strings (0001, 0013, etc) but users will
+> want to search using the < and >.  I've been using the range query for
+> this ([0 TO 0013] if a user does < 13).  But my index is quite large and
+> I get a ToManyBooleanClauses Exception or an out of memory exception if
+> I increase the boolean clause count.  It seems that a simpler/better
+> solution would be to have lucene be able to do < > on strings.  Is that
+> possible now, if not how hard would it be to implement?
+>
+> Thanks,
+> Peter
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+Regards,
+Paul Elschot
+
+
+From org.apache.lucene.search.DateFilter, easily adapted for
+anything that supports compareTo():
+
+  /**
+   * Returns a BitSet with true for documents which should be
+   * permitted in search results, and false for those that should
+   * not.
+   */
+  public BitSet bits(IndexReader reader) throws IOException {
+    BitSet bits = new BitSet(reader.maxDoc());
+    TermEnum enumerator = reader.terms(new Term(field, start));
+    TermDocs termDocs = reader.termDocs();
+    if (enumerator.term() == null) {
+      return bits;
+    }
+
+    try {
+      Term stop = new Term(field, end);
+      while (enumerator.term().compareTo(stop) <= 0) {
+        termDocs.seek(enumerator.term());
+        while (termDocs.next()) {
+          bits.set(termDocs.doc());
+        }
+        if (!enumerator.next()) {
+          break;
+        }
+      }
+    } finally {
+      enumerator.close();
+      termDocs.close();
+    }
+    return bits;
+  }
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,314 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: "Natural sorting" of documents in a Lucene index - possible?
+DATE: 17 Aug 2010
+
+Using NumericField for dates and other numbers is likely to help a
+lot, and removes padding problems.  I'd try that first, or just sort
+the top n hits yourself.
+
+
+--
+Ian.
+
+
+On Tue, Aug 17, 2010 at 8:46 PM, Michel Nadeau <akaris@gmail.com> wrote:
+> I could at least drop hours/mins/sec, we don't need them, so my timestamp
+> could become 'YYYYMMDD', that would cut the number of unique terms at least
+> for dates.
+>
+> What about my other question about numbers : *" We do pad our numbers with
+> zeros though (for example: 10 becomes 00000010, etc.) because we had trouble
+> with sorting (100 was smaller than 2) ; is that considered as "string
+> sorting" ? This might explain a part of the problem."* ? Thanks.
+>
+> - Mike
+> akaris@gmail.com
+>
+>
+> On Tue, Aug 17, 2010 at 3:40 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+>
+>> Hmmm, I glossed over your comment about sorting the top 250. There's
+>> no reason that wouldn't work.
+>>
+>> Well, one way for, say, dates is to store separate fields. YYYY, MM, DD,
+>> HH, MM, SS, MS. That gives you say, 100 year terms, + 12 month
+>> +31 days + .... for a very small total. You pay the price though by
+>> having to change your queries and sorts to respect all 6 fields...
+>>
+>> But I'd only really go there after seeing if other options don't work.
+>>
+>>
+>> Best
+>> Erick
+>>
+>> On Tue, Aug 17, 2010 at 3:35 PM, Michel Nadeau <akaris@gmail.com> wrote:
+>>
+>> > Would our approach to limit the search top 250 documents (and then sort
+>> > these 250 documents) work fine ? Or even 250 unique terms with a lot of
+>> > users is bad on memory when sorting ?
+>> >
+>> > We didn't look at trie fields - I will do though, thanks for the tip !
+>> >
+>> > We do store the original 'Data' field (only the 'SearchableData' field is
+>> > analyzed, all other fields are not analyzed), the users mainly sort on
+>> > numeric values; not a lot on string values (in fact I could compltely
+>> drop
+>> > the sort by string feature). We do pad our numbers with zeros though (for
+>> > example: 10 becomes 00000010, etc.) because we had trouble with sorting
+>> > (100
+>> > was smaller than 2) ; is that considered as "string sorting" ? This might
+>> > explain a part of the problem.
+>> >
+>> > Why/how would I reduce the count of unique terms?
+>> >
+>> >
+>> > - Mike
+>> > akaris@gmail.com
+>> >
+>> >
+>> > On Tue, Aug 17, 2010 at 3:28 PM, Erick Erickson <erickerickson@gmail.com
+>> > >wrote:
+>> >
+>> > > If you have tens of millions of documents, almost all with unique
+>> fields
+>> > > that you're sorting on, you'll chew through memory like there's no
+>> > > tomorrow.
+>> > >
+>> > > Have you looked at trie fields? See:
+>> > >
+>> > >
+>> >
+>> http://www.lucidimagination.com/blog/2009/05/13/exploring-lucene-and-solrs-trierange-capabilities/
+>> > >
+>> > > I'm a little concerned that the user can sort on Data. Any field used
+>> for
+>> > > sorting
+>> > > should NOT be analyzed, so unless you are indexing "Data" unanalyzed,
+>> > > that's
+>> > > a problem. And if you are sorting on strings unique to each document,
+>> > > that's
+>> > > also a memory hog. Not to mention whether capitalization counts.
+>> > >
+>> > > You might enumerate the terms in your index for each of the sortable
+>> > fields
+>> > > to figure out what the total number of unique terms each is and use
+>> that
+>> > as
+>> > > a basis for reducing their count....
+>> > >
+>> > > HTH
+>> > > Erick
+>> > >
+>> > > On Tue, Aug 17, 2010 at 3:05 PM, Michel Nadeau <akaris@gmail.com>
+>> wrote:
+>> > >
+>> > > > Hi Erick,
+>> > > >
+>> > > > Here's some more details about our structure. First here's an example
+>> > of
+>> > > > document in our index :
+>> > > >
+>> > > >     PrimaryKey        = SJAsfsf353JHGada66GH6 (it's a hash)
+>> > > >     DocType           = X
+>> > > >     Data              = This is the data
+>> > > >     SearchableContent = This is the data
+>> > > >     DateCreated       = <timestamp>
+>> > > >     DateModified      = <timestamp>
+>> > > >     Counter1          = 17
+>> > > >     Counter2          = 3
+>> > > >     Average           = 0.17
+>> > > >     Cost              = 200
+>> > > >
+>> > > > The users are able to sort on almost all fields: Data, DateCreated,
+>> > > > DateModified, Counter1, Counter2, Average, Cost.
+>> > > >
+>> > > > When we search, we always search on the 'SearchableContent' field
+and
+>> > we
+>> > > > have at least one filter on the DocType (because we have many
+>> document
+>> > > > types
+>> > > > in the same index). So a common search that would find the document
+>> > above
+>> > > > is
+>> > > > "data *AND DocType:X*" (we automatically add the "*AND DocType:X*"
+>> part
+>> > > > using Lucene Filters.
+>> > > >
+>> > > > I would say that the number of unique terms in the field being sorted
+>> > on
+>> > > is
+>> > > > very big - for example timestamps, almost all unique, counters,
+>> > average,
+>> > > > cost, data... so if a query finds 10M results, it's almost 10M
+>> > different
+>> > > > values to sort. About cache and warm-up queries : we don't use
+>> warm-up
+>> > > > queries -at all- because we have absolutely no idea of what users
+are
+>> > > going
+>> > > > to search for (they can search for absolutely anything). About
+>> > "returning
+>> > > > 10M" documents, right, we don't actually return the 10M documents,
+we
+>> > use
+>> > > > pagination to return documents X to Y of the 10M (and the 10M was
+>> only
+>> > an
+>> > > > example, it can be anywhere between 1K and 100M results). The
+>> > pagination
+>> > > > usually works fine and fast, our problem is really sorting.
+>> > > >
+>> > > > Our "Lucene Reader" process has 2GB of ram allowed, here's how I
+>> start
+>> > it
+>> > > -
+>> > > >
+>> > > >     java -Xmx2048m -jar LuceneReader.jar
+>> > > >
+>> > > > The problem really seems to be a ram problem, but I can't be 100%
+>> sure
+>> > > (any
+>> > > > help about how to be sure is welcome).
+>> > > >
+>> > > > Our current idea of a solution would be to get maximum 250 results
+>> (the
+>> > > > more
+>> > > > relevant ones; more results than that is totally useless in our
+>> system)
+>> > > so
+>> > > > the sort should work fine on a small data set like that, but we want
+>> to
+>> > > > make
+>> > > > sure we're doing everything right before doing that so we don't run
+>> in
+>> > > the
+>> > > > same problems again.
+>> > > >
+>> > > > Thank you very much; let me know if you need any more details!
+>> > > >
+>> > > > - Mike
+>> > > > akaris@gmail.com
+>> > > >
+>> > > >
+>> > > > On Mon, Aug 16, 2010 at 4:01 PM, Erick Erickson <
+>> > erickerickson@gmail.com
+>> > > > >wrote:
+>> > > >
+>> > > > > Let's back up a minute. The number of matched records is not
+>> > > > > important when sorting, what's important is the number of unique
+>> > > > > terms in the field being sorted. Do you have any figures on that?
+>> One
+>> > > > > very common sorting issue is sorting on very fine date time
+>> > > resolutions,
+>> > > > > although your examples don't include that...
+>> > > > >
+>> > > > > Now, cache loading is an issue. The very first time you sort
+on a
+>> > > field,
+>> > > > > all the values are read into a cache. Is it possible this is
+the
+>> > source
+>> > > > > of your problems? You can cure this with warmup queries. The
+>> > take-away
+>> > > > > is that measuring the response time for the first sorted query
+is
+>> > > > > very misleading.
+>> > > > >
+>> > > > > Although if you're sorting on many, many, many email addresses,
+>> > > > > that could be "interesting".
+>> > > > >
+>> > > > > The comment "returning 10,000,000 documents" is, I hope, a
+>> > > > > misstatement. If you're trying to *return* 10M docs sorting
+>> > > > > is irrelevant compared to assembling that many documents. If
+>> > > > > you're trying to return the first 100 of 10M documents, it should
+>> > > > > work.
+>> > > > >
+>> > > > > Overall, we need more details on what you're sorting and what
+>> > > > > you're trying to return as well as how you're measuring before
+>> > > > > we can say much....
+>> > > > >
+>> > > > > Along with how much memory you're giving your JVM to work with,
+>> > > > > what "exploding" means. Are you CPU bound? IO bound? Swapping?
+>> > > > > You need to characterize what is going wrong before worrying
+about
+>> > > > > solutions......
+>> > > > >
+>> > > > > Best
+>> > > > > Erick
+>> > > > >
+>> > > > > On Mon, Aug 16, 2010 at 3:08 PM, Michel Nadeau <akaris@gmail.com>
+>> > > wrote:
+>> > > > >
+>> > > > > > Hi,
+>> > > > > >
+>> > > > > > we are building an application using Lucene and we have
+HUGE data
+>> > > sets
+>> > > > > (our
+>> > > > > > index contains millions and millions and millions of documents),
+>> > > which
+>> > > > > > obviously cause us very important problems when sorting.
+In fact,
+>> > we
+>> > > > > > disabled sorting completely because the servers were just
+>> exploding
+>> > > > when
+>> > > > > > trying to sort results in RAM. The users using the system
+can
+>> > search
+>> > > > for
+>> > > > > > whatever they want, so we never know how many results will
+be
+>> > > returned
+>> > > > -
+>> > > > > a
+>> > > > > > search can return 10 documents (no problem with sorting)
+or
+>> > > 10,000,000
+>> > > > > > (huge
+>> > > > > > sorting problems).
+>> > > > > >
+>> > > > > > I woke up this morning and had a flash : is it possible
+with
+>> Lucene
+>> > > to
+>> > > > > have
+>> > > > > > a "natural sorting" of documents? For example, let's say
+I have 3
+>> > > > columns
+>> > > > > I
+>> > > > > > want to be able to sort by : first name, last name, email;
+I
+>> would
+>> > > have
+>> > > > 3
+>> > > > > > different indexes with the very same data but with a different
+>> > > primary
+>> > > > > key
+>> > > > > > for sorting. I know it's far fetched, and I have never seen
+>> > anything
+>> > > > like
+>> > > > > > that since I use Lucene, but we're just desperate... how
+people
+>> do
+>> > to
+>> > > > > have
+>> > > > > > huge data sets, a lot of users, and sort!?
+>> > > > > >
+>> > > > > > Thanks,
+>> > > > > >
+>> > > > > > Mike
+>> > > > > >
+>> > > > >
+>> > > >
+>> > >
+>> >
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

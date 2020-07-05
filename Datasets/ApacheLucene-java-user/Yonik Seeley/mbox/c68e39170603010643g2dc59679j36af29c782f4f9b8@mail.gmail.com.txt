@@ -1,0 +1,114 @@
+FROM: "Yonik Seeley" <ysee...@gmail.com>
+SUBJECT: Re: Efficiently updating indexed documents
+DATE: 1 Mar 2006
+
+Hi Nadav,
+
+This is exactly the approach Solr uses by default, and it works fine.
+
+see doDeletions() on DirectUpdateHandler2
+http://svn.apache.org/viewcvs.cgi/incubator/solr/trunk/src/java/org/apache/solr/update/DirectUpdateHandler2.java?rev=372455&view=markup
+
+We keep a Map of id->num_to_save that is updated as documents are
+added or deleted.
+If a docoument is added, num_to_save is set to 1 (delete all but the
+last docid later).
+If a document is deleted, num_to_save is set to 0.
+There is even an option to add a document w/o overwriting the old one,
+and in this case, num_to_save is incremented.
+
+-Yonik
+
+On 2/28/06, Nadav Har'El <NYH@il.ibm.com> wrote:
+>
+> A few days ago someone on this list asked how to efficiently "update"
+> documents in the index, i.e.,
+> delete the old version of the document (found by some unique id field)  and
+> add the new version.
+> The problem was that opening and closing the IndexReader and IndexWriter
+> after each document
+> was inefficient (using IndexModifier doesn't help here, because it does the
+> same under the scenes).
+> I was also interested in doing the same thing myself.
+>
+> People suggested doing the deletes immediately and buffering the document
+> additions
+> in memory for later. This is doable, but  I wanted to avoid buffering the
+> new documents (potentially
+> large) in memory myself (let Lucene do whatever buffering it wishes in
+> IndexWriter). I also did not
+> like the idea that in some periods of time, searches will not return the
+> updated file, because the old
+> version was already deleted and the new version was not yet indexed.
+>
+> I therefore came up with the following solution, which I'll be happy to
+> hear comments about
+> (especially if you think this solution is broken in some way or my
+> assumptions are wrong).
+>
+> The idea is basically this: when I want to replace a document, I immediatly
+> add (with
+> IndexWriter.addDocument) the new document to the open IndexWriter. I also
+> save the
+> document;s unique id term to a vector "idsReplaced", of terms we will deal
+> with later:
+>
+>     private Vector idsReplaced = new Vector();
+>     public void replaceDocument(Document document, String idfield, Analyzer
+> analyzer) throws IOException {
+>       indexwriter.addDocument(document, analyzer);
+>       idsReplaced.add(new Term(idfield,document.get(idfield)));
+>     }
+>
+> Now, when I want to flush the index, I close the IndexWriter to make sure
+> all the new documents
+> were added, and then for each id in the idsReplaced vector, I remove all
+> but the last document
+> with this id. The trick here is that IndexReader.termDocs(term) returns the
+> matching documents
+> ordered by internal document number, and documents added later get a higher
+> number
+> (I hope this is actually true... It seems like that in my experiments), so
+> we can delete all but the
+> last matching document for the same id. The code looks something like this:
+>
+>     // call this after doing indexwriter.close();
+>     private void doDelete() throws IOException {
+>       if(idsReplaced.isEmpty())
+>             return;
+>       IndexReader ir = IndexReader.open(indexDir);
+>       for(Iterator i = idsReplaced.iterator(); i.hasNext();){
+>             Term term = (Term) i.next();
+>             TermDocs docs = ir.termDocs(term);
+>             int doctodelete = -1;
+>             while(docs.next()){
+>                   if(doctodelete>0)
+>                         ir.deleteDocument(doctodelete);
+>                   doctodelete=docs.doc();
+>             }
+>       }
+>       idsReplaced.clear();
+>       ir.close();
+>     }
+>
+> I did not test this idea too much, but in some initial experiments I tried,
+> it seems
+> to work.
+>
+> --
+> Nadav Har'El
+> nyh@il.ibm.com
+> +972-4-829-6326
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

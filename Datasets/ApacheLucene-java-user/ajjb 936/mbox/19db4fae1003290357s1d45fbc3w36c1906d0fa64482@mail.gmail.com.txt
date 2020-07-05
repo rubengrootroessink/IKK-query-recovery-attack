@@ -1,0 +1,115 @@
+FROM: ajjb 936 <ajjb...@googlemail.com>
+SUBJECT: Lucene scalability observations with a large volatile Index
+DATE: 29 Mar 2010
+
+Hi,
+
+I have some observations when using Lucene with my particular use case, I
+thought it may be useful to capture some of these observations.
+
+I need to create and continuously update a Lucene Index where each document
+adds (2 to 3) unique terms. The number of documents in the index is between
+150 - 200 million and the number of unique terms in the index is around 300
+- 600 million. I am running on 32bit Windows. Lucene versions 2.4 and 2.9.2.
+
+1)  To reduce memory usage when performing a TermEnum walk of the entire
+Index I use an appropriate value in the method setTermInfosIndexDivisor( int
+indexDivisor) on the IndexReader. (I have chosen not to use the
+setTermIndexInterval(int interval) on the IndexWriter to allow fast random
+access). A problem occurs when I try to delete a number of documents from
+the Index. The IndexWriter internally creates an IndexReader on which I am
+unable to control the indexDivisor value, this results in an
+OutOfMemoryError in low memory situations.
+
+java.lang.OutOfMemoryError: Java heap space at
+org.apache.lucene.index.SegmentTermEnum.termInfo(SegmentTermEnum.java:178)
+        at
+org.apache.lucene.index.TermInfosReader.ensureIndexIsRead(TermInfosReader.java:179)
+        at
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:225)
+        at
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:218)
+        at
+org.apache.lucene.index.SegmentTermDocs.seek(SegmentTermDocs.java:55)
+        at
+org.apache.lucene.index.IndexReader.termDocs(IndexReader.java:780)
+        at
+org.apache.lucene.index.DocumentsWriter.applyDeletes(DocumentsWriter.java:952)
+        at
+org.apache.lucene.index.DocumentsWriter.applyDeletes(DocumentsWriter.java:918)
+        at
+org.apache.lucene.index.IndexWriter.applyDeletes(IndexWriter.java:4336)
+        at
+org.apache.lucene.index.IndexWriter.doFlush(IndexWriter.java:3572)
+        at org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:3442)
+        at
+org.apache.lucene.index.IndexWriter.closeInternal(IndexWriter.java:1623)
+        at org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1588)
+        at org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1562)
+
+A solution is to set an appropriate value on the IndexWriter
+setTermIndexInterval(int interval), at the cost of search speed.
+
+Is there a way to control the IndexDivisor value on any readers created by
+an IndexWriter? If not, It may be useful to have this ability.
+
+
+2) When trying to delete large numbers of documents from the index, using an
+IndexWriter, it appears that using the method setRAMBufferSizeMB() has no
+effect. I consistently run out of memory when trying to delete a third of
+all documents in my index (stack trace below). I realised that even if the
+RAMBufferSize was used , the IndexWriter would have to perform a full
+TermEnum walk of the Index every time the RAM Buffer was full, which would
+really slow the deletion process down, (In addition I would face the problem
+mentioned above).
+
+Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+            at
+org.apache.lucene.index.DocumentsWriter.addDeleteTerm(DocumentsWriter.java:1008)
+            at
+org.apache.lucene.index.DocumentsWriter.bufferDeleteTerm(DocumentsWriter.java:861)
+            at
+org.apache.lucene.index.IndexWriter.deleteDocuments(IndexWriter.java:1938)
+
+Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+at org.apache.lucene.index.TermBuffer.toTerm(TermBuffer.java:122)
+ at org.apache.lucene.index.SegmentTermEnum.term(SegmentTermEnum.java:167)
+at org.apache.lucene.index.SegmentMergeInfo.next(SegmentMergeInfo.java:66)
+ at
+org.apache.lucene.index.MultiSegmentReader$MultiTermEnum.next(MultiSegmentReader.java:495)
+
+As a work around, I am using an IndexReader to perform the deletes as it is
+far more memory efficient.
+
+Another solution may be to call commit on the IndexWriter more often ( i.e.
+perform the deletes as smaller transactions)
+
+3) In some scenarios, we have chosen to postpone an optimize, and to use the
+method expungeDeletes() on IndexWriter. We face another memory issue here in
+that Lucene creates an int[] with the size of indexReader.maxDoc(). With
+200million docs the initialisation of this array causes an OutOfMemoryError
+in low memory situations, just the initialisation of this array uses up
+about 800MB of memory.
+
+Caused by: java.lang.OutOfMemoryError: Java heap space
+        at
+org.apache.lucene.index.SegmentMergeInfo.getDocMap(SegmentMergeInfo.java:44)
+        at
+org.apache.lucene.index.SegmentMerger.mergeTermInfos(SegmentMerger.java:517)
+        at
+org.apache.lucene.index.SegmentMerger.mergeTerms(SegmentMerger.java:500)
+        at
+org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:140)
+        at
+org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:4226)
+        at org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:3877)
+        at
+org.apache.lucene.index.ConcurrentMergeScheduler.doMerge(ConcurrentMergeScheduler.java:205)
+
+I do not have a work around for this issue, and it is preventing us from
+running on a 32bit OS. Any advice on this issue would be appreciated.
+
+Cheers,
+
+Alistair
+

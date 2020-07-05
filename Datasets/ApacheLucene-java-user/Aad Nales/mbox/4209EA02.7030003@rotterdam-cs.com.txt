@@ -1,0 +1,101 @@
+FROM: Aad Nales <aad.na...@rotterdam-cs.com>
+SUBJECT: Re: Configurable indexing of an RDBMS, has it been done before?
+DATE: 9 Feb 2005
+
+Not sure that I get everything:
+
+In the framework that we have built we use a 'simple' object mapping 
+that connects a database table with an object and implicetely with a 
+cache. It is build on top of JDBC.
+
+The key fields of the database are used to create a DbKey element a 
+simple array of Object's. Through our mapping layer you can read and 
+write objects as atomic elements the layer takes care of stuff like 
+inheritance and delegation. (e.g. our object model has Items, Versions 
+and States, reading an item creates an ItemBean, a VersionBean with the 
+current version and a StateBean with the Version most current state).
+
+The framework foresees in a number of different applications e.g. Forum, 
+News, Questionaires, Pages and then some each inherited from Item. What 
+we needed was an indexing approach that could do the following:
+
+1. When an Page, Questionnaire, NewsItem etc. was updated this needed to 
+be reflected in the search results directly.
+2. Every now and then (say once per night) a batch update was needed.
+
+During the creation of our search solution we encountered a number of 
+issues:
+
+1. Double results.
+When you execute a search every hit counts but if a forum thread 
+consists of 200 items then 200 hits on reply's does not really add to 
+the users feeling of service. We added the concept of 'key' field to the 
+index. Double results are filtered out only the highest hit is displayed.
+
+2. Delegate objects
+A thread consists of messages. The content of each message should be in 
+the index. In order to solve this we create detailers. A detailer is 
+called with a DbKey and returns a set of Objects. Each individual object 
+is parsed (by calling the detailer again) based on the rules that are 
+defined in search.xml (see previous mail).
+
+3. Batch Jobs
+To optimize the index now and then we need to reindex the whole thing. 
+This is done by executing a query and getting the DbKey elements. (This 
+by the way is done in a so called DbMap as spare implementation a 
+HashMap where objects are only loaded into the cache when a getValue() 
+is called on it's entry). The query is called on the Item 'table'. The 
+parsing is done by calling the apprioriate detailers per Item type.
+
+Now coming back to our discussion.
+
+- The cache/mapping layer does not care much for the type of database 
+since it is build on JDBC and does not use any stored procedures or 
+constraints other than primary keys.
+
+- Searches are executed on an object that assures that no reader or 
+writers are active.
+
+- The result of a search is given back as Map. This way the uri that is 
+created as part of the result can be completely ignored if your 
+application so pleases.
+
+Eriks suggestions:
+
+Per field analyzers and wrappers are not a problem and could very easily 
+be added to this framework.
+
+Creating an object as a result is possible i guess, but does this not 
+defeat the purpose of a search index somewhat? The information in the 
+index especially when set against a database are to present those fields 
+that are interesting to be searched.
+
+The second part i don't quite 'get' is how would the 'dot' mapping work 
+"company.president.name" for instance? I can see it writing to the index 
+but not creating object returning from a call? Or would this simply be a 
+key field that is then used as part of query? Using it to navigate an 
+object structure is quite feasible especially if you would create a key. 
+E.g. I would store a key in lucene called: "company.role.person" and a 
+related field with the csv values "XYZ, VP, Jenssen". Then if the 
+company 'object' can be derived from so kind of persistent object the 
+result of the query would be:
+
+persistentObject.getCompany("XYZ").getRole("VP").getPerson("Jenssen");
+
+The stuff we build so far would be able to cope with something like that 
+i guess, although quite some elements would still be missing. Using 
+Lucene this way more or less creates a 'unified' index.
+
+Also: I have not been able to look a Squirrel.
+
+Cheers,
+Aad
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

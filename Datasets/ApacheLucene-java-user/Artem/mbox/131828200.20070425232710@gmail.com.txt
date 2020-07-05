@@ -1,0 +1,154 @@
+FROM: Artem <abub...@gmail.com>
+SUBJECT: Re[2]: Out of memory exception for big indexes
+DATE: 25 Apr 2007
+
+Hello Ivan,
+
+That was cool news! Thanks! :) The timings are surprisingly good. 10 mln docs
+sorted in 20s.. cool! Also it looks like sorting algorithm employed by Lucene is
+quite memory-economic.
+
+Not supporting multiple fields is in fact another limitation of my patch. I
+don't need it so I didn't implement it :) What is needed to implement it is
+probably do it manually - employ FieldSelector fetching that bunch of fields;
+change compare(ScoreDoc scoreDoc1, ScoreDoc scoreDoc2) method so that it
+compares docs by a bunch of fields (there should be also another array of
+Asc/Desc flags somewhere which makes this more complicated) instead of single
+field; that's it.
+
+I don't understand yet why Sort(SortField[] fields) didn't give the same when
+fields.length == 1.. Probably we should dig into Lucene code to find out.
+In case of several fields I can imagine why this approach would be less effective: at least
+N*2 Document reads (by StoredFieldComparator.sortValue) will be needed to
+compare 2 documents (N is length of fields array).
+One read with appropriate FieldSelector is likely to perform better.
+
+Anyway, I do think StoredFieldSortFactory's approach could be successfully
+applied to multiple fields, but I'm not going to implement it yet. May be you?
+:)
+
+Regards,
+Artem
+
+IV> Hi Artem,
+
+IV> Thank you very much for your mails :)
+IV> So first I have to tell you that your patch works perfectly even with 
+IV> very big indexes - 40 GB (you can see the results bellow).
+IV> The reason I to have bad test results last time is that I made a bit 
+IV> change (but I can not understand why this change made problem - on my 
+IV> opinion it should not have so big effects on performance).
+IV> So the change that I made is - I added a new method in the class 
+IV> StoredFieldSortFactory. It is the same like create(String sortFieldName, 
+IV> boolean sortDescending) method but instead of wrapping SortField it 
+IV> return it directly and in my class I wrap this object in a Sort one. 
+IV> Here is the code:
+
+IV> public static SortField createSortField(String sortFieldName, boolean 
+IV> sortDescending) {
+IV> return new SortField(sortFieldName, instance, sortDescending);
+IV> }
+
+IV> I do this because we have to support sorting on multiple fields and I 
+IV> obtain all SortField objects in a cycle and then create Sort out of them:
+
+IV> Sort sort = new Sort(sortFields);
+
+IV> In my tests that were with very bad results (time for searches was more 
+IV> than 5 mins) in all the tests I used sorting ONLY BY ONE FIELD (means 
+IV> the array sortFields was always with length 1).
+IV> But I still used the constructor Sort(SortField[]) but not 
+IV> Sort(SortField) as originally in your code in the method 
+IV> StoredFieldSortFactory.create(..).
+IV> Do you think this is the reason for pure performance?
+
+IV> If so, COULD YOU PLEASE TELL ME how to use your patch for sorting on 
+IV> multiple stored fields?
+
+IV> Here are the test result of your patch with different indexes (the tests 
+IV> are with code just as you recommend to use it - with using of your 
+IV> create(..) method that uses constructor Sort(SortField) ):
+
+IV> - CPU - Intel Core2Duo, max memory allowed to the process that makes 
+IV> searching - 1GB (not all of it used)
+IV> **********************************************************************************************************
+IV> - index size 3,3 GB, about 486 410 documents (all the testing searches 
+IV> include all documents);
+
+IV> ____________________________________________________________________________________________
+
+IV> - field size - it is file name and varies - on my opinion 15 - 30 chars 
+IV> average.
+IV> - search time (ASC) - 1,312 s, memory usage - 71MB
+IV> - search time (DSC) - 1,281 s, memory usage - 71MB
+
+IV> - field size - it is abs path name and varies - on my opinion 60 - 90 
+IV> chars average.
+IV> - search time (ASC) - 1,344 s, memory usage - 71MB
+IV> - search time (DSC) - 1,328 s, memory usage - 71MB
+
+IV> - field size - it is file size and varies - on my opinion 3 - 7 chars 
+IV> average.
+IV> - search time (ASC) - 1,313 s, memory usage - 71MB
+IV> - search time (DSC) - 1,312 s, memory usage - 71MB
+
+IV> **********************************************************************************
+
+IV> - index size 21,4 GB, about 376 999 documents (all the testing searches 
+IV> include all documents);
+IV> ____________________________________________________________________________________________
+
+IV> - field size - it is file name and varies - on my opinion 15 - 30 chars 
+IV> average.
+IV> - search time (ASC) - 0,875 s, memory usage - 371MB
+IV> - search time (DSC) - 0,828 s, memory usage - 371MB
+
+IV> - field size - it is abs path name and varies - on my opinion 60 - 90 
+IV> chars average.
+IV> - search time (ASC) - 0,844 s, memory usage - 371MB
+IV> - search time (DSC) - 0,813 s, memory usage - 371MB
+
+IV> - field size - it is file size and varies - on my opinion 3 - 7 chars 
+IV> average.
+IV> - search time (ASC) - 0,813 s, memory usage - 371MB
+IV> - search time (DSC) - 0,797 s, memory usage - 371MB
+
+IV> **********************************************************************************
+
+IV> - index size 42,9 GB, about 10 944 918 documents (all the testing 
+IV> searches include all documents);
+IV> ____________________________________________________________________________________________
+
+IV> - field size - it is file name and varies - on my opinion 15 - 30 chars 
+IV> average.
+IV> - search time (ASC) - 21,905 s, memory usage - 625MB
+IV> - search time (DSC) - 21,781 s, memory usage - 625MB
+
+IV> - field size - it is abs path name and varies - on my opinion 60 - 90 
+IV> chars average.
+IV> - search time (ASC) - 21,874 s, memory usage - 625MB
+IV> - search time (DSC) - 21,749 s, memory usage - 625MB
+
+IV> - field size - it is file size and varies - on my opinion 3 - 7 chars 
+IV> average.
+IV> - search time (ASC) - 21,687 s, memory usage - 625MB
+IV> - search time (DSC) - 21,812 s, memory usage - 625MB
+
+
+IV> THANK YOU VERY MUCH,
+IV> Ivan
+
+
+
+
+
+-- 
+Best regards,
+ Artem                            mailto:abublic@gmail.com
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

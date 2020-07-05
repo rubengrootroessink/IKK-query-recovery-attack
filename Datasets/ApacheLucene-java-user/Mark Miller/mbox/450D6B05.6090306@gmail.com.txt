@@ -1,0 +1,210 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: default AND operator
+DATE: 17 Sep 2006
+
+3 docs with one field each in index:
+-------------------------------------
+french beast stone
+crazy rolling stone
+rolling stone done in by coconut
+
+3 searches, default op set as AND
+-------------------------------------
+search("coconut stone");
+search("coconut OR stone");
+search("coconut AND stone");
+
+3 results:
+--------------------------------------
+query: +allFields:coconut +allFields:stone
+Found 1 document(s) (in 31 milliseconds) that matched query 'coconut stone':
+
+query: allFields:coconut allFields:stone
+Found 3 document(s) (in 0 milliseconds) that matched query 'coconut OR 
+stone':
+
+query: +allFields:coconut +allFields:stone
+Found 1 document(s) (in 16 milliseconds) that matched query 'coconut AND 
+stone':
+
+
+You do not find this to be true? Your analyzer should not be a problem 
+as the Queryparser will only analyze non queryparser syntax keywords.
+
+Code follows:
+
+public class Tester {
+    private static RAMDirectory directory;
+
+    private static Analyzer analyzer;
+
+    public static void main(String[] args) {
+        setupIndex();
+       
+        try {
+            search("coconut stone");
+            search("coconut OR stone");
+            search("coconut AND stone");
+        } catch (Exception e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
+
+    private static void setupIndex() {
+        directory = new RAMDirectory();
+
+        analyzer = new WhitespaceAnalyzer();
+
+        IndexWriter writer;
+
+        try {
+            writer = new IndexWriter(directory, analyzer, true);
+
+            Document doc = new Document();
+            doc.add(new Field("allFields",
+                    "french beast stone",
+                    Field.Store.NO, Field.Index.TOKENIZED));
+
+            writer.addDocument(doc);
+
+
+            doc = new Document();
+            doc.add(new Field("allFields", "crazy rolling stone",
+                    Field.Store.NO, Field.Index.TOKENIZED));
+            writer.addDocument(doc);
+           
+            doc = new Document();
+            doc.add(new Field("allFields", "rolling stone done in by 
+coconut",
+                    Field.Store.NO, Field.Index.TOKENIZED));
+            writer.addDocument(doc);
+
+
+            writer.close();
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
+   
+    public static int search(String q) throws Exception {
+        IndexSearcher is = new IndexSearcher(directory);
+
+        QueryParser qp = new QueryParser("allFields", analyzer);
+       
+        qp.setDefaultOperator(Operator.AND);
+       
+        Query query = qp.parse(q);
+       
+        long start = new Date().getTime();
+        Hits hits = is.search(query);
+        long end = new Date().getTime();
+        System.err.println("\nquery: " + query.toString());
+        System.err.println("Found " + hits.length() + " document(s) (in " +
+            (end - start) + " milliseconds) that matched query '" + q + 
+"':");
+       
+        return hits.length();
+    }
+}
+
+Erick Erickson wrote:
+> Are you really, really sure that your *analyzer* isn't automatically
+> lower-casing your *query* and turning "french AND antiques" into 
+> "french and
+> antiques", then, as Chris says, treating "and" as a stop word?
+>
+> The fact that your parser transforms "antiques" into "antiqu" leads me to
+> suspect that there's a lot more going on in the parser analyzer than you
+> might expect....
+>
+> And, in case you haven't already found it, are you sure what your index
+> contains. I've found luke (google luke lucene) to be very valuable for 
+> these
+> kinds of questions, particularly your issue about stemming etc.
+>
+> Best
+> Erick
+>
+> On 9/17/06, no spam <mrs.nospam@gmail.com> wrote:
+>>
+>> When I use "french AND antiques" I get documents like this :
+>>
+>> score: 1.0, boost: 1.0, cont: French Antiques
+>> score: 0.23080501, boost: 1.0, cont: FRENCH SEPTIC
+>> score: 0.23080501, boost: 1.0, cont: French & French Septic
+>> score: 0.20400475, boost: 1.0,id: 25460, cont: French & Associates
+>>
+>> As in the first e-mail the Query object shows these terms:
+>>
+>> contents:french contents:antiqu  <---- using string "french AND 
+>> antiques"
+>>
+>> when using Operator.AND it shows these:
+>>
+>> +contents:french +contents:antiqu      <----- here I used used "french
+>> antiques"
+>>
+>> The second example below matches NONE of the documents above and in fact
+>> only if I do synonym expansion with stemming.
+>>
+>> *****My big question here is why doesn't the operator.AND force both of
+>> these queries to be identical? These will be users typed queries so I 
+>> want
+>> Lucene to force the use of AND so I don't have to search/replace
+>>
+>>
+>> On 9/16/06, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+>> >
+>> > can you be more specific about what it is you "expect", and what 
+>> exactly
+>> > serachTerms is in your examples?  (presumably it's a string, is it the
+>> > string "french AND antiques" ... are you sure it's not "french and
+>> > antiques" ? ... QueryParser only respects AND and OR if they are
+>> > capitalized, otherwise they are treated as normal words, which are
+>> > probably StopWords to your analyzer .. in which case everything you've
+>> > shown makes perfect sense to me.)
+>> >
+>> >
+>> > :
+>> > :   stemParser = new QueryParser("contents", stemmingAnalyzer);
+>> > :   Query query = stemParser.parse(searchTerms);
+>> > :   Hits docHits = searcher.search(query);
+>> > :
+>> > : Debug from query shows: contents:french contents:antiqu  ... I would
+>> > have
+>> > : expected to see '+' before contents.
+>> > :
+>> > : But not if I try the query again with "french antiques" with this 
+>> code
+>> > ...
+>> > : which sets the default operator to AND:
+>> > :
+>> > :    stemParser = new QueryParser("contents", stemmingAnalyzer);
+>> > :   stemParser.setDefaultOperator(QueryParser.Operator.AND);
+>> > :   Query query = stemParser.parse(searchTerms);
+>> > :   Hits docHits = searcher.search(query);
+>> > :
+>> > : Debug from Query shows this:  +contents:french +contents:antiqu
+>> > :
+>> >
+>> >
+>> >
+>> > -Hoss
+>> >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

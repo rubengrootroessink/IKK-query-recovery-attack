@@ -1,0 +1,77 @@
+FROM: Philip Puffinburger <ppuffinbur...@tlcdelivers.com>
+SUBJECT: Re: Use of PrefixQuery to create multi-word queries
+DATE: 5 Jan 2011
+
+
+On Jan 5, 2011, at 1:00 PM, L Duperval wrote:
+
+> Philip,
+> 
+> I also have two fields, one for indexing and another for display. How does the
+> above affect searching? If you type "brown do" will it find the title correctly
+> or do you have to type "brown dog" in order to get a match? Would "brown do"
+> match "The brown horse has a dog" or not? My understanding is that that Lucene
+> (BTW, I'm using 2.4.1 because it's the latest version to work with Compass)
+> matches the prefix first, and then combines the matching results with other
+> clauses as specified.
+
+No.   Typing "brown do" will match on "brown dog" but not match on "the brown dog" that way
+we don't care which way the user types it.       In our system "brown do" will not match on
+"the brown horse has a dog".   We only do the PrefixQuery which is against the keyword field
+("brown dog" is a single term as is "the brown dog").   We don't have a BooleanQuery like
+you do, but I don't see why it wouldn't work.
+
+We basically have a method that looks something like 
+
+List<Book> getBooksBeginningWithTitle(String prefix);
+
+and that code looks something like (we use Hibernate Search and not Compass, but they are
+pretty similar) :
+
+FullTextSession fullTextSession = Search.getFullTextSession(getSession());
+PrefixQuery prefixQuery = new PrefixQuery(new Term("titlekeyword", TextNormailzationUtil.transformKeyword(prefix,
+LetterCaseTransform.Lower)));
+FullTextQuery ftQuery = fullTextSession.createFullTextQuery(prefixQuery, Book.class);
+return ftQuery.list();
+
+
+
+The field creation for the keyword fields looks like (done in a Hibernate Search construct
+called a FieldBridge - can't remember if Compass has something similar)
+
+document.add(new Field("titlekeyword", TextNormailzationUtil.transformKeyword(fullTitle, LetterCaseTransform.Lower),
+Store.NO, Index.NOT_ANALYZED_NO_NORMS));
+document.add(new Field("titlekeyword", TextNormailzationUtil.transformKeyword(partialTitle,
+LetterCaseTransform.Lower), Store.NO, Index.NOT_ANALYZED_NO_NORMS));
+
+The partialTitle is just the full title with leading articles removed ('A', 'An', 'The', 'L'',
+etc).   
+
+The TextNormalizationUtil.transformKeyword in this case removes punctuation and non-spacing
+marks from the text and then lowercases.   This is a business decision because in a keyword
+the case matters and users might not type in the punctuation or have Caps Lock key on so we
+normalize things down.    You have to be sure that the same normalization happens at index
+and at search time. 
+
+
+
+> That's what I was planning to look at next. Why did you choose not to use this
+> approach? Is it because of the other things you want to do with those fields or
+> something about the way the SpanQuery classes work?
+
+I needed the field for other things and the code to do the PrefixQuery against this field
+was pretty simple.   
+
+We use SpanQuery's (well, list of SpanRegexQuery clauses fed into a SpanNearQuery) when we
+do something similar with authors (user can type an author name in first/last or last/first
+order and then what about any additional parts of their name - which means we would have had
+to create a lot of keyword fields to handle all the combinations and would still have missed
+some).
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

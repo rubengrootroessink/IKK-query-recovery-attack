@@ -1,0 +1,149 @@
+FROM: "Paul J. Lucas" <p...@lucasmail.org>
+SUBJECT: Hints on implementing XQuery full-text search
+DATE: 14 Jan 2010
+
+Hi -
+
+I've used Lucene on a previous project, so I am somewhat familiar with the API. However, I've
+never had to do anything "fancy" (where "fancy" means things like using filters, different
+analyzers, boosting, payloads, etc).
+
+I'm about to embark on implementing the full-text search feature of XQuery:
+
+	http://www.w3.org/TR/xpath-full-text-10/
+
+Its query abilities are the most complicated I've seen.  From my experience with Lucene, I
+know it can be used to implement some of the features; however, I'd like to walk through them
+all.  For each feature, I only need a simple answer like, "Feature X is best implemented using
+a query filter," just so I start off in the right direction for each feature.
+
+Note: I will be implementing my own query parser and construct queries "by hand" using various
+instantiations of Lucene classes.
+
+-------------------------
+3.3 Cardinality Selection
+
+This allows you to say things like:
+
+	title ftcontains "usability" occurs at least 2 times
+
+which means that the title field must contain the "usability" at least twice.  How can this
+be done?
+
+---------------------
+3.4.4 Stemming Option
+
+This allows you to match words that have been indexed against words in the query that have
+been stemmed like:
+
+	title ftcontains "improve" with stemming
+
+which would match even if title contained "improving".  Note that PorterStemFilter can not
+be used because the decision whether to use stemming or not is specified at query-time and
+not index-time.
+
+In this case, would I have to add each word to the index twice?  Once for the original word
+and once for the stemmed word (assuming the stemmed word is different from the original word)?
+ Or is there a better way?
+
+-----------------
+3.4.5 Case Option
+
+This allows you to specify -- at query-time -- one of "case insensitive", "case sensitive",
+"lowercase", "uppercase".
+
+The last two I think can be implemented using a query filter since, for "lowercase", it matches
+only if the document text is all in lower-case (and same for "uppercase").
+
+But how would you handle the case insensitive/sensitive specifications?  One thought is to
+add every word twice: once in its original case and once in a normalized case (arbitrarily
+chosen to be, say, lowercase).  Any better ideas?
+
+-----------------------
+3.4.6 Diacritics Option
+
+This is similar to the Cast Option except its "diacritics insensitive" or "diacritics sensitive.
+ How about implementing this?
+
+----------------------
+3.4.7 Stop Word Option
+
+This allows you to specify -- qt query time -- "with stop words", e.g.:
+
+	abstract ftcontains "propagating of errors"
+	with stop words ("a", "the", "of")
+
+would match a document with an abstract that contains "propagating few errors". It seems odd,
+I know.  It's as if the stop words become wildcards, i.e.:
+
+	"propagating of errors" -> "propagating * errors"
+
+where * will match any word in the document.  How can this be implemented in Lucene?
+
+------------------------
+3.5.3 Mild-Not Selection
+
+XQuery has two flavors of "not": (regular) not and mild-not.  This allows you to have a query
+like:
+
+	body ftcontains "Mexico" not in "New Mexico"
+
+which would only match documents that contain "Mexico" when it's not part of the phrase "New
+Mexico".  How can this be implemented using Lucene?
+
+-----------------------
+3.6.1 Ordered Selection
+
+This allows you to require that the order of the words in a query match the order of the words
+in a document, e.g.:
+
+	title ftcontains ("web site" ftand "usability") ordered
+
+which would match only if the phrase "web site" and the word "usability" both occurred in
+the document and "usability" comes after "web site" in word order.  My guess for implementing
+this would be to keep track of word positions and store this in a payload.  Yes?
+
+---------------------
+3.6.4 Scope Selection
+
+This allows you to require that words appear in the same "scope", e.g.:
+
+	abstract ftcontains "usability" ftand "web site" same sentence
+
+You can also do any combination of {same|different} {sentence|paragraph}.  My guess for this
+would also be to keep track of sentence/paragraph data in a payload.  Yes?
+
+-----------------
+3.7 Ignore Option
+
+Given the partial XQuery:
+
+let $x := <book>
+   <title>Web Usability and Practice</title>
+   <author>Montana <annotation> this author is
+       an expert in Web Usability</annotation> Marigold
+   </author>
+   <editor>Vera Tudor-Medina on Web <annotation> best
+       editor on Web Usability</annotation> Usability
+   </editor>
+ </book>
+
+if I were to have a query:
+
+	book ftcontains "Web Usability" without content $x//annotation
+
+then it would not consider any text inside of <annotation></annotation> elements
+at all.  "Web Usability" would be found twice: once in the title element and once in the editor
+element.  Note that the latter <annotation> element comes smack in the middle of the
+phrase "Web Usability".  My guess for this would also be to use payload data to store the
+element each word is inside of then use a filter based on that.  Yes?
+
+-----------------
+I realize this is a lot, but any pointers appreciated.  Thanks!
+
+- Paul
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,116 @@
+FROM: Regan Heath <regan.he...@BridgeHeadSoftware.com>
+SUBJECT: Re: indexWriter.addIndexes, Disk space, and open files
+DATE: 7 Jun 2010
+
+
+That's pretty much exactly what I suspected was happening.  I've had the same
+problem myself on another occasion... out of interest is there any way to
+force the file closed without flushing?  From memory I tried everything I
+could think of at the time but couldn't manage it.  Best I could do was
+catch and swallow the expected exception from close and carry on.
+
+So, the only option for us is to upgrade the version of lucene we're using
+to the current trunk?  Is there no existing stable release version
+containing the fix?  If not, when do you estimate the next stable release
+with the fix will be available?
+
+Thanks,
+Regan
+
+
+Michael McCandless-2 wrote:
+> 
+> This is a bug in how Lucene handles IOException while closing files.
+> 
+> Look at SegmentMerger's sources, for 2.3.2:
+> 
+>  
+> https://svn.apache.org/repos/asf/lucene/java/tags/lucene_2_3_2/src/java/org/apache/lucene/index/SegmentMerger.java
+> 
+> Look at the finally clause in mergeTerms:
+> 
+>     } finally {
+>       if (freqOutput != null) freqOutput.close();
+>       if (proxOutput != null) proxOutput.close();
+>       if (termInfosWriter != null) termInfosWriter.close();
+>       if (queue != null) queue.close();
+>     }
+> 
+> You are hitting an exception in that freqOutput.close, which means the
+> proxOutput (*.prx) and termInfosWriter (*.tii, *.tis) are not
+> successfully closed.  It looks like the bug is still present to some
+> degree through 3x, but fixed (at least specifically for segment
+> merging, but likely not in other places) in trunk.
+> 
+> Likely what happened is you hit a disk full inside the "try" part, and
+> so the finally clause went to close the files, but close then tries to
+> flush the pending buffer, which also hits disk full.
+> 
+> Mike
+> 
+> On Mon, Jun 7, 2010 at 4:52 AM, Regan Heath
+> <regan.heath@bridgeheadsoftware.com> wrote:
+>>
+>> If you don't want to use the ImDisk software, a small flash drive will do
+>> just as well...
+>>
+>>
+>> Regan Heath wrote:
+>>>
+>>> Windows XP.
+>>>
+>>> The problem occurs on the local file system, but to replicate it more
+>>> easily I am using http://www.ltr-data.se/opencode.html#ImDisk to mount a
+>>> virtual 10mb disk on F:\.  It is formatted as an NTFS file system.
+>>>
+>>> The files can be removed normally (delete from explorer or command
+>>> prompt)
+>>> after program shut down.  In fact, the program cleans them up itself on
+>>> restart (an interim solution).
+>>>
+>>> Process Explorer shows the program has handles to these three files
+>>> open.
+>>>
+>>>
+>>> Erick Erickson wrote:
+>>>>
+>>>> What op system and what file system are you using? Is the file system
+>>>> local
+>>>> or
+>>>> networked?
+>>>>
+>>>> What does it take to remove the files. That is, can you do it manually
+>>>> after
+>>>> the
+>>>> program shuts down?
+>>>>
+>>>> Best
+>>>> Erick
+>>>>
+>>>
+>> --
+>> View this message in context:
+>> http://lucene.472066.n3.nabble.com/indexWriter-addIndexes-Disk-space-and-open-files-tp841735p875713.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+-- 
+View this message in context: http://lucene.472066.n3.nabble.com/indexWriter-addIndexes-Disk-space-and-open-files-tp841735p875884.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

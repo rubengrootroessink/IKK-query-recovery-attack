@@ -1,0 +1,125 @@
+FROM: Mark Kristensson <mark.kristens...@smartsheet.com>
+SUBJECT: Re: IndexWriter.close() performance issue
+DATE: 22 Feb 2011
+
+I'm resurrecting this old thread because this issue is now reaching a
+critical point for us and I'm going to have to modify the Lucene source code
+for it to continue to work for us.
+
+Just a quick refresher: we have one index with several hundred thousand
+unqiue field names and found that opening an index writer and closing an
+index reader results in horribly slow performance on that one index. I have
+isolated the problem down to the calls to String.intern() that are used to
+allow for quick string comparisons of field names throughout Lucene.
+
+FYI, the requirement that necessitates all of those unique field names
+cannot be changed without effectively removing a major piece of
+functionality from our application.
+
+It is clear that Lucene has already gone through a couple of battles with
+String.intern() judging by the closed issues (LUCENE-1600 and LUCENE-1607)
+and the fact that a simple hashmap has been created in SimpleStringInterner
+(and before that StringInterner, which appears to be unused now) to minimize
+the number of calls to String.intern().
+
+My first question is: is the call to String.intern() in SimpleStringInterner
+really necessary? Since you are already using a hashmap to return the same
+instance without calling String.intern() in the case where you have already
+encountered that String, why bother to call .intern() when you add the
+String to the HashMap?
+
+Additionally, the fact that all of the calls to String.intern() in the
+Lucene code base have been replaced with calls to StringHelper.intern(),
+which uses the SimpleStringInterner, tells me that no String comparisons
+will happen without calling StringHelper.intern() which uses the hashmap in
+SimpleStringInterner to ensure it gets back the same String instance for
+equivalent strings.
+
+Second question: rather than using the very simple hashmap in
+SimpleStringInterner, would I be better off using a ConcurrentHashMap in
+StringHelper? Something like this:
+
+
+  //  public static StringInterner interner = new
+SimpleStringInterner(1024,8);
+  public static ConcurrentHashMap<String, String> uniqueStrings = new
+ConcurrentHashMap<String, String>();
+
+  /** Return the same string object for all equal strings */
+  public static String intern(String s) {
+  //    return interner.intern(s);
+    String v = uniqueStrings.putIfAbsent(s, s);
+    return (v != null) ? v : s;
+  }
+
+Since this issue has become critical for us, I am planning to proceed with
+testing using a ConcurrentHashMap in StringHelper. My quick testing back in
+November confirmed the basics of the approach would work, but the feedback
+here was twofold: 1) make it thread-safe and 2) make sure your hashkey won't
+lead to collisions (I was passing the String.hashCode() in as the key
+before).
+
+Third question, as I test out this solution, are there any particular
+actions/methods/operations that I should test out because this kind of a
+change might be especially problematic?
+
+Finally, back on the root issue. I understand intuitively why having so many
+unique field names might cause a problem opening an index reader. However,
+I'm not sure why closing (committing changes to) an index writer would have
+such a problem. Why is that?
+
+Thank you!
+Mark
+
+
+On Tue, Nov 23, 2010 at 2:22 PM, Mark Kristensson <
+mark.kristensson@smartsheet.com> wrote:
+
+> I've tried the suggestion below, but it really doesn't seem to have any
+> impact. I guess that's not surprising since 80% of the CPU time when I ran
+> hprof was in String.intern(), not in the StringHelper class.
+>
+> Clearly, if I'm going to hack things up at this level, I've got some work
+> do to, including:
+> - Synchronizing access to the storage mechanism I use for the strings
+> - Using something else (String?) for the hashCode (instead of the String's
+> built-in integer hashcode).
+>
+> Could I not use the HashMap solution I proposed to ensure that all field
+> name strings that are the same refer to the same instance of the String?
+> Does a HashMap.get() not return the same instance with every call?
+>
+> I'm also intrigued by a comment from Mike about FieldInfos and using those
+> to control the uniqueness. Any suggestions on how I go about doing that?
+> Would that be instead of monkeying with StringHelper or in addition to it?
+>
+> Thanks,
+> Mark
+>
+>
+>
+> On Nov 20, 2010, at 5:44 AM, Yonik Seeley wrote:
+>
+> > On Fri, Nov 19, 2010 at 5:41 PM, Mark Kristensson
+> > <mark.kristensson@smartsheet.com> wrote:
+> >> Here's the changes I made to org.apache.lucene.util.StringHelper:
+> >>
+> >>  //public static StringInterner interner = new
+> SimpleStringInterner(1024,8);
+> >
+> > As Mike said, the real fix for trunk is to get rid of interning.
+> > But for your version, you could try making the string intern cache
+> larger.
+> >
+> > StringHelper.interner = new SimpleStringInterner(300000,8);
+> >
+> > -Yonik
+> > http://www.lucidimagination.com
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+>
+>
+

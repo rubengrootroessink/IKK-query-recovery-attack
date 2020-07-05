@@ -1,0 +1,126 @@
+FROM: Max Jakob <max.ja...@fu-berlin.de>
+SUBJECT: Re: Consider only documents of a category for IDF
+DATE: 18 Oct 2010
+
+Thanks Mark, the call reader.docFreq(categoryTerm) is certainly a good
+way to get the nominator part of the IDF formula
+(http://en.wikipedia.org/wiki/Tf%E2%80%93idf#Mathematical_details).
+
+However, what is left to get is the denominator. For this I want the
+number of in-category documents that each term appears in (again,
+categories are in a separate field). Calling reader.docFreq(term) for
+this would give me the document frequency in the complete collection,
+but I only want the number of documents that the term appears within a
+category.
+
+So for a query +CATEGORY:sport TEXT:Johnson, I would like to set the IDF to
+   log( (number of all sports documents)
+         / (number of all sports documents that contain Johnson) )
+
+Is there an efficient way for doing this?
+
+Cheers,
+Max
+
+On Mon, Oct 18, 2010 at 2:32 PM, mark harwood <markharw00d@yahoo.co.uk> wrote:
+> Can you not just call reader.docFreq(categoryTerm) ?
+>
+> The returned figure includes deleted docs but then the search term uses this
+> method too so should suffer from the same inaccuracy.
+>
+> Cheers
+> Mark
+>
+>
+>
+> ----- Original Message ----
+> From: Max Jakob <max.jakob@fu-berlin.de>
+> To: java-user@lucene.apache.org
+> Sent: Mon, 18 October, 2010 12:26:33
+> Subject: Consider only documents of a category for IDF
+>
+> Hi,
+>
+> I would like to change the IDF value of the Lucene similarity
+> computation to "inverse document frequency inside category". Not the
+> complete collection should be considered, but only the documents that
+> have a certain category. The categories are stored as separate fields.
+>
+> The implementation below works, but it is kind of slow. I was
+> wondering if there is a more efficient way than to read the DocIdSet
+> from the index for each term.
+>
+> Thanks in advance for any pointers you might have!
+> Regards,
+> Max
+>
+> public class InCategorySimilarity extends DefaultSimilarity {
+>
+>   public InCategorySimilarity() {}
+>
+>   // These objects have to be here so that they are visible across
+> multiple executions of idfExplain
+>   OpenBitSet categoryIdSet;
+>   long catDocs = 1;
+>
+>   @Override
+>   public Explanation.IDFExplanation idfExplain(final Term term,
+> final Searcher searcher) throws IOException {
+>       return new Explanation.IDFExplanation() {
+>           long termCategoryFreq = 0;
+>           boolean isCategoryField = term.field().equals("CATEGORY");
+>
+>           private long termCategoryFreq() {
+>               try {
+>                   IndexReader reader = ((IndexSearcher)
+> searcher).getIndexReader();
+>                   TermsFilter filter = new TermsFilter();
+>                   filter.addTerm(term);
+>                   OpenBitSet docSet = (OpenBitSet) filter.getDocIdSet(reader);
+>
+>                   if (isCategoryField) {
+>                       categoryIdSet = docSet;
+>                       catDocs = categoryIdSet.cardinality();
+>                   } else {
+>                       docSet.and(categoryIdSet);
+>                   }
+>                  termCategoryFreq = docSet.cardinality();
+>               } catch (IOException e) {
+>                   //handle
+>               }
+>               return termCategoryFreq;
+>           }
+>
+>           public float invCatFreq(long termCategoryFreq, long catDocs) {
+>               return termCategoryFreq==0 ? 0 : (float) (Math.log(new
+> Float(catDocs) / new Float(termCategoryFreq)) + 1.0);
+>           }
+>
+>           @Override
+>           public float getIdf() {
+>               termCategoryFreq = termCategoryFreq();
+>               float invCatFreq = invCatFreq(termCategoryFreq, catDocs);
+>               return invCatFreq;
+>           }
+>       };
+>   }
+> }
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

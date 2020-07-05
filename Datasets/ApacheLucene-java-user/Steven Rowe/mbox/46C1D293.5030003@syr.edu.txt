@@ -1,0 +1,64 @@
+FROM: Steven Rowe <sar...@syr.edu>
+SUBJECT: Re: performance on filtering against thousands of different publications
+DATE: 14 Aug 2007
+
+Hi Cedric,
+
+Cedric Ho wrote:
+> On 8/13/07, Erick Erickson <erickerickson@gmail.com> wrote:
+>> Are you iterating through a Hits object that has more than
+>> 100 (maybe it's 200 now) entries? Are you loading each document that
+>> satisfies the query? Etc. Etc.
+> 
+> Unfortunately, yes. And I know this is another big source for
+> slowness. But due to some other reason that cannot be worked around at
+> this stage. I'll have to return all hits for a search for now.
+> For each document I get the docid (not the internal one in lucene),
+> date and publication. I've already used FieldCache to cache all the 3
+> fields.
+
+I think you misunderstood Erick.  He was not telling you that you should
+not retrieve all hits; instead, he was pointing out that there are more
+efficient ways of doing so than using the search() method that returns a
+Hits object.
+
+>From <http://wiki.apache.org/lucene-java/ImproveSearchingSpeed>:
+
+    Iterating over all hits is slow for two reasons.
+    Firstly, the search() method that returns a Hits
+    object re-executes the search internally when you
+    need more than 100 hits. Solution: use the search
+    method that takes a HitCollector instead.
+
+Upon construction, a Hits object collects (at most) the top 100 hits'
+scores and document IDs.  Each time you ask the Hits object for
+information about a hit beyond what it has collected info for, it will
+re-execute the search, collecting info on as many as double the
+requested position, as long as there are further hits.  (And this is
+Erick's point: you shouldn't be using an API that executes the same
+search more than once.)
+
+So for example, if you are iterating over the hits from a search
+resulting in over 100 hits, when you ask for info on the 101st document
+(n=100 in zero-based notation), the Hits object will re-execute the
+search to collect info on the top 200 (n*2) documents; at the 201st
+document, the top 400 documents' info will be collected; and so on.
+
+There is another form of potential inefficiency resulting from usage of
+the Hits object: it maintains an LRU cache of 200 Documents' stored
+fields.  If you are already doing this elsewhere in your application, or
+if you will only visit each Document once, then maintaining the cache
+will only slow you down.
+
+Steve
+
+-- 
+Steve Rowe
+Center for Natural Language Processing
+http://www.cnlp.org/tech/lucene.asp
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

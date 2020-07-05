@@ -1,0 +1,66 @@
+FROM: John Haxby <...@scalix.com>
+SUBJECT: Re: Best Practice: emails and file-attachments
+DATE: 15 Aug 2006
+
+lude wrote:
+> does anybody has an idea what is the best design approch for realizing
+> the following:
+>
+> The goal is to index emails and their corresponding file attachments.
+> One email could contain for example:
+I put a fair amount of thought into this when I was doing the design for 
+our mail server -- I know about mail :-)   After a little trial and 
+error I came up with the following scheme:
+
+   1. All header fields indexed under their own name with the name
+      converted to lower case.
+   2. Almost all bodyparts indexed in a single field called BODY (in
+      upper case)
+   3. Meta-data such as SIZE, DELIVERY-DATE and similar indexed with
+      uppercase fields
+   4. Extensions for other bodypart-specific or application-specific
+      fields indexed as something with an initial uppercase letter and
+      at least one lowercase letter
+
+That gives an extensible set of fields and does require that the index 
+knows ahead of time what header fields will be present or relevant.   It 
+means that there are potentially a lot of fields: we're running at about 
+60 depending on the user.
+
+Some header fields are special.   The various message-id fields 
+(Message-Id, Resent-Message-Id, In-Reply-To and References) need to have 
+their mesage-ids carefully extracted and then indexed untokenized.   
+Recipient fields (to, cc, from, etc) need to parsed and then have their 
+addresses re-assembled as a friendly-name and an RFC822 address -- the 
+reason for the re-assembly is that addresses can be presented in 
+equivalent but odd fashions.   Most header fields can have RFC2047 
+encoded text which needs to be decoded.
+
+When indexing the bodyparts you need to be a little careful.   In 
+general, the MIME headers for each part are all indexed as other message 
+headers (content-id is a messge id field) and I also indexed the 
+canonical content type under a CONTENT-TYPE field, again to get rid of 
+fluff so that I can search for, say, 
+CONTENT-TYPE:application/x-vnd-powerpoint to find all those annoyingly 
+huge messages :-)  An attached message probably doesn't want all its 
+headers indexed: subject is good; recipients are probably bad as it'll 
+confuse the normal search and give unexpected results; message-id fields 
+are almost certainly a bad idea.  If you're indexing a 
+multipart/alternative bodypart then index all the MIME headers, but only 
+index the content of the *first* bodypart.
+
+Does that all make sense?  Javamail is great for this, it's good at 
+parsing and extracting the content of messages.  However, it's not 
+enough to just read what I've said and the javamail doc.   If you're not 
+intimately familiar with the MIME RFCs (I think the first one is 
+RFC2045, but their not difficult to find as their all around RFC2047) 
+and RFC2822, the message structure RFC itself.   If you just guess 
+because the structure is "obvious" you'll come unstuck.
+
+jch
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

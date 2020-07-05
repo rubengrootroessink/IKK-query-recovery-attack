@@ -1,0 +1,127 @@
+FROM: Christian Reuschling <christian.reuschl...@gmail.com>
+SUBJECT: Re: Search By Phrase Not Working
+DATE: 8 Oct 2009
+
+Hi,
+
+I had similar behaviour. On an self-build index on german wikipedia I searched
+for the phrase "blaue blume". I've got 2 results. When I searched for +"blaue
+blume" "vogel" I've got 59 results...strange.
+I found out that when I create a plain BooleanQuery with just the phrase "blaue
+blume" gives different results, depending whether I specify 'SHOULD' or 'MUST'
+(i.e. 2 or 59 results)
+Looking closer at this, I found out that Lucene takes different BooleanScorer
+implementations (BooleanScorer/BooleanScorer2) depending on this criteria,
+which implies the 'docsScoredInOrder'flag.
+I started a search by specifying the collector directly:
+TopScoreDocCollector collector = TopScoreDocCollector.create(1000, <false OR
+true>);
+
+In the case docsScoredInOrder was true, I've got correct 59 results. In the
+case it was false, I've got 2.
+
+I looked into Luke now, and I found out in the search tab under 'collector' the
+checkbox "Allow out-of-order collecting, when supported". When I searched now
+in Luke for 'blaue blume', I could reproduce this behaviour - depending on the
+checkbox setting I recieved 2 or 59 results.
+
+I manually created a small, new Index just by copying the 59 documents in the
+hope to get a testing scenario that I can post here in the mailing list, but the
+new index worked correctly...I can't reproduce this behaviour.
+
+Because of this I recognized that my wikipedia index was ~1-2 years old, and
+the testing index was build with Lucene 2.9. At the end, I build a complete new
+index on wikipedia with 2.9, which finished this night. When I look into it
+with Luke it seems everything works fine now :)
+
+
+For me, it looks that there is some index version incompatibility regarding the
+new (at least for me) 'docsScoredInOrder' concept (currently I haven't a clear
+idea what this is good for - but anyway). Maybe it is a bug, but in the case it
+is not, some kind of according exception would be much better instead of silent
+odd behaviour.
+
+
+Last but not least: I think Lucene 2.9 is a really fine release - thanks to the
+Lucene team!
+
+
+
+Chris
+
+
+
+
+
+On Wed, 7 Oct 2009 21:44:18 -0700 (PDT)
+sadronmeldir <sadronmeldir@gmail.com> wrote:
+
+> 
+> Hello all,
+> 
+> I'm having some difficult getting queries on phrases to work properly, and I
+> can't figure out why. For example, a search for ("Heart of Fire") yields no
+> results when it should be returning two. 
+> 
+> Below is a snippet of my code. I'm probably overlooking something trivial,
+> but any help would be appreciated!
+> 
+> 
+> 
+> ==============START CODE SNIPET==============
+> String indexDir = "tmp";
+> StandardAnalyzer aWrapper = new StandardAnalyzer(Version.LUCENE_CURRENT);
+> IndexWriter writer = new IndexWriter(SimpleFSDirectory.open(new
+> File(indexDir)), aWrapper, true, IndexWriter.MaxFieldLength.UNLIMITED);
+> 
+> .
+> .
+> .
+> 
+> Document doc = new Document();
+> doc.add(new Field("year", Integer.toString(line.getYear()), Field.Store.YES,
+> Field.Index.ANALYZED));
+> doc.add(new Field("month", Integer.toString(line.getMonth()),
+> Field.Store.YES, Field.Index.ANALYZED));
+> doc.add(new Field("day", Integer.toString(line.getDay()), Field.Store.YES,
+> Field.Index.ANALYZED));
+> doc.add(new Field("hour", Integer.toString(line.getHour()), Field.Store.YES,
+> Field.Index.ANALYZED));
+> doc.add(new Field("minute", Integer.toString(line.getMinute()),
+> Field.Store.YES, Field.Index.NOT_ANALYZED));
+> doc.add(new Field("second", Integer.toString(line.getSecond()),
+> Field.Store.YES, Field.Index.NOT_ANALYZED));
+> doc.add(new Field("userID", line.getUserID(), Field.Store.YES,
+> Field.Index.ANALYZED));
+> doc.add(new Field("channelID", line.getChannelID(), Field.Store.YES,
+> Field.Index.ANALYZED));
+> doc.add(new Field("text", line.getText(), Field.Store.YES,
+> Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
+> doc.add(new Field("detail", line.getDetail(), Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+> 
+> writer.addDocument(doc);
+> 
+> .
+> .
+> .
+> 
+> writer.optimize();
+> writer.close();
+> 
+> IndexReader ir = IndexReader.open(SimpleFSDirectory.open(new
+> File(indexDir)), true);
+> IndexSearcher is = new IndexSearcher(ir);
+> Analyzer analyzera = new StandardAnalyzer(Version.LUCENE_CURRENT);
+> 
+> QueryParser parser = new QueryParser("text", analyzera);
+> PhraseQuery query = (PhraseQuery) parser.parse("\"Rain of Fire\"");
+> 
+> System.out.println("Query: " + query.toString());
+> 
+> TopFieldCollector collector = TopFieldCollector.create(sort, 100000, false,
+> false, false, false);
+> is.search(query, collector);
+> ===============END CODE SNIPET===============
+
+

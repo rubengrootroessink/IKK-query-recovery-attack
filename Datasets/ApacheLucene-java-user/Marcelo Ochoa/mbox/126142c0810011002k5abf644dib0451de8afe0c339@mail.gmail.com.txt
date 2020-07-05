@@ -1,0 +1,66 @@
+FROM: "Marcelo Ochoa" <marcelo.oc...@gmail.com>
+SUBJECT: Re: Lucene vs. Database
+DATE: 1 Oct 2008
+
+Mathieu:
+> Crawling a DB is not a good idea. Indexing while writing/deleting is
+> clever.
+  These operations also consume network traffic in architectures like Solr WS.
+  Also there is a waste of network traffic when a query is filtered
+against relational data (slides 15 and 18 of Google presentation), for
+example:
+select  /*+ DOMAIN_INDEX_SORT */
+   p.id,p.first_Name,p.last_Name,p.nationality,p.sex,p.type_Document,
+   p.number_Document,p.civil_State,p.date_Birth,p.mail,g.organization_id ,
+   lscore(1) as suma from person p left join
+   (select * from guest where organization_id = 67) g on g.person_id = p.id
+     where p.state = 1  and lcontains(p.first_name, 'rownum:[1 TO 20]
+AND John~ Doe~',1) > 0
+   This kind of filtering (security for example) is very common in
+relational world, then there are two possible solutions:
+   1) performs a free text search to lookup all the rowid that match
+and send it to the database to filter it against the other table
+   2) get all the rows from the DB and joins in middle tier with the
+rows which match the free text query.
+  in both cases there will be a lot of network traffic if the free
+text query cardinally is larger than the relational filter.
+  Many times the DB optimizer can choose a different execution plan
+based on how costly is the operation on the index and this information
+is known by the DB only.
+> Doing it inside the DB is a solution.
+> Java users like ORM. Compass plug Lucene indexation in the ORM's
+> transaction. If it's wrote or deleted, Lucene is aware.
+  AFAIK now Lucene doesn't support two-phase commit, so what happen if
+transaction need to be undoed?
+  If you perform an update on Lucene index before a relational delete,
+if the delete is rolled back the index will have inconsistently
+returning phantom reads.
+  Otherwise if you perform the update on Lucene index after a DB
+operation which is committed and the index fail there will be rows
+which will be not considered as positive hit.
+  In Lucene Domain Index both, the DML operation, and the Lucene
+storage are transactional and the operation can be secure rolled back.
+> Compass is opensource.
+  Lucene and Lucene Domain Index too ;) so for Oracle users is an open
+source solution.
+  Also we are looking for an alternative solution using open sources
+database, like H2, but not all databases have and API for creating new
+indexes.
+>
+> M.
+  Best regards, Marcelo.
+-- 
+Marcelo F. Ochoa
+http://marceloochoa.blogspot.com/
+http://marcelo.ochoa.googlepages.com/home
+______________
+Want to integrate Lucene and Oracle?
+http://marceloochoa.blogspot.com/2007/09/running-lucene-inside-your-oracle-jvm.html
+Is Oracle 11g REST ready?
+http://marceloochoa.blogspot.com/2008/02/is-oracle-11g-rest-ready.html
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

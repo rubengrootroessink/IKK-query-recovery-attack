@@ -1,0 +1,147 @@
+FROM: "Gustavo Comba" <gco...@emagister.com>
+SUBJECT: RE: Custom ScoreDocComparator and normalized Scores
+DATE: 21 Jun 2006
+
+Thanks Chris, I didn't know the "solr" package, it is not in the release
+distribution, isn't? I'm going to read about it to see if it matchs our
+needs.
+
+The need for normalization is derived from converting a list of values
+in "polynomial" like ranking function. We define our "ranking" in a way
+like that:
+
+Our Score = x . LuceneScore + y . SomeField + z . SomeOtherField + w .
+YetAnotherField
+
+Being x, y, z and w our coeffiecients or "scaling factors" in our
+ranking function.
+
+In order to have some sense, all the other values (LuceneScore,
+SomeField, SomeOtherField  and YetAnotherField) must be normalized,
+being positive (because we want to) values linear scaled to fit some
+fixed segment, let say, 0 to 1.
+
+To achive pre-ordering normalization I'm using an "all collector" like:
+
+public class AllCollector extends HitCollector {
+
+	private ArrayList scoreDocs;
+	
+	public AllCollector() {
+		scoreDocs = new ArrayList(10000);
+	}
+
+	public void collect(int doc, float score) {
+		if (score > 0.0f) {
+			maxScore = Math.max(maxScore, score);
+			scoreDocs.add(new ScoreDoc(doc, score));
+		    	totalHits++;
+		}
+	}
+}
+
+And to get the "best-n" we rewrite topDocs() to: 
+
+	public TopDocs topDocs(IndexReader reader, Sort sort, int
+numHits) throws IOException {
+	    TopFieldDocCollector collector = new
+TopFieldDocCollector(reader, sort, numHits);
+	    if (maxScore > 0.0f) {
+	        for(Iterator it = scoreDocs.iterator();it.hasNext();) {
+	            ScoreDoc scoreDoc = (ScoreDoc) it.next();
+	            scoreDoc.score /= maxScore;
+	            collector.collect(scoreDoc.doc, scoreDoc.score);
+	        }
+	    }
+		collector.totalHits = totalHits;
+		return collector.topDocs();
+	}
+
+This workaround has some evident "cons", like:
+
+	* It makes a big list with all the results
+	* It duplicates the work, first a List, then a PriorityQue
+	* Could generate problems with "multi indexes".
+
+But it works for us by now. I'm going to look the FunctionQuery to see
+if it can do the job.
+
+Thanks a Lot for your help!
+
+	Gustavo
+
+
+-----Mensaje original-----
+De: Chris Hostetter [mailto:hossman_lucene@fucit.org] 
+Enviado el: martes, 20 de junio de 2006 21:55
+Para: java-user@lucene.apache.org
+Asunto: Re: Custom ScoreDocComparator and normalized Scores
+
+
+
+First off: why do you need the normalized scores in your equation?  for
+the purposes of comparing the calculated values in order to sort them,
+it shouldn't matter if they are normalized or not.
+
+Second: I strongly suggest you take a look at FunctionQuery ... it was
+created for hte expres purpose of letting you define functions that be
+applied to indexed field values of each document to affect the score....
+
+http://incubator.apache.org/solr/docs/api/org/apache/solr/search/functio
+n/package-summary.html
+
+
+: Date: Tue, 20 Jun 2006 11:31:42 +0200
+: From: Gustavo Comba <gcomba@emagister.com>
+: Reply-To: java-user@lucene.apache.org
+: To: java-user@lucene.apache.org
+: Subject: Custom ScoreDocComparator and normalized Scores
+:
+: Hi,
+:
+:     I'm trying to sort the search results by a "combination" of the
+: "lucene score" and the value of a document field. The "combination" is
+: something like that:
+:
+:     scoreWeight * i.score + fieldWeight * getFieldValue(i.doc)
+:
+:     I expect results between 0 and scoreWeight + fieldWeight
+:
+:     Until version 1.9 this use to works OK, but now Lucene doesn't
+: normalize the documents scores before calling
+: ScoreDocComparator#compare(ScoreDoc i, ScoreDoc j). I know this is
+: necessary when combining several indexes, but it's not our case (we
+have
+: only one index).
+:
+:     I'm diggin into Lucene's source code to find a way to normalize
+: values before sorting the results. The solution I found requires a lot
+: of "custom" code, and doing 2 passes over the results, one to
+calculate
+: alll the document's scores, and then a sort using a comparator "who
+: knows" the maximum score value (in order to normalize values on the
+: fly), so I think there should be a more efficient and elegant way to
+do
+: this.
+:
+:     Any ideas? Any help will be appreciated! Thanks in advance,
+:
+:         Gustavo Comba
+:         Emagister.com
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

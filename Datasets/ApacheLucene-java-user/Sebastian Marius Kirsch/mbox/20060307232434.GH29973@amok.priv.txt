@@ -1,0 +1,165 @@
+FROM: Sebastian Marius Kirsch <skir...@sebastian-kirsch.org>
+SUBJECT: Re: Scoring with FunctionQueries?
+DATE: 7 Mar 2006
+
+Dear Chris,
+
+thanks very much for your quick answer.
+
+I tried both approaches, and both don't seem to do what I
+want. Perhaps I did not understand you properly.
+
+I generated a small in-memory index (six documents) for testing your
+suggestions, with some text in field "content" and a numeric score in
+field "score". Following are the code I used and the explanations I
+obtained.
+
+On Tue, Mar 07, 2006 at 11:10:51AM -0800, Chris Hostetter wrote:
+> 1) change the default similarity (using Similarity.setDefault(Similarity)
+> used by all queries to a version with queryNorm returning an constant, and
+> then in the few queries where you want the more traditional queryNorm,
+> override the getSimilarity method inline...
+> 
+>    Query q = new TermQuery(new Term("foo","bar")) {
+>       public Similarity getSimilarity(Searcher s) {
+>         return new DefaultSimilarity();
+>       }
+>    };
+
+This is the code I used:
+
+    IndexSearcher searcher = new IndexSearcher(directory);
+ 
+    searcher.setSimilarity(new DefaultSimilarity() {
+      public float queryNorm(float sumOfSquaredWeight) {
+        return 1.0f;
+      }
+    });
+    
+    TermQuery tq = new TermQuery(new Term("content", "desmond")) {
+      public Similarity getSimilarity(Searcher s) {
+        return new DefaultSimilarity();
+      }
+    };
+    
+    FunctionQuery fq = new FunctionQuery(new FloatFieldSource("score"));
+    
+    BooleanQuery bq = new BooleanQuery();
+    bq.add(fq, BooleanClause.Occur.SHOULD);
+    bq.add(tq, BooleanClause.Occur.MUST);
+ 
+And this is the explanation I obtained:
+
+2.526826 = sum of:
+  0.6 = FunctionQuery(org.apache.solr.search.function.FloatFieldSource:float(score)), product
+of:
+    0.6 = float(score)=0.6
+    1.0 = boost
+    1.0 = queryNorm
+  1.926826 = weight(content:desmond in 3), product of:
+    2.0986123 = queryWeight(content:desmond), product of:
+      2.0986123 = idf(docFreq=1)
+      1.0 = queryNorm
+    0.9181429 = fieldWeight(content:desmond in 3), product of:
+      1.0 = tf(termFreq(content:desmond)=1)
+      2.0986123 = idf(docFreq=1)
+      0.4375 = fieldNorm(field=content, doc=3)
+
+So, as you see, the query norm for the FunctionQuery is 1.0, but for
+the TermQuery, this query norm is also used (when it should be
+computed from the terms in the query.)
+
+> 2) reverse step one ... override getSimiliarity() just in the classes you
+> want to queryNorm to be constant and leave hte default alone.
+
+OK, so this would look like the following:
+
+    IndexSearcher searcher = new IndexSearcher(directory);
+ 
+    TermQuery tq = new TermQuery(new Term("content", "desmond"));
+    FunctionQuery fq = new FunctionQuery(new FloatFieldSource("score")) {
+      public Similarity getSimilarity(Searcher s) {
+        return new DefaultSimilarity() {
+          public float queryNorm(float sumOfSquaredWeight) {
+            return 1.0f;
+          }
+        };
+      }
+    };
+    
+    BooleanQuery bq = new BooleanQuery();
+    bq.add(fq, BooleanClause.Occur.SHOULD);
+    bq.add(tq, BooleanClause.Occur.MUST);
+
+And what I get as an explanation is this:
+
+1.0869528 = sum of:
+  0.25809917 = FunctionQuery(org.apache.solr.search.function.FloatFieldSource:float(score)),
+product of:
+    0.6 = float(score)=0.6
+    1.0 = boost
+    0.43016526 = queryNorm
+  0.82885367 = weight(content:desmond in 3), product of:
+    0.90275013 = queryWeight(content:desmond), product of:
+      2.0986123 = idf(docFreq=1)
+      0.43016526 = queryNorm
+    0.9181429 = fieldWeight(content:desmond in 3), product of:
+      1.0 = tf(termFreq(content:desmond)=1)
+      2.0986123 = idf(docFreq=1)
+      0.4375 = fieldNorm(field=content, doc=3)
+
+So, this is also wrong, but in a different way -- the queryNorm for
+the FunctionQuery should be 1.0.
+
+I hope I interpreted your explanations correctly, and this is what you
+intended me to try.
+
+
+So, what I *really* want is something like this (modulo normalization;
+I might want to boost both clauses to 0.5. But I'm not worrying about
+that right now.):
+
+1.42885367 = sum of:
+  0.6 = FunctionQuery(org.apache.solr.search.function.FloatFieldSource:float(score)), product
+of:
+    0.6 = float(score)=0.6
+    1.0 = boost
+    1.0 = queryNorm
+  0.82885367 = weight(content:desmond in 3), product of:
+    0.90275013 = queryWeight(content:desmond), product of:
+      2.0986123 = idf(docFreq=1)
+      0.43016526 = queryNorm
+    0.9181429 = fieldWeight(content:desmond in 3), product of:
+      1.0 = tf(termFreq(content:desmond)=1)
+      2.0986123 = idf(docFreq=1)
+      0.4375 = fieldNorm(field=content, doc=3)
+
+> Hmmm ... that really doesn't sound right, are you sure you don't mean you
+> changed the default similarity, or changed the similarity on the searcher?
+
+Please see the code above. I have not delved into the depths of Lucene
+yet, but it seems that Lucene uses only one similarity instance for
+scoring all clauses in the boolean query, and doesn't honour the
+similarity instances provided by the individual clauses.
+
+Or I'm wrong somewhere ;)
+
+I've also wondered whether perhaps I might get by with not normalizing
+the query, or with using a queryNorm of 1.0 everywhere. But then the
+magnitude of the Lucene similarity score and my "static score" will
+not be comparable, of course.
+
+
+I hope someone with more insight into Lucene scoring can shed light on
+this.
+
+Regards, Sebastian
+
+-- 
+Sebastian Kirsch <skirsch@sebastian-kirsch.org> [http://www.sebastian-kirsch.org/]
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,140 @@
+FROM: "vivek sar" <vivex...@gmail.com>
+SUBJECT: Re: Background merge hit exception
+DATE: 18 Sep 2008
+
+Thanks Mike for the insight. I did check the stdout log and found it
+was complaining of not having enough disk space. I thought we need
+only x2 of the index size. Our index size is 10G (max) and we had 45G
+left on that parition - should it still complain of the space?
+
+
+Some comments/questions on other issues you raised,
+
+
+We have 2 threads that index the data in two different indexes and
+then we merge them into a master index with following call,
+
+    masterWriter.addIndexesNoOptimize(indices);
+
+Once the smaller indices have merged into the master index we delete
+the smaller indices.
+
+This process runs every 5 minutes. Master Index can grow up to 10G
+before we partition it - move it to other directory and start a new
+master index.
+
+Every hour we then optimize the master index using,
+
+       writer.optimize(optimizeSegment);    //where optimizeSegment = 10
+
+Here are my questions,
+
+1) Is this process flawed in terms of performance and efficiency? What
+would you recommend?
+2) When you say "partial optimize" what do you mean by that?
+3) In Lucene 2.3 "segment merging is done in a background thread" -
+how does it work, ie, how does it know which segments to merge? What
+would cause this background merge exception?
+4) Can we turn off "background merge" if I'm running the optimize
+every hour in any case? How do we turn it off?
+
+Thanks,
+-vivek
+
+
+
+On Thu, Sep 18, 2008 at 7:19 AM, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> Lucene tries to carry forward the root cause exception from the merge,
+> into that IOException that optimize throws.  But it doesn't always
+> succeed in doing so; I'll open a Jira issue and try to figure out why
+> this is the case.
+>
+> All the exception "means" is that the optimize didn't finish -- you
+> still have multiple segments in the index.  The index should still be
+> fine (not corrupt, nothing lost).
+>
+> What's happening is a BG merge thread is hitting an unhandled
+> exception.  The JRE will log such unhandled exceptions to System.err
+> by default, so, you should scour the app server's logs to find it (it
+> should be there).
+>
+> BTW, that merge that's being attempted is particularly inefficient --
+> you are merging an immense segment (the first one) with a bunch of
+> tiny ones.  A partial optimize could be much better.
+>
+> Things to try w/o code changes:
+>
+>  * Use a separate tool, eg Luke, to run optimize and see what
+>    root exception is thrown.
+>
+> Things to try with code changes:
+>
+>  * Switch to SerialMergeScheduler -- it should still throw the
+>    exception, but you'll see the full root cause.
+>
+>  * As of 2.4 (coming soon), subclass ConcurrentMergeScheduler and
+>    override the handleMergeException to do your own logging so you
+>    that you see the detailed root-cause exception.
+>
+>  * Alternatively, before Lucene 2.4, if you are running in JRE 1.5+
+>    environment, you can set the default exception handler for
+>    threads to do your own logging:
+>
+>
+>  http://java.sun.com/j2se/1.5.0/docs/api/java/lang/Thread.html#setDefaultUncaughtExceptionHandler(java.lang.Thread.UncaughtExceptionHandler)
+>
+> Mike
+>
+> On Sep 17, 2008, at 4:24 PM, vivek sar wrote:
+>
+>> Hi,
+>>
+>> We have been running Lucene 2.3 for last few months with our
+>> application and all the sudden we have hit the following exception,
+>>
+>>      java.lang.RuntimeException: java.io.IOException: background
+>> merge hit exception: _2uxy:c11345949 _2uxz:c150 _2uy0:c150 _2uy1:c150
+>> _2uy2:c150 _2uy3:c150 _2uy4:c82 into _2uy5 [optimize]
+>>
+>> I don't see any other error messages (or stacktrace) around this
+>> exception message. This problem doesn't seem to be recoverable and the
+>> indexer process is failing even after the reboot of the machine.
+>>
+>> I've gone through the mailing list over this issue and saw few
+>> suggestions,
+>>
+>> 1) Make sure you've enough disk space (x2 the index size)  - our
+>> index size is around 5 GB and we have around 50GB space available so
+>> this shouldn't be the case
+>> 2) Is your machine multi-core - yes, this application is running on
+>> Linux box with 8 CPUs, not sure if this is the problem
+>>
+>> I can't update the code as this is running on the customer site. Here
+>> are my questions,
+>>
+>>  a) Is there any workaround to this problem without updating the code
+>> base?
+>>  b) Is there a jira opened on this issue?
+>>  c) Has this been fixed in the subsequent Lucene releases?
+>>
+>> Thanks,
+>> -vivek
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

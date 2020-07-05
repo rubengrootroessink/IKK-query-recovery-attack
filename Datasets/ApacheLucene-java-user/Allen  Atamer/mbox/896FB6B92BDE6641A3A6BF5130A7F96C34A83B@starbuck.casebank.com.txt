@@ -1,0 +1,203 @@
+FROM: "Allen  Atamer" <aata...@casebank.com>
+SUBJECT: help with DictionaryFilter replacing an acronym token with multiple tokens
+DATE: 24 Sep 2009
+
+Hello List members,
+
+ 
+
+Please help me to fix a problem in my DictionaryFilter class.  It is
+used to map acronyms, abbreviations, synonyms, etc. to one common root
+word/phrase for easy searching.  For example, "temp" is an abbreviation
+for "temperature".  One-to-one substitutions work without problem in
+this code.  However one-to-many substitution isn't working properly.
+For example, the search term "lop" is converted to "low oil pressure".
+However, in the database, instances of "lop" are not being converted.
+I need Lucene search to pick up both.  Right now my search term "lop"
+only picks up documents with "low oil pressure" in them.
+
+ 
+
+The log trace of the indexer is as follows:
+
+2009-09-24 15:40:32,774 [     main] DEBUG DictionaryFilter  -  NEWTOKEN
+[low] , start:17, end:19
+
+2009-09-24 15:40:32,774 [     main] DEBUG DictionaryFilter  -  NEWTOKEN
+[oil] , start:20, end:22
+
+2009-09-24 15:40:32,774 [     main] DEBUG DictionaryFilter  -  NEWTOKEN
+[pressure] , start:23, end:30
+
+2009-09-24 15:40:32,774 [     main] INFO  AnalyzerUtils  - [fault]
+[mnemonics] [lop] [sdn]
+
+ 
+
+So you can see the DictionaryFilter makes the substitutions, but the
+Analyzer doesn't keep the new tokens. When I scan through the terms with
+AnalyzerUtils, the original token [lop] is still there!  
+
+ 
+
+Please help.  Thank you.
+
+ 
+
+Below is the logic for DictionaryFilter.next():
+
+ 
+
+    public Token next()
+
+        throws java.io.IOException {
+
+        if (!tokenQueue.isEmpty()) {
+
+            return (Token) tokenQueue.pop();
+
+        }
+
+ 
+
+        Token reusableToken = new Token();
+
+        Token token = input.next(reusableToken);
+
+ 
+
+        if ((dictionary == null) || (token == null) || !processField) {
+
+            return token;
+
+        }
+
+ 
+
+        TermData t = (TermData) dictionary.get(token.term());
+
+ 
+
+        if (t != null && t.getTeach() != null) {
+
+                  Token result = processTeachToken(t.getTeach(), token);
+
+                  token = null;
+
+                  return result;
+
+            } else if (t != null) { 
+
+                  // return original because there's nothing better to
+go on.
+
+                  return token;
+
+            }
+
+            ... // other logic related to spell-checking
+
+      }
+
+ 
+
+And here's the processTeachToken() function, which is where the
+substitution happens:
+
+ 
+
+    private Token processTeachToken(String teachString, Token original)
+{
+
+        StringTokenizer tokenizer = new StringTokenizer(teachString, "
+");
+
+ 
+
+        int start = original.startOffset();
+
+        int positionIncrement = original.getPositionIncrement();
+
+ 
+
+        while (tokenizer.hasMoreTokens()) {
+
+            String partToken = tokenizer.nextToken();
+
+ 
+
+            if (partToken.equals("")) {
+
+                  throw new RuntimeException("TextClassifier failed");
+
+            }
+
+ 
+
+//          Token newToken = new Token(partToken, start,
+
+//          (start + partToken.length()) - 1);
+
+                  Token newToken = new Token(start, (start +
+partToken.length()) - 1);
+
+//                newToken.setTermLength(partToken.length());
+
+                  LuceneUtils.copyTermBuffer(newToken, partToken);
+
+            log.debug(" NEWTOKEN [" + partToken + "] , start:"
+
+                + newToken.startOffset() + ", end:" +
+newToken.endOffset());
+
+            newToken.setPositionIncrement(positionIncrement);
+
+            tokenQueue.push(newToken);
+
+            start += partToken.length();
+
+            positionIncrement++;
+
+        }
+
+ 
+
+        Token result = (Token) tokenQueue.pop();
+
+ 
+
+        return result;
+
+    }
+
+ 
+
+LuceneUtils.copyTermBuffer:
+
+ 
+
+      public static void copyTermBuffer(Token term, String copyTerm) {
+
+        if (term.termBuffer().length < copyTerm.length()) {
+
+                  term.resizeTermBuffer(copyTerm.length());
+
+            }
+
+            
+
+        term.setTermLength(copyTerm.length());
+
+ 
+
+            char [] termBuffer = term.termBuffer();
+
+            for (int i = 0; i < copyTerm.length(); i++) {
+
+                  termBuffer[i] = copyTerm.charAt(i);
+
+            }
+
+      }
+
+

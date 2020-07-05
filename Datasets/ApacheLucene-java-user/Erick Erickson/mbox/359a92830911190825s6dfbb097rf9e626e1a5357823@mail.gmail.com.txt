@@ -1,0 +1,232 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Phrase query with terms at same location
+DATE: 19 Nov 2009
+
+Hmmm, you're beyond what I've tried to do, so all I can do is speculate. But
+I don't
+believe that two terms on top of each other are considered when calculating
+slop. But I really don't know for sure, so I'd create a couple of unit tests
+to verify.
+
+You're right, the combinatorial explosion with putting X "synonyms" at each
+word gets ugly. It still may be doable, a lot depends upon how much data
+we're talking about here. If your index were to total 10M, expanding it
+100-fold (to pick an absurd example) might be OK. If your index started
+at 100G, that's a different story..
+
+Not much help here I know
+
+Good Luck!
+Erick
+
+
+On Thu, Nov 19, 2009 at 10:59 AM, Christopher Tignor
+<ctignor@thinkmap.com>wrote:
+
+> Thanks again for this.
+>
+> I would like to able to do several things with this data if possible.
+> As per Mark's post, I'd like to be able to query for phrases like "He _v"~1
+> (where _v is my verb part of speech token) to recover string like: "He
+> later
+> apologized".
+>
+> This already in fact seems to be working.  But I'd also like to be able to
+> say give me all the times
+> "report" is used as a noun, i.e. when "report" and "_n" occur at the same
+> location.
+>
+> But isn't the slop for PhraseQueries the "edit
+> distance"<
+> http://content18.wuala.com/contents/cborealis/Docs/lucene/api/org/apache/lucene/search/PhraseQuery.html#setSlop%28int%29
+> >and
+> shouldn't "report _n"~1 achieve my above goal, moving "_n" onto the
+> location of "report" in one edit step?  If so, it seems I would need to be
+> able to also specify that the query is restricted from also  interpreting
+> the slop the other way, i.e. also recovering "report to him", allowing one
+> term between report and him.  Perhaps PhraseQuery can't do this?
+>
+> It seems like your suggestion of creating part-of-speech tag prefixed
+> tokens
+> might be the only way to accommodate both, e.g. creating a token
+> "_n_reporting" as well as "reporting" and maybe also an additional "_n"
+> token to avoid having to use more expensive Wildcard matches to recover all
+> nouns.  The only problem here is that I also have *other* tags at the same
+> location adding semantics to "reporting" as encountered in the text: it's
+> stemmed form "^report" for example as well as more fine grained part of
+> speech tag from the NUPOS set, e.g. "_n2_" and I can imagine additional
+> future semantics.  To create new combinatorial terms for all thes esemantic
+> tags explodes the token count exponentially...
+>
+> thanks -
+>
+> C>T>
+>
+>
+> On Thu, Nov 19, 2009 at 10:30 AM, Erick Erickson <erickerickson@gmail.com
+> >wrote:
+>
+> > Ahhh, I should have followed the link. I was interpreting your first note
+> > as
+> > emitting two tokens NOT at the same offset. My mistake, ignore my
+> nonsense
+> > about unexpected consequences. Your original assumption is correct, zero
+> > offsets are pretty transparent.
+> >
+> > What do you really want to do here? Mark's email (at the link) allows
+> > you to create queries queries expressing "find all phrases
+> > of the form noun-verb-adverb" say. The slop allows for intervening words.
+> >
+> > Your original post seems to want different semantics.
+> >
+> > <<<I would like to do a search that retrieves documents when a given word
+> > is
+> > used with a specific part of speech, e.g. all docs where "report" is used
+> > as
+> > a noun>>>.
+> >
+> > For that, my suggestion seems simpler, which is not surprising since it
+> > addresses a less general problem. So instead of including a general
+> > part of speech token, just suffix your original word with your marker and
+> > use that for your "synonym.
+> >
+> > Then expressing your intent is simply tacking on the part of speech
+> > marker to the words you care about (e.g. report_n when you wanted
+> > report as a noun). No phrases or slop required, at the expense of
+> > more terms.
+> >
+> > Hmmmm, if you wanted to, say, "find all the nouns in the index", you
+> > could *prefix* the word (e.g. n_report) which would group all the
+> > nouns together in the term enumerations....
+> >
+> > Sorry for the confusion
+> > Erick
+> >
+> >
+> > On Thu, Nov 19, 2009 at 9:38 AM, Christopher Tignor <
+> ctignor@thinkmap.com
+> > >wrote:
+> >
+> > > Thanks, Erick -
+> > >
+> > > Indeed every word will have a part of speech token but Is this how the
+> > slop
+> > > actually works?  My understanding was that if I have two tokens in the
+> > same
+> > > location then each will not effect searches involving other in terms of
+> > the
+> > > slop as slop indicates the number of words *between* search terms in a
+> > > phrase.
+> > >
+> > >
+> > Are tokens at the same location actually adjacent in their ordinal
+> values,
+> > > thus affecting the slop as you describe?
+> > >
+> > > If so, Is there a predictable way to determine which comes before the
+> > other
+> > > - perhaps the order they are inserted when being tokenized?
+> > >
+> > > thanks,
+> > >
+> > > C>T>
+> > >
+> > > On Thu, Nov 19, 2009 at 8:35 AM, Erick Erickson <
+> erickerickson@gmail.com
+> > > >wrote:
+> > >
+> > > > If I'm reading this right, your tokenizer creates two tokens. One
+> > > > "report" and one "_n"... I suspect if so that this will create some
+> > > > "interesting"
+> > > > behaviors. For instance, if you put two tokens in place, are you
+> going
+> > > > to double the slop when you don't care about part of speech? Is every
+> > > > word going to get a marker? etc.
+> > > >
+> > > > I'm not sure payloads would be useful here, but you might check it
+> > out...
+> > > >
+> > > > What I'd think about, though, is a variant of synonyms. That is,
+> index
+> > > > report and report_n (note no space) at the same location. Then, when
+> > > > you wanted to create a part-of-speech-aware query, you'd attach the
+> > > > various markers to your terms (_n, _v, _adj, _adv etc.) and not have
+> to
+> > > > worry about unexpected side-effects.
+> > > >
+> > > > HTH
+> > > > Erick
+> > > >
+> > > > On Wed, Nov 18, 2009 at 5:20 PM, Christopher Tignor <
+> > > ctignor@thinkmap.com
+> > > > >wrote:
+> > > >
+> > > > > Hello,
+> > > > >
+> > > > > I have indexed words in my documents with part of speech tags at
+> the
+> > > same
+> > > > > location as these words using a custom Tokenizer as described, very
+> > > > > helpfully, here:
+> > > > >
+> > > > >
+> > > > >
+> > > >
+> > >
+> >
+> http://mail-archives.apache.org/mod_mbox/lucene-java-user/200607.mbox/%3C20060712115026.38897.qmail@web26002.mail.ukl.yahoo.com%3E
+> > > > >
+> > > > > I would like to do a search that retrieves documents when a given
+> > word
+> > > is
+> > > > > used with a specific part of speech, e.g. all docs where "report"
+> is
+> > > used
+> > > > > as
+> > > > > a noun.
+> > > > >
+> > > > > I was hoping I could use something like a PhraseQuery with "report
+> > _n"
+> > > > (_n
+> > > > > is my noun part of speech tag) with some sort of identifier that
+> > > > describes
+> > > > > the words as having to be at the same location - like a null slop
+> or
+> > > > > something.
+> > > > >
+> > > > > Any thoughts on how to do this?
+> > > > >
+> > > > > thanks so much,
+> > > > >
+> > > > > C>T>
+> > > > >
+> > > > > --
+> > > > > TH!NKMAP
+> > > > >
+> > > > > Christopher Tignor | Senior Software Architect
+> > > > > 155 Spring Street NY, NY 10012
+> > > > > p.212-285-8600 x385 f.212-285-8999
+> > > > >
+> > > >
+> > >
+> > >
+> > >
+> > > --
+> > > TH!NKMAP
+> > >
+> > > Christopher Tignor | Senior Software Architect
+> > > 155 Spring Street NY, NY 10012
+> > > p.212-285-8600 x385 f.212-285-8999
+> > >
+> >
+>
+>
+>
+> --
+> TH!NKMAP
+>
+> Christopher Tignor | Senior Software Architect
+> 155 Spring Street NY, NY 10012
+> p.212-285-8600 x385 f.212-285-8999
+>
+

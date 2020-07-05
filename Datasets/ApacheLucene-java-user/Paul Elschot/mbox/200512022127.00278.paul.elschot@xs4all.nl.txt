@@ -1,0 +1,122 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Lucene performance bottlenecks
+DATE: 2 Dec 2005
+
+Andrzej,
+
+On Friday 02 December 2005 12:55, Andrzej Bialecki wrote:
+> Hi,
+> 
+> I'm doing some performance profiling of a Nutch installation, working 
+> with relatively large individual indexes (10 mln docs), and I'm puzzled 
+> with the results.
+> 
+> Here's the listing of the index:
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f0
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f1
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f2
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f3
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f4
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:24 _0.f5
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:25 _0.f6
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:25 _0.f7
+> -rw-r--r--  1 andrzej andrzej     9803100 Dec  2 05:25 _0.f8
+> -rw-r--r--  1 andrzej andrzej  2494445020 Dec  2 04:58 _0.fdt
+> -rw-r--r--  1 andrzej andrzej    78424800 Dec  2 04:58 _0.fdx
+> -rw-r--r--  1 andrzej andrzej          92 Dec  2 04:55 _0.fnm
+> -rw-r--r--  1 andrzej andrzej  7436259508 Dec  2 05:24 _0.frq
+> -rw-r--r--  1 andrzej andrzej 12885589796 Dec  2 05:24 _0.prx
+> -rw-r--r--  1 andrzej andrzej     3483642 Dec  2 05:24 _0.tii
+> -rw-r--r--  1 andrzej andrzej   280376933 Dec  2 05:24 _0.tis
+> -rw-r--r--  1 andrzej andrzej           4 Dec  2 05:25 deletable
+> -rw-r--r--  1 andrzej andrzej          27 Dec  2 05:25 segments
+> 
+> 
+> I run it on an AMD Opteron 246, 2Ghz, 4GB RAM, java -version says:
+> 
+> Java HotSpot(TM) 64-Bit Server VM (build 1.5.0_05-b05, mixed mode)
+> 
+> I run it with a heap of 1.5-2.5 GB, which doesn't make any difference 
+> (see below). I'm using the latest SVN code (from yesterday) + 
+> performance enhancements to ConjunctionScorer and BooleanScorer2 from JIRA.
+> 
+> The performance is less than impressive, response times being more than 
+> 1 sec. Nutch produces complex queries for phrases, so the user query 
+> "term1 term2" gets rewritten like this:
+
+In somewhat more readable layout:
+ 
++(url:term1^4.0 anchor:term1^2.0 content:term1
+   title:term1^1.5  host:term1^2.0)
++(url:term2^4.0 anchor:term2^2.0 content:term2
+   title:term2^1.5 host:term2^2.0)
+url:"term1 term2"~2147483647^4.0 
+anchor:"term1 term2"~4^2.0
+content:"term1 term2"~2147483647
+title:"term1 term2"~2147483647^1.5
+host:"term1 term2"~2147483647^2.0
+
+The first two clauses with + prefixes are required, and I would guess
+that the 5 way disjunctions inside these clauses take most of the cpu time
+during search.
+The remaining clauses will be skipped to only when the two required
+clauses are both present, so these are probably not the problem.
+In the call tree for scoring these can be identified by the skipTo()
+being called inside the score() method at the top level.
+
+This is one of the cases in which BooleanScorer2 can be faster
+than the 1.4 BooleanScorer because the 1.4 BooleanScorer does
+not use skipTo() for the optional clauses.
+Could you try this by calling the static method
+BooleanQuery.setUseScorer14(true) and repeating the test?
+ 
+> For a simple TermQuery, if the DF(term) is above 10%, the response time 
+> from IndexSearcher.search() is around 400ms (repeatable, after warm-up). 
+> For such complex phrase queries the response time is around 1 sec or 
+> more (again, after warm-up).
+> 
+> Initially I thought the process is I/O or heap/GC bound, this is a large 
+> index after all, but the profiler shows it's purely CPU bound. I tracked 
+> the bottleneck to the scorers (see my previous email on this), but also 
+> to IndexInput.readVInt.. What's even more curious, most of the heap is 
+> unused - I had the impression that Lucene tries to read as much of the 
+> index as it can to memory in order to speed up the access, but 
+> apparently that's not the case. The heap consumption was always in the 
+> order of 100-200MB, no matter how large heap I set (and I tried values 
+> between 1-4GB).
+> 
+> For those interested in profiler info, look here:
+> 
+> http://www.getopt.org/lucene/20051202/
+
+Thanks for making this available.
+I had a short look and noticed that the times in the call tree are cumulative.
+Would it be possible to record cpu time per method by subtracting the
+times of the called methods?
+Another interesting statistic is the actual numbers of times the methods get
+called. The scorers used by BooleanScorer2 can use rather deep
+call trees for scoring. These method calls are not free, and I would like
+to know whether these form a bottleneck. 
+
+From the hot spots output of the profiler info I see that the following methods:
+- PhrasePositions.nextPosition
+- SegmentTermDocs.read
+have a larger portion of cpu time spent in the method.
+Looking at the expanded query, seeing PhrasePositions.nextPosition
+here is not a surprise.
+
+The fact that SegmentTermDocs.read shows up might explain
+the reason why only a little heap is used:  Lucene normally leaves
+the file buffering to the operating system, and
+when the file buffers are read the index data is decompressed
+mostly by the readVInt method.
+
+Regards,
+Paul Elschot
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

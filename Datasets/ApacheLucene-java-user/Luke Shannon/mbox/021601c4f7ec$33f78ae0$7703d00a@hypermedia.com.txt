@@ -1,0 +1,137 @@
+FROM: "Luke Shannon" <lshan...@futurebrand.com>
+SUBJECT: Re: what if the IndexReader crashes, after delete, before close.
+DATE: 11 Jan 2005
+
+Here is how I handle it.
+
+The Indexer is a Runnable. All the members it uses are static. The run()
+method calls a syncronized method called go(). This kicks off the indexing.
+
+Before you even get to here, the method in the CMS code that created the
+thread object and instaniated the index is also sychronized.
+
+Here is the code that handles the potential lock file that may be left
+behind from a Reader or Writer.
+
+Note: I found I had to check if the index existed before checking if it was
+locked. If I checked if it was locked and the index had not been created yet
+I got an error.
+
+//if we have gotten to hear that this is the only index running.
+//the index should not be locked. if it is the lock is "stale"
+//and must be released before we can continue
+try {
+if (index.exists() && IndexReader.isLocked(indexFileLocation)) {
+Trace.ERROR("INDEX INFO: Had to clear a stale index lock");
+IndexReader.unlock(FSDirectory.getDirectory(index, false));
+}
+} catch (IOException e3) {
+Trace.ERROR("INDEX ERROR: IMPORTANT. Was unable to clear a stale index lock:
+" + e3);
+}
+
+HTH
+
+Luke
+
+----- Original Message ----- 
+From: "Peter Veentjer - Anchor Men" <p.veentjer@anchormen.nl>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Tuesday, January 11, 2005 3:24 AM
+Subject: RE: what if the IndexReader crashes, after delete, before close.
+
+
+
+
+-----Oorspronkelijk bericht-----
+Van: Luke Shannon [mailto:lshannon@futurebrand.com]
+Verzonden: maandag 10 januari 2005 15:46
+Aan: Lucene Users List
+Onderwerp: Re: what if the IndexReader crashes, after delete, before
+close.
+
+
+>>One thing that will happen is the lock file
+>>will get left behind. This means when you start
+>>back up and try to create another Reader you will
+>>get a file lock error.
+
+I have figured out that part the hard way ;) Why can`t I access my index
+anymore?? Ahh.. The lock file
+
+>>Our system is threaded and synchronized.
+>>Thus when a Reader is being created I know
+>>it is the only one (the Writer comes after
+>>the reader has been closed). Before creating
+>>it I check if the Index is locked. If it is,
+>>I forcefully clear it. This prevents the above
+>>problem from happening.
+
+You can have more than 1 reader open at anytime. Even while a delete or
+add is in progress. But you can`t use a reader where documents are
+deleted (IndexReader) and added(IndexWriter) at the same time. If you
+don`t have other threads doing delete/add you won`t have to synchronize
+anything.
+
+And how do you synchronize on it? I have applied the ReadWriteLock From
+Doug Lea`s concurrency library after I have build my own
+synchronization brick and somebody pointed out that I was implementing
+the ReadWriteLock. But at the moment I don`t do any synchronization.
+
+And I want to have a component that is executed if the system is started
+and knows that to do if there is rubbish in the index directory. I want
+that component to restore my index to a usable version (and even small
+loss of information is acceptable because everything is checked once and
+a while. And user-added-information is going to be stored in the
+database. So nothing gets lost. The index can be rebuild..
+
+
+
+
+Luke
+
+----- Original Message -----
+From: "Peter Veentjer - Anchor Men" <p.veentjer@anchormen.nl>
+To: <lucene-user@jakarta.apache.org>
+Sent: Saturday, January 08, 2005 4:08 AM
+Subject: what if the IndexReader crashes, after delete, before close.
+
+
+What happens to the Index if the IndexReader crashes, after I have
+deleted
+documents, and before I have called close. Are the deletes ignored? Is
+the
+Index screwed up? Is the filesystem screwed up (if a document is deleted
+new
+delete-files appear) so are the delete-files still there (and can these
+be
+ignored the next time?). Can I restore the index to the previous state,
+just
+by removing those delete-files?
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

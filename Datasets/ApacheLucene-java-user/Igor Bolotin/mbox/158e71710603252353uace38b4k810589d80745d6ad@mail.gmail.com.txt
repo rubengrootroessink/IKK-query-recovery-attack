@@ -1,0 +1,37 @@
+FROM: "Igor Bolotin" <ibolo...@gmail.com>
+SUBJECT: Lucene indexing on Hadoop distributed file system
+DATE: 26 Mar 2006
+
+In my current project we needed a way to create very large Lucene indexes on
+Hadoop distributed file system. When we tried to do it directly on DFS using
+Nutch FsDirectory class - we immediately found that indexing fails because
+DfsIndexOutput.seek() method throws UnsupportedOperationException. The
+reason for this behavior is clear - DFS does not support random updates and
+so seek() method can't be supported (at least not easily).
+
+Well, if we can't support random updates - the question is: do we really
+need them? Search in the Lucene code revealed 2 places which call
+IndexOutput.seek() method: one is in TermInfosWriter and another one in
+CompoundFileWriter. As we weren't planning to use CompoundFileWriter - the
+only place that concerned us was in TermInfosWriter.
+
+TermInfosWriter uses IndexOutput.seek() in its close() method to write total
+number of terms in the file back into the beginning of the file. It was very
+simple to change file format a little bit and write number of terms into
+last 8 bytes of the file instead of writing them into beginning of file. The
+only other place that should be fixed in order for this to work is in
+SegmentTermEnum constructor - to read this piece of information at position
+= file length - 8.
+
+With this format hack - we were able to use FsDirectory to write index
+directly to DFS without any problems. Well - we still don't index directly
+to DFS for performance reasons, but at least we can build small local
+indexes and merge them into the main index on DFS without copying big main
+index back and forth.
+
+If somebody is interested - I can post our changes in TermInfosWriter and
+SegmentTermEnum code, although they are pretty trivial.
+
+Best regards!
+Igor
+

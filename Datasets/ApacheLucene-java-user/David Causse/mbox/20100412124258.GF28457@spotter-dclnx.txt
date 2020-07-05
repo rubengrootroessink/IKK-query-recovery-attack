@@ -1,0 +1,169 @@
+FROM: David Causse <dcau...@spotter.com>
+SUBJECT: Re: Too many open files
+DATE: 12 Apr 2010
+
+After a closer look, I forgot to mention a major clue : it's also the
+first time we use NRT.
+
+I thought IW.getReader() would return a pooled NRT and in fact it
+returns always a new IR. This should explain the Too many opened files
+exception. After each addDocument(doc) I prepare a reader with
+IW.getReader() overriding the old NRT reader reference with no care...
+
+So I'll take extra care of my NRT reader instances and pool it myself.
+
+Sorry for the noise.
+
+On Mon, Apr 12, 2010 at 12:46:02PM +0200, David Causse wrote:
+> Hi,
+> 
+> I found a bug in my application, there was no commit at all in all the
+> indexing chain.
+> I noticed thanks to this bug that lucene keeps a file system reference
+> to deleted index files. So after many files indexed I hit a Too many
+> open files.
+> 
+> I use a 32 bits 1.6.16 JVM on a linux 64bits system.
+> Directory is opened using factory : FSDirectory.open(dir)
+> So I guess NIOFSDirectory is returned.
+> We use a merge factor of 4.
+> 
+> NOTE: that we use lucene for a long time and never had this problem.
+> clues are : - it's the first time we use 3.0.1
+> 	    - it's the first we forgot to commit on a large 
+> 	      collection (10k docs).
+> 
+> Here is a chunk of lsof linux utility (which output open files)
+> (There is a total of 16225 files in this case)
+> 
+> COMMAND     PID        USER    FD      TYPE            DEVICE   SIZE/OFF       NODE NAME
+> java       3485      techno  755r      REG               8,23      56264    2785417 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1v.cfs
+(deleted)
+> java       3485      techno  756r      REG               8,23      44137    2785418 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1w.cfs
+(deleted)
+> java       3485      techno  757r      REG               8,23      87610    2785405 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1x.tis
+(deleted)
+> java       3485      techno  758r      REG               8,23      31791    2785413 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1x.frq
+(deleted)
+> java       3485      techno  759r      REG               8,23     459082    2785414 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1x.prx
+(deleted)
+> java       3485      techno  760r      REG               8,23      20845    2589066 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_68.cfs
+(deleted)
+> java       3485      techno  761r      REG               8,23     770136    2589057 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_65.cfs
+(deleted)
+> java       3485      techno  762r      REG               8,23      50043    2589064 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_66.cfs
+(deleted)
+> java       3485      techno  763r      REG               8,23       9731    2589065 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_67.cfs
+(deleted)
+> java       3485      techno  764r      REG               8,23      80442    2589054 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_69.tis
+(deleted)
+> java       3485      techno  765r      REG               8,23      18179    2589061 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_69.frq
+(deleted)
+> java       3485      techno  766r      REG               8,23     282912    2589062 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_69.prx
+(deleted)
+> java       3485      techno  767r      REG               8,23    1094347    2785415 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1x.cfs
+(deleted)
+> java       3485      techno  768r      REG               8,23      19905    2785423 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1y.cfs
+(deleted)
+> java       3485      techno  769r      REG               8,23     843370    2589063 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_69.cfs
+(deleted)
+> java       3485      techno  770r      REG               8,23      21271    2589071 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6a.cfs
+(deleted)
+> java       3485      techno  771r      REG               8,23      14050    2589072 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6b.cfs
+(deleted)
+> java       3485      techno  772r      REG               8,23      13508    2589073 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6c.cfs
+(deleted)
+> java       3485      techno  773r      REG               8,23       4362    2589074 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6e.cfs
+(deleted)
+> java       3485      techno  774r      REG               8,23       6253    2589075 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6f.cfs
+(deleted)
+> java       3485      techno  775r      REG               8,23      81194    2589060 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6d.tis
+(deleted)
+> java       3485      techno  776r      REG               8,23      19199    2589068 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6d.frq
+(deleted)
+> java       3485      techno  777r      REG               8,23     296407    2589069 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6d.prx
+(deleted)
+> java       3485      techno  778r      REG               8,23     116547    2785424 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_1z.cfs
+(deleted)
+> java       3485      techno  779r      REG               8,23     882807    2589070 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6d.cfs
+(deleted)
+> java       3485      techno  780r      REG               8,23       7850    2589080 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6g.cfs
+(deleted)
+> java       3485      techno  781r      REG               8,23      82314    2589067 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6h.tis
+(deleted)
+> java       3485      techno  782r      REG               8,23      19642    2589077 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6h.frq
+(deleted)
+> java       3485      techno  783r      REG               8,23     300953    2589078 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6h.prx
+(deleted)
+> java       3485      techno  784r      REG               8,23      49075    2785425 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_20.cfs
+(deleted)
+> java       3485      techno  785r      REG               8,23      96241    2785412 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_21.tis
+(deleted)
+> java       3485      techno  786r      REG               8,23     897209    2589079 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6h.cfs
+(deleted)
+> java       3485      techno  787r      REG               8,23      27077    2589085 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6i.cfs
+(deleted)
+> java       3485      techno  788r      REG               8,23      10381    2589086 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6j.cfs
+(deleted)
+> java       3485      techno  789r      REG               8,23      36423    2785420 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_21.frq
+(deleted)
+> java       3485      techno  790r      REG               8,23     528730    2785421 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_21.prx
+(deleted)
+> java       3485      techno  791r      REG               8,23    1141276    2629777 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/FR/main/_25.cfs
+(deleted)
+> java       3485      techno  792r      REG               8,23      88374    2629785 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/FR/main/_26.cfs
+(deleted)
+> java       3485      techno  793r      REG               8,23       7114    2589087 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6k.cfs
+(deleted)
+> java       3485      techno  794r      REG               8,23      84488    2589076 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6l.tis
+(deleted)
+> java       3485      techno  795r      REG               8,23      20533    2589082 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6l.frq
+(deleted)
+> java       3485      techno  796r      REG               8,23     314411    2589083 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6l.prx
+(deleted)
+> java       3485      techno  797r      REG               8,23    1254167    2785422 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_21.cfs
+(deleted)
+> java       3485      techno  798r      REG               8,23      39697    2785430 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_22.cfs
+(deleted)
+> java       3485      techno  799r      REG               8,23      72896    2785431 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/EN/main/_23.cfs
+(deleted)
+> java       3485      techno  800r      REG               8,23     935325    2589084 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6l.cfs
+(deleted)
+> java       3485      techno  801r      REG               8,23      26395    2589092 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6m.cfs
+(deleted)
+> java       3485      techno  802r      REG               8,23      15475    2589093 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6n.cfs
+(deleted)
+> java       3485      techno  803r      REG               8,23      20575    2589094 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6o.cfs
+(deleted)
+> java       3485      techno  804r      REG               8,23       6243    2589095 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6q.cfs
+(deleted)
+> java       3485      techno  805r      REG               8,23      88382    2589081 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6p.tis
+(deleted)
+> java       3485      techno  806r      REG               8,23      21880    2589089 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6p.frq
+(deleted)
+> java       3485      techno  807r      REG               8,23     332073    2589090 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/fulltext/main/_6p.prx
+(deleted)
+> java       3485      techno  808r      REG               8,23      37441    2629786 /home/techno/TMCorpora/cdf71916-ff5c-404e-a07f-8c398bde30b9/indexes/FR/main/_27.cfs
+(deleted)
+> 
+> 
+> -- 
+> David Causse
+> Spotter
+> http://www.spotter.com/
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+-- 
+David Causse
+Spotter
+http://www.spotter.com/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

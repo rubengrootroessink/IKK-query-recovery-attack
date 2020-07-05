@@ -1,0 +1,121 @@
+FROM: "Anders Nielsen" <and...@visator.dk>
+SUBJECT: RE: Memory Usage?
+DATE: 11 Nov 2001
+
+I am not very familiar with the output of -Xrunhprof, but I've attached the
+output of a run of a search through and index of 50.000 documents. It gave
+me out-of-memory errors until I allocated 100 megabytes of heap-space.
+
+The top 10:
+
+SITES BEGIN (ordered by live bytes) Sun Nov 11 15:50:31 2001
+          percent         live       alloc'ed  stack class
+ rank   self  accum    bytes objs   bytes objs trace name
+    1 26.41% 26.41% 12485200 12005 45566560 43814  1783 [B
+    2 25.18% 51.59% 11904880 11447 44867680 43142  1796 [B
+    3  4.15% 55.74%  1962904 69214 171546352 5510292  1632 [C
+    4  3.83% 59.58%  1812096 3432 1812096 3432  1768 [I
+    5  3.83% 63.41%  1812096 3432 1812096 3432  1769 [I
+    6  3.34% 66.75%  1580688 65862 130618992 5442458  1631 java.lang.String
+    7  3.19% 69.95%  1509584 44763 1509584 44763   458 [C
+    8  3.03% 72.98%  1432416 44763 1432416 44763   459
+org.apache.lucene.index.TermInfo
+    9  2.27% 75.25%  1074312 44763 1074312 44763   457 java.lang.String
+   10  2.23% 77.48%  1053792 65862 87079328 5442458  1631
+org.apache.lucene.index.Term
+
+and the top 3 traces were:
+
+TRACE 1783:
+        org.apache.lucene.store.InputStream.refill(InputStream.java:165)
+        org.apache.lucene.store.InputStream.readByte(InputStream.java:80)
+        org.apache.lucene.store.InputStream.readVInt(InputStream.java:106)
+
+org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java:101)
+
+TRACE 1796:
+        org.apache.lucene.store.InputStream.refill(InputStream.java:165)
+        org.apache.lucene.store.InputStream.readByte(InputStream.java:80)
+        org.apache.lucene.store.InputStream.readVInt(InputStream.java:106)
+
+org.apache.lucene.index.SegmentTermPositions.next(SegmentTermPositions.java:
+100)
+
+TRACE 1632:
+        java.lang.String.<init>(String.java:198)
+
+org.apache.lucene.index.SegmentTermEnum.readTerm(SegmentTermEnum.java:134)
+
+org.apache.lucene.index.SegmentTermEnum.next(SegmentTermEnum.java:114)
+
+org.apache.lucene.index.TermInfosReader.scanEnum(TermInfosReader.java:166)
+
+
+I've attached the whole trace as gzipped.txt
+
+regards,
+Anders Nielsen
+
+-----Original Message-----
+From: Doug Cutting [mailto:DCutting@grandcentral.com]
+Sent: 10. november 2001 04:35
+To: 'Lucene Users List'
+Subject: RE: Memory Usage?
+
+
+I'm surprised that your memory use is that high.
+
+An IndexReader requires:
+  one byte per field per document in index (norms)
+  one open file per file in index
+  1/128 of the Terms in the index
+    a Term has two pointers (8 bytes)
+     and a String (4 pointers = 24 bytes, one to 16-bit chars)
+
+A Search requires:
+  1 1024 byte buffer per TermQuery
+  2 128 int buffers per TermQuery
+  2 1024 byte buffers per PhraseQuery term
+  1 1024 element bucket array per BooleanQuery
+    each bucket has 5 fields, and hence requires ~20 bytes
+  1 bit per document in index per DateFilter
+
+A Hits requires:
+  up to n+100 ScoreDocs (float+int, 8 bytes)
+    where n is the highest Hits.doc(n) accessed
+  up to 200 Document objects
+
+I may have forgotten something...
+
+Let's assume that your 1M document index has 2M unique terms, and that you
+only look at the top-100 hits, that your index has three fields, and that
+the typical document has two stored fields, each 20 characters.  Your
+30-term boolean query over a 1M document index should use around the
+following numbers of bytes:
+  IndexReader:
+    3,000,000 (norms)
+    1,000,000 (1/128 of 2M terms, each requiring ~50 bytes)
+  during search
+       50,000 (TermQuery buffers)
+       20,000 (BooleanQuery buckets)
+      100,000 (DateFilter bit vector)
+  in Hits
+        2,000 (200 ScoreDocs)
+       30,000 (up to 200 cached Documents)
+
+So searches should run in a 5Mb heap.  Are my assumptions off?
+
+You can also see why it is useful to keep a single IndexReader and use it
+for all queries.  (IndexReader is thread safe.)
+
+You could also 'java -Xrunhprof:heap=sites' to see what's using memory.
+
+Doug
+
+--
+To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+
+

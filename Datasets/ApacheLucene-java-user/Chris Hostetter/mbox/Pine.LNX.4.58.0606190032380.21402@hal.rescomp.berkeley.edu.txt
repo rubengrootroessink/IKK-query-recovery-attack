@@ -1,0 +1,145 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: faceting and categorizing on color?
+DATE: 19 Jun 2006
+
+
+: I have been reading several threads about facet counts
+: and category counts and was wondering if/how they
+: might apply to searching for colors. Let's say that
+
+First off, let me clear up somethign regarding your index field structure,
+you mentioned that you currently have documents that look like this...
+
+: IMAGE	1
+: COLORS	F00000 FF0000 FFF000 FFFF00 FFFFF0 FFFFFF
+: E00000 EE0000 EEE000 EEEE00
+
+	...
+
+: If I setup the COLORS field such that it is of type
+: Field.Keyword, then I can construct a query
+: COLORS:FFFFFF with a StandardAnalyzer that returns the
+
+If you are indexing it as Field.Keyword and you can query for
+COLORS:FFFFFF and get results, then either you are only only getting
+documents that are 100% white, or when you indexed the Documents you added
+eeach collor as a seperate field instance -- I'm going to assume it's the
+later, which makes perfect sense and is a reasonable way to do things, but
+it's also exactly the same as what you ask about a little later..
+
+: Am I mistaken in thinking that my problem is similar
+: to faceting/categorization/rollup, just on a different
+: scale? I suppose I could also structure my document
+: such that it looked like this:
+:
+: Field Value
+: IMAGE 1
+: COLOR F00000
+: COLOR FF0000
+
+...unless of course, i'm completley missunderstanding you.
+
+On to the meat of your question...
+
+: performance hit.This thread from last year:
+: http://www.nabble.com/forum/ViewTopic.jtp?topic=266441&tview=threaded
+:
+: Seems to suggest the creation of a String[] of colors
+: and then iterate over it using a QueryFilter, AND'ing
+: the result sets bits with the filtered bits, sorting
+: based on cardinality. That works in my tests with a
+: limited number of colors, but my String[] of colors
+: could contain 16.7M values, and most certainly will
+: contain at least several million.
+
+Actually, the idea behind that approach is that you *want* to build up a
+QueryFilter (or some other BitSetish thing) for every possible term value,
+even if most of the time you won't be looking at all of them
+because you can reuse a differnet subset of all of them on every query --
+it's a time/space tradeoff, really fast set lookups/intersections in
+exchange of a lot of RAM.
+
+: Am I mistaken in thinking that my problem is similar
+: to faceting/categorization/rollup, just on a different
+
+You're not mistaken.  One thing you may want to consider is wether or not
+it's really usefull to provide "facet" counts for each of the unique
+color values in the 256^3 RGB spectrum, or if it's better (and easier) to
+facet on the most significant bytes of the color value.  Searching for
+"white" and seeing...
+
+     FFFFFF  22,143 photos
+     FFFFFE  22,134 photos
+     FEFFFF  22,121 photos
+     FFFEFF  22,098 photos
+     FEFFFE  22,088 photos
+
+...as the top 5 common colors in my results isn't all the helpfull is it?
+
+If you index both the full color codes as well as just the most
+significant hex characters from the RGB code in seperate fields, you can
+do "coarse" faceting on one field, and "refined" faceting on the other...
+
+IMAGE:  1
+COLOR: FFFFFE FFA3B4 2287C3 773442 666BED
+COARSE_COLOR: FFF FAB 28C 734 66E
+
+: That would allow me to do something with TermEnums,
+: but I don't see how it would be any better than using
+: a HitCollector. Does the above document structure make
+
+Usually, you need to do one pass over your values and one pass over
+your documents -- with a HitCollector you do a pass over your values first
+(either by constructing a FieldCache or by doing something fancy with
+TermEnum).  Alternately, you can do one pass over your documents building
+a BitSet of the docs that match, and *then* do a pass over the values
+using a TermEnum/TermDocs to get interestign stats about them
+
+If you are interested in doing the coarse appraoch, the QueryFilter/BitSet
+approach would probably work very well (only 4096 total BitSets ever).
+Once a coarse color was choosen you can use the TermEnum to get a list of
+all the subtle shades and TermDocs to check which docs already in your set
+match on that shade.
+
+if you store the least significant hex characters last, you can reduce
+the amount of skipping arround you have to do...
+
+IMAGE:  1
+COLOR: FFFFFE FFA3B4 2587C3 773442 666BED
+COARSE_COLOR: FFF FAB 28C 734 66E
+REFINE_COLOR: FFFFFE FABF34 28C573 734742 66E6BD
+
+: initial document structure? If the answer to my
+: question is trivial would anything change if I wanted
+: to weight the colors. For example, if the initial
+: document looked like:
+:
+: Field	Value
+: IMAGE	1
+: COLORS	10-F00000 6-FF0000 3-FFF000 9-FFFF00 7-FFFFF0
+: 1-FFFFFF 2-E00000 4-EE0000 8-EEE000 5-EEEE00
+: PIXELS	10000
+: FORMAT	JPG
+:
+: That would be interpreted as FFFFFF is the most
+: dominant of the top 10 most dominant colors and F00000
+: is the least. Would that be a terrible document
+: structure?
+
+thigns certainly get a lot harder when you want to weight them ... but not
+impossible.  Using term frequencies would probably be the best way to do
+this (ie: add COLORS:F00000 to the 10 times, and COLOR:FFFFFF only once)
+and would have the added benefit that this document would score better on
+a search for COLORS:F00000 then it would on a search for COLOR:FFFFFF.
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

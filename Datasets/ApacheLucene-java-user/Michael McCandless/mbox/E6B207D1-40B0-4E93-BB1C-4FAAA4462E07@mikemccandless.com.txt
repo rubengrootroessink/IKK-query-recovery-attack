@@ -1,0 +1,140 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Problems with reopening IndexReader while pushing documents to the index
+DATE: 1 Jul 2008
+
+
+OK thanks for the answers below.
+
+One thing to realize is, with this specific corruption, you will only  
+hit the exception if the one term that has the corruption is queried  
+on.  Ie, only a certain term in a query will hit the corruption.
+
+That's great news that it's easily reproduced -- can you post the code  
+you're using that hits it?  It's easily reproduced when starting from  
+a newly created index, right?
+
+Mike
+
+Sascha Fahl wrote:
+
+> It is easyily reproduced. The strange thing is that when I check the  
+> IndexReader for currentness some IndexReader seem to get the  
+> corrupted version of the index and some not (the IndexReader gets  
+> reopened around 10 times while adding the documents to the index and  
+> sending 10.000 requests to the index). So maybe something goes wrong  
+> when the IndexReader fetches the index while IndexWriter flushes  
+> data to the index ( I did not change the default MergePolicy)?
+> I will do the CheckIndex thing asap.
+> I do not change any of the indexwriter settings. That is how I  
+> initialize a new IndexWriter: this.indexWriter = new  
+> IndexWriter(index_dir, new LiveAnalyzer(), false);
+> I am working with a singleton (so only one thread adds documents to  
+> the index).
+> This is what java -version says: java version "1.5.0_13"
+> Java(TM) 2 Runtime Environment, Standard Edition (build 1.5.0_13- 
+> b05-237)
+> Java HotSpot(TM) Client VM (build 1.5.0_13-119, mixed mode, sharing)
+> Currently I am developing on MacOS X Leopard, but the production  
+> system shall run on gentoo linux.
+> New indeces only are created when there was no previous index in the  
+> index directory.
+>
+> Sascha
+>
+> Am 30.06.2008 um 18:34 schrieb Michael McCandless:
+>
+>>
+>> This is spooky: that exception means you have some sort of index  
+>> corruption.  The TermScorer thinks it found a doc ID 37389, which  
+>> is out of bounds.
+>>
+>> Reopening IndexReader while IndexWriter is writing should be  
+>> completely fine.
+>>
+>> Is this easily reproduced?  If so, if you could narrow it down to  
+>> sequence of added documents, that'd be awesome.
+>>
+>> It's very strange that you see the corruption go away.  Can you run  
+>> CheckIndex (java org.apache.lucene.index.CheckIndex <indexDir>) to  
+>> see if it detects any corruption.  In fact, if you could run  
+>> CheckIndex after each session of IndexWriter to isolate which batch  
+>> of added documents causes the corruption, that could help us narrow  
+>> it down.
+>>
+>> Are you changing any of the settings in IndexWriter?  Are you using  
+>> multiple threads?  Which exact JRE version and OS are you using?   
+>> Are you creating a new index at the start of each run?
+>>
+>> Mike
+>>
+>> Sascha Fahl wrote:
+>>
+>>> Hi,
+>>>
+>>> I see some strange behavoiur of lucene. The following scenario.
+>>> While adding documents to my index (every doc is pretty small, doc- 
+>>> count is about 12000) I have implemented a custom behaviour of  
+>>> flushing and committing documents to the index. Before adding  
+>>> documents to the index I check if wether der ramDocCount has  
+>>> reached a certain number of if the last commit is a while ago. If  
+>>> so i flush the buffered documents and reopen the IndexWriter. So  
+>>> far, so good. Indexing works very well. The problem is that if I  
+>>> send requests with die IndexReader while writing documents with  
+>>> the IndexWriter (I send around 10.000 requests to lucene) I reopen  
+>>> the IndexReader every 100 requests (only for testing) if the  
+>>> IndexReader is not current. The first around 4000 requests work  
+>>> very well, but afterwards I always get the following exception:
+>>>
+>>> java.lang.ArrayIndexOutOfBoundsException: 37389
+>>> 	at org.apache.lucene.search.TermScorer.score(TermScorer.java:126)
+>>> 	at  
+>>> org.apache.lucene.util.ScorerDocQueue.topScore(ScorerDocQueue.java: 
+>>> 112)
+>>> 	at  
+>>> org 
+>>> .apache 
+>>> .lucene 
+>>> .search 
+>>> .DisjunctionSumScorer 
+>>> .advanceAfterCurrent(DisjunctionSumScorer.java:172)
+>>> 	at  
+>>> org 
+>>> .apache 
+>>> .lucene.search.DisjunctionSumScorer.next(DisjunctionSumScorer.java: 
+>>> 146)
+>>> 	at  
+>>> org.apache.lucene.search.BooleanScorer2.score(BooleanScorer2.java: 
+>>> 319)
+>>> 	at  
+>>> org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java: 
+>>> 146)
+>>> 	at  
+>>> org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java: 
+>>> 113)
+>>> 	at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:100)
+>>> 	at org.apache.lucene.search.Hits.<init>(Hits.java:67)
+>>> 	at org.apache.lucene.search.Searcher.search(Searcher.java:46)
+>>> 	at org.apache.lucene.search.Searcher.search(Searcher.java:38)
+>>>
+>>> This seems to be a temporarily problem because opening a new  
+>>> IndexReader after all documents were added everything is ok again  
+>>> and the 10.000 requests are all right.
+>>>
+>>> So what could be the problem here?
+>>>
+>>> reg,
+>>> sascha
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

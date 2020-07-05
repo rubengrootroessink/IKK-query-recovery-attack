@@ -1,0 +1,50 @@
+FROM: ArtemGr <artem...@gmail.com>
+SUBJECT: Re: What kind of performance to expect from a MultiTermQuery being used in BooleanQuery?
+DATE: 13 Mar 2009
+
+> I wonder: does Lucene need to scan all the terms in the inverted index
+> and the collect all the document identifiers into the DocIdSet
+> in order to implement the MultiTermQuery which goes after some other
+> queries in a BooleanQuery? Like, collecting a thouthand of document
+> identifiers only to filter a few documents which remain after the other
+> queries had been fired up?
+
+Adding some debugging output shows that MultiTermQuery still scans all the
+terms even though the other parts of the enclosing BooleanQuery
+had already diminished the results to one or two documents.
+
+But then, the MultiTermQuery itself looks to be implemented as a filter.
+(I first created a filter, but then decided to make a query
+from the MultiTermQuery in hopes that it would be faster due to some
+query combination technology, but it turns out there is no difference,
+since MultiTermQuery itself only implements a filter).
+I do not understand how MultiTermQuery works with BooleanQuery.
+BooleanWeight asks all the underlying queries for their weights,
+but MultiTermQuery does not implement the createWeight method and should
+throw an UnsupportedOperationException...
+
+I think there is a space for optimization here:
+IndexReader is basically a "SortedMap<Term,List<Doc>> reader".
+Now, some of the BooleanQuery clauses will diminish that SortedMap.
+Currently they return a "List<(Doc,Float)> scores", not the filtered
+SortedMap<Term,List<Doc>>, but the optimization is still possible
+by dynamically filtering a subset of SortedMap<Term,List<Doc>> terms,
+only returning from it the entries which does still have a passing score.
+E.g., moving the "merge" operation on List<Doc> sets earlier, so that
+the subsequent queries does not even see the documents which were already
+excluded by the previous BooleanQuery clauses.
+It is quite possible that the previous BooleanQuery clause will remove a lot
+of documents from the consideration, so that some terms in the IndexReader
+will have an empty set of documents to consider by the subsequent
+BooleanQuery clauses. A filtered IndexReader won't even pass such terms
+into the subsequent clauses (e.g. queries).
+Thus, in the best case, instead of considering tens of thouthands of unique
+terms and documents, a subsequent clause in a BooleanQuery will only have to
+consider a few.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

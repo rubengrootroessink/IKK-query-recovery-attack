@@ -1,0 +1,167 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Proximity Query Parser
+DATE: 31 Aug 2006
+
+I am not a huge fan of the queryparser's syntax so I have started an 
+open source project to create a viable alternative. I could really use 
+some helping testing it out. The more I can get it tested the better 
+chance it has of serving the community. The parser is called Qsol. I am 
+right up against its initial release. So far it:
+
+offers a simple clean syntax.
+allows arbitrary combinations/nesting of proximity and boolean queries.
+allows special date field processing (date searches can use a 
+constantscore range filter).
+other minor features ( like makeAllTermsFuzzy() to make your standard 
+search a fuzzy search (would prob be god awful slow I know, but I have 
+seen this option in MediaWare I think).
+
+The first initial release (if I can get some people to take the plunge 
+and help me test) will also include sentence/paragraph proximity search 
+support and a goggle suggest/spell-check type function. I have roughly 
+implemented both of these, but have not combined them into the parser yet.
+
+I have set up a rough page with some sparse documentation for the parser 
+at http://famestalker.com/devwiki/ You can download the jar there.
+
+A general query parser is such a pluggable part of Lucene that it would 
+be really nice to have a few viable options. It seems that everyone that 
+makes one keeps it proprietary (other than Surround). Help me push this 
+thing to a 1.0 release! It is almost there. Try it out! Keep in mind, 
+there are probably plenty of optimizations to be had in the future.
+
+Below is a simple syntax explanation and some sample queries.
+
+- Mark Miller
+
+
+    Order of Operations
+
+   1. '( )' *parenthesis* : me & (him | her)
+   2. '!' *and not* : mill ! bucketloader
+   3. '~' *within* : score ~5 lunch : use ord to only find terms in
+      order : score ord~5 lunch
+   4. '&' *and* : beat & pony
+   5. '|' *or* : him | her
+
+Spaces between terms default to & but this can be changed to |
+
+*Escape* - A '\' will escape an operator : m\&m's
+
+*Quotes* - an in-order phrase search with or without a specified slop : 
+"holy war sick":3 | "gimme all my cake"
+
+*Range Queries* - a query in the form: /beingword - endword/ will 
+perform a range search. The default search is inclusive. For an 
+exclusive search use '--' instead of '-' : creditcard[23907094 - 
+23094345] | creditcard[23907094 -- 23094345]
+
+*Wildcards* - * indicates zero or more unknowns and ? indicates a single 
+unknown : old harr*t?n | kil?r
+
+A wildcard query cannot begin with an unknown.
+
+*Fuzzy Query* : a ` indicates the preceding term should be a fuzzy 
+term : old carrot & devil` may cry
+
+*Paragraph/Sentence Proximity Searching*
+
+If you have enabled sentence and paragraph proximity searching then the 
+'~' operator may also be used as '~3p' or '~5s' to perform paragraph and 
+sentence proximity searches.
+
+*Sample Queries:*
+
+        example = "(good witch & "killa the willaw") ~4 scary ! man";
+        expected = "+(+spanNear([allFields:good, allFields:scary], 4, 
+false) -spanNear([allFields:good, allFields:man], 4, false)) 
++(+spanNear([allFields:witch, allFields:scary], 4, false) 
+-spanNear([allFields:witch, allFields:man], 4, false)) 
++(+spanNear([spanNear([allFields:killa, allFields:willaw], 1, true), 
+allFields:scary], 4, false) -spanNear([spanNear([allFields:killa, 
+allFields:willaw], 1, true), allFields:man], 4, false))";
+        assertEquals(expected, parse(example));
+       
+        example = "beat` old magpie`";
+        expected = "+allFields:beat~0.5 +allFields:old 
++allFields:magpie~0.5";
+        assertEquals(expected, parse(example));
+
+        example = "me \| the & test & hole";
+        expected = "+allFields:me +allFields:test +allFields:hole";
+        assertEquals(expected, parse(example));
+
+        example = ""test the big search":30 & me";
+        expected = "+spanNear([allFields:test, allFields:big, 
+allFields:search], 30, true) +allFields:me";
+        assertEquals(expected, parse(example));
+
+        example = "me & fox & cop";
+        expected = "+allFields:me +allFields:fox +allFields:cop";
+        assertEquals(expected, parse(example));
+       
+        example = "date[8/5/82]";
+        expected = "date:19820805";
+        assertEquals(expected, parse(example));
+
+        example = "date[> 12/31/02]";
+        expected = "ConstantScore(date:[20021231-})";
+        assertEquals(expected, parse(example));
+
+        example = "date[< 03/23/2004]";
+        expected = "ConstantScore(date:{-20040323])";
+        assertEquals(expected, parse(example));
+       
+        example = "date[3/23/2004 - 6/34/02]";
+        expected = "ConstantScore(date:[20040323-20020704])";
+        assertEquals(expected, parse(example));
+       
+        example = "field1,field2[(search & old) ~3 horse]";
+        expected = "(+spanNear([field1:search, field1:horse], 3, false) 
++spanNear([field1:old, field1:horse], 3, false)) 
+(+spanNear([field2:search, field2:horse], 3, false) 
++spanNear([field2:old, field2:horse], 3, false))";
+        assertEquals(expected, parse(example));
+
+        example = "field1[search | old ~3 horse]";
+        expected = "(field1:search spanNear([field1:old, field1:horse], 
+3, false))";
+        assertEquals(expected, parse(example));
+
+        parser.makeAllTermsFuzzy(true);
+        example = "meat & old cleaver | mike ~3 (dirty man)";
+        expected = "(+allFields:meat~0.5 +allFields:old~0.5 
++allFields:cleaver~0.5) (+spanNear([fuzzy(allFields:mike), 
+fuzzy(allFields:dirty)], 3, false) +spanNear([fuzzy(allFields:mike), 
+fuzzy(allFields:man)], 3, false))";
+        assertEquals(expected, parse(example));
+        parser.makeAllTermsFuzzy(false);
+       
+        example = "goat-valley";
+        expected = "spanNear([allFields:goat, allFields:valley], 1, true)";
+        assertEquals(expected, parse(example));
+       
+        example = "goat -- valley";
+        expected = "allFields:[goat TO valley]";
+        assertEquals(expected, parse(example));
+       
+        example = "goat \\-- valley";
+        expected = "+allFields:goat +allFields:valley";
+        assertEquals(expected, parse(example));
+       
+        example = "goat \\- valley";
+        expected = "+allFields:goat +allFields:valley";
+        assertEquals(expected, parse(example));
+       
+        example = "goat - valley";
+        expected = "allFields:{goat TO valley}";
+        assertEquals(expected, parse(example));
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,105 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: Does more memory help Lucene?
+DATE: 12 Jun 2006
+
+See my note about overlapping indexing documents with merging:
+
+http://www.gossamer-threads.com/lists/lucene/java-user/34188?search_string=%2Bkeegan%20%2Baddindexes;#34188
+
+Peter
+
+On 6/12/06, Michael D. Curtin <mike@curtin.com> wrote:
+>
+> Nadav Har'El wrote:
+>
+> > Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote on 12/06/2006
+> 04:36:45
+> > PM:
+> >
+> >
+> >>Nadav,
+> >>
+> >>Look up one of my onjava.com Lucene articles, where I talk about
+> >>this.  You may also want to tell Lucene to merge segments on disk
+> >>less frequently, which is what mergeFactor does.
+> >
+> >
+> > Thanks. Can you please point me to the appropriate article (I found one
+> > from March 2003, but I'm not sure if it's the one you meant).
+> >
+> > About mergeFactor() - thanks for the hint, I'll try changing it too (I
+> used
+> > 20 so far), and see if it helps performance.
+> >
+> > Still, there is one thing about mergeFactor(), and the merge process,
+> that
+> > I don't understand: does having more memory help this process at all?
+> Does
+> > having a large mergeFactor() actually require more memory? The reason
+> I'm
+> > asking this that I'm still trying to figure out whether having a machine
+> > with huge ram actually helps Lucene, or not.
+>
+> I'm using 1.4.3, so I don't know if things are the same in 2.0.  Anyhow, I
+> found a significant performance benefit from changing minMergeDocs and
+> mergeFactor from their defaults of 10 and 10 to 1,000 and 70,
+> respectively.
+> The improvement seems to come from a reduction in the number of merges as
+> the
+> index is created.  Each merge involves reading and writing a bunch of data
+> already indexed, sometimes everything indexed so far, so it's easy to see
+> how
+> reducing the number of merges reduces the overall indexing time.
+>
+> I can't remember why, but I also little benefit to increasing minMergeDocs
+> beyond 1000.  A lot of time was being spent in the first merge, which
+> takes a
+> bunch of one-document "segments" in a RAMDirectory and merges them into
+> the
+> first-level segments on disk.  I hacked the code to make this first merge
+> (and
+> ONLY the first merge) operate on minMergeDocs * mergeFactor documents
+> instead,
+> which greatly increased the RAM consumption but reduced the indexing
+> time.  In
+> detail, what I started with was:
+>    a.  read minMergeDocs of docs, creating one-doc segments in RAM
+>    b.  read those one-doc RAM segments and merge them
+>    c.  write the merged results to a disk segment
+>    ...
+>    i.  read mergeFactor first-level disk segments and merge them
+>    j.  write second-level segments to disk
+>    ...
+>    p.  normal disk-based merging thereafter, as necessary
+>
+> And what I ended up with was:
+>    A.  read minMergeDocs * mergeFactor docs, and remember them in RAM
+>    B.  write a segment from all the remembered RAM docs (a modified merge)
+>    ...
+>    F.  normal disk-based merging thereafter, as necessary
+>
+> In essence, I eliminated that first level merge, one that involved lots
+> and
+> lots of teeny-weeny I/O operations that were very inefficient.
+>
+> In my case, steps A & B worked on 70,000 documents instead of 1,000.
+> Remembering all those docs required a lot of RAM (almost 2GB), but it
+> almost
+> tripled indexing performance.  Later, I had to knock the 70 down to 35
+> (maybe
+> because my docs got a lot bigger but I don't remember now), but you get
+> the
+> idea.  I couldn't use a mergeFactor of 70,000 because that's way more file
+> descriptors than I could have without recompiling the kernel (I seem to
+> remember my limit being 1,024, and each segment took 14 file descriptors).
+>
+> Hope it helps.
+>
+> --MDC
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

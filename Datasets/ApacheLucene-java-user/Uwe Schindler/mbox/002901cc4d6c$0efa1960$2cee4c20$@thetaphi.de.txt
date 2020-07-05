@@ -1,0 +1,133 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: FW: Thans for your help with my Lucene problem
+DATE: 28 Jul 2011
+
+Forwarded personal mail:
+
+Hi Uwe,
+
+Many thanks for your excellent help with my problem in Lucene (below), 
+I really appreciate such a prompt and professional support 
+that you guys provide.
+
+I'm sending this email directly to you because I don't know how to reply 
+to your reply on the Lucene Mailing List Archives page.
+
+Greetings, best wishes and God's blessings to everyone on the Lucene team!
+
+Slav
+
+---------------------------------------------------------------
+
+Hi Slavomir,
+
+ 
+
+The problem in your code is the HitCollector, it does not respect the
+docBase or IndexReader passed in by setNextReader:
+
+ 
+
+Your index contains more than one segment, so the docId passed to collect is
+only relative to the current segment not to the global searcher.
+IndexSearcher runs the query not on the top-level IndexReader, it runs the
+search on each index segment separately (as your index contains of several
+sub-indexes). When you call optimize, your index will only contain one
+segment at the end, so this fixes your bug. Also when you not commit before,
+this will also happen for this small index size you have (merging does not
+occur at all, so after closing you have only one sub-index). With larger
+indexes, more than one segment will created in all cases after some time,
+with commit you just enforce that.
+
+ 
+
+You can fix this in two ways:
+
+ 
+
+1. The naïve (looks ugly) approach (not recommended). Please note, this one
+uses IndexSearcher to retrieve the document, which is stupid for collectors:
+
+ 
+
+private class HitCollector extends Collector {
+  private final IndexSearcher searcher;
+
+  private int docBase = 0;
+ 
+  public HitCollector(IndexSearcher searcher) {
+   this.searcher = searcher;
+  }
+ 
+  public boolean acceptsDocsOutOfOrder() {
+   return true;
+  }
+
+ 
+
+  public void collect(int docIndex) throws IOException {
+   Document document = searcher.doc(docBase + docIndex);
+   System.out.println(format(new
+Date(Long.parseLong(document.get("startdatetime")))));
+  }
+
+ 
+
+  public void setNextReader(IndexReader reader, int docBase) throws
+IOException {
+
+    this.docBase = docBase;
+
+  }
+  
+
+  public void setScorer(org.apache.lucene.search.Scorer scorer) throws
+IOException {}
+}
+
+
+
+ 
+
+2. In my opinion the better approach: Remove IndexSearcher completely from
+the collector, you dont need it:
+
+ 
+
+private class HitCollector extends Collector {
+  private IndexReader currentReader = null;
+ 
+  public HitCollector() {}
+ 
+  public boolean acceptsDocsOutOfOrder() {
+   return true;
+  }
+
+ 
+
+  public void collect(int docIndex) throws IOException {
+   Document document = currentReader.doc(docIndex);
+   System.out.println(format(new
+Date(Long.parseLong(document.get("startdatetime")))));
+  }
+
+ 
+
+  public void setNextReader(IndexReader reader, int docBase) throws
+IOException {
+
+   this.currentReader = reader;
+
+  }
+
+
+  public void setScorer(org.apache.lucene.search.Scorer scorer) throws
+IOException {}
+}
+
+
+
+
+ 
+
+

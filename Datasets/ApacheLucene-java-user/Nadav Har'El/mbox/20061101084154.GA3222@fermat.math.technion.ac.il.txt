@@ -1,0 +1,68 @@
+FROM: "Nadav Har'El" <...@math.technion.ac.il>
+SUBJECT: Re: Indexing floating point number
+DATE: 1 Nov 2006
+
+On Mon, Oct 30, 2006, Yonik Seeley wrote about "Re: Indexing floating point number":
+> On 10/30/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> >Newbie question. How do we index floating point number in Lucene, so that 
+> >it
+> >is sortable ? There is a built-in utility class 'NumberTools' which help
+> >with indexing integer. Does Lucene has the same mechanism for floating 
+> >point
+> >number?
+> 
+> You can look at NumberUtils in Solr, it has conversions for
+> int/long/float/double that make strings that sort correctly
+
+This question was asked so many times, that I think it belongs in the FAQ.
+Moreover, I wonder if we shouldn't add a floating-point version of NumberTools
+to the base Lucene, instead of referring people to Solr every time this
+question is asked?
+
+I'm attaching another possible implementation. It's a class ToSortableString
+with two static functions fromDouble(double) and fromInt(int). These convert
+numbers into strings which sort lexicographically in the same order as the
+original numbers.
+
+The long comments in the attached code explain my encoding, the details of
+which are different from Solr's. In particular differences include:
+1. In my code, integers and floating point can be mixed: the encoding of
+   7 (integer) and 7.0 (double) is the same.
+2. In my code, we can decide how much precision (significant digits) we want
+   to keep from doubles. I decided to keep only 10 significant digits (out of
+   the available ~16) by default, which is more than enough for search
+   application.
+3. My code currently uses base 10 encoding, and therefore often generates
+   longer strings than Solr's NumberTools. Moving to base 100 or even 256
+   (as I suggest in the comments) can eliminate this difference.
+4. My code is probably a bit slower, though I didn't actually check.
+5. I did not yet implement a reverse transformation (from String back to
+   number), because it practice it wasn't needed.
+
+> (for range queries as well as sorts).
+
+This support for floating-point range queries is a "honey trap". It sounds
+really good, but when you actually try to use it, you'll notice how extremely
+inefficient it is during search (unless you're lucky enough to have only a
+few distinct floating point values in the given range).
+
+To really support numeric search well, Lucene may need some additional data
+structure in addition to the usual lexicon and posting lists - like some sort
+tree of sub-range posting lists, or something.
+But perhaps this can even be done without any changes to Lucene: for example,
+imagine we index the number 2.345 as four tokens "2.345", "2.34", "2.3", "2".
+Now, if we're looking for the range [2.3-2.4) we can just search for "2.3",
+and if we're looking for the range [2.2-2.45) we can search for
+	"2.2" OR "2.3" OR "2.40" OR "2.41" OR "2.42" OR "2.43" OR "2.44"
+(note that this is an OR of just 7 posting lists, even if this range contains
+thousands of distinct values).
+
+I wonder if anybody ever done such a thing (or came up with an better
+solution) in Lucene.
+
+-- 
+Nadav Har'El                        |   Wednesday, Nov 1 2006, 10 Heshvan 5767
+IBM Haifa Research Lab              |-----------------------------------------
+                                    |The socks in my drawer are like
+http://nadav.harel.org.il           |snowflakes: No two are alike.
+

@@ -1,0 +1,84 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Query joining 2 indexes
+DATE: 18 Dec 2009
+
+Well, making a large OR clause is definitely more efficient than making
+N different requests, but you would have to search the results. It doesn't
+sound very performant.
+
+Could you go to 50,000 ids? yes, but you have to fiddle with
+setMaxClauseCount
+because Lucene defaults to a max of 1,024.
+
+There's no way I know of to emulate a DB join. Usually, whenever I try
+the answer is to flatten my data but I don't see a good way to do that
+in this case.
+
+Hmmm, what do you think would happen if you opened an IndexReader
+into your Hourly index straight from your Daily query? Something like:
+
+IndexReader irHourly = <open index reader to Hourly>.
+for (each hit in Daily) {
+    for (each id in this Hourly doc) {
+         Document doc irHourly.doc(<id in hit>);
+         addToResponse(doc); // your method here.....
+    }
+}
+
+
+You *probably* want to keep the Hourly reader open between requests, but
+since the above isn't searching, you *might* be able to open it each time.
+I'd
+go for keeping it open between requests if at all possible.
+
+And here's a wild and crazy idea. Remember that Lucene documents don't
+require that *any* fields be in common. It might make your management
+easier if you *combined* the indexes. Crudely, prefix each Daily field with
+"D_" and each hourly field with "H_" and put 'em all in the same index. I'm
+not claiming that's a good solution in your case, but I thought I'd mention
+it
+as a possibility. You still can't do joins on them though.....
+
+Erick
+
+
+
+On Fri, Dec 18, 2009 at 9:08 AM, François Eric <francois.eric@jarca.ca>wrote:
+
+> Hello,
+>
+> I have a performance problem and would need expert advice on how to go
+> about fixing it:
+>
+> I currently have 2 indexes: Daily and Hourly.  The Daily index contains
+> about 1,000,000 documents and my Hourly index approximately: 24,000,000
+> documents.  My Daily index contains many fields and some of them are IDs to
+> my Hourly Index.
+> What I want to do is fetch data in one request (if possible).
+> Right now I do it in many requests:
+> 1- Get the matching Daily documents (say it returns 500 documents)
+> 2- For each of these documents, locate the Hourly Index Id and fetch it.
+>
+> Therefore I make 501 requests to lucene.  This causes some performance
+> issues I guess because of the overhead to  making a request to Lucene.
+>
+> Is it possible to do this in 1 request?  I'm thinking no because I'm not
+> sure what the result set would be but maybe I'm missing something.
+>
+> If not I guess it would be possible to build a query with my 500 hourly ids
+> and make a OR between them to make it in 2 requests....but then I have to
+> find the matching documents.  Will this overflow if I have 50000 ids in my
+> query?
+>
+> Anyway, I just want advice on how one would address this situation.
+>
+> Thank you very much,
+>
+> François
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

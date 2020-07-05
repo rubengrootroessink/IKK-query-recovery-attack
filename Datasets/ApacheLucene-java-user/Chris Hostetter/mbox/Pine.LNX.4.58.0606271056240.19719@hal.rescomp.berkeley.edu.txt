@@ -1,0 +1,279 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: RE: Scoring purely on term frequencies
+DATE: 27 Jun 2006
+
+: Similarity that simply returns the number of matched terms per document
+: as the score. I tried making one that returns freq as tf and 1.0f as
+: anything else, but that gives strange results; same for something that
+: really returns 1.0f whatever.
+
+That's because when your tf function always returns 1.0, your Similarity
+is telling the Scorers that certains docs should "match" even when the
+term doesn't appear in them -- it's a vicious cycle, Scorers distinguish
+the concept of "matching" and "scoring" so it's possible to have a
+document "match" a query with a negative score -- but the Scorers
+themselves look at the value returned from tf to determine wether or not
+it should be considered a match (that way you can have a similarity that
+says there must be at least two occurances of each term to count as a
+match)
+
+as for why you might get strange results when your tf function returns
+the frequency ... it depends on what you mean by strange ...
+Searcher.explain is your friend, and with the recent bugs i fixed, it
+should be an honest friend.
+
+
+
+:
+: The code is listed below, if anybody can help me out I would be very
+: grateful! (and this is the first time I'm using Lucene at all so forgive
+: me if I am getting something totally wrong...)
+:
+: -- Wouter
+:
+: ============ HitCountSimilarity.java ===============
+:
+: import  org.apache.lucene.search.*;
+: import java.util.*;
+:
+: public class HitCountSimilarity extends Similarity {
+:
+:     public float coord(int overlap, int maxOverlap)
+:     {
+:         // Computes a score factor based on the fraction of all query
+: terms that a document contains.
+:         return 1.0f;
+:     }
+:
+:
+:     public float idf(Collection terms, Searcher searcher)
+:     {
+:         // Computes a score factor for a phrase.
+:         return 1.0f;
+:     }
+:
+:     public float idf(int docFreq, int numDocs)
+:     {
+:         // Computes a score factor based on a term's document frequency
+: (the number of documents which contain the term).
+:         return 1.0f;
+:     }
+:
+:     public float idf(org.apache.lucene.index.Term term, Searcher
+: searcher)
+:     {
+:         // Computes a score factor for a simple term.
+:         return 1.0f;
+:     }
+:
+:     public float lengthNorm(String fieldName, int numTokens)
+:     {
+:         // Computes the normalization value for a field given the total
+: number of terms contained in a field.
+:         return 1.0f;
+:     }
+:
+:     public float queryNorm(float sumOfSquaredWeights)
+:     {
+:         // Computes the normalization value for a query given the sum of
+: the squared weights of each of the query terms.
+:         return 1.0f;
+:     }
+:
+:     public float sloppyFreq(int distance)
+:     {
+:         return 0.0f;
+:     }
+:
+:     public float tf(float freq)
+:     {
+:         // Computes a score factor based on a term or phrase's frequency
+: in a document.
+:         return 1.0f; // was return freq;
+:     }
+:
+:     public float tf(int freq)
+:     {
+:         // Computes a score factor based on a term or phrase's frequency
+: in a document.
+:         return 1.0f;  // was return freq;
+:     }
+: }
+:
+:
+: ============ SearchFiles.java =================
+:
+: <snip imports>
+:
+: public class SearchFiles {
+:
+:   public static void main(String[] args) throws Exception {
+:
+:     Similarity.setDefault(new HitCountSimilarity());
+:
+:     String index = "index";
+:     String field = "body";
+:     String q = "dit";
+:
+:
+:     IndexReader reader = IndexReader.open(index);
+:     Term t = new Term(field, q);
+:     TermDocs td = reader.termDocs(t);
+:
+:     System.out.println("Searching query "+q);
+:
+:     Searcher searcher = new IndexSearcher(reader);
+:     Analyzer analyzer = new StandardAnalyzer();
+:
+:     org.apache.lucene.search.Query query = new QueryParser(field,
+: analyzer).parse(q);
+:
+:     Hits hits = searcher.search(query);
+:
+:     System.out.println(hits.length() + " total matching documents");
+:
+:     for(int i=0; i<hits.length(); i++) {
+:         System.out.println("doc="+hits.id(i)+" score="+hits.score(i));
+:         Document doc = hits.doc(i);
+:         System.out.println(doc.get("id"));
+:         }
+:     reader.close();
+:   }
+: }
+:
+: ========= session: ===========
+:
+: [wva@swpc450 lucenetest]$ java SearchFiles
+: Searching query dit
+: 2 total matching documents
+: doc=1 score=0.65625 (should be 4)
+: 2
+: doc=0 score=0.5  (should be 3)
+: 123
+: [wva@swpc450 lucenetest]$ javac *.java  # (after changing return freq to
+: return 1.0f)
+: [wva@swpc450 lucenetest]$ java SearchFiles
+: Searching query dit
+: 2 total matching documents
+: doc=0 score=0.25 (should be 1?)
+: 123
+: doc=1 score=0.21875 (should be 1?)
+: 2
+: [wva@swpc450 lucenetest]$
+:
+:
+:
+:
+:
+: > -----Original Message-----
+: > From: Ziv Gome [mailto:zgome@entopia.com]
+: > Sent: 21 May 2006 11:19
+: > To: java-user@lucene.apache.org
+: > Subject: RE: Scoring purely on term frequencies
+: >
+: > Hi Wouter,
+: >
+: > My thought would be to go for plan (b) (have not tested it though).
+: This
+: > would produce simply the sum of frequencies of the different terms
+: (I'm
+: > referring to a real multi-term query, not a phrase as you mentioned -
+: > "the man" - which should work).
+: > The problem I see is that it you loose the ability to use boosts (I
+: > assume this is fine by you).
+: >
+: > I don't see a problem here, (referring to "doesn't feel right"...) -
+: you
+: > simply want a different scoring - "just give me the damn frequency",
+: > right? In that situation, you should disable all the idf, coord, norm
+: > and sqrt manipulations that Lucene did in order to produce "smarter"
+: > scores, which takes into account and balance other properties of the
+: > query (different terms and their IDFs); the document (lengthNorm); the
+: > index (IDF's); and behavior of frequencies (tf implementation as
+: sqrt).
+: > The frameworks makes these smarter adjustments possible, it does not
+: > mean you need it in your case.
+: >
+: > Ziv
+: >
+: >
+: >
+: > -----Original Message-----
+: > From: W.H. van Atteveldt [mailto:wouter@2at.nl]
+: > Sent: Saturday, May 20, 2006 7:05 AM
+: > To: java-user@lucene.apache.org
+: > Subject: Scoring purely on term frequencies
+: >
+: > Dear list,
+: >
+: > I am interested in using Lucene for analyzing documents based on
+: > occurrence of certain keywords. As such, I am not interested in the
+: > 'top' or 'best' documents, but I do want to know exactly how many
+: words
+: > in the query matched.
+: >
+: > Thus, instead of the complicated formula used by default, I really
+: just
+: > want to use Score(q,d) = Sum_{t in q} freq(q,d).
+: >
+: > [Of course, if the query is "the man", I do not want to count 'the'
+: > before man; since 'the' I think is a Term (right?), this does not
+: quite
+: > hold. I want to count every occurrence of the combination 'the man']
+: >
+: > (a)
+: > I tried extending a SimilarityDelegator(DefaultSimilarity) and make tf
+: > return freq and coord,idf,*Norm return 1.0f. This worked but produced
+: > scores like 0.61 (approx) and 0.5 where it should have returned 3 and
+: 2
+: > (on a simple test)
+: >
+: > (b)
+: > I suppose I could extend Similarity itself but the documentation is
+: > quite sketchy on which methods are actually used, and something like
+: > coord or idf is simply meaningless in my case. I could return 1.0 like
+: > above but somehow it doesn't feel right. That said, I haven't tried it
+: > yet :-)
+: >
+: > (c)
+: > I could skip the Searcher and directly use the IndexReader. With
+: simple
+: > term queries this is trivial and works as expected, but I would like
+: to
+: > be able to use "the man" and "the article"~3 style queries. I could go
+: > ahead and look at the positions, but it seems like someone should
+: > already have implemented this before. Can anyone point me in the
+: > direction of something that gives me a frequency if I give it a query
+: > (rather than a term).
+: >
+: > Any help greatly appreciated!
+: >
+: > Wouter
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

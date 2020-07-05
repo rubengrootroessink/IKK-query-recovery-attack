@@ -1,0 +1,104 @@
+FROM: "Naomi Dushay" <Na...@cs.cornell.edu>
+SUBJECT: expert question: concurrent, asynchronous batch updates and real-time reads on very large, heavily used index
+DATE: 6 May 2005
+
+We have a very large lucene index (currently ~6 gig; likely to be ~20 gig in
+near future; currently around 800,000 documents; likely to be 3 million
+documents in near future and to continue growing).
+
+ 
+
+The read-only searching of the lucene index is done via a REST service; the
+REST code is java Servlets under tomcat.   This service is heavily used, with
+many requests per second, and needs to have good response times.
+
+ 
+
+Our indexed Documents essentially contain information from two sources:
+bibliographic metadata and fetched resource content.  We have separate index
+update work flows for these sources:
+
+ 
+
+Index update workflow 1:  harvest new/updated bibliographic metadata -->
+update index accordingly.  This may delete records from the index, add
+records to the index, or update records already in the index.  This is a
+batch process run outside of tomcat. The actual index updates are done in
+batches of max 10,000 documents at a time;  simply updating the index records
+(no other document processing) can take from 5 minutes to 1 hour.
+
+ 
+
+Index update workflow 2:  fetch new/updated resource content --> update index
+accordingly.   Currently this should only update records already in the
+index.  This is a batch process run outside of tomcat. Again, the actual
+index updates are done in batches which can be updating the index for some
+minutes.
+
+ 
+
+Optimization of the index currently can take an hour.
+
+ 
+
+ 
+
+Here's my question:
+
+ 
+
+Given such a large index, with such heavy use, what is the best way to allow
+timely batch process updating of the index without interrupting the REST
+search service?  
+
+ 
+
+Possible solutions I'm aware of:
+
+ 
+
+1.	single lucene index:
+
+REST service opens an IndexReader on tomcat startup.  Updates use built-in
+Lucene locking mechanism.   Questions/Problems:  while the updates are going
+on, will the users see weird search results?  That is, will the REST
+IndexReader be able to find documents it expect if said documents are updated
+by the IndexWriter?  What about when optimization is performed at the end of
+the update job - will the IndexReader be able to find documents while
+optimization is running?  After optimization is over?
+
+(clearly, I can close the REST IndexReader and open a new one any time ... my
+guess would be to do this only after optimizing the index, not after partial
+updates such as a batch of 10,000 document updates).
+
+ 
+
+ 
+
+2.	update a copy of the lucene index, point to the newly updated copy,
+delete the old, non-updated index.  
+
+In this scenario, index update workflows would start by copying the current
+"read only" index used by the REST IndexReader, then update and optimize the
+newly copied index, then tell the REST service to close its current
+IndexReader and open a new one for the newly updated index.  The old index
+could then be deleted.   This scenario would require its own locking
+mechanism to ensure that only a single index update workflow is executing at
+a time, in order to avoid different partial updates made to multiple index
+copies. 
+
+ 
+
+ 
+
+Does anyone have any other solutions, or helpful information?
+
+ 
+
+- Naomi Dushay
+
+National Science Digital Library - Core Integration
+
+Cornell University
+
+

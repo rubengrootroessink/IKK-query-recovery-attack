@@ -1,0 +1,86 @@
+FROM: Miles Barr <mi...@runtime-collective.com>
+SUBJECT: Re: Question: force a field must be matched?
+DATE: 16 Sep 2005
+
+On Thu, 2005-09-15 at 11:56 -0700, James Huang wrote:
+> Yes, "+" is what I missed! Thanks.
+> 
+> Suppose there is a book published by 3 publishers (I
+> don't know how that works in real world):
+> 
+> // At index time:
+>   doc.add( Field.Keyword("publisher", "Manning") );
+>   doc.add( Field.Keyword("publisher", "SAMS") );
+>   doc.add( Field.Keyword("publisher", "O'Reilly") );
+> 
+> // At search time:
+>   queryString += " +publisher:SAMS";
+>   ...
+> 
+> should find me that Document.
+
+That may or may not work depending on your analyzer. 
+
+If you're using the query parser with the standard analyzer it will
+search the 'publisher' field for 'sams' not 'SAMS', and hence get no
+matches back.
+
+If you want to use the query parser instead of building the query by
+hand you can use the PerFieldAnalyzerWrapper class and write a
+KeywordAnalyzer, i.e.:
+
+package org.apache.lucene.analysis;
+
+import java.io.IOException;
+import java.io.Reader;
+
+/** "Tokenizes" the entire stream as a single token. */
+public class KeywordAnalyzer extends Analyzer {
+    public TokenStream tokenStream(String fieldName, final Reader reader) {
+        
+        return new TokenStream() {
+                private boolean done;
+                private final char[] buffer = new char[1024];
+                
+                public Token next() throws IOException {
+                    if (!done) {
+                        done = true;
+                        StringBuffer sb = new StringBuffer();
+                        int length;
+                        while (true) {
+                            length = reader.read(this.buffer);
+                            if (length == -1) break;
+                            
+                            sb.append(this.buffer, 0, length);
+                        }
+                        String text = sb.toString();
+                        return new Token(text, 0, text.length());
+                    }
+                    return null;
+                }
+            };
+    }
+}
+
+--------------------
+
+PerFieldAnalyzerWrapper result =
+    new PerFieldAnalyzerWrapper(new StandardAnalyzer());
+
+result.addAnalyzer("publisher", new KeywordAnalyzer());
+
+QueryParser parser = new QueryParser(<your regular field>, result);
+
+
+
+
+-- 
+Miles Barr <miles@runtime-collective.com>
+Runtime Collective Ltd.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

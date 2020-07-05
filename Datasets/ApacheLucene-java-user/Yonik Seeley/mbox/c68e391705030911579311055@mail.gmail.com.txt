@@ -1,0 +1,63 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 9 Mar 2005
+
+I'm trying to support an interface where documents can be added one at
+a time at a high rate (via HTTP POST).  You don't know all of the
+documents ahead of time, so you can't delete them all ahead of time.
+
+Given this constraint, it seems like you can do one of two things:
+1) collect all the documents to be added, without actually adding
+them.  Then you know the complete list and can do the deletes before
+the adds
+2) tag all the documents as you add them so you can tell old from new.
+3) depend on some special ordering that may exist in a lucene index
+(see Big Questions below)
+
+For the 2nd approach to work with duplicates in the same group (doc A
+added twice before the IndexWriter is closed), it looks like you would
+have to keep track of what you tagged each individual document with. 
+After the IndexWriter has closed, you could use a term enumerator to
+go through every document you added and delete anything but the latest
+(but to find which lucene docid corresponds to which version is more
+work still...)
+
+Big Big Question:
+Will a term enumerator enumerate in the order documents were added to
+the index (for a single term of say id:a)?  If so, there would be no
+need to tag at all - simply enumerate and delete all but the last.
+
+Another Big Big Question:
+If the former idea doesn't work, can we depend on the ordering of the
+docids?  Will docs added later always have higher internal docids than
+ones added earlier?
+
+-Yonik
+
+
+On Wed, 09 Mar 2005 10:43:43 -0800, Doug Cutting <cutting@apache.org> wrote:
+> Yonik Seeley wrote:
+> > This strategy looks very promising.
+> >
+> > One drawback is that documents must be added directly to the main
+> > index for this to be efficient.  This is a bit of a problem if there
+> > is a document uniqueness requirement (a unique id field).
+> 
+> This is easy to do with a single index.  Here's the loop:
+> 
+>   1. Poll DB for updated and new documents.
+>   2. Delete all updated docs from an IndexReader & close it.
+>   3. Add all new & updated to an IndexWriter & close it.
+>   4. Tell DB that documents are updated.
+>   5. Checkpoint index.
+>   6. Repeat.
+> 
+> Deleting is much faster than adding.
+> 
+> Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

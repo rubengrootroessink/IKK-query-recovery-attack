@@ -1,0 +1,221 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: MultiFieldQueryParser with default AND and stopfilter
+DATE: 8 Jun 2011
+
+I'm sure you are right and I'm wrong - sorry for the waste of space.
+However I still think you should build it all up in code.
+
+
+--
+Ian.
+
+
+On Wed, Jun 8, 2011 at 4:33 PM, Elmer <evanchastelet@gmail.com> wrote:
+>> Using MFQP with AND
+>> everywhere you'll never get a match if some fields don't contain all
+>> of the search terms"
+>
+> I'm sorry to say, but that's not true I guess, look how the query parser
+> parses the following query:
+> 'information retrieval'
+> --parsed-to-->
+> +(title:inform description:inform authors.name:information)
+> +(title:retriev description:retriev authors.name:retrieval)
+>
+> in human language: both 'information' and 'retrieval' should appear
+> somewhere, doesn't matter in which fields.
+>
+> So if 'information' only appears in the title, and 'retrieval' only in
+> the description, there is a match (and there is, I just tested it ;))
+>
+> Br,
+> Elmer
+>
+>
+> On Wed, 2011-06-08 at 16:19 +0100, Ian Lea wrote:
+>> Then surely the stop word issue is a red herring.  Using MFQP with AND
+>> everywhere you'll never get a match if some fields don't contain all
+>> of the search terms.
+>>
+>> Even if Erick's exact answer won't apply, I suspect that building up a
+>> composite boolean query is the way to go.
+>>
+>>
+>> --
+>> Ian.
+>>
+>> On Wed, Jun 8, 2011 at 4:01 PM, Elmer <evanchastelet@gmail.com> wrote:
+>> > Sorry, I made a mistake here:
+>> >
+>> >> Unfortunately, the solution that Erick gave won't do the trick
+>> >> > > bq.add(qp.parse("title:(the AND project)", SHOULD))
+>> >> > > bq.add(qp.parse("desc:(the AND project)", SHOULD))
+>> >> This still won't match documents where both 'the' and 'project' appear
+>> >> in DIFFERENT fields (i.e. a document with title: 'Lucene project' and
+>> >> desc: 'the open source search software from Apache')
+>> >
+>> > Correction: this will actually match the example query ('the project'),
+>> > but this solution won't work if the search query is changed to: 'the
+>> > search project', since 'search' is not in the title field.
+>> >
+>> > Br,
+>> > Elmer
+>> >
+>> >
+>> > On Wed, 2011-06-08 at 16:35 +0200, Elmer wrote:
+>> >> Thank you,
+>> >>
+>> >> I already use the PerFieldAnalyzerWrapper (by Hibernate Search) ;)
+>> >> And that's where the problem comes in: different fields using different
+>> >> analyzers (some with, some without a stopfilter). For each term
+>> >> (tokenized by MFQP itself?), it applies the given analyzer on each
+>> >> field. If the analyzer returns no token (occurs on 'the' when using the
+>> >> PerFieldAnalyzerWrapper for the desc field), that field will not be
+>> >> included in the clause for that term. (see/re-read the example, maybe
+>> >> it's more clear what I mean now).
+>> >>
+>> >> Unfortunately, the solution that Erick gave won't do the trick
+>> >> > > bq.add(qp.parse("title:(the AND project)", SHOULD))
+>> >> > > bq.add(qp.parse("desc:(the AND project)", SHOULD))
+>> >> This still won't match documents where both 'the' and 'project' appear
+>> >> in DIFFERENT fields (i.e. a document with title: 'Lucene project' and
+>> >> desc: 'the open source search software from Apache')
+>> >>
+>> >> I hope it's clear what I mean :) Otherwise, let me know!
+>> >>
+>> >> BR,
+>> >> Elmer
+>> >>
+>> >>
+>> >>
+>> >> On Wed, 2011-06-08 at 14:42 +0100, Ian Lea wrote:
+>> >> > Except that I think he has loads of other fields and wants to keep
+it simple.
+>> >> >
+>> >> > But how about passing a PerFieldAnalyzerWrapper instance as the
+>> >> > analyzer to MFQP?  Worth a try.
+>> >> >
+>> >> >
+>> >> > --
+>> >> > Ian.
+>> >> >
+>> >> >
+>> >> > On Wed, Jun 8, 2011 at 2:38 PM, Erick Erickson <erickerickson@gmail.com>
+wrote:
+>> >> > > Could you just construct a BooleanQuery with the
+>> >> > > terms against different fields instead of using MFQP?
+>> >> > > e.g.
+>> >> > >
+>> >> > > bq.add(qp.parse("title:(the AND project)", SHOULD))
+>> >> > > bq.add(qp.parse("desc:(the AND project)", SHOULD))
+>> >> > >
+>> >> > > etc...? If your QueryParser was created with a
+>> >> > > PerFieldAnalyzerWrapper I think you might get what you
+>> >> > > want....
+>> >> > >
+>> >> > > Note, bad pseudo code there...
+>> >> > >
+>> >> > > Best
+>> >> > > Erick
+>> >> > >
+>> >> > > On Wed, Jun 8, 2011 at 4:52 AM, Elmer <evanchastelet@gmail.com>
+wrote:
+>> >> > >> Hi,
+>> >> > >>
+>> >> > >> I have a use case in which I use the MultiFieldQueryParser
+(MFQP) on
+>> >> > >> some fields that use and some fields that don't use a stopfilter.
+The
+>> >> > >> default operator of the MFQP is set to AND.
+>> >> > >> For example, if the search query is 'the project' (with 'the'
+included
+>> >> > >> in the stoplist) and the search fields are:
+>> >> > >>
+>> >> > >> title - not using a stopfilter,
+>> >> > >> desc - using a stopfilter,
+>> >> > >>
+>> >> > >> the parsed query becomes:
+>> >> > >>
+>> >> > >> '+(title:the) +(title:project desc:project)'.
+>> >> > >>
+>> >> > >> So, the problem is that docs that have the term 'the' only
+appearing in
+>> >> > >> their desc field are excluded from the results. So every query,
+with AND
+>> >> > >> as default operator, that has a stop word in it that only
+appears in
+>> >> > >> fields that use a stop filter will have this problem (or similar,
+if
+>> >> > >> there is at least one field X not using a stopfilter ->
+no match if a
+>> >> > >> stopword from query doesn't appear in field X). Thus, in this
+example, a
+>> >> > >> document with title: 'Lucene project' and desc: 'the open
+source search
+>> >> > >> software from Apache' will not be matched. In my opinion this
+is not the
+>> >> > >> expected behavior. What I'd like to see is that this doc is
+matched by
+>> >> > >> the given query. So, for each token in the query, that appears
+to be a
+>> >> > >> stopword in a field (i.e. some filter filters the token out),
+I want it
+>> >> > >> to be matched instead of not.
+>> >> > >>
+>> >> > >> Anyone who knows a way to deal with this? I would prefer to
+keep using
+>> >> > >> the MFQP, since I need to support multiple fields, querytime
+boosting
+>> >> > >> and lucene syntax. Or is there a disadvantage by doing this?
+>> >> > >>
+>> >> > >> Thanks in advance.
+>> >> > >>
+>> >> > >> BR,
+>> >> > >> Elmer van Chastelet
+>> >> > >>
+>> >> > >>
+>> >> > >> ---------------------------------------------------------------------
+>> >> > >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> > >>
+>> >> > >>
+>> >> > >
+>> >> > > ---------------------------------------------------------------------
+>> >> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> > >
+>> >> > >
+>> >> >
+>> >> > ---------------------------------------------------------------------
+>> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >
+>> >>
+>> >>
+>> >
+>> >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

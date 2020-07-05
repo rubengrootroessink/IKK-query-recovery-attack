@@ -1,0 +1,94 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Using the new tokenizer API from a jar file
+DATE: 28 Dec 2009
+
+The question on this list was ok,as it shows a minor problem of using the
+new TokenStream API with Solr.
+
+His plugin was loaded correctly, because if Lucene says, that it cannot find
+the *Impl class, it was able to load the interface class before -> the JAR
+file is "visible" to the JVM.
+
+The problem is the following and has to do with classloaders:
+
+1. We have different class loaders for different places in Solr. Solr uses
+for plugins a SolrResourceLoader that searches for JAR files in the local
+lib folder before handling over to the webapp's classloader.
+
+2. Initially, the lucene JAR is loaded by the Webapp's class loader
+
+3. If a AttributeImpl is placed into a jar file e.g. in the plugin folder of
+solr (the lib folder where solr loads all resources, stop words,...), the
+loading mechanism inside AttributeSource.DEFAULT_ATTRIBUTE_FACTORY is unable
+to locate the class file, because Class.forName() always uses the class'
+classloader and not the global/thread one's. So AttributeSource will only
+find the class file if it is in the *same* directory as the lucene-core.jar
+file (WEB-INF/lib) and so accessible by the webapp's class loader.
+
+A good introduction about the problem is this one:
+http://www.theserverside.com/tt/articles/content/dm_classForname/DynLoad.pdf
+
+The problem is here described for the JVM extensions folder but also applies
+to solr, because it has another classloader for plugins.
+
+A solution to fix this would be in lucene to use the thread's context class
+loader in AttributeSource.DEFAULT_ATTRIBUTE_FACTORY, but I strongly
+discourage this, as it would break the whole AttributeSource functionality
+if you add two different attributes with same class names from different
+class loaders to the AttributeSource.
+
+The only solution to the problem is placing the JAR file inside the
+WEB-INF/lib folder where lucene-core.jar is. Plugins in Solr cannot define
+own attribute implementations. Alternatively he could try to force preload
+the class by calling Class.forName in his plugin initialization code on the
+Impl class. But I am not sure if this works (as Java handles classes from
+different classloaders different).
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: Chris Hostetter [mailto:hossman_lucene@fucit.org]
+> Sent: Monday, December 28, 2009 4:27 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: Using the new tokenizer API from a jar file
+> 
+> 
+> : I tried to use it with solr and the problems began. It's always telling
+> me
+> : that it cannot find the class GlossAttributeImpl. I think the problem is
+> : that my jar file is added to the class path at run time not from the
+> command
+> : line. Do you have a good solution or workaround?
+> 
+> You're likely to get mmore helpful answers from other people in the Solr
+> User community (solr-user@lucene.a.o)
+> 
+> As long as you put your jar in the "lib" directory under your solr home
+> (or refrence it using a <lib/> directive in your solrconfig.xml) Solr's
+> plugin loader will take care of hte classloading for you.
+> 
+> if you are confident you have your jar in the correct place, please email
+> solr-user with the ClassNotFound stack trace from your solr logs, as well
+> as hierarchy  of files from your solr home (ie: the output of "find .")
+> 
+> 
+> -Hoss
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

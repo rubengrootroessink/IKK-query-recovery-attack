@@ -1,0 +1,129 @@
+FROM: Ype Kingma <ykin...@xs4all.nl>
+SUBJECT: Re: Indexing and Duplication
+DATE: 18 Mar 2002
+
+Kelvin,
+
+>Ype,
+>
+>That would be a good solution to my problem if only I weren't performing
+>multi-threaded indexing. :(
+>The Reader obtained by any one thread may not be an accurate reflection of
+>the actual state of the index, just what the state when the Reader was
+>instantiated.
+
+Why share index readers between threads?
+For searching this is fine, off course, but importing can be done
+differently.
+
+You might consider changing the functionality of your threads a bit:
+one or more threads for indexing and one or
+more other threads for extracting the lucene documents.
+
+You could eg. use a bounded queue of batches of lucene docs as input to
+the indexing threads. The extracting thread(s) can then put
+lucene docs in the next batch and put the batch on the queue.
+
+The only exclusive serial part would then be opening the index reader,
+deleting a batch of old docs, and closing the reader. Adding a batch of
+new docs can be done by eg. two threads while not using the reader.
+
+For incremental imports an index reader is also needed to check whether a
+document has been imported or not. Such checks might be done up front
+during a single run of the import program.
+
+In this way the index readers are used for rather short periods
+to do some batch of work, and there is no need to share them
+between threads.
+
+>My current solution is that I hold a collection of documents with the key as
+>my object identifier and only write them to the writer after indexing is
+
+What's the difference between 'writing to the writer' and 'indexing'?
+
+>done. I chose it because it saved me having to write, then delete a
+>document, etc. However, it's not so ideal because the memory consumed by
+>such an approach may be prohibitive.
+
+>What do you think?
+
+Memory usage can be limited by using a bounded queue. A single batch
+of docs on the queue can be limited by eg. the total size of the docs.
+
+I assumed you need to delete old docs while adding new ones. In case
+you don't need to delete old docs, you you might not need an
+index reader at all.
+
+Ype
+
+
+>Regards,
+>Kelvin
+>----- Original Message -----
+>From: "Ype Kingma" <ykingma@xs4all.nl>
+>To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>Sent: Sunday, March 17, 2002 6:15 AM
+>Subject: Re: Indexing and Duplication
+>
+>
+> > Kelvin,
+> >
+> > >I've got a little problem with indexing that I'd like to throw to
+>everyone.
+> > >
+> > >My objects have a unique identifier. When indexing, before I create a new
+> > >document, I'd like to check if a document has already been created with
+>this
+> > >identifier. If so, I'd like to retrieve the document corresponding to
+>this
+> > >identifier, and add the fields I currently have to this document's fields
+> > >and write it. If no such document exists, then I'd create a new document,
+> > >add my fields and write it. What this really does, I guess, is ensure
+>that a
+> > >document object represents a body of information which really belongs
+> > >together, eliminating duplication.
+> > >
+> > >With the current API, writing and retrieving is performed by the
+>IndexWriter
+> > >and IndexReader respectively. This effectively means that in order to do
+>the
+> > >above, I'd have to close the writer, create a new instance of the index
+> > >reader after each document has been added in order for the reader to have
+> > >the most updated version of the index (!).
+> > >
+>> >Does anyone have any suggestions how I might approach this?
+>>
+>> Avoid closing and opening too much by batching n docs at a time
+>> on the index reader and then to the things needed for the n docs on the
+>> index writer. You might have to delete docs on the reader, too.
+> >
+> > The reasons for using the reader for reading/searching/deleting
+> > and the using writer for adding have been discussed some time ago on this
+> > list. I can't provide a pointer into the list archives as I don't recall
+>> the original subject header, sorry.
+>>
+>> Regards,
+>> Ype
+>>
+>> --
+>>
+>> --
+>> To unsubscribe, e-mail:
+><mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>> For additional commands, e-mail:
+><mailto:lucene-user-help@jakarta.apache.org>
+>>
+>
+>
+>--
+>To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+
+-- 
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

@@ -1,0 +1,137 @@
+FROM: poeta simbolista <poetasimboli...@gmail.com>
+SUBJECT: Extending Query, Weight, Scorer
+DATE: 14 Feb 2007
+
+
+Hi, 
+I have created a Query that works for numerical max-min ranges, that may
+work for any Field specified.
+I have done that by extending Query, and creating own Weight and Scorer
+subclasses as well.
+So it works ... but I have problems when setting min or max boundary to 0:
+In this case, those entries that do not have the field, happen as if they
+had it with value 0. And I would like that, those not  having the field, not
+scoring for the query. Code is below.
+
+I have put a printout there on the bold statement. This printout gives me as
+the size, the number of docs of the whole index. So it is retrieving all of
+the documents, regardless they have the field or not. I assume that they
+will store a zero if the entry does not have the field.
+
+How could I get rid of those entries not having the field?
+(If I cut as the min range with 1, it works fine; setting 0, it gives me all
+the entries on the index).
+
+Thank you
+
+PS. Sorry for some variable names maybe not very descriptive :)
+
+public class MaxMinQuery extends Query 
+{
+  // The min, max values to be accepted. 
+  private int min;
+  private int max;
+  
+  // The field to be used for queries.
+  private String queryField;
+
+  public MaxMinQuery(int min, int max, String field) 
+  {
+    this.min = min;
+    this.max = max;
+    this.queryField = field;
+  }
+
+  protected Weight createWeight(Searcher searcher) {
+    return new FloatFieldWeight(searcher, this);
+  }
+
+  public String toString(String string) {
+    return queryField + ":[min=" + min + " max=" + max + "]";
+  }
+
+  private class FloatFieldWeight implements Weight {
+    private Searcher searcher;
+    private MaxMinQuery query;
+    private String queryField;
+    
+    public FloatFieldWeight(Searcher searcher, MaxMinQuery query) {
+      this.searcher = searcher;
+      this.query = query;
+      this.queryField = query.queryField;
+    }
+
+    public Query getQuery() {
+      return query;
+    }
+
+    public float getValue() {
+      return 1;
+    }
+
+    public float sumOfSquaredWeights() throws IOException {
+      return 1;
+    }
+
+    public void normalize(float v) {
+
+    }
+
+    public Scorer scorer(IndexReader indexReader) throws IOException {
+      final float[] prices = FieldCache.DEFAULT.getFloats(indexReader, );
+    		  this.queryField);
+      System.out.println("PRICES SIZE: " + prices.length);
+      return new FloatFieldScorer(getSimilarity(searcher), prices);
+    }
+
+    public Explanation explain(IndexReader indexReader, int i) throws
+IOException {
+      return scorer(indexReader).explain(i);
+    }
+  }
+
+  private class FloatFieldScorer extends Scorer {
+    private float[] prices;
+    private int idx = -1;
+
+    public FloatFieldScorer(Similarity similarity, float[] prices) {
+      super(similarity);
+      this.prices = prices;
+    }
+
+    public boolean next() throws IOException {
+      return (++idx < prices.length);
+    }
+
+    public int doc() {
+      return idx;
+    }
+
+    public float score() throws IOException {
+    	
+      if (prices[idx] > max || prices[idx] < min)
+        return -Float.MAX_VALUE;
+
+      return 1;
+    }
+
+    public boolean skipTo(int i) throws IOException {
+      idx = i;
+      return idx < prices.length;
+    }
+
+    public Explanation explain(int i) throws IOException {
+      return new Explanation();
+    }
+  }
+}
+-- 
+View this message in context: http://www.nabble.com/Extending-Query%2C-Weight%2C-Scorer-tf3227441.html#a8965471
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

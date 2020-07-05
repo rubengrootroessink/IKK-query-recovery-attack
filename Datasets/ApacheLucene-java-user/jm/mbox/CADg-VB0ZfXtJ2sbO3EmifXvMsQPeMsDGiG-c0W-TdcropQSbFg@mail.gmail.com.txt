@@ -1,0 +1,142 @@
+FROM: jm <jmugur...@gmail.com>
+SUBJECT: Re: analizer not doing the same thing at index and query time?
+DATE: 12 Jul 2011
+
+*Here is a self contained code:
+*
+*
+*
+*
+I verified with luke no 's' is indexed in the index. The output I get is:
+testChars
+bbbb:(bloom's*) got 0 Query is: bbbb:bloom's*
+bbbb:(bloom) got 1 Query is: bbbb:bloom
+bbbb:(bloom AND b*) got 1 Query is: +bbbb:bloom +bbbb:b*
+
+So what I don't understand why is the ' in the first query not being
+removed.
+thanks
+
+
+public class AnalyzerTest {
+    public static void main(String[] args) throws IOException,
+ParseException {
+        System.out.println("testChars ");
+        Analyzer analyzer = getAnalyzer();
+
+        //test search
+        //        Directory directory = new RAMDirectory();
+        Directory directory = FSDirectory.open(new
+File("d:\\temp\\lucene.index"));
+        IndexWriter writer = new IndexWriter(directory, analyzer,
+IndexWriter.MaxFieldLength.UNLIMITED); //2
+        Document doc = new Document(); // 3
+        String text = "bloom's bird";
+        doc.add((Fieldable) new Field("bbbb", text, Field.Store.NO,
+Field.Index.ANALYZED)); // 3
+        writer.addDocument(doc); // 3
+        doc = new Document();
+        doc.add((Fieldable) new Field("bbbb", "ungry abloom card",
+Field.Store.NO, Field.Index.ANALYZED)); // 3
+        writer.addDocument(doc); // 3
+        writer.close(); // 3
+        //proximity
+        QueryParser qp = new QueryParser(Version.LUCENE_24, "bbbb",
+analyzer);
+        printHitCountQP(directory, qp, "bbbb:(bloom's*)");
+        printHitCountQP(directory, qp, "bbbb:(bloom)");
+        printHitCountQP(directory, qp, "bbbb:(bloom AND b*)");
+    }
+
+    private static Analyzer getAnalyzer() {
+        return new MyAnalyzer();
+    }
+
+    protected static void printHitCountQP(Directory directory, QueryParser
+qp, String searchString) throws IOException, ParseException {
+        IndexSearcher searcher = new IndexSearcher(directory, true); //5
+        Query query = qp.parse(searchString);
+        int hitCount = searcher.search(query, 1).totalHits;
+        searcher.close();
+        System.out.println(searchString + " got " + hitCount + " Query is: "
++ query.toString());
+    }
+}
+
+class MyAnalyzer extends Analyzer {
+
+    private static final String[] STOPS = { "i", "s" };
+    private final Set<?> stopWords;
+    private final boolean enablePositionIncrements;
+    private int maxWordLength = 2000;
+    private int minWordLength = 2;
+
+    public Set getStopWords() {
+        return stopWords;
+    }
+
+    public TokenStream tokenStream(String fieldName, Reader reader) {
+        TokenStream result = new MyLowerCaseLetterNumberTokenizer(reader);
+        result = new LengthFilter(result, minWordLength, maxWordLength);
+        result = new StopFilter(enablePositionIncrements, result, stopWords,
+true);
+        return result;
+    }
+
+    public MyAnalyzer() {
+        this.stopWords = StopFilter.makeStopSet(STOPS);
+        enablePositionIncrements =
+StopFilter.getEnablePositionIncrementsVersionDefault(Version.LUCENE_24);
+    }
+
+    private class SavedStreams {
+        Tokenizer source;
+        TokenStream result;
+    };
+
+    @Override
+    public TokenStream reusableTokenStream(String fieldName, Reader reader)
+throws IOException {
+        SavedStreams streams = (SavedStreams) getPreviousTokenStream();
+        if (streams == null) {
+            streams = new SavedStreams();
+
+            streams.source = new MyLowerCaseLetterNumberTokenizer(reader);
+            streams.result = new LengthFilter(streams.source, minWordLength,
+maxWordLength);
+            streams.result = new StopFilter(enablePositionIncrements,
+streams.result, stopWords, true);
+            setPreviousTokenStream(streams);
+        } else
+            streams.source.reset(reader);
+        return streams.result;
+    }
+}
+
+class MyLowerCaseLetterNumberTokenizer extends LetterTokenizer {
+
+    public MyLowerCaseLetterNumberTokenizer(Reader in) {
+        super(in);
+    }
+
+    public MyLowerCaseLetterNumberTokenizer(AttributeSource source, Reader
+in) {
+        super(source, in);
+    }
+
+    public MyLowerCaseLetterNumberTokenizer(AttributeFactory factory, Reader
+in) {
+        super(factory, in);
+    }
+
+    protected boolean isTokenChar(char c) {
+        return Character.isLetterOrDigit(c);
+    }
+
+    protected char normalize(char c) {
+        return Character.toLowerCase(c);
+    }
+}
+
+*
+

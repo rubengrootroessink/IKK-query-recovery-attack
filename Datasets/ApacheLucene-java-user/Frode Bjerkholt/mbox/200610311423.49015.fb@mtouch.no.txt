@@ -1,0 +1,225 @@
+FROM: Frode Bjerkholt ...@mtouch.no>
+SUBJECT: Re: Lucene search priorities
+DATE: 31 Oct 2006
+
+Hi
+
+This is probably related to my question from October 5. - Here is the reponse 
+from Doron Cohen:
+
+Frode Bjerkholt <fb@mtouch.no> wrote on 05/10/2006 01:10:43:
+> My intention is to give different terms in a field different boost
+values.
+> The queries from a use perspective, will be one fulltext input field.
+> The following code illustrates this:
+>
+> Field f1 = new Field("name", "John", Field.Store.NO,
+Field.Index.TOKENIZED);
+> Field f2 = new Field("name", "Doe", Field.Store.NO,
+Field.Index.TOKENIZED);
+>
+> f1.setBoost(1.0f);
+> f2.setBoost(2.0f);
+>
+> doc.add(f1);
+> doc.add(f2);
+>
+> In the current version of Lucene, as far as I now, this does not work -
+> Allthough it would have been a very powerful feature.
+
+To support this, additional info would need to be stored along with each
+index token - i.e. along with each occurrence of each index term in each
+indexed document. There are discussions on adding (in a future "flexible"
+index structure) token "payloads". If/when this is added, and if this is
+flexible and general as desired, such boost per token can be stored there
+and then used at scoring. For more info on this search for "payloads" in
+the dev mailing list.
+
+Notice however that even so, without separating to distinct fields, when
+searching for "Doe" - both its occurrences as "name" and as "last name"
+would be collected, and there would be no way to look for only matches of
+it as, say, "last name".
+
+>
+> The current solution is to make a firstname field and a lastname field,
+and
+> then make a complex query like this:
+>
+> Input: Eric Doe
+>
+> (firstname:Eric OR lastname:Eric^2) AND (firstname:Doe OR lastname:Doe^2)
+>
+> The performance of such a query is quite slow, and it becomes even worse
+when
+> you have more than two fields and/or more words in the input string.
+>
+> My questions:
+>
+> 1. Is there a better/faster solution to accomplish such a query?
+>
+
+I think one way (which I don't like but you may think otherwise) would be
+to insert two tokens for a boosted one at indexing time, so that your
+indexing code would look like:
+  Field f1 = new Field("mixed", "John Doe", Store.NO, TOKENIZED);
+  doc.add(f1);
+  Field f2 = new Field("mixed", "Doe", Store.NO, TOKENIZED);
+  doc.add(f2);
+This would enlarge the index.
+You might need to work the gap (between f1 and f2) to avoid false phrase
+matches.
+But your query should be simple and faster.
+
+> Field f2 = new Field("name", "Doe", Field.Store.NO,
+Field.Index.TOKENIZED);
+
+> 2. Would it be possible to implement the described feature in a
+> future version
+> of Lucene?
+
+
+
+
+
+Tirsdag 31 oktober 2006 14:03, skrev Erick Erickson:
+> I don't remember who wrote this, Chris or Yonik or Otis, but here's the
+> word from somebody who actually knows...
+>
+> index time field boosts are away to express things like "this document
+> title is worth twice as much as the title of most documents". query time
+> boosts are a way to express "i care about matches on this clause of my
+> query twice as much as I do about matches to other clauses of my query".
+>
+> so which boost you use depends on your goal.
+>
+> Erick
+>
+> On 10/31/06, Amit Soni <amit_soni@netcore.co.in> wrote:
+> > Hi Bhavin,
+> >
+> > Thanks a lot for your reply. But i am little confuse this time. Do i
+> > have to give boost and index and search both or either index or search?
+> > Also can you give some docs which has something on how to use boost on
+> > particular fields.
+> >
+> > Thanks,
+> > Amit Soni
+> >
+> > Bhavin Pandya wrote:
+> > > Hi amit,
+> > > You can give boost to query at search time...
+> > > and you can boost to perticular field at index time....
+> > >
+> > > - Bhavin pandya
+> > >
+> > > ----- Original Message ----- From: "Patrick Turcotte"
+> > > <patrek@gmail.com> To: <java-user@lucene.apache.org>;
+> > > <amit_soni@netcore.co.in>
+> > > Sent: Monday, October 30, 2006 7:38 PM
+> > > Subject: Re: Lucene search priorities
+> > >
+> > >> I don't remember the syntax right now, but how about giving a boost to
+> > >> certain fields, either while indexing or while searching ?
+> > >>
+> > >> Patrick
+> > >>
+> > >> On 10/30/06, Amit Soni <amit_soni@netcore.co.in> wrote:
+> > >>> Hi Erick,
+> > >>>
+> > >>> Thanks for the reply.
+> > >>>
+> > >>> Actually the priorities mean when i search for example for cancer
+> > >>> then in the result if get the result in order like
+> > >>> 1. it appears in title
+> > >>> 2. it appears in keywords
+> > >>> 3. it appears in synonyms.
+> > >>>
+> > >>> But right now with the default implementation when i search for query
+> > >>> 'cancer' then for say document range 1 to 10 i got 9th result which
+> > >>> contains given 'cancer' query appears in synonyms field while in 10th
+> > >>> result the 'cancer' query appears in keyword field . But actually i
+> > >>> want
+> > >>> 10th result before 9th.
+> > >>>
+> > >>> So i can do the same using Sort class. Or i can do the same with
+> > >>> anything else.
+> > >>>
+> > >>> I hope you understand want i want to ask.
+> > >>>
+> > >>> Thanks,
+> > >>> Amit Soni
+> > >>>
+> > >>> Erick Erickson wrote:
+> > >>> > I think what you want is IndexSearcher.search(Query, Filter, Sort).
+> > >>> > Filter may be null, and Sort is a Sort object that allows you
+to
+> >
+> > sort
+> >
+> > >>> > on multiple fields at once, which I assume is what you mane by
+> > >>> > "priorities".
+> > >>> >
+> > >>> > Read the cautions about memory usage for a Sort object though.
+> > >>> >
+> > >>> > Best
+> > >>> > Erick
+> > >>> >
+> > >>> > On 10/30/06, *Amit Soni* < amit_soni@netcore.co.in
+> > >>> > <mailto:amit_soni@netcore.co.in>> wrote:
+> > >>> >
+> > >>> >     Hi list.
+> > >>> >
+> > >>> >     I am using lucene search for one of my site search. In which
+i
+> >
+> > am
+> >
+> > >>> >     fetching values from the database and then index it.
+> > >>> >
+> > >>> >     The fields which the docuement contains is:
+> > >>> >     1. hwid
+> > >>> >     2. title
+> > >>> >     3. author
+> > >>> >     4. keywords
+> > >>> >     5. synonyms
+> > >>> >
+> > >>> >     Now i want the search result should be as per the following
+> > >>> >     priorities
+> > >>> >     1. title
+> > >>> >     2. keywords
+> > >>> >     3. synonyms
+> > >>> >
+> > >>> >     But right now it is in some different priorities. So if some
+> > >>> > one has and
+> > >>> >     idean regarding this then please let me know.
+> > >>> >
+> > >>> >     Thanks,
+> > >>> >     Amit Soni
+> > >>>
+> > >>> ---------------------------------------------------------------------
+> > >>>
+> > >>> >     To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > >>> >     <mailto:java-user-unsubscribe@lucene.apache.org>
+> > >>> >     For additional commands, e-mail:
+> >
+> > java-user-help@lucene.apache.org
+> >
+> > >>> >     <mailto:java-user-help@lucene.apache.org>
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+
+Best Regards,
+
+Frode
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

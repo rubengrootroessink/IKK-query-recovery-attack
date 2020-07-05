@@ -1,0 +1,144 @@
+FROM: karl wettin <karl.wet...@gmail.com>
+SUBJECT: Re: Combining scores
+DATE: 21 Nov 2006
+
+
+21 nov 2006 kl. 10.02 skrev Luis Rodrigo Aguado:
+
+> Hi all,
+>
+> I am working in a project that, for each query from the user,  
+> builds four or five different queries and tries to combine the  
+> results. The first part is already working, but, as I have read  
+> that the scores from different queries are not comparable at all  
+> among them, I am a bit stuck in the second part. Which could be a  
+> good strategy to get a unified score merging the results from  
+> different queries over the same index. Is there anything already  
+> done on that?
+
+Perhaps this can help you:
+
+I've written something I call a QueryFork, used for simplified  
+queries when the user does not specify any operators (field:, +, -,  
+et c). In essence it builds a number of queries from the same text  
+and place them in the order of their priority. The collector discards  
+any documents already matched. For each query results to be collected  
+I normlize the score based on the bottom score of the previous results.
+
+So something like this:
+
+1. Fork results from phrase query
+2. Fork results from non sequencial near query
+3. Fork results from boolean MUST term queries
+
+Each query can be placed in multiple fields with multiple boosts. See  
+it as an alternative to MultiFieldQueryParser.
+
+I could put the code in the Jira if you want. This is the core:
+
+class ForkCollector extends HitCollector {
+
+     private ConcurrentLinkedQueue<ForkHit> collected = new  
+ConcurrentLinkedQueue<ForkHit>();
+     private float iterationLowScore = 1;
+     private float norm = 1;
+
+     private Set<Integer> collectedDocumentNumbers = new  
+HashSet<Integer>(100);
+
+     public synchronized void collect(int doc, float score) {
+         if (!collectedDocumentNumbers.contains(doc)) {
+             collectedDocumentNumbers.add(doc);
+             ForkHit hit = new ForkHit(doc, score * norm);
+             collected.add(hit);
+             if (hit.getScore() < iterationLowScore) {
+                 iterationLowScore = hit.getScore();
+             }
+         }
+     }
+
+     void prepareNextCollectionIteration() {
+         norm = iterationLowScore;
+     }
+
+
+     ConcurrentLinkedQueue<ForkHit> getCollected() {
+         return collected;
+     }
+}
+
+
+public class ForkSearcher {
+
+     private List<Fork> forks = new ArrayList<Fork>();
+
+     /**
+      * @param searcher
+      * @param analyzer
+      * @param forkQuery
+      * @return null if no Fork was applicable (thus no search was  
+placed)
+      * @throws IOException
+      */
+     public ForkHit[] search(Searcher searcher, Analyzer analyzer,  
+ForkQuery forkQuery) throws IOException {
+
+         boolean forkUsed = false;
+
+         ForkCollector collector = new ForkCollector();
+         for (Fork fork : getForks()) {
+             Query query = fork.queryFactory(forkQuery, analyzer);
+             if (query != null) {
+                 if (forkQuery.getStaticQuery() != null) {
+                     BooleanQuery q = new BooleanQuery();
+                     q.add(new BooleanClause(forkQuery.getStaticQuery 
+(), BooleanClause.Occur.MUST));
+                     q.add(new BooleanClause(query,  
+BooleanClause.Occur.MUST));
+
+                     searcher.search(q, collector);
+                     collector.prepareNextCollectionIteration();
+
+                     forkUsed = true;
+                 } else {
+                     searcher.search(query, collector);
+                     collector.prepareNextCollectionIteration();
+                     forkUsed = true;
+                 }
+             }
+         }
+
+         if (!forkUsed) {
+             return null;
+         }
+
+         ForkHit[] forkHits = collector.getCollected().toArray(new  
+ForkHit[collector.getCollected().size()]);
+         Arrays.sort(forkHits, new Comparator<ForkHit>() {
+             public int compare(ForkHit forkHit, ForkHit forkHit1) {
+                 return Float.compare(forkHit.getScore(),  
+forkHit1.getScore());
+             }
+         });
+         return forkHits;
+     }
+
+
+public interface Fork {
+
+     /**
+      * @param forkQuery
+      * @param analyzer
+      * @return null if fork is not applicable
+      */
+     Query queryFactory(ForkQuery forkQuery, Analyzer analyzer)  
+throws IOException;
+}
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

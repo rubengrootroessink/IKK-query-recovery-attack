@@ -1,0 +1,267 @@
+FROM: Dennis Watson <den...@guba.com>
+SUBJECT: Re: OutOfMemory and IOException Access Denied errors
+DATE: 19 May 2006
+
+Hi Rahil,
+
+Your out of memory error is likely due to a mysql bug outlined here:
+
+   http://bugs.mysql.com/bug.php?id=7698
+
+There is a work around presented in the article.  I have been able to select 
+large datasets from mysql while indexing by using the SQL_BIG_RESULT hint in 
+mysql and pumping up the max heap size on the java side via -Xmx 2048M.
+
+I am not sure about the IOException except perhaps there is a stale lock file 
+or otherwise corrupted index?
+
+
+Dennis
+
+
+On Friday 19 May 2006 08:55, Rahil wrote:
+> Thanks Paul and Otis
+>
+> I basically applied the same mechanism used in creating indexes in MySQL
+> to Lucene. So I didnt use any fetchSize. But Ill implement it now and
+> see how it performs. Will also look into DBSight.
+>
+> However when executing the query by limiting the result set to 100000
+> the query executed fine but it led to an IOException in the Lucene index
+> creation. I might be wrong but I think that this IOException has nothing
+> to do with the MySQL code but rather with the inclusion of the Document
+> object to the index. Im attaching a bit more of my code below.
+>
+> -------
+>
+> The main method has the following method calls :
+>
+>         //establish a connection with MySQL
+>         Connection conn  = lucene.connectMySQL();
+>
+>         //run SQL query
+>         ResultSet rs = lucene.executeQuery(conn);
+>
+>         //build the index
+>         lucene.indexResultSet(rs);
+>
+> private ResultSet executeQuery(Connection conn) {
+>
+>         ResultSet resultSet = null;
+>         System.out.println("Executing query...");
+>
+>         try {
+>             String sql = "SELECT CONCEPTID, TERM, DESCRIPTIONTYPE FROM
+> sct_descriptions_20050731 limit 10000";
+>             PreparedStatement stmt = conn.prepareStatement(sql);
+>             resultSet = stmt.executeQuery();
+>         } catch (SQLException e) {
+>             e.printStackTrace();
+>         }
+>         return resultSet;
+>     }
+>
+> private IndexWriter getIndexWriter(boolean create) throws IOException{
+>
+>         if(indexWriter == null)
+>             indexWriter = new IndexWriter(asksPath+"index",new
+> StandardAnalyzer(),create);
+>
+>         return indexWriter;
+>     }
+> private void indexResultSet(ResultSet rs) throws IOException{
+>
+>         Document lucDoc = null;
+>
+>         indexWriter = getIndexWriter(true); //problem when I set it to
+> 'false'. Theres a javacc error which does not appear once I delete all
+> the files in the 'index' directory and set the flag to 'true'
+>         System.out.println("Starting to Index resultset ...");
+>         try {
+>             while(rs.next()){
+>                 lucDoc = new Document();
+>
+> lucDoc.add(Field.Keyword("conceptId",rs.getString("CONCEPTID")));
+>                 lucDoc.add(Field.Text("term",rs.getString("TERM")));
+>
+> lucDoc.add(Field.UnIndexed("descriptionType",rs.getString("DESCRIPTIONTYPE"
+>)));
+>
+>                 indexWriter.addDocument(lucDoc);
+>             }
+>
+>             rs.close();
+>             closeIndexWriter();
+>
+>             //System.out.println("Completed indexing resultset");
+>
+>         } catch (SQLException e) {
+>             e.printStackTrace();
+>         }
+>
+>     }
+>
+>
+> --------
+>
+> Thanks for all your help
+>
+> Rahil
+>
+> Paul.Illingworth@saaconsultants.com wrote:
+> >I guess you are executing your SQL and getting the whole result set. There
+> >are options on the JDBC Statement class that can be used for controlling
+> >the fetch size - by using these you should be able to limit the amount of
+> >data returned from the database so you don't get OOM. I haven't used these
+> >so I am guessing a little.  Are you pulling the whole result set into
+> >memory and then adding it to your index or are you iterating through
+> > result set adding one entry at a time to your index? The latter would be
+> > better. There is also something called DBSight (that I know very little
+> > about) but it seems to do exactly what you are trying to do.
+> >
+> >Regards
+> >
+> >Paul I.
+> >
+> >
+> >
+> >             Otis Gospodnetic
+> >             <otis_gospodnetic
+> >             @yahoo.com>                                                To
+> >                                       java-user@lucene.apache.org
+> >             19/05/2006 15:24                                           cc
+> >
+> >                                                                   Subject
+> >             Please respond to         Re: OutOfMemory and IOException
+> >             java-user@lucene.         Access Denied errors
+> >                apache.org
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >It's impossible to tell from the code you provided, but you are most
+> > likely just leaking memory/resources somewhere.  For example, ResultSet's
+> > and other DB operations should typically be placed in a try/catch/FINALLY
+> > block, where the finally block ensures all DB resources are
+> >closed/released.
+> >
+> >Otis
+> >
+> >----- Original Message ----
+> >From: Rahil <qamarr@cs.man.ac.uk>
+> >To: Lucene User Group <java-user@lucene.apache.org>
+> >Sent: Friday, May 19, 2006 8:27:55 AM
+> >Subject: OutOfMemory and IOException Access Denied errors
+> >
+> >  Hi
+> >
+> >I am new to Lucene so am perhaps missing something obvious. I have
+> >included Lucene 1.9.1 in my classpath and am trying to integrate it with
+> >MySQL.
+> >
+> >I have a table which has near a million records in it. According to the
+> >documentation on Lucene I have read so far, my understanding is that I
+> >need to (1) make a connection with MySQL then (2) execute the query
+> >normally in SQL syntax. (3) Then pass the ResultSet to the method to
+> >create indexes. (4) I can then pass a queryString to the searchIndex()
+> >custom method to locate the queryString.
+> >
+> >PROBLEMS:
+> >
+> >(a) The first problem I had was when trying to execute the query on the
+> >million records table in Step 1. It resulted in an OutOfMemory error due
+> >to the size of the table. How can I get around this problem so that the
+> >query executes on the entire table at one time?
+> >
+> >As a workaround, I limited the number of results to 100,000 which worked
+> >fine.
+> >
+> >(b) But I then received an IOException when the index was being written
+> >to the Document object. The Exception stack trace is shown below:
+> >
+> >---
+> >Exception in thread "main" java.io.IOException: Access is denied
+> >at java.io.WinNTFileSystem.createFileExclusively(Native Method)
+> >at java.io.File.createNewFile(File.java:850)
+> >at org.apache.lucene.store.FSDirectory$1.obtain(FSDirectory.java:324)
+> >at org.apache.lucene.store.Lock.obtain(Lock.java:92)
+> >at org.apache.lucene.store.Lock$With.run(Lock.java:147)
+> >at org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:442)
+> >at
+> >org.apache.lucene.index.IndexWriter.maybeMergeSegments(IndexWriter.java:40
+> >1)
+> >
+> >at org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:260)
+> >at org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:244)
+> >at man.ac.uk.most.LuceneIndex.indexResultSet(LuceneIndex.java:102) ---
+> >error line in my piece of code !
+> >at man.ac.uk.most.LuceneIndex.main(LuceneIndex.java:40)
+> >at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+> >at
+> >sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:
+> >39)
+> >
+> >at
+> >sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorIm
+> >pl.java:25)
+> >
+> >at java.lang.reflect.Method.invoke(Method.java:585)
+> >at com.intellij.rt.execution.application.AppMain.main(AppMain.java:78)
+> >
+> >---
+> >
+> >Line 102 is present in the block of code in my program as such
+> >
+> >----
+> >while(rs.next()){
+> >lucDoc = new Document();
+> >lucDoc.add(Field.Keyword("conceptId",rs.getString("CONCEPTID")));
+> >lucDoc.add(Field.Text("term",rs.getString("TERM")));
+> >lucDoc.add(Field.UnIndexed("descriptionType",rs.getString("DESCRIPTIONTYPE
+> >")));
+> >
+> >
+> >indexWriter.addDocument(lucDoc); --- problem line 102
+> >}
+> >
+> >rs.close();
+> >closeIndexWriter();
+> >
+> >
+> >----
+> >
+> >If I limit Step 1 to execute 10000 records then the program runs fine
+> >and theres no problem. However I need to index the entire table either
+> >as a single query or an incremental query.
+> >
+> >Can someone please help me with these problems.
+> >
+> >Thanks
+> >Rahil
+> >
+> >
+> >
+> >
+> >---------------------------------------------------------------------
+> >To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> >
+> >---------------------------------------------------------------------
+> >To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> /
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

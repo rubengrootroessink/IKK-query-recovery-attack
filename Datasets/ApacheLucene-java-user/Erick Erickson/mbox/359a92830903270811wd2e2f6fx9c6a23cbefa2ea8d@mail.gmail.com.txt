@@ -1,0 +1,172 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Syncing lucene index with a database
+DATE: 27 Mar 2009
+
+Yes, updating a document in Lucene is "expensive" for two
+reasons:
+1> deleting and adding a document does mean there's internal
+    work being done. But it's not all *that* expensive. So this really
+    comes down to how many records you expect to update
+    every 15 minutes. You've gotta try it.
+2> whenever a Lucene index is altered, you have to close/reopen
+     the index searcher to see the changes. That's expensive in
+     the sense that the first few queries through the system will
+     fill up internal caches etc, so will be slower. You can hide this
+     from your users by altering the index, firing a few warmup
+     searches at the modified index *then* switching searchers
+     in your main app.
+
+
+I didn't see how many additions/deletions you're expecting every 15
+minutes, but assuming it's not a huge amount, I'd take the simplest
+approach.
+
+The very first thing you need to do is build a stupid version of the index
+and see how long it takes. Take another hour or two and try some
+deletions/additions just to get a feel for how much time you're talking
+about
+here. *Then* design in more detail.
+
+I think you're over-analyzing the problem, and worrying about efficiency/
+speed too early in the process. You can generate some prototypes in
+a very short time that will inform your design. Sure, there are
+"best practices", none of which matter in *your* situation. Unless and
+until you can put some numbers beside your concerns, you're flying
+blind. Do you really care if you take 1.234 seconds to update your index
+as opposed to 1.75 seconds? I have no clue whether the actual numbers
+are in the milliseconds or hours. But neither do you <G>. So I'd just
+jump in and prototype *just the indexing* portion...
+
+Best
+Erick
+
+On Fri, Mar 27, 2009 at 11:33 AM, Matt Schraeder <MSchraeder@btsb.com>wrote:
+
+> I'm going to try and cover all replies so far, but for the most part
+> this first one since it had the most help so far. Thanks to everyone who
+> replied so far, you've given me a lot of great ideas to think about and
+> look into.  I'm going to begin some small test indexes with our data so
+> we have something to play with today and next week.
+>
+> >>> erickerickson@gmail.com 3/26/2009 4:49 PM >>>
+> >You've got a great grasp of the issues, comments below. But before
+> you
+> >do, a lot of this kind if thing is incorporated in SOLR, which is
+> build on
+> >Lucene. Particularly updating an index then using it.
+> >So you might take a look over there. It even has a
+> DataImportHandler...
+>
+> We're actually using Zend_Lucene, as our entire database and web
+> structure is based on PHP with the Zend framework, so it will be more
+> efficient for us to do searching with a php based lucene rather than
+> running from within Tomcat.  I was considering using Java and looking
+> into SOLR to do the majority of the index work, and using Zend_Lucene to
+> do the searching, but it looks like Zend doesn't support the newer 2.4
+> lucene indexes yet.  For our uses, I'm thinking Zend's implementation is
+> our best option, both because of lack of support for 2.4 and my being
+> more comfortable writing in PHP rather than Java.
+>
+> >How many rows/columns are we talking here? the answer for
+> >100,000,000 is different than for 1,000.
+>
+> For start... 18,000 rows, theoretically 56,000 if we start to scope out
+> Lucene for other uses and some in-house apps.
+>
+> >How many fields is this? And are they searched or displayed? Both?
+> >Neither? If you don't search these fields, you could keep an auxiliary
+> index
+> >with your primary key and the new fields. For that matter, if it was
+> >a small enough amount of data you could keep it in an internal map
+> >keyed by your DB unique id. Size matters here.....
+>
+> From my initial estimates it looks like 25 searchable fields. A mix of
+> keywords and text, possibly one or two unstored.
+>
+> >I wouldn't rebuild the entire index, just the changed rows. Assuming
+> that
+> >your 15 minute deltas aren't for a large percentage of the rows.
+>
+> I was under the impression that even for a few rows it can still be an
+> expensive process. Am I wrong?
+>
+> >This may be a fine choice. What is the throughput you expect to have
+> to
+> >satisfy? 1 qpm or 1000 qps? And how many rows of results do you
+> expect
+> >to display? How fast can you get rows from the DB?
+>
+> Our server itself is pretty fast, so returning rows isn't a huge
+> problem. Our main web table is returned in ~3 seconds. Our bigger
+> in-house database takes ~16 seconds. In most cases we'll only be
+> returning 100 or so results.
+>
+> >Possible, but it really depends upon whether the difference between
+> >fetching a few fields really shows up compared to fetching them all.
+> Which
+> >in turn depends upon the answers for some of the questions above.
+>
+> The fields that change are just a decimal and a keyword.  In comparison
+> to the entire result set we get currently from our search results stored
+> procedure it's minuscule, but like I said, the database speed isn't a
+> huge deal.  We are mainly interested in Lucene for it's more accurate
+> full text searching and more powerful searching compared to MS SQL 2000.
+>  That being said, however, I am very interested in maximizing our speed
+> and I want to do it in as efficient as well as standardized a way as
+> possible.  Since I'm new to Lucene I'm not sure how much of what I'm
+> looking into is on a per-site basis and requires coding both and seeing
+> the performance hit for either, and how much is based on the "proper"
+> uses of Lucene.
+>
+> >It depends (tm). How long does it take to build the index in the
+> first
+> >place?
+>
+> We haven't gotten as far as building the index yet, as to use Lucene we
+> have to make some rather major changes to how our Database is setup to
+> get the most out of Lucene's indexing. I'm simply trying to scope out
+> the project and make sure that I am headed in the right direction and
+> getting the concepts of the software down.
+>
+> >>> chris.lu@gmail.com 3/26/2009 5:11 PM >>>
+> >There are many things you need to synchronize with database. Besides
+> >just changed fields, you may need to deal with deleted database
+> records,
+> >etc.
+>
+> Records are deleted very infrequently from our database. A once an
+> evening full update of our index is more than enough to handle that.
+>
+> >Seems you are not sure the proper index structure yet.
+> >I think you can use DBSight Free version, to rapidly prototype and
+> >experiment with all these choices, without coding any XML etc.
+>
+> I have a pretty good idea of the index structure so far, I think. The
+> main issue is that there are two specific fields that need to be fairly
+> accurate (cronjob every 15 minutes currently) when returned with search
+> results.  The rest can wait ~24 hours to appear live on the site, but
+> would be nice to keep those up to date.  So really I'm just trying to
+> find out if it's worth updating the index for that data, or if it's
+> better to store just index information in Lucene and use it for pure
+> searching, and the database to retrieve the data based on the results
+> Lucene returns. I want to make sure this is done right the first time,
+> so we don't have to go back and correct it later if/when we discover it
+> was implemented poorly. Sadly I really don't know an real world numbers
+> on how often the data changes, just that it needs to be up to date.
+>
+> >>> williamstw@gmail.com 3/26/2009 7:03 PM >>>
+> >Not sure what ORM framework, if any, you might be using, but some
+> >colleagues have had some success using Hibernate Search[1] for this
+> >sorta thing.
+>
+> Currently we entirely use the database.  Lucene will be the first time
+> we have to map to a source off of the database.   Correct me if I'm
+> wrong though, but from my research it appears Hibernate requires you to
+> use it to actually make your SQL queries which would in turn also make
+> the same change to the Lucene index? Since we are building this on a
+> already large site it would be too large of a project to try and convert
+> all of our current in house applications and web apps to attach to a new
+> service.
+>
+>
+

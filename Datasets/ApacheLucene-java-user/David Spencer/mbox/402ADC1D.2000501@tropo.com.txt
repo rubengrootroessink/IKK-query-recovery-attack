@@ -1,0 +1,216 @@
+FROM: David Spencer <dave-lucene-u...@tropo.com>
+SUBJECT: code for "more like this" query "expansion" - was - Re: setMaxClauseCount ??
+DATE: 12 Feb 2004
+
+Doug Cutting wrote:
+
+> Karl Koch wrote:
+>
+>> Do you know good papers about strategies of how
+>> to select keywords effectivly beyond the scope of stopword lists and 
+>> stemming?
+>>
+>> Using term frequencies of the document is not really possible since 
+>> lucene
+>> is not providing access to a document vector, isn't it?
+>
+>
+> Lucene does let you access the document frequency of terms, with 
+> IndexReader.docFreq().  Term frequencies can be computed by 
+> re-tokenizing the text, which, for a single document, is usually fast 
+> enough.  But looking up the docFreq() of every term in the document is 
+> probably too slow.
+>
+> You can use some heuristics to prune the set of terms, to avoid 
+> calling docFreq() too much, or at all.  Since you're trying to 
+> maximize a tf*idf score, you're probably most interested in terms with 
+> a high tf. Choosing a tf threshold even as low as two or three will 
+> radically reduce the number of terms under consideration.  Another 
+> heuristic is that terms with a high idf (i.e., a low df) tend to be 
+> longer.  So you could threshold the terms by the number of characters, 
+> not selecting anything less than, e.g., six or seven characters.  With 
+> these sorts of heuristics you can usually find small set of, e.g., ten 
+> or fewer terms that do a pretty good job of characterizing a document.
+>
+> It all depends on what you're trying to do.  If you're trying to eek 
+> out that last percent of precision and recall regardless of 
+> computational difficulty so that you can win a TREC competition, then 
+> the techniques I mention above are useless.  But if you're trying to 
+> provide a "more like this" button on a search results page that does a 
+> decent job and has good performance, such techniques might be useful.
+>
+> An efficient, effective "more-like-this" query generator would be a 
+> great contribution, if anyone's interested.  I'd imagine that it would 
+> take a Reader or a String (the document's text), an Analyzer, and 
+> return a set of representative terms using heuristics like those 
+> above.  The frequency and length thresholds could be parameters, etc.
+
+
+Well I've done a prelim impl of the above. Maybe someone could proofread 
+my code.
+The code is hot off the presses and seems to work...
+
+Questions are:
+[a] is the code right
+[b] are any more (less) params needed to properly "genericize" the 
+algorithm? e.g. max "words" to return?
+[c] I can tweak the code to be a little more usable..does it make sense 
+to return, say, a Query?
+[d] then the eternal question - I think these things are interesting but 
+my theory is that Queries (is-a Query impls) which are not implemented 
+into the QueryParser will never really be used....
+
+Anyway:
+
+There are two parts - the main() quick test I did which is not set up to 
+run on another system
+right now but shows how the mlt rountine (mlt->MoreLikeThis) is called:
+
+
+
+    public static void main( String[] a)
+        throws Throwable
+    {
+        Hashtable stopTable = StopFilter.makeStopTable( 
+StopAnalyzer.ENGLISH_STOP_WORDS);
+        String fn = "c:/Program Files/Apache 
+Group/Apache/htdocs/manual/vhosts/index.html.en";
+        PrintStream o = System.out;
+        final IndexReader r = IndexReader.open( "localhost_index");
+
+        String body = new com.tropo.html.HTMLTextMuncher( new 
+FileInputStream( fn)).getText();
+        PriorityQueue q = mlt(  new StringReader( body), 
+getDefAnalyzer(), r, "contents", 2, stopTable, 0, 0);
+
+        o.println( "res..." + q.size());
+        o.println();
+
+        Object cur;
+        while ( (cur = q.pop()) != null)
+        {
+            Object[] ar = (Object[]) cur;
+            o.println( ar[ 0] + " = " + ar[ 1]);
+        }
+
+
+    }
+
+
+
+
+And the impl which will compile with appropriate imports.
+
+import java.io.*;
+import java.util.*;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.document.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.store.*;
+import org.apache.lucene.util.*;
+
+
+    /**
+     * Find words for a more-like-this query former.
+     *
+     * @param r the reader that has the content of the document
+     * @param a the analyzer to parse the reader with
+     * @param field the field of interest in the document
+     * @param minFreq filter out terms that occur less than this in the 
+document
+     * @param stop a table of stopwords to ignore
+     * @param minLen ignore words less than this length or pass in 0 to 
+not use this
+     * @param maxLen ignore words greater than this length or pass in 0 
+to not use this
+     * @return a priority queue ordered by docs with the largest score 
+(tf*idf)
+     */
+    public static PriorityQueue mlt( Reader r,
+                                     Analyzer a,
+                                     IndexReader ir,
+                                     String field,
+                                     int minFreq,
+                                     Hashtable stop,
+                                     int minLen,
+                                     int maxLen)
+        throws IOException
+    {
+        Similarity sim = new DefaultSimilarity(); // for idf
+        TokenStream ts = a.tokenStream( field, r);
+        org.apache.lucene.analysis.Token toke;
+        Map words = new HashMap();
+        while ( (toke = ts.next()) != null)
+        {
+            String word = toke.termText().toLowerCase();
+            if ( stop.contains( word)) continue;
+            int len = word.length();
+            if ( minLen > 0 && len < minLen) continue;
+            if ( maxLen > 0 && len < maxLen) continue;
+            if ( words.containsKey( word))
+            {
+                Integer x = (Integer) words.get( word);
+                words.put( word, new Integer( x.intValue()+1));
+            }
+            else
+                words.put( word, new Integer( 1));
+        }
+        Iterator it = words.keySet().iterator();
+
+        int numDocs = ir.numDocs();
+        FreqQ res = new FreqQ( words.size());
+       
+        while ( it.hasNext())
+        {
+            String word = (String) it.next();
+            int tf = ((Integer) words.get( word)).intValue();
+            if (tf < minFreq) continue;
+            Term t = new Term( field, word);
+            int docFreq = ir.docFreq( t);
+            float idf = sim.idf( docFreq, numDocs);
+            float score = tf * idf;
+            res.insert( new Object[] { word, new Float( score),
+                                       new Float( idf),
+                                       new Integer( docFreq)});
+        }
+        return res;
+    }
+
+    /**
+     *
+     */
+    static class FreqQ
+        extends PriorityQueue
+    {
+        FreqQ( int s)
+        {
+            initialize( s);
+        }
+
+        protected boolean lessThan(Object a, Object b)
+        {
+            Object[] aa =(Object[]) a;
+            Object[] bb =(Object[]) b;
+            Float fa = (Float) aa[ 1];
+            Float fb = (Float) bb[ 1];
+            return fa.floatValue() > fb.floatValue();
+        }
+    }
+
+
+>
+> Doug
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

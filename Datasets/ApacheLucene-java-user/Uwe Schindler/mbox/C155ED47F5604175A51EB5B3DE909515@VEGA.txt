@@ -1,0 +1,623 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: semi-infinite loop during merging
+DATE: 14 Apr 2009
+
+> On Unix, one can "kill -SIGQUIT" to get a thread stack trace dump for
+> all threads; do you know how to do this on Windows?  If so, can you do
+> that at the end when IW starts doing this infinite merging?  That
+> would be very helpful towards understanding why this recursion is
+> happening (though it is spooky that this is all happening under
+> JET...)
+
+On Windows, press Ctrl-Break in the console, this sends SIGBREAK to JVM,
+which does the same on Windows (the stack traces will appear in console).
+Ctrl-Break is *not* Ctrl-C (which kills the process). Break is the seldom
+used key also known as "Pause" key somewhere right top on the keyboard.
+
+Uwe
+
+> On Tue, Apr 14, 2009 at 5:28 AM, Christiaan Fluit
+> <christiaan.fluit@aduna-software.com> wrote:
+> > Hello all,
+> >
+> > I have a very peculiar problem that is driving me crazy: on some of our
+> > datasets and at some point in time during indexing, the merge operation
+> runs
+> > into a (semi-)infinite loop and keeps adding files to the index until it
+> > runs out of free disk space.
+> >
+> > The situation: I have an indexing application that uses Lucene 2.4.1.
+> Only
+> > one IndexWriter is involved, operating on a FSDirectory and using the
+> > compound file format. The index is created from scratch. No IndexReaders
+> or
+> > IndexSearchers are open during indexing (double-checked by adding
+> explicit
+> > log statements where they are created).
+> >
+> > For reasons unrelated to Lucene, the application is compiled with JET, a
+> > commercial Java Windows compiler. A regular Java build has produced the
+> > problem only once. The JET build does it every time - unless I keep
+> pressing
+> > F5 continuously in Windows Explorer on the index dir.
+> >
+> > Here is what I see happening in the index dir:
+> >
+> > - At first, it builds _0.cfs to _9.cfs without problems. The files vary
+> in
+> > size between 12 MB and 49 MB and add up to about 250 MB.
+> >
+> > - Then, .del files are generated for some of these .cfs files. The
+> number of
+> > .del files and the .cfs files they correspond with differs from time to
+> > time. I don't understand why these are created, as no IndexReaders exist
+> at
+> > this time.
+> >
+> > - Then, it generates files called _a.fdt, _a.fdx, _a.fnm, _a.frq,
+> _a.nrm,
+> > _a.prx, _a.tii, _a.tis, _a.tvd, _a.tvf, _a.tvx. Together these files add
+> up
+> > to 219 MB. I assume this is the start of the merge of the 10 .cfs files
+> and
+> > this is all still correct.
+> >
+> > - Then, it generates _b files with those same extensions, then _c, _d,
+> etc.
+> > It only keeps generating new files, I never see files disappear. The
+> > original .cfs files are still there.
+> >
+> > - This continues until my hard drive is out of free space. At one test I
+> was
+> > at _8n and the index had grown from 250MB to 64 GB. Then the application
+> > just hangs.
+> >
+> > Interestingly, after killing the application in this test, there were
+> > _8k.cfs and _8m.cfs files of 20 MB and 27 MB respectively. No other .cfs
+> > files existed.
+> >
+> > In some older threads on this list (e.g.
+> > http://marc.info/?l=lucene-user&m=108300530413241&w=2) I read that
+> "Win32
+> > seems to sometimes not permit one to delete a file immediately after it
+> has
+> > been closed". Could this explain the problem? Perhaps the JET-compiled
+> app
+> > gets to delete the file quicker than when the code is running inside a
+> Java
+> > VM and therefore runs into this issue? This would also explain why
+> pressing
+> > F5 during indexing lets the application continue: external activity
+> causing
+> > some manual delay.
+> >
+> > At the end of this mail I have added the output of the InfoStream
+> installed
+> > on the IndexWriter, showing everything from the start to the first few
+> > problematic merges. Lines starting with "===" are println's in my own
+> code
+> > to make sure that indeed only IndexWriters are generated and no
+> > IndexSearchers/-Readers. The fun starts almost at the bottom, at the
+> first
+> > line containing "LMP: findMerges: 10 segments". The next lines then get
+> > repeated over and over again, with different segment names. I cannot
+> explain
+> > why it mentions "1 deleted docIDs" a couple of lines below the first
+> > "findMerges: 10" as no IndexWriter.deleteDocuments takes place.
+> >
+> > As you can see in this output, I am setting a SerialMergeScheduler to
+> rule
+> > out concurrency issues and making debugging easier. Both
+> > SerialMergeScheduler and ConcurrentMergeScheduler give this problem
+> though.
+> >
+> > I would be grateful if anyone could pose some light on this or can
+> advise me
+> > on what I can try next. I even considered hacking the FSDirectory code
+> and
+> > adding some delay in the deleteFile operation to see if the above-
+> mentioned
+> > win32 issue is the problem, but unless you know what you're doing, such
+> > hacks can even cause such problems in the first place.
+> >
+> >
+> > Kind regards,
+> >
+> > Chris
+> > --
+> >
+> > === Creating new FSDirectory
+> > === Opening indexWriter (create=true)
+> > IFD [AWT-EventQueue-0]: setInfoStream
+> >
+> deletionPolicy=org.apache.lucene.index.KeepOnlyLastCommitDeletionPolicy@9f
+> b0688
+> > IW 0 [AWT-EventQueue-0]: setInfoStream:
+> > dir=org.apache.lucene.store.FSDirectory@D:\index autoCommit=false
+> > mergePolicy=org.apache.lucene.index.LogByteSizeMergePolicy@a11d0d8
+> > mergeScheduler=org.apache.lucene.index.ConcurrentMergeScheduler@a3fa9d8
+> > ramBufferSizeMB=16.0 maxBufferedDocs=-1 maxBuffereDeleteTerms=-1
+> > maxFieldLength=2147483647 index=
+> > IW 0 [AWT-EventQueue-0]: setMergeScheduler
+> > org.apache.lucene.index.SerialMergeScheduler@a3d1fe8
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=46.015 vs
+> > trigger=16 allocMB=46.015 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=46.015
+> > allocMB=46.015
+> > IW 0 [CrawlThread]:   flush: segment=_0 docStoreSegment=_0
+> docStoreOffset=0
+> > flushDocs=true flushDeletes=false flushDocStores=false numDocs=2193
+> > numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush
+> > IW 0 [CrawlThread]: DW: flush postings as segment _0 numDocs=2193
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=48249856 newFlushedSize=13379990
+> > docs/MB=171.863 new/old=27.731%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [1 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [1 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_0.fnm"
+> > IFD [CrawlThread]: delete "_0.frq"
+> > IFD [CrawlThread]: delete "_0.prx"
+> > IFD [CrawlThread]: delete "_0.tis"
+> > IFD [CrawlThread]: delete "_0.tii"
+> > IFD [CrawlThread]: delete "_0.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 1 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 1 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=46.015 vs trigger=16.8 byteBlockFree=12.438
+> > charBlockFree=8.969
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=30.841 usedMB=0.044
+> > allocMB=15.173
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=6.806 vs
+> > trigger=16 allocMB=16.829 vs trigger=16.8 byteBlockFree=0.812
+> > charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.656 usedMB=6.806
+> > allocMB=15.173
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=9.242 vs
+> > trigger=16 allocMB=16.861 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.687 usedMB=9.242
+> > allocMB=15.174
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=43.339 vs
+> > trigger=16 allocMB=43.401 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=43.339
+> > allocMB=43.401
+> > IW 0 [CrawlThread]:   flush: segment=_1 docStoreSegment=_0
+> > docStoreOffset=2193 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=1799 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _1 numDocs=1799
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=45444096 newFlushedSize=12691373
+> > docs/MB=148.635 new/old=27.927%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [2 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [2 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_1.fnm"
+> > IFD [CrawlThread]: delete "_1.frq"
+> > IFD [CrawlThread]: delete "_1.prx"
+> > IFD [CrawlThread]: delete "_1.tis"
+> > IFD [CrawlThread]: delete "_1.tii"
+> > IFD [CrawlThread]: delete "_1.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 2 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 2 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=43.401 vs trigger=16.8 byteBlockFree=11.781
+> > charBlockFree=8.469
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=28.217 usedMB=0.044
+> > allocMB=15.185
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=40.889 vs
+> > trigger=16 allocMB=40.951 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=40.889
+> > allocMB=40.951
+> > IW 0 [CrawlThread]:   flush: segment=_2 docStoreSegment=_0
+> > docStoreOffset=3992 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=1013 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _2 numDocs=1013
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=42874880 newFlushedSize=11684845
+> > docs/MB=90.905 new/old=27.253%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [3 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [3 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_2.fnm"
+> > IFD [CrawlThread]: delete "_2.frq"
+> > IFD [CrawlThread]: delete "_2.prx"
+> > IFD [CrawlThread]: delete "_2.tis"
+> > IFD [CrawlThread]: delete "_2.tii"
+> > IFD [CrawlThread]: delete "_2.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 3 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 3 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=40.951 vs trigger=16.8 byteBlockFree=10.688
+> > charBlockFree=8.062
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=25.779 usedMB=0.044
+> > allocMB=15.172
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=38.82 vs
+> > trigger=16 allocMB=38.883 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=38.82
+> > allocMB=38.883
+> > IW 0 [CrawlThread]:   flush: segment=_3 docStoreSegment=_0
+> > docStoreOffset=5005 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=427 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _3 numDocs=427
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=40706048 newFlushedSize=10574425
+> > docs/MB=42.342 new/old=25.978%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [4 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [4 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_3.fnm"
+> > IFD [CrawlThread]: delete "_3.frq"
+> > IFD [CrawlThread]: delete "_3.prx"
+> > IFD [CrawlThread]: delete "_3.tis"
+> > IFD [CrawlThread]: delete "_3.tii"
+> > IFD [CrawlThread]: delete "_3.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 4 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 4 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=38.883 vs trigger=16.8 byteBlockFree=9.312
+> > charBlockFree=7.812
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=23.686 usedMB=0.044
+> > allocMB=15.197
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=8.588 vs
+> > trigger=16 allocMB=16.822 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.625 usedMB=8.588
+> > allocMB=15.197
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=16.15 vs
+> > trigger=16 allocMB=19.51 vs trigger=16.8 byteBlockFree=0 charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=3.297 usedMB=16.15
+> > allocMB=16.213
+> > IW 0 [CrawlThread]:   flush: segment=_4 docStoreSegment=_0
+> > docStoreOffset=5432 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=1145 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _4 numDocs=1145
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=16934912 newFlushedSize=5040651
+> > docs/MB=238.187 new/old=29.765%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [5 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [5 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_4.fnm"
+> > IFD [CrawlThread]: delete "_4.frq"
+> > IFD [CrawlThread]: delete "_4.prx"
+> > IFD [CrawlThread]: delete "_4.tis"
+> > IFD [CrawlThread]: delete "_4.tii"
+> > IFD [CrawlThread]: delete "_4.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 5 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 5 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=45.533 vs
+> > trigger=16 allocMB=45.596 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=45.533
+> > allocMB=45.596
+> > IW 0 [CrawlThread]:   flush: segment=_5 docStoreSegment=_0
+> > docStoreOffset=6577 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=808 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _5 numDocs=808
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=47745024 newFlushedSize=12761396
+> > docs/MB=66.392 new/old=26.728%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [6 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [6 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_5.fnm"
+> > IFD [CrawlThread]: delete "_5.frq"
+> > IFD [CrawlThread]: delete "_5.prx"
+> > IFD [CrawlThread]: delete "_5.tis"
+> > IFD [CrawlThread]: delete "_5.tii"
+> > IFD [CrawlThread]: delete "_5.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 6 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.37646 to 7.12646: 6 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=45.596 vs trigger=16.8 byteBlockFree=11.5
+> > charBlockFree=9.031
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=30.404 usedMB=0.044
+> > allocMB=15.192
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=7.051 vs
+> > trigger=16 allocMB=16.848 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.656 usedMB=7.051
+> > allocMB=15.192
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=9.829 vs
+> > trigger=16 allocMB=16.942 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.75 usedMB=9.829
+> > allocMB=15.192
+> > IW 0 [CrawlThread]: hit exception adding document
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=48.622 vs
+> > trigger=16 allocMB=48.685 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free; now set bufferIsFull
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=0 usedMB=48.622
+> > allocMB=48.685
+> > IW 0 [CrawlThread]:   flush: segment=_6 docStoreSegment=_0
+> > docStoreOffset=7385 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=1689 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _6 numDocs=1689
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=50983936 newFlushedSize=14095657
+> > docs/MB=125.645 new/old=27.647%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [7 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [7 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_6.fnm"
+> > IFD [CrawlThread]: delete "_6.frq"
+> > IFD [CrawlThread]: delete "_6.prx"
+> > IFD [CrawlThread]: delete "_6.tis"
+> > IFD [CrawlThread]: delete "_6.tii"
+> > IFD [CrawlThread]: delete "_6.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 7 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 7 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=0.044 vs
+> > trigger=16 allocMB=48.685 vs trigger=16.8 byteBlockFree=12.969
+> > charBlockFree=9.594
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=33.498 usedMB=0.044
+> > allocMB=15.187
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=7.007 vs
+> > trigger=16 allocMB=16.812 vs trigger=16.8 byteBlockFree=0.281
+> > charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.625 usedMB=7.007
+> > allocMB=15.187
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=9.254 vs
+> > trigger=16 allocMB=16.812 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.625 usedMB=9.254
+> > allocMB=15.188
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=11.913 vs
+> > trigger=16 allocMB=16.844 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.656 usedMB=11.913
+> > allocMB=15.188
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=14.566 vs
+> > trigger=16 allocMB=16.813 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.625 usedMB=14.566
+> > allocMB=15.189
+> > IW 0 [CrawlThread]: DW:   RAM: now flush @ usedMB=16.151 allocMB=16.214
+> > triggerMB=16
+> > IW 0 [CrawlThread]:   flush: segment=_7 docStoreSegment=_0
+> > docStoreOffset=9074 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=2941 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _7 numDocs=2941
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=16935936 newFlushedSize=5920901
+> > docs/MB=520.843 new/old=34.961%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [8 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [8 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_7.fnm"
+> > IFD [CrawlThread]: delete "_7.frq"
+> > IFD [CrawlThread]: delete "_7.prx"
+> > IFD [CrawlThread]: delete "_7.tis"
+> > IFD [CrawlThread]: delete "_7.tii"
+> > IFD [CrawlThread]: delete "_7.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 8 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 8 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=14.513 vs
+> > trigger=16 allocMB=16.808 vs trigger=16.8 byteBlockFree=0
+> charBlockFree=0.75
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.625 usedMB=14.513
+> > allocMB=15.183
+> > IW 0 [CrawlThread]: DW:   RAM: now flush @ usedMB=16.057 allocMB=16.277
+> > triggerMB=16
+> > IW 0 [CrawlThread]:   flush: segment=_8 docStoreSegment=_0
+> > docStoreOffset=12015 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=3171 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _8 numDocs=3171
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=16836608 newFlushedSize=7011110
+> > docs/MB=474.252 new/old=41.642%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [9 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [9 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_8.fnm"
+> > IFD [CrawlThread]: delete "_8.frq"
+> > IFD [CrawlThread]: delete "_8.prx"
+> > IFD [CrawlThread]: delete "_8.tis"
+> > IFD [CrawlThread]: delete "_8.tii"
+> > IFD [CrawlThread]: delete "_8.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 9 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 9 segments
+> > IW 0 [CrawlThread]: DW:   RAM: now balance allocations: usedMB=15.678 vs
+> > trigger=16 allocMB=17.178 vs trigger=16.8 byteBlockFree=1.438
+> > charBlockFree=0
+> > IW 0 [CrawlThread]: DW:     nothing to free
+> > IW 0 [CrawlThread]: DW:     after free: freedMB=1.438 usedMB=15.678
+> > allocMB=15.74
+> > IW 0 [CrawlThread]: DW:   RAM: now flush @ usedMB=16.067 allocMB=16.13
+> > triggerMB=16
+> > IW 0 [CrawlThread]:   flush: segment=_9 docStoreSegment=_0
+> > docStoreOffset=15186 flushDocs=true flushDeletes=false
+> flushDocStores=false
+> > numDocs=3401 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0
+> > IW 0 [CrawlThread]: DW: flush postings as segment _9 numDocs=3401
+> > IW 0 [CrawlThread]: DW:   oldRAMSize=16847872 newFlushedSize=6184635
+> > docs/MB=576.624 new/old=36.709%
+> > IFD [CrawlThread]: now checkpoint "segments_1" [10 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: now checkpoint "segments_1" [10 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_9.fnm"
+> > IFD [CrawlThread]: delete "_9.frq"
+> > IFD [CrawlThread]: delete "_9.prx"
+> > IFD [CrawlThread]: delete "_9.tis"
+> > IFD [CrawlThread]: delete "_9.tii"
+> > IFD [CrawlThread]: delete "_9.nrm"
+> > IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 10 segments
+> > IW 0 [CrawlThread]: LMP:     0 to 10: add this merge
+> > IW 0 [CrawlThread]: add merge to pendingMerges: _0:c2193->_0 _1:c1799-
+> >_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0 [total 1 pending]
+> > IW 0 [CrawlThread]: DW: apply 0 buffered deleted terms and 1 deleted
+> docIDs
+> > and 0 deleted queries on 10 segments.
+> > IFD [CrawlThread]: now checkpoint "segments_1" [10 segments ; isCommit =
+> > false]
+> > IW 0 [CrawlThread]: now flush at merge
+> > IW 0 [CrawlThread]:   flush: segment=null docStoreSegment=_0
+> > docStoreOffset=18587 flushDocs=false flushDeletes=false
+> flushDocStores=true
+> > numDocs=0 numBufDelTerms=0
+> > IW 0 [CrawlThread]:   index before flush _0:c2193->_0 _1:c1799->_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0
+> > IW 0 [CrawlThread]:   flush shared docStore segment _0
+> > IW 0 [CrawlThread]: DW: closeDocStore: 2 files to flush to segment _0
+> > numDocs=18587
+> > IFD [CrawlThread]: now checkpoint "segments_1" [10 segments ; isCommit =
+> > false]
+> > IFD [CrawlThread]: delete "_0.fdt"
+> > IFD [CrawlThread]: delete "_0.fdx"
+> > IFD [CrawlThread]: delete "_0.fdt"
+> > IFD [CrawlThread]: delete "_0.fdx"
+> > IW 0 [CrawlThread]: now merge
+> >  merge=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0 into
+_a
+> >  merge=org.apache.lucene.index.MergePolicy$OneMerge@b590b98
+> >  index=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0
+> > IW 0 [CrawlThread]: merging _0:c2193->_0 _1:c1799->_0 _2:c1013->_0
+> > _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171-
+> >_0
+> > _9:c3401->_0 into _a
+> > IW 0 [CrawlThread]: merge: total 18586 docs
+> > IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 10 segments
+> > IW 0 [CrawlThread]: LMP:     0 to 10: add this merge
+> > IW 0 [CrawlThread]: add merge to pendingMerges: _0:c2193->_0 _1:c1799-
+> >_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0 [total 1 pending]
+> > IW 0 [CrawlThread]: now merge
+> >  merge=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0 into
+_b
+> >  merge=org.apache.lucene.index.MergePolicy$OneMerge@b590658
+> >  index=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0
+> > IW 0 [CrawlThread]: merging _0:c2193->_0 _1:c1799->_0 _2:c1013->_0
+> > _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171-
+> >_0
+> > _9:c3401->_0 into _b
+> > IW 0 [CrawlThread]: merge: total 18586 docs
+> > IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 10 segments
+> > IW 0 [CrawlThread]: LMP:     0 to 10: add this merge
+> > IW 0 [CrawlThread]: add merge to pendingMerges: _0:c2193->_0 _1:c1799-
+> >_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0 [total 1 pending]
+> > IW 0 [CrawlThread]: now merge
+> >  merge=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0 into
+_c
+> >  merge=org.apache.lucene.index.MergePolicy$OneMerge@b5906b8
+> >  index=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0
+> > IW 0 [CrawlThread]: merging _0:c2193->_0 _1:c1799->_0 _2:c1013->_0
+> > _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171-
+> >_0
+> > _9:c3401->_0 into _c
+> > IW 0 [CrawlThread]: merge: total 18586 docs
+> > IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 10 segments
+> > IW 0 [CrawlThread]: LMP:     0 to 10: add this merge
+> > IW 0 [CrawlThread]: add merge to pendingMerges: _0:c2193->_0 _1:c1799-
+> >_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0 [total 1 pending]
+> > IW 0 [CrawlThread]: now merge
+> >  merge=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0 into
+_d
+> >  merge=org.apache.lucene.index.MergePolicy$OneMerge@b5906e8
+> >  index=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0
+> > IW 0 [CrawlThread]: merging _0:c2193->_0 _1:c1799->_0 _2:c1013->_0
+> > _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171-
+> >_0
+> > _9:c3401->_0 into _d
+> > IW 0 [CrawlThread]: merge: total 18586 docs
+> > IW 0 [CrawlThread]: LMP: findMerges: 10 segments
+> > IW 0 [CrawlThread]: LMP:   level 6.39909 to 7.14909: 10 segments
+> > IW 0 [CrawlThread]: LMP:     0 to 10: add this merge
+> > IW 0 [CrawlThread]: add merge to pendingMerges: _0:c2193->_0 _1:c1799-
+> >_0
+> > _2:c1013->_0 _3:c427->_0 _4:c1145->_0 _5:c808->_0 _6:c1689->_0 _7:c2941-
+> >_0
+> > _8:c3171->_0 _9:c3401->_0 [total 1 pending]
+> > IW 0 [CrawlThread]: now merge
+> >  merge=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0 into
+_e
+> >  merge=org.apache.lucene.index.MergePolicy$OneMerge@b590688
+> >  index=_0:c2193->_0 _1:c1799->_0 _2:c1013->_0 _3:c427->_0 _4:c1145->_0
+> > _5:c808->_0 _6:c1689->_0 _7:c2941->_0 _8:c3171->_0 _9:c3401->_0
+> > .......
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,44 @@
+FROM: "Chris Lu" <chris...@gmail.com>
+SUBJECT: memory leak during Lucene Search
+DATE: 7 Sep 2008
+
+Unless my understanding is wrong, there is a memory leak for Lucene search
+from Lucene-1195.(svn r659602, May23,2008)
+
+This patch brings in a ThreadLocal cache to TermInfosReader.
+
+It's usually recommended to keep the reader open, and reuse it when
+possible. In a common J2EE application, the http requests are usually
+handled by different threads. But since the cache is ThreadLocal, the cache
+are not really usable by other threads. What's worse, the cache can not be
+cleared by another thread!
+
+This leak is not so obvious usually. But my case is using RAMDirectory,
+having several hundred megabytes. So one un-released resource is obvious to
+me.
+
+Here is the reference tree:
+org.apache.lucene.store.RAMDirectory
+  |- directory of org.apache.lucene.store.RAMFile
+      |- file of org.apache.lucene.store.RAMInputStream
+          |- base of org.apache.lucene.index.CompoundFileReader$CSIndexInput
+              |- input of org.apache.lucene.index.SegmentTermEnum
+                  |- value of java.lang.ThreadLocal$ThreadLocalMap$Entry
+
+
+After I switched back to svn revision 659601, right before this patch is
+checked in, the memory leak is gone.
+Although my case is RAMDirectory, I believe this will affect disk based
+index also.
+
+-- 
+Chris Lu
+-------------------------
+Instant Scalable Full-Text Search On Any Database/Application
+site: http://www.dbsight.net
+demo: http://search.dbsight.com
+Lucene Database Search in 3 minutes:
+http://wiki.dbsight.com/index.php?title=Create_Lucene_Database_Search_in_3_minutes
+DBSight customer, a shopping comparison site, (anonymous per request) got
+2.6 Million Euro funding!
+

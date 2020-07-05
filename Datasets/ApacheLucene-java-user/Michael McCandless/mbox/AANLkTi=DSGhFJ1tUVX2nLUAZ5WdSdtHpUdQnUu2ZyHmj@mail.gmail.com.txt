@@ -1,0 +1,62 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Term browsing much slower in Lucene 3.x.x
+DATE: 29 Jul 2010
+
+On Wed, Jul 28, 2010 at 2:39 PM, Nader, John P <john.nader@cengage.com> wrote:
+> We recently upgraded from lucene 2.4.0 to lucene 3.0.2.  Our load testing revealed a
+serious performance drop specific to traversing the list of terms and their associated documents
+for a given indexed field.  Our code looks something like this:
+>
+> for(Term term : terms) {
+> TermDocs termDocs = indexReader.termDocs(term);
+> while(termDocs.next()) {   //  much slower here
+>    int doc = termDocs.doc();
+>    ...do something with each doc...
+> }
+
+Is that IndexReader reading multiple segments or single segment?
+
+> The slowness is all on the first call to TermDocs.next() for each term.  Further investigation
+comparing 2.4.0 and 3.0.2 revealed that there is some new synchronization on the SegmentTermDocs
+constructor and the SegmentReader.getTermsReader().  The first call to next() hits this synchronization,
+causing a 4x slowdown on an 8 CPU machine.
+
+There was some added sync, however, the code within those sync blocks
+is minuscule (looking up a field).  It's weird that you're seeing a 4X
+hit because of this.  We could conceivably optimize this code to avoid
+the sync blocks if the reader is readOnly.
+
+> My first question is should we be using a different approach to process each term's doc
+list that would be more efficient?  The synchronization appears to be on aspects of these
+classes that the next() operation is not concerned with.
+
+Are you sorting your terms in index-sort order (UTF16, ie
+String.compareTo)?  This can be an important gain especially if you
+have many terms.
+
+Also, if you are working with your top reader, you should see some
+perf gain by instead working w/ the sub readers directly, ie:
+
+  for(IndexReader subReader : indexReader.getSequentialSubReaders()) {
+     ...
+  }
+
+Also, instead of getting a new TermDocs every time, you should get a
+single TermDocs up front (IndexReader.termDocs()), and then seek it to
+your term (termDocs.seek(term)), validate the term in seek'd to in
+fact matches what you asked for, then iterate its docs.
+
+> My other question is whether there are planned performance enhancements to address this
+loss of performance?
+
+These APIs are very different in the next major release (4.0) of
+Lucene, so except for problems spotted by users like you, there's not
+much more dev happening against them.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

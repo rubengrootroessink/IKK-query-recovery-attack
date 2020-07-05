@@ -1,0 +1,126 @@
+FROM: "J.J. Larrea" <...@panix.com>
+SUBJECT: Re: Optimizing index takes too long
+DATE: 12 Nov 2007
+
+Hi. Here are a couple of thoughts:
+
+1. Your problem description would be a little easier to parse if you didn't use the word "stored"
+to refer to fields which are not, in a Lucene sense, stored, only indexed.  For example, one
+doesn't "store" stemmed and unstemmed versions, since stemming has absolutely no effect on
+the stored Documents (and here I am using the capitalized word to distinguish Lucene Documents
+from your source documents).
+
+2. Since the full document and its longer bibliographic subfields are being indexed but not
+stored, my guess is that the large size of the index segments is due to the inverted index
+rather than the stored data fields.  But you can roughly verify by checking the size of the
+files in the index, with Luke's Files tab or simply an ls -l.  For example .fdt files are
+stored data while .tis are the inverted index; see http://lucene.apache.org/java/docs/fileformats.html
+ And if you have .cfs files...
+
+3. You have set MaxFieldLength to Integer.MAX_VALUE.  Is there a specific requirement for
+that being unbounded?  If you reduce the size, e.g. to 50k, you will dramatically reduce the
+size of the inverted index.
+
+For fields for which norms will never be used (ie. queries of those fields affect hits but
+do not contribute to the score), disable them.
+
+4. Make sure you have set useCompoundFile(false)!  If it is true (which is the default), every
+round of optimization* writes separate per-role files, then as a separate step packs them
+up into a compound file.  Besides causing an additional recopy, it means that optimization
+can take three times rather than twice the space on disk**.
+
+5. 35000 files for 1.5M documents - that's <50 documents per file, way too low!  When I
+index 27M documents I think it's a lot when I'm up to 100 files!  Reduce MergeFactor, increase
+MaxMergeDocs.  I think if you reduce MergeFactor from 50 to 10 and increase  MaxMergeDocs
+from 2000 to 10000, you will end up with a similar memory footprint but a significantly more
+efficient disk footprint and far fewer rounds of optimization.  Also, what about MinMergeDocs?
+
+I've not experimented with the RAMBufferSizeMB parameter, but 32Mb seems low for  an app dealing
+with such heavyweight documents.  Perhaps someone else knows better.
+
+Note that if useCompoundFiles is false, you will end up with ~8 times the number of files
+(depending on features such as term vectors, etc.), so it is essential to first reduce the
+number with MergeFactor and MaxMergeDocs.
+
+Through some judicious combination of the above steps, I am confident you can greatly reduce
+indexing time, optimization time, and index size, without impairing the ability to meet functional
+requirements.
+
+- J.J.
+
+*I'm not absolutely sure it's still every round of optimization, but it's certainly the case
+for the final round.
+
+**At least in Lucene 1.9, I'm not sure about 2.3
+
+At 11:05 AM +1100 11/12/07, Barry Forrest wrote:
+>Hi,
+>
+>Thanks for your help.
+>
+>I'm using Lucene 2.3.
+>
+>Raw document size is about 138G for 1.5M documents, which is about
+>250k per document.
+>
+>IndexWriter settings are MergeFactor 50, MaxMergeDocs 2000,
+>RAMBufferSizeMB 32, MaxFieldLength Integer.MAX_VALUE.
+>
+>Each document has about 10 short bibliographic fields and 3 longer
+>content fields and 1 field that contains the entire contents of the
+>document.  The longer content fields are stored twice - in a stemmed
+>and unstemmed form.  So actually there are about 8 longer content
+>fields.  (The effect of storing stemmed and unstemmed versions is to
+>approximately double the index size over storing the content only
+>once).  About half the short bibliographic fields are stored
+>(compressed) in the index.  The longer content fields are not stored,
+>and no term vectors are stored.
+>
+>The hardware is quite new and fast: 8 cores, 15,000 RPM disks.
+>
+>Thanks again
+>Barry
+>
+>On Nov 12, 2007 10:41 AM, Grant Ingersoll <gsingers@apache.org> wrote:
+>> Hmmm, something doesn't sound quite right.  You have 10 million docs,
+> > split into 5 or so indexes, right?  And each sub index is 150
+>> gigabytes?  How big are your documents?
+>>
+>> Can you provide more info about what your Directory and IndexWriter
+>> settings are?  What version of Lucene are you using?  What are your
+>> Field settings?  Are you storing info?  What about Term Vectors?
+>>
+>> Can you explain more about your documents, etc?  10 million doesn't
+>> sound like it would need to be split up that much, if at all,
+>> depending on your hardware.
+>>
+>> The wiki has some excellent resources on improving both indexing and
+>> search speed.
+>>
+>> -Grant
+>>
+>>
+>>
+>> On Nov 11, 2007, at 6:16 PM, Barry Forrest wrote:
+>>
+>> > Hi,
+>> >
+> > > Optimizing my index of 1.5 million documents takes days and days.
+>> >
+>> > I have a collection of 10 million documents that I am trying to index
+>> > with Lucene.  I've divided the collection into chunks of about 1.5 - 2
+>> > million documents each.  Indexing 1.5 documents is fast enough (about
+>> > 12 hours), but this results in an index directory containing about
+>> > 35000 files.  Optimizing this index takes several days, which is a bit
+>> > too long for my purposes.  Each sub-index is about 150G.
+>> >
+>> > What can I do to make this process faster?
+> > >
+>> > Thanks for your help,
+> > > Barry
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

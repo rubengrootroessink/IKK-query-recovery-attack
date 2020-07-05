@@ -1,0 +1,580 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Faceted Search using Lucene
+DATE: 26 Feb 2009
+
+Hi
+I have modified my search code.  Here is the following:
+[code]
+
+ public Summary[] search(SearchRequest searchRequest)
+throwsSearchExecutionException {
+
+String searchTerm = searchRequest.getSearchTerm();
+
+if (StringUtils.isBlank(searchTerm)) {
+
+throw new SearchExecutionException("Search string cannot be empty. There
+will be too many results to process.");
+
+}
+
+List<Summary> summaryList = new ArrayList<Summary>();
+
+StopWatch stopWatch = new StopWatch("searchStopWatch");
+
+stopWatch.start();
+
+MultiSearcher multiSearcher = null;
+
+List<IndexSearcher> indexSearchers = new ArrayList<IndexSearcher>();
+
+boolean refreshSearchers = false;
+
+try {
+
+LOGGER.debug("Ensuring all index readers are up to date...");
+
+for (IndexSearcher indexSearcher: searchers) {
+
+ IndexReader reader = indexSearcher.getIndexReader();
+
+ reader.incRef();
+
+ Directory directory = reader.directory();
+
+
+
+ long currentVersion = reader.getVersion();
+
+ if (IndexReader.getCurrentVersion(directory) != currentVersion) {
+
+ IndexReader newReader = reader.reopen();
+
+ if (newReader != reader) {
+
+ reader.decRef();
+
+ refreshSearchers = true;
+
+ }
+
+ reader = newReader;
+
+ }
+
+ IndexSearcher indexSearch = new IndexSearcher(reader);
+
+ indexSearchers.add(indexSearch);
+
+}
+
+if (refreshSearchers) {
+
+searchers.clear();
+
+searchers = new ArrayList<IndexSearcher>(indexSearchers);
+
+}
+
+LOGGER.debug("All Index Searchers are up to date. No of index searchers '" +
+indexSearchers.size() +"'");
+
+ multiSearcher = new MultiSearcher(searchers.toArray(new IndexSearcher[]
+{}));
+
+PerFieldAnalyzerWrapper analyzerWrapper = new PerFieldAnalyzerWrapper(
+analyzer);
+
+analyzerWrapper.addAnalyzer(FieldNameEnum.TYPE.getDescription(),
+newKeywordAnalyzer());
+
+QueryParser queryParser =
+newMultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+analyzerWrapper);
+
+ Query query = queryParser.parse(searchTerm);
+
+LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene Query '" +
+query.toString() +"'");
+
+ Sort sort = null;
+
+sort = applySortIfApplicable(searchRequest);
+
+ Filter[] filters =applyFiltersIfApplicable(searchRequest);
+
+ ChainedFilter chainedFilter = null;
+
+if (filters != null) {
+
+chainedFilter = new ChainedFilter(filters, ChainedFilter.OR);
+
+}
+
+TopDocs topDocs = multiSearcher.search(query,chainedFilter ,100,sort);
+
+ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+
+LOGGER.debug("total number of hits for [" + query.toString() + " ] = "+topDocs.
+totalHits);
+
+ for (ScoreDoc scoreDoc : scoreDocs) {
+
+final Document doc = multiSearcher.doc(scoreDoc.doc);
+
+float score = scoreDoc.score;
+
+final BaseDocument baseDocument = new BaseDocument(doc, score);
+
+Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+
+summaryList.add(documentSummary);
+
+}
+
+multiSearcher.close();
+
+} catch (Exception e) {
+
+throw new IllegalStateException(e);
+
+}
+
+stopWatch.stop();
+
+ LOGGER.debug("total time taken for document seach: " +
+stopWatch.getTotalTimeMillis() + " ms");
+
+return summaryList.toArray(new Summary[] {});
+
+}
+
+ [/code]
+
+Just some background:
+
+There is a list of indexsearchers that are injected via Spring.  These
+searchers are configured again by Spring.  As you can see the multisearcher
+is a local variable.  I then have a variable that checks if a indexreader is
+not up to date.  When this is set to true the indexsearchers are refreshed.
+
+I would be grateful on your thoughts.
+
+
+On Thu, Feb 26, 2009 at 1:35 PM, Amin Mohammed-Coleman <aminmc@gmail.com>wrote:
+
+> Hi
+>
+> Thanks for your help.  I will modify my facet search and my other code to
+> use the recommendations.   Would it be ok to get a review of the completed
+> code?  I just want to make sure that I'm not doing anything that may cause
+> any problems (threading, memory).
+>
+> Cheers
+>
+>
+> On Thu, Feb 26, 2009 at 1:10 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>>
+>> See below -- this is an excerpt from the upcoming Lucene in Action
+>> revision (chapter 10).
+>>
+>> It's a simple class.  Use it like this for searching:
+>>
+>>  IndexSearcher searcher = manager.get();
+>>  try {
+>>    searcher.search(...).
+>>    ...render results...
+>>  } finally {
+>>    manager.release(searcher);
+>>    searcher = null;
+>>  }
+>>
+>> When you want to reopen (application dependent), call maybeReopen.
+>> Subclass and define the warm() method if needed.
+>>
+>> NOTE: this hasn't yet been heavily tested (I just quickly revised it to
+>> use
+>> incRef/decRef).
+>>
+>> Mike
+>>
+>> import java.io.IOException;
+>> import java.util.HashMap;
+>>
+>> import org.apache.lucene.search.IndexSearcher;
+>> import org.apache.lucene.index.IndexReader;
+>> import org.apache.lucene.store.Directory;
+>>
+>> /** Utility class to get/refresh searchers when you are
+>>  *  using multiple threads. */
+>>
+>> public class SearcherManager {
+>>
+>>  private IndexSearcher currentSearcher;                         //A
+>>  private Directory dir;
+>>
+>>  public SearcherManager(Directory dir) throws IOException {
+>>    this.dir = dir;
+>>    currentSearcher = new IndexSearcher(IndexReader.open(dir));  //B
+>>  }
+>>
+>>  public void warm(IndexSearcher searcher) {}                    //C
+>>
+>>  public void maybeReopen() throws IOException {                 //D
+>>    long currentVersion = currentSearcher.getIndexReader().getVersion();
+>>    if (IndexReader.getCurrentVersion(dir) != currentVersion) {
+>>      IndexReader newReader = currentSearcher.getIndexReader().reopen();
+>>      assert newReader != currentSearcher.getIndexReader();
+>>      IndexSearcher newSearcher = new IndexSearcher(newReader);
+>>      warm(newSearcher);
+>>      swapSearcher(newSearcher);
+>>    }
+>>  }
+>>
+>>  public synchronized IndexSearcher get() {                      //E
+>>    currentSearcher.getIndexReader().incRef();
+>>    return currentSearcher;
+>>  }
+>>
+>>  public synchronized void release(IndexSearcher searcher)       //F
+>>    throws IOException {
+>>    searcher.getIndexReader().decRef();
+>>  }
+>>
+>>  private synchronized void swapSearcher(IndexSearcher newSearcher) //G
+>>      throws IOException {
+>>    release(currentSearcher);
+>>    currentSearcher = newSearcher;
+>>  }
+>> }
+>>
+>> /*
+>> #A Current IndexSearcher
+>> #B Create initial searcher
+>> #C Implement in subclass to warm new searcher
+>> #D Call this to reopen searcher if index changed
+>> #E Returns current searcher
+>> #F Release searcher
+>> #G Swaps currentSearcher to new searcher
+>> */
+>>
+>> Mike
+>>
+>>
+>> Amin Mohammed-Coleman wrote:
+>>
+>>  Hi
+>>>
+>>> Thanks for your reply.  Without sound completely ...silly...how do i go
+>>> abouts using the methods you mentioned...
+>>>
+>>> Cheers
+>>> Amin
+>>>
+>>> On Thu, Feb 26, 2009 at 10:24 AM, Michael McCandless <
+>>> lucene@mikemccandless.com> wrote:
+>>>
+>>>
+>>>> Actually, it's best to use IndexReader.incRef/decRef to track the
+>>>> IndexReader.
+>>>>
+>>>> You should not rely on GC to close your IndexReader since this can
+>>>> easily
+>>>> tie up resources (eg open file descriptors) for too long.
+>>>>
+>>>> Mike
+>>>>
+>>>>
+>>>> Michael Stoppelman wrote:
+>>>>
+>>>> If another thread is executing a query with the handle to one of
+>>>>
+>>>>> readers[i]
+>>>>> you're going to kill it since the IndexReader is now closed.
+>>>>> Just don't call the IndexReader#close() method. If nothing is pointing
+>>>>> at
+>>>>> the readers they should be garbage collected. Also, you might
+>>>>> want to warm up your new IndexSearcher before you switch to it, meaning
+>>>>> run
+>>>>> a few queries on it before you swap the old one out.
+>>>>>
+>>>>> M
+>>>>>
+>>>>>
+>>>>>
+>>>>> On Tue, Feb 24, 2009 at 12:48 PM, Amin Mohammed-Coleman <
+>>>>> aminmc@gmail.com
+>>>>>
+>>>>>> wrote:
+>>>>>>
+>>>>>
+>>>>> The reason for the indexreader.reopen is because I have a webapp which
+>>>>>
+>>>>>> enables users to upload files and then search for the documents.
+ If I
+>>>>>> don't
+>>>>>> reopen i'm concerned that the facet hit counter won't be updated.
+>>>>>>
+>>>>>> On Tue, Feb 24, 2009 at 8:32 PM, Amin Mohammed-Coleman <
+>>>>>> aminmc@gmail.com
+>>>>>>
+>>>>>>  wrote:
+>>>>>>>
+>>>>>>>
+>>>>>> Hi
+>>>>>>
+>>>>>>> I have been able to get the code working for my scenario, however
+I
+>>>>>>> have
+>>>>>>>
+>>>>>>>  a
+>>>>>>
+>>>>>>  question and I was wondering if I could get some help.  I have a
+list
+>>>>>>> of
+>>>>>>> IndexSearchers which are used in a MultiSearcher class.  I use
+the
+>>>>>>> indexsearchers to get each indexreader and put them into a
+>>>>>>>
+>>>>>>>  MultiIndexReader.
+>>>>>>
+>>>>>>
+>>>>>>> IndexReader[] readers = new IndexReader[searchables.length];
+>>>>>>>
+>>>>>>> for (int i =0 ; i < searchables.length;i++) {
+>>>>>>>
+>>>>>>> IndexSearcher indexSearcher = (IndexSearcher)searchables[i];
+>>>>>>>
+>>>>>>> readers[i] = indexSearcher.getIndexReader();
+>>>>>>>
+>>>>>>>  IndexReader newReader = readers[i].reopen();
+>>>>>>>
+>>>>>>> if (newReader != readers[i]) {
+>>>>>>>
+>>>>>>> readers[i].close();
+>>>>>>>
+>>>>>>> }
+>>>>>>>
+>>>>>>> readers[i] = newReader;
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> }
+>>>>>>>
+>>>>>>> multiReader = new MultiReader(readers);
+>>>>>>>
+>>>>>>> OpenBitSetFacetHitCounter facetHitCounter =
+>>>>>>>
+>>>>>>>  newOpenBitSetFacetHitCounter();
+>>>>>>
+>>>>>>
+>>>>>>> IndexSearcher indexSearcher = new IndexSearcher(multiReader);
+>>>>>>>
+>>>>>>>
+>>>>>>> I then use the indexseacher to do the facet stuff.  I end the
+code
+>>>>>>> with
+>>>>>>> closing the multireader.  This is causing problems in another
+method
+>>>>>>>
+>>>>>>>  where I
+>>>>>>
+>>>>>>  do some other search as the indexreaders are closed.  Is it ok to
+not
+>>>>>>>
+>>>>>>>  close
+>>>>>>
+>>>>>>  the multiindexreader or should I do some additional checks in the
+>>>>>>> other
+>>>>>>> method to see if the indexreader is closed?
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> Cheers
+>>>>>>>
+>>>>>>>
+>>>>>>> P.S. Hope that made sense...!
+>>>>>>>
+>>>>>>>
+>>>>>>> On Mon, Feb 23, 2009 at 7:20 AM, Amin Mohammed-Coleman <
+>>>>>>> aminmc@gmail.com
+>>>>>>> wrote:
+>>>>>>>
+>>>>>>> Hi
+>>>>>>>
+>>>>>>>>
+>>>>>>>> Thanks just what I needed!
+>>>>>>>>
+>>>>>>>> Cheers
+>>>>>>>> Amin
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> On 22 Feb 2009, at 16:11, Marcelo Ochoa <marcelo.ochoa@gmail.com>
+>>>>>>>>
+>>>>>>>>  wrote:
+>>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>>  Hi Amin:
+>>>>>>>>
+>>>>>>>>  Please take a look a this blog post:
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>> http://sujitpal.blogspot.com/2007/04/lucene-search-within-search-with.html
+>>>>>>
+>>>>>>  Best regards, Marcelo.
+>>>>>>>
+>>>>>>>>
+>>>>>>>>> On Sun, Feb 22, 2009 at 1:18 PM, Amin Mohammed-Coleman
+<
+>>>>>>>>>
+>>>>>>>>>  aminmc@gmail.com>
+>>>>>>>>
+>>>>>>>
+>>>>>>  wrote:
+>>>>>>>
+>>>>>>>>
+>>>>>>>>> Hi
+>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> Sorry to re send this email but I was wondering if
+I could get
+>>>>>>>>>> some
+>>>>>>>>>> advice
+>>>>>>>>>> on this.
+>>>>>>>>>>
+>>>>>>>>>> Cheers
+>>>>>>>>>>
+>>>>>>>>>> Amin
+>>>>>>>>>>
+>>>>>>>>>> On 16 Feb 2009, at 20:37, Amin Mohammed-Coleman <aminmc@gmail.com
+>>>>>>>>>> >
+>>>>>>>>>> wrote:
+>>>>>>>>>>
+>>>>>>>>>> Hi
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>> I am looking at building a faceted search using
+Lucene.  I know
+>>>>>>>>>>> that
+>>>>>>>>>>> Solr
+>>>>>>>>>>> comes with this built in, however I would like
+to try this by
+>>>>>>>>>>> myself
+>>>>>>>>>>> (something to add to my CV!).  I have been looking
+around and I
+>>>>>>>>>>> found
+>>>>>>>>>>> that
+>>>>>>>>>>> you can use the IndexReader and use TermVectors.
+ This looks ok
+>>>>>>>>>>> but
+>>>>>>>>>>>
+>>>>>>>>>>>  I'm
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>  not
+>>>>>>>
+>>>>>>>>  sure how to filter the results so that a particular user
+can only
+>>>>>>>>>>> see
+>>>>>>>>>>>
+>>>>>>>>>>>  a
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>  subset of results.  The next option I was looking at was something
+>>>>>>>
+>>>>>>>>
+>>>>>>>>>>>  like
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>
+>>>>>>>  Term term1 = new Term("brand", "ford");
+>>>>>>>>>>> Term term2 = new Term("brand", "vw");
+>>>>>>>>>>> Term[] termsArray = new Term[] { term1, term2
+};un
+>>>>>>>>>>> int[] docFreqs = indexSearcher.docFreqs(termsArray);
+>>>>>>>>>>>
+>>>>>>>>>>> The only problem here is that I have to provide
+the brand type
+>>>>>>>>>>> each
+>>>>>>>>>>> time a
+>>>>>>>>>>> new brand is created.  Again I'm not sure how
+I can filter the
+>>>>>>>>>>>
+>>>>>>>>>>>  results
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>  here.
+>>>>>>>
+>>>>>>>>  It may be that I'm using the wrong api methods to do this.
+>>>>>>>>>>>
+>>>>>>>>>>> I would be grateful if I could get some advice
+on this.
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> Cheers
+>>>>>>>>>>> Amin
+>>>>>>>>>>>
+>>>>>>>>>>> P.S.  I am basically trying to do something that
+displays the
+>>>>>>>>>>>
+>>>>>>>>>>>  following
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>
+>>>>>>>  Personal Contact (23) Business Contact (45) and so on..
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>> --
+>>>>>>>>> Marcelo F. Ochoa
+>>>>>>>>> http://marceloochoa.blogspot.com/
+>>>>>>>>> http://marcelo.ochoa.googlepages.com/home
+>>>>>>>>> ______________
+>>>>>>>>> Want to integrate Lucene and Oracle?
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>> http://marceloochoa.blogspot.com/2007/09/running-lucene-inside-your-oracle-jvm.html
+>>>>>>
+>>>>>>  Is Oracle 11g REST ready?
+>>>>>>>
+>>>>>>>>
+>>>>>>>>> http://marceloochoa.blogspot.com/2008/02/is-oracle-11g-rest-ready.html
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>
+>>>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

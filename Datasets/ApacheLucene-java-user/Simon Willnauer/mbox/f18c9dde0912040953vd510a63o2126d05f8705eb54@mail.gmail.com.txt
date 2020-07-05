@@ -1,0 +1,129 @@
+FROM: Simon Willnauer <simon.willna...@googlemail.com>
+SUBJECT: Re: searchWithFilter bug?
+DATE: 4 Dec 2009
+
+---------- Forwarded message ----------
+From: Simon Willnauer <simon.willnauer@googlemail.com>
+Date: Fri, Dec 4, 2009 at 6:53 PM
+Subject: Re: searchWithFilter bug?
+To: Peter Keegan <peterlkeegan@gmail.com>
+
+
+Peter, since search is per segment you need to use the segment reader
+passed in during search to create you DocIdSet if you use absolute
+docID your filter will not work.
+Many filters don't need to be segment aware as they use the given
+reader to somehow generate the docIdSet like
+MultiTermQueryWrapperFiler. DistanceFilter (contrib/spatial) and its
+subclasses keep state internally to work with per-segment search.
+
+maybe this helps to understand:
+
+ public static final class SimpleDocIdSetFilter extends Filter {
+   private int docBase;
+   private int[] docs;
+   private int index;
+   public SimpleDocIdSetFilter(int[] docs) {
+     this.docs = docs;
+   }
+   @Override
+   public DocIdSet getDocIdSet(IndexReader reader) {
+     final OpenBitSet set = new OpenBitSet();
+     final int limit = docBase+reader.maxDoc();
+     for (;index < docs.length; index++) {
+       final int docId = docs[index];
+       if(docId > limit)
+         break;
+       set.set(docId-docBase);
+     }
+     docBase = limit;
+     return set.isEmpty()?null:set;
+   }
+ }
+
+@Mike: maybe we should add a testcase / method in TestFilteredSearch
+that searches on more than one segment.
+
+simon
+
+
+On Fri, Dec 4, 2009 at 5:27 PM, Peter Keegan <peterlkeegan@gmail.com> wrote:
+> The filter is just a java.util.BitSet. I use the top level reader to create
+> the filter, and call IndexSearcher.search (Query, Filter, HitCollector). So,
+> there is no 'docBase' at this level of the api.
+>
+> Peter
+>
+> On Fri, Dec 4, 2009 at 11:01 AM, Simon Willnauer
+> <simon.willnauer@googlemail.com> wrote:
+>>
+>> Peter, which filter do you use, do you respect the IndexReaders
+>> maxDoc() and the docBase?
+>>
+>> simon
+>>
+>> On Fri, Dec 4, 2009 at 4:47 PM, Peter Keegan <peterlkeegan@gmail.com>
+>> wrote:
+>> > I think the Filter's docIdSetIterator is using the top level reader for
+>> > each
+>> > segment, because the cardinality of the DocIdSet from which it's created
+>> > is
+>> > the same for all readers (and what I expect to see at the top level.
+>> >
+>> > Peter
+>> >
+>> > On Fri, Dec 4, 2009 at 10:38 AM, Michael McCandless <
+>> > lucene@mikemccandless.com> wrote:
+>> >
+>> >> That doesn't sound good.
+>> >>
+>> >> Though, in searchWithFilter, we seem to ask for the Query's scorer,
+>> >> and the Filter's docIdSetIterator, using the same reader (which may be
+>> >> toplevel, for the legacy case, or per-segment, for the normal case).
+>> >> So I'm not [yet] seeing where the issue is...
+>> >>
+>> >> Can you boil it down to a smallish test case?
+>> >>
+>> >> Mike
+>> >>
+>> >> On Fri, Dec 4, 2009 at 10:32 AM, Peter Keegan <peterlkeegan@gmail.com>
+>> >> wrote:
+>> >> > I'm having a problem with 'searchWithFilter' on Lucene 2.9.1. The
+>> >> > Filter
+>> >> > wraps a simple BitSet. When doing a 'MatchAllDocs' query with this
+>> >> filter, I
+>> >> > get only a subset of the expected results, even accounting for
+>> >> > deletes.
+>> >> The
+>> >> > index has 10 segments. In IndexSearcher->searchWithFilter, it looks
+>> >> > like
+>> >> the
+>> >> > scorer is advancing to the filter's docId, which is the index-wide
+>> >> > value,
+>> >> > but the scorer is using the segment-relative value. If I optimize the
+>> >> index,
+>> >> > I get the expected results.
+>> >> > Does this look like a bug?
+>> >> >
+>> >> > Peter
+>> >> >
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

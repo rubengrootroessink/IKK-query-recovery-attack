@@ -1,0 +1,222 @@
+FROM: "Itamar Syn-Hershko" <ita...@divrei-tora.com>
+SUBJECT: RE: Lucene, HTML and Hebrew
+DATE: 24 Jan 2008
+
+Steve and all,
+
+I didn't know whether to send a detailed description of my case to aid with
+seeing the whole picture, or to send a list of short questions which will
+require loads of follow-up. I guess I know what is better now, thanks....
+
+>> Lucene does not store proximity relations between data in different
+fields, only within individual fields
+
+So are 2 calls for doc->add with the same field but different texts are
+considered as 1 field (latter call being internally appended into the
+former, merged into one field), or as two instances of the same field which
+do not share proximity and frequency data?
+As it seems from what you wrote later in your response, it seems the case is
+the former. How can I inhibit this appending -- are there any more
+approaches than appending an invalid string like "$$$"?
+
+I've been thinking about this a bit, and I think I'd go with one big field
+for all the content, and I'd want to incorporate the headers into it as
+well. How would I boost those specific words - so the content field can
+contain both all words and all headers in their original order (for
+proximity and frequency data to be valid), yet keep the terms which were
+originally in a header or a sub-header boosted? This can be a good practice
+for boosting bolded or italic text in the normal paragrphs as well (only
+with a lower boost).
+
+>> Generally, stemming increases recall (proportion of matching relevant
+docs among relevant docs in the entire corpus), and decreases precision
+(proportion of relevant docs among matching docs).
+
+Thats a great definition, thanks.
+
+I'm trying to think this through, since Hebrew is not a regular case. If you
+will google for Hebrew and Stemming you will get pages which talk about how
+complicated is Hebrew compared to English and other European languages.
+
+[ Warning: technical data, questions follow after this paragraph -- to
+comply with the 30-seconds rule :) ]
+This is extremely difficult since unique features Hebrew has like
+Niqqud-less spelling (which causes many words to have several spelling
+options, only one legal but the others too-common to ignore) and
+three-letter stems which have many deriviations. Furthermore, English words
+like and, that, of, to etc. in Hebrew are represented as one letter appended
+to the beginning of the word, forming a whole new word than the original.
+Discarding them while indexing is not a smart move since one would try and
+look for specific term *with* this initial and would not expect results
+without. Furthermore, some words which uses these initials have another
+meaning when pronounced differently (like KLBI - could be read as Ke-libi
+["as my heart"] where I can omit the leading K, and also as Kalbi ["My dog"]
+where I cannot.
+
+So, to overcome the challenges above, I was thinking about the query
+inflation approach, having a negative boost for the inflated terms as you
+suggested. I will appreciate any different takes on this one, as this is
+going to be the first public Lucene Hebrew analyzer... Using this approach I
+only need to make sure I do not inflate those too much (1024 is the standard
+limit, right?).
+
+Also, how can I check whether a word I inflated exists in the index BEFORE
+executing the query? Is that recommended at all? -- I'm looking for the most
+efficient way so search speed will still be measured in few m/s, as it is
+now. The idea is to prevent, or minimize, the use of a dictionary, and
+keeping the stemmer as simple as possible (and by that produce invalid words
+and eliminate them before executing the search).
+
+>> It's worth noting, as the above-linked documentation for Field.setBoost()
+does, that field boosts are not stored independently of other normalization
+factors in the index.
+
+Does this mean I should stick with boosting fields in the query phase only?
+
+Itamar.
+
+-----Original Message-----
+From: Steven A Rowe [mailto:sarowe@syr.edu] 
+Sent: Wednesday, January 23, 2008 1:06 AM
+To: java-user@lucene.apache.org
+Subject: RE: Lucene, HTML and Hebrew
+
+Hi Itamar,
+
+In another thread, you wrote:
+
+> Yesterday I sent an email to this group querying about some very 
+> important (to me...) features of Lucene. I'm giving it another chance 
+> before it goes unnoticed or forgotten. If it was too long please let 
+> me know and I will email a shorter list of questions....
+
+I think I have something like a 30-second rule for posts on this list: if I
+can't figure out what the question is within 30 seconds, I move on.  Your
+post was so verbose that I gave up before I asked myself whether I could
+help.  (Déjà vu - upon re-reading this paragraph, it sounds very much like
+something Hoss has said on this list...)
+
+Although I answer your original post below, please don't take this as
+affirmation of your "reminder" approach.  In my experience, this strategy is
+interpreted as badgering, and tends to affect response rate in the opposite
+direction to that intended.
+
+Short, focused questions will maximize the response rate here (and
+elsewhere, I suspect).  Also, it helps if there is some indication that the
+questioner has attempted to answer the question for themselves using readily
+available resources, but failed.
+
+On 01/21/2008 at 2:59 PM, Itamar Syn-Hershko wrote:
+> 1) How would Lucene treat the "normal" paragraph when they are added 
+> that way? Would proximity and frequency data be computed between 
+> paragraph1 and paragraph2 (last word of former with first word of 
+> latter)? What about proximity data between "h2" paragraph and the 
+> "normal" before or after it?
+
+Lucene does not store proximity relations between data in different fields,
+only within individual fields.  Similarly, term frequencies are stored
+per-field, not per-document.
+
+> 2) How would I set the boosts for the headers and footnotes?
+> I'd rather have it stored within the index file than have to append it 
+> to each and every query I will execute, but I'm open to suggestions. 
+> I'm more interested in performance and flexibility.
+
+AFAIK, there is no way currently in Lucene to set index-time per-field
+boosts - only per-document boosts are supported.
+
+One very coarse-grained boosting trick you could use is to repeat the text
+of headers, etc., that you want to boost, e.g.:
+
+	Doc->add(new Field("h2", "sub-header 1 $$$ sub-header 1",
+Field::STORE_NO | Field::INDEX_TOKENIZED);
+
+I included "$$$" as an example of how to break proximity between the first
+and last terms in the "sub-header 1" text - note, however, that this
+particular string may not serve this function properly, depending on the
+analyzer you choose. 
+
+Note also that this is an issue elsewhere for you, since each addition of
+field information is understood by Lucene as contiguous.  That is, unless
+you do something to inhibit it, proximity matches will occur between the
+last term from one <h2> tag and the first term from the next <h2> tag in the
+same doc.
+
+> 3) When executing a query against the above-mentioned index, how would 
+> I execute a set of words as a query (boolean quey using list of 
+> inflated words) without repeating this set of words for each and every 
+> field? Any support for something like *:word1 OR word2 OR word3 
+> (instead of normal:(word1 OR
+> word2 OR word3) AND quote:(word1 OR word2 OR word3) AND
+> h1:(word1 OR word2 OR word3) etc...)?
+
+MultiFieldQueryParser may do something like what you want:
+
+<http://lucene.apache.org/java/1_4_3/api/org/apache/lucene/queryParser/Multi
+FieldQueryParser.html>
+
+> 4) Writing a Hebrew analyzer, I'm considering using a StandardAnalyzer 
+> and just ammend it so when it recognizes a Hebrew word it will call 
+> some function that will parse it correctly (there are some 
+> differences, such as quotes in the middle of a word are legitmate, 
+> also remove Niqqud).
+> If it's a non-Hebrew word it will just continue as usual with its 
+> default behavior and functions.
+> Also, this means I will index ALL words (Hebrew AND English) into the 
+> same index. The thinking behind this is to allow for searches with 
+> both Hebrew and English words to be performed successfully, taking 
+> into account there shouldn't be any downsides for indexing two 
+> languages within one index. I'm aware of the way Lucene stores words 
+> (not the whole word, but only the part that is different from the 
+> previous), but I really don't see how bad that's gonna be...
+
+Not sure what the question is here - if you mean to ask "What are the
+impacts of including terms from two languages in a single index?" then my
+answer is "it depends"... 
+
+For languages that share orthographies (e.g. Spanish and French, to a great
+extent), cognates (i.e. the same term meaning completely different things in
+the two languages) could cause degraded precision.  AFAIK, this is not an
+issue for Hebrew and English.  
+
+The only other issue I can think of is that you will be taking symbols
+(words) from two completely different meaning-systems and merging them into
+the same index space.  For similar contexts ("should I have separate fields
+for each unit of information?"), the advice generally given on this list is
+to put everything into a single field.  In short: try the simplest thing
+first, test, and if the performance is not good enough, then increase the
+complexity of your solution, test, and iterate until it is.  But you
+probably already knew that :).
+
+> 5) Where should a stemmer be used? As far as I see it, it should only 
+> be used for query inflation, am I right?
+
+Generally, stemming increases recall (proportion of matching relevant docs
+among relevant docs in the entire corpus), and decreases precision
+(proportion of relevant docs among matching docs).
+
+The standard advice is to use the same analysis pipeline at both index-time
+and query-time; in the context of your question, that would mean stemming in
+both places.
+
+However, adding stems to a query, especially if you boosted them lower than
+the original terms, is probably a good strategy to maximize both precision
+and recall.  The cost of this approach is two-fold: a larger index than if
+you had performed index-time stemming; and increased query-time processing,
+hence lower query throughput.
+
+Steve
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

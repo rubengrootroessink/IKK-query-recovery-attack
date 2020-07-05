@@ -1,0 +1,143 @@
+FROM: Jason Rutherglen <jason.rutherg...@gmail.com>
+SUBJECT: Re: Lucene memory usage
+DATE: 10 Jun 2009
+
+Great! If I understand correctly it looks like RAM savings? Will
+there be an improvement in lookup speed? (We're using binary
+search here?).
+
+Is there a precedence in database systems for what was mentioned
+about placing the term dict, delDocs, and filters onto disk and
+reading them from there (with the IO cache taking care of
+keeping the data in RAM)? (Would there be a future advantage to
+this approach when SSDs are more prevalent?) It seems like we
+could have some generalized pluggable system where one could try
+out this or the current heap approach, and benchmark.
+
+Given our continued inability to properly measure Java RAM
+usage, this approach may be a good one for Lucene? Where heap
+based LRU caches are a shot in the dark when it comes to mem
+size, as we never really know how much they're using.
+
+Once we generalize delDocs, filters, and field caches
+(LUCENE-831?), then perhaps CSF is a good place to test out this
+approach? We could have a generic class that handles the
+underlying IO that simply returns values based on a position or
+iteration.
+
+On Wed, Jun 10, 2009 at 11:26 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> Roughly, the current approach for the default terms dict codec in
+> LUCENE-1458 is:
+>
+>  * Create a separate class per-field (the String field in each Term
+>    is redundant).  This is a big change over Lucene today....
+>
+>  * That class has String[] indexText and long[] indexPointer, each
+>    length = the number of index terms.  No TermInfo instance nor Term
+>    instance are used.
+>
+>  * Modify the tis format to also store its data by field
+>
+>  * Modify the tis format so that at a seek point (ie an indexed
+>    term), absolute values are written for freq/prox pointer, but
+>    continue to delta-code in between indexed terms.  EG this is how
+>    video codecs work (every so often they write a "key frame" which
+>    you can seek to & immediately decode w/ no prior context).
+>
+>  * tii then just stores text/long (delta coded) for all indexed
+>    terms, and is slurped into the arrays on init.
+>
+> This is a sizable RAM savings over what's done now because you save 2
+> objects, 3 pointers, 2 longs, 2 ints (I think), per indexed term.
+>
+> Mike
+>
+> On Wed, Jun 10, 2009 at 2:02 PM, Jason
+> Rutherglen<jason.rutherglen@gmail.com> wrote:
+> >> LUCENE-1458 (flexible indexing) has these improvements,
+> >
+> > Mike, can you explain how it's different?  I looked through the code once
+> > but yeah, it's in with a lot of other changes.
+> >
+> > On Wed, Jun 10, 2009 at 5:40 AM, Michael McCandless <
+> > lucene@mikemccandless.com> wrote:
+> >
+> >> This (very large number of unique terms) is a problem for Lucene
+> currently.
+> >>
+> >> There are some simple improvements we could make to the terms dict
+> >> format to not require so much RAM per term in the terms index...
+> >> LUCENE-1458 (flexible indexing) has these improvements, but
+> >> unfortunately tied in w/ lots of other changes.  Maybe we should break
+> >> out a separate issue for this... this'd be a great contained
+> >> improvement, if anyone out there has "the itch" :)
+> >>
+> >> One simple workaround is to call IndexReader.setTermIndexInterval
+> >> immediately after opening the reader; this simply loads fewer terms in
+> >> the index, using far less RAM, but at the expense of somewhat slower
+> >> searching.
+> >>
+> >> Also: you should peek at your index, eg using Luke, to understand why
+> >> you have so many terms.  It could be legitimate (indexing a massive
+> >> catalog with eg part numbers), or, it could be your document filtering
+> >> / analyzer are accidentally producing garbage terms.
+> >>
+> >> Mike
+> >>
+> >> On Wed, Jun 10, 2009 at 8:23 AM, Benedikt Boss<nanoc@web.de> wrote:
+> >> > Hej hej,
+> >> >
+> >> > i have a question regarding lucenes memory usage
+> >> > when launching a query. When i execute my query
+> >> > lucene eats up over 1gig of heap-memory even
+> >> > when my result-set is only a single hit. I
+> >> > found out that this is due to the "ensureIndexIsRead()"
+> >> > method-call in the "TermInfosReader" class, which
+> >> > iterates over all Terms found in the index and saves
+> >> > them (including all value-strings) in a Term-Array.
+> >> > Is it possible to not read all that stuff
+> >> > into memory at all?
+> >> >
+> >> > Im doing the query like in the following pseudo-code:
+> >> >
+> ------------------------------------------------------------------------
+> >> >
+> >> > TopScoreDocCollector collector = new TopScoreDocCollector(100000);
+> >> >
+> >> > QueryParser   parser= new QueryParser(field, new WhitespaceAnalyzer()
+> );
+> >> > Directory     fsDir = new FSDirectory(indexDir, null);
+> >> > IndexSearcher is    = new IndexSearcher(fsdir);
+> >> >
+> >> > Query         query = parser.parse(q);
+> >> >
+> >> > is.search(query, collector);
+> >> > ScoreDoc[] hits = collector.topDocs();
+> >> >
+> >> > ....... < iterate over hits and print results >
+> >> >
+> >> >
+> >> > Thanks in advance
+> >> > Benedikt
+> >> >
+> >> > ---------------------------------------------------------------------
+> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

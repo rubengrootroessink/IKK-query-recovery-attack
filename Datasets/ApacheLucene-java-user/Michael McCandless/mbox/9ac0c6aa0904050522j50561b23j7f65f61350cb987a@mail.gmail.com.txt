@@ -1,0 +1,58 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: simultaneous indexing and searching causing intermitently long	searches.
+DATE: 5 Apr 2009
+
+On Sat, Apr 4, 2009 at 5:03 PM, Dan OConnor <doconnor@acquiremedia.com> wrote:
+
+> We have watched GC times closely in the past. Most of the results of us trying various
+settings was to make GC worse instead of better.
+
+OK, but is a slow "stop the world" GC event to blame for the queries
+that unexpectedly long to come back?  (vs, "a big merge was running",
+vs "the OS had swapped pages out").
+
+> We didn't know about reopen() until recently so we still create a new IndexSearcher in
+the background and warm it up before we put it into service. We are going to switch to ping-ponging
+between to IndexSearchers. When we call reopen(), do we have to warm it up again if reopen
+returns a new IndexReader?
+
+Yes you still need to fully warm after using reopen.  Unfortunately,
+in 2.4 reopen() doesn't save all that much on the warming time, but in
+2.9 it saves quite a bit when sorting by fields.  Still, it does save
+some (eg loading norms) so you should switch to reopen right away.
+
+> After I sent this email, I found that the ConcurrentMergeScheduler has both a setMaxThreadCount
+and a setMergeThreadPriority. Does this allow our code to tell the JVM to run merge at a lower
+priority (and perhaps with more threads) than our IndexWriter and IndexSearcher threads (which
+are created with normal priority)?
+
+Yes, you can set the merge thread priority.  By default it's one tick
+higher than your indexer threads, the reasoning being to prevent
+starvation of the merge thread when you are doing intense indexing.
+Since you are indexing & searching on the same box, you should try
+dropping merge thread priority to one tick lower and see if that helps
+things.  If it does, please report back because this is a good
+tunable.
+
+You can also set the max number of merge threads.  It defaults to 3,
+which may be too high (even a single merge thread may saturate your IO
+system); you might want to try setting it to 1... if that helps, I'd
+love to hear back as well.
+
+> For warm-ups, since we sort on a couple of date fields within the document (in addition
+to the straight relevance sort), I'm reading your suggestion that it is important to issue
+warm up queries that date sort as well?
+
+Definitely.  Sorting by field must load the FieldCache entry (under
+the hood), which is a costly operation.  With 2.9, after reopen,
+loading this field cache will be much less costly because only the new
+segments will need to be loaded.  But 2.4 is not as efficient after a
+reopen, and will reload the entire FieldCache (ie, for all docs).
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,78 @@
+FROM: "Jerome Chauvin" <Jerome.Chau...@businessinteractif.fr>
+SUBJECT: RE: Lucene 2.1: java.io.IOException: Lock obtain timed out:  SimpleFSLock@<path of index file>
+DATE: 2 Mar 2007
+
+Thanks Michael for your answer, but following check of our processing, it
+appears all the updates of the index are made in a single thread. Actually,
+this kind of exception is thrown during a heavy batch processing. This
+processing is not multi-threaded.
+
+One other think I don't understand is: All the methods accessing the index in
+Lucene are synchronized. How can a concurrent access to the index occur?
+
+Thanks in advance,
+
+-Jerome Chauvin-
+
+-----Message d'origine-----
+De : Michael McCandless [mailto:lucene@mikemccandless.com] 
+Envoyé : jeudi 1 mars 2007 11:22
+À : java-user@lucene.apache.org
+Objet : Re: Lucene 2.1: java.io.IOException: Lock obtain timed out:
+SimpleFSLock@<path of index file>
+
+"Jerome Chauvin" <Jerome.Chauvin@businessinteractif.fr> wrote:
+
+> We encounter issues while updating the lucene index, here is the stack
+> trace:
+>  
+> Caused by: java.io.IOException: Lock obtain timed out:
+> SimpleFSLock@/data/www/orcanta/lucene/store1/write.lock
+>  at org.apache.lucene.store.Lock.obtain(Lock.java:69)
+>  at
+>  
+> org.apache.lucene.index.IndexReader.aquireWriteLock(IndexReader.java:5
+> 26)
+>  at
+>  
+> org.apache.lucene.index.IndexReader.deleteDocument(IndexReader.java:55
+> 1)
+>  at
+>  
+> org.apache.lucene.index.IndexReader.deleteDocuments(IndexReader.java:5
+> 78)
+>  at
+> com.bi.commerce.service.catalog.spring.lucene.LuceneIndex.deleteFromIn
+> dex(Luc
+> eneIndex.java:692)
+>  ... 25 more
+
+First off, you have to ensure only one writer (either IndexWriter or as in
+this case IndexReader doing deletes) is trying to update the index at the
+same time.  Lucene only allows one writer on an index, and if a second writer
+tries to open it will receive exactly this exception.
+
+(Note that as of 2.1 you can now do deletes with IndexWriter which simplifies
+things because you can use a single IndexWriter for
+adds/updates/deletes.)
+
+If you are already doing that (single writer) correctly, the other common
+cause is that this is a leftover lock file (for example if the JVM crashed or
+was killed or even if you didn't close a previous writer before the JVM
+exited).  There is a better locking implementation (NativeFSLockFactory) that
+correctly frees the lock when the JVM crashes so you may want to use that one
+instead if you hit this often (but first explain the root cause of your
+crashes!).
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

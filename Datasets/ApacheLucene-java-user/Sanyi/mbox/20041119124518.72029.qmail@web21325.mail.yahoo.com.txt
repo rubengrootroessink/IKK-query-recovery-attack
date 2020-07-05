@@ -1,0 +1,109 @@
+FROM: Sanyi <need4...@yahoo.com>
+SUBJECT: Re: WildcardTermEnum skipping terms containing numbers?!
+DATE: 19 Nov 2004
+
+> If there's a bug, it should be tracked down, not worked around...
+
+Sure, but I'm working with 20million records and it takes about 25 hours to re-index, so I'm
+looking for ways that doesn't require reindexing.
+
+My code was:
+
+      WildcardTermEnum wcenum = new WildcardTermEnum(reader, term);
+      
+      while (wcenum.next()) {
+    		terms.add(new WeightedTerm(termgroup,wcenum.term().text()));
+    		//System.out.println(wcenum.term().text());
+      }
+
+And it skipped lots of things it shouldn't have skipped.
+So, I've chosen the other way:
+if (wcenum.wildcardEquals(term.text(), 0, "c0ca", 0)) { ... }
+It works perfectly so far.
+
+> 
+> But it looks ok to me:
+> 
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.index.*;
+> import org.apache.lucene.document.*;
+> import org.apache.lucene.store.*;
+> import org.apache.lucene.search.*;
+> 
+> public class LuceneTest {
+> 
+>     public static void main(String[] args) throws Exception {
+> 
+> 	RAMDirectory dir = new RAMDirectory();
+> 
+> 	IndexWriter writer = new IndexWriter(dir, new StandardAnalyzer(), true);
+> 
+> 	Document doc = new Document();
+> 	
+> 	doc.add(new Field("foo", "blabla etc.. etc... c0la c0ca caca ccca", true, true, true));
+> 
+> 	writer.addDocument(doc);
+> 
+> 	writer.close();
+> 
+> 	IndexReader reader = IndexReader.open(dir);
+> 
+> 	WildcardTermEnum enum = new WildcardTermEnum(reader, new Term("foo", "c??a"));
+> 
+> 	do {
+> 	    System.out.println(enum.term().text());
+> 	} while ( enum.next() );
+> 
+> 	WildcardQuery wq = new WildcardQuery(new Term("foo", "c??a"));
+> 
+> 	Query q = wq.rewrite(reader);
+> 
+> 	System.out.println(q.toString());
+> 
+> 	reader.close();
+>     }
+> }
+> 
+> gives
+> c0ca
+> c0la
+> caca
+> ccca
+> foo:c0ca foo:c0la foo:caca foo:ccca
+> 
+> The only bug I see is in the docs, that claims enum.term() to be invalid
+> before the first call to next() which does not seem to be the case.
+> So if you use
+> while ( enum.next() ) {
+> ...
+> }
+> you will loose the first term, whatever it is.
+> Looking at the sources I find that this behaviour is shared by 
+> FuzzyTermEnum. Both implementations of the abstract FilteredTermEnum class
+> call setEnum at the end of the constructor, which prepares the first
+> result.
+> 
+> Morus
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+
+
+
+		
+__________________________________ 
+Do you Yahoo!? 
+Meet the all-new My Yahoo! - Try it today! 
+http://my.yahoo.com 
+ 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

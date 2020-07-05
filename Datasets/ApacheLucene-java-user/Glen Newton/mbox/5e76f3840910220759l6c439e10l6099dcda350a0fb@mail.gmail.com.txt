@@ -1,0 +1,112 @@
+FROM: Glen Newton <glen.new...@gmail.com>
+SUBJECT: Re: Performance tips when creating a large index from database.
+DATE: 22 Oct 2009
+
+This is basically what LuSql does. The time increases ("8h to 30 min")
+are similar. Usually on the order of an order of magnitude.
+
+Oh, the comments suggesting most of the interaction is with the
+database? The answer is: it depends.
+With large Lucene documents: Lucene is the limiting factor (worsened
+by going single threaded).
+With small documents: it can be the DB.
+
+Other issues include waiting for complex queries on the DB to be ready
+(avoid sorting in the SQL!!).
+LuSql supports out-of-band joins (don't do the join in the SQL, but do
+the join from the client (with an additional- but low cost as it is
+usually on the primary key - query for each record); sometimes this is
+better; sometimes this is worse, depending on your DB design, queries,
+etc.)
+
+-Glen
+
+2009/10/22 Thomas Becker <thomas.becker@net-m.de>:
+> Profile your application first hand and find out where the bottlenecks really
+> are during indexing.
+>
+> For me it was clearly the database calls which took most of the time. Due to a
+> very complex SQL Query.
+> I applied the Producer - Consumer pattern and put a blocking queue in between. I
+> have a threadpool running x producers which are sending SQL Queries to the
+> database. Each returned row is put into the blockingQueue and another threadpool
+> running x (currently only 1) consumers is taking Objects from the row, converts
+> them to lucene documents and adds them to the index.
+> If the last row is put into the queue I add a Poison Pill to tell the consumer
+> to break.
+> Using a blockingQueue limited to 10.000 entries together with jdbc fetchSize
+> avoids high memory consumptions if too many producer threads return from the db.
+>
+> This way I could reduce indexing time from around 8h to 30 min. (really). But be
+> careful. Load on the DB Server will surely increase.
+>
+> Hope that helps.
+>
+> Cheers,
+> Thomas
+>
+> Paul Taylor wrote:
+>> I'm building a lucene index from a database, creating 1 about 1 million
+>> documents, unsuprisingly this takes quite a long time.
+>> I do this by sending a query  to the db over a range of ids , (10,000)
+>> records
+>> Add these results in Lucene
+>> Then get next 10,0000 and so on.
+>> When completed indexing I then call optimize()
+>> I also set  indexWriter.setMaxBufferedDocs(1000) and
+>> indexWriter.setMergeFactor(3000) but don't fully understand these values.
+>> Each document contains about 10 small fields
+>>
+>> I'm looking for some ways to improve performance.
+>>
+>> This index writing is single threaded, is there a way I can multi-thread
+>> writing to the indexing ?
+>> I only call optimize() once at the end, is the best way to do it.
+>> I'm going to run a profiler over the code, but are there any rules of
+>> thumbs on the best values to set for MaxBufferedDocs and Mergefactor()
+>>
+>> thanks Paul
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+> --
+> Thomas Becker
+> Senior JEE Developer
+>
+> net mobile AG
+> Zollhof 17
+> 40221 Düsseldorf
+> GERMANY
+>
+> Phone:    +49 211 97020-195
+> Fax:      +49 211 97020-949
+> Mobile:   +49 173 5146567 (private)
+> E-Mail:   mailto:thomas.becker@net-m.de
+> Internet: http://www.net-m.de
+>
+> Registergericht:  Amtsgericht Düsseldorf, HRB 48022
+> Vorstand:         Theodor Niehues (Vorsitzender), Frank Hartmann,
+>                 Kai Markus Kulas, Dieter Plassmann
+> Vorsitzender des
+> Aufsichtsrates:   Dr. Michael Briem
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+-- 
+
+-
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

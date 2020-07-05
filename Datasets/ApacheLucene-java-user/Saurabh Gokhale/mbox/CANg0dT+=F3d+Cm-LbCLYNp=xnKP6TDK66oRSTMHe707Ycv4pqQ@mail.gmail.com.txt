@@ -1,0 +1,92 @@
+FROM: Saurabh Gokhale <saurabhgokh...@gmail.com>
+SUBJECT: Re: Need Help: Index directory files getting deleted due to server restart.
+DATE: 29 Jul 2011
+
+Hi Ian
+
+Thanks for looking into the issue. And you are right. Its not this code
+which was causing the issue.
+
+The issue was as follows: (I just successfully performed a test run)
+
+*ISSUE:*
+My code had following characteristics.
+1. CREATE_OR_APPEND way of opening indexWriter.
+2. No explicit call to index.commit() --> This was because I wanted lucene
+to decide on the time to commit.
+3. IndexWriters setRAMBufferSizeMB and setMaxBufferedDocs values set. -->
+may be they were set to high.
+
+So due to this configuration, it seems as long as my tomcat was indexing
+documents, commit was never getting called and therefore segments.gen and
+segments.XX files were never getting created (even though other index files
+were getting created and written to hard drive)
+
+So due to this whenever I used to restart my tomcat, in the next run, index
+writer never used to find this index folder as a valid index directory and
+it used to erase the contents. (I confirmed by opening the folder contents
+using luke who also rejected the contents)
+
+*SOLUTION:*
+Now after every 100 documents indexed, I am calling explicitly
+index.commit() which generates and updates segments.gen and segments.XX
+files. Once these files are present, next run of tomcat honors the existing
+index.
+
+
+It is strange that I was suggested not to call commit explicitly and leave
+it to the lucene but it seems it has its own disadvantages.
+
+Saurabh
+
+
+On Fri, Jul 29, 2011 at 4:13 AM, Ian Lea <ian.lea@gmail.com> wrote:
+
+> Code looks fine and will not zap the current contents of indexDir.
+> Something else must be - another call with OpenMode.CREATE?  Where is
+> indexDir - could tomcat be zapping it on startup?  Some other job?
+>
+>
+> --
+> Ian.
+>
+>
+> On Thu, Jul 28, 2011 at 8:12 PM, Saurabh Gokhale
+> <saurabhgokhale@gmail.com> wrote:
+> > Hi All,
+> >
+> > I am using following code to create Lucene index using writer object
+> >
+> > if (indexWriter == null) {
+> >        Directory idx = new NIOFSDirectory(new File(indexDir),null);
+> > IndexWriterConfig iConfig = new IndexWriterConfig(Version.LUCENE_31,
+> > getAnalyzer());
+> > iConfig.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
+> > indexWriter = new IndexWriter(idx, iConfig);
+> >
+> > indexWriter.setRAMBufferSizeMB(50);
+> > indexWriter.setMaxBufferedDocs(100);
+> > }
+> >
+> > return indexWriter;
+> >
+> > I have the application hosted on Tomcat 7. Now whenever I start / restart
+> my
+> > tomcat server, my index directory gets cleaned up (all lucene index files
+> > are removed) and fresh indexing starts.
+> >
+> > How can I stop it from happening? If this is the expected behavior, is
+> there
+> > any work around?
+> >
+> > Thanks
+> >
+> > Saurabh
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

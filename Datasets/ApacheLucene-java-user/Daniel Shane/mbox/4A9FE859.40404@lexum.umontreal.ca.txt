@@ -1,0 +1,152 @@
+FROM: Daniel Shane <sha...@LEXUM.UMontreal.CA>
+SUBJECT: Re: Lucene 2.9.0-rc2 [PROBLEM] : TokenStream API (incrementToken / AttributeSource), cannot implement a LookaheadTokenFilter.
+DATE: 3 Sep 2009
+
+Ok, I got it, from checking other filters, I should call 
+input.incrementToken() instead of super.incrementToken().
+
+Do you feel this kind of breaks the object model (super.incrementToken() 
+should also work).
+
+Maybe when the old API is gone, we can stop checking if someone has 
+overloaded next() or incrementToken()?
+
+Daniel S.
+
+> Humm... I looked at captureState() and restoreState() and it doesnt 
+> seem like it would work in my scenario.
+>
+> I'd like the LookAheadFilter to be able to peek() several tokens 
+> forward and they can have different attributes, so I don't think I 
+> should assume I can restoreState() safely.
+>
+> Here is an application for the filter, lets say I want to recognize 
+> abbreviations (like S.C.R.) at the token level. I'd need to be able to 
+> peek() a few tokens forward to make sure S.C.R. is an abbreviation and 
+> not simply the end of a sentence.
+>
+> So the user should be able to peek() a number of token forward before 
+> returning to usual behavior.
+>
+> Here is the implementation I had in mind (untested yet because of a 
+> StackOverflow) :
+>
+> public class LookaheadTokenFilter extends TokenFilter {
+>    /** List of tokens that were peeked but not returned with next. */
+>    LinkedList<AttributeSource> peekedTokens = new 
+> LinkedList<AttributeSource>();
+>
+>    /** The position of the next character that peek() will return in 
+> peekedTokens */
+>    int peekPosition = 0;
+>
+>    public LookaheadTokenFilter(TokenStream input) {
+>        super(input);
+>    }
+>
+>    public boolean peekIncrementToken() throws IOException {
+>        if (this.peekPosition >= this.peekedTokens.size()) {
+>            if (this.input.incrementToken() == false) {
+>                return false;
+>            }
+>                      
+> this.peekedTokens.add(cloneAttributes());                      
+> this.peekPosition = this.peekedTokens.size();
+>            return true;
+>        }
+>               this.peekPosition++;              return true;
+>    }
+>      @Override
+>    public boolean incrementToken() throws IOException {
+>        reset();
+>              if (this.peekedTokens.isEmpty() == false) {
+>            this.peekedTokens.removeFirst();
+>        }
+>              if (this.peekedTokens.isEmpty() == false) {
+>            return true;
+>        }
+>              return super.incrementToken();
+>    }
+>          @Override
+>    public void reset() {
+>        this.peekPosition = 0;
+>    }    
+>    //Overloaded methods...
+>      public Attribute getAttribute(Class attClass) {
+>        if (this.peekedTokens.size() > 0) {
+>            return 
+> this.peekedTokens.get(this.peekPosition).getAttribute(attClass);
+>        }              return super.getAttribute(attClass);
+>    }
+>      //Overload all these just like getAttribute() ...
+>    public Iterator<?> getAttributeClassesIterator() ...
+>    public AttributeFactory getAttributeFactory() ...
+>    public Iterator getAttributeImplsIterator() ...
+>    public Attribute addAttribute(Class attClass) ...
+>    public void addAttributeImpl(AttributeImpl att) ...
+>    public State captureState() ...
+>    public void clearAttributes() ...
+>    public AttributeSource cloneAttributes() ...
+>    public boolean hasAttribute(Class attClass) ...
+>    public boolean hasAttributes() ...
+>    public void restoreState(State state) ...                     }
+>
+>
+> Now the problem I have is that the below code triggers an evil 
+> StackOverflow because I'm overriding incrementToken() and calling 
+> super.incrementToken() which will loop back because of this :
+>
+> public boolean incrementToken() throws IOException {
+>    assert tokenWrapper != null;
+>      final Token token;
+>    if (supportedMethods.hasReusableNext) {
+>      token = next(tokenWrapper.delegate);
+>    } else {
+>      assert supportedMethods.hasNext;
+>      token = next(); <----- Lucene calls next();
+>    }
+>    if (token == null) return false;
+>    tokenWrapper.delegate = token;
+>    return true;
+>  }
+>
+> which then calls :
+>
+> public Token next() throws IOException {
+>    if (tokenWrapper == null)
+>      throw new UnsupportedOperationException("This TokenStream only 
+> supports the new Attributes API.");
+>      if (supportedMethods.hasIncrementToken) {
+>      return incrementToken() ? ((Token) tokenWrapper.delegate.clone()) 
+> : null; <--- incrementToken() gets called
+>    } else {
+>      assert supportedMethods.hasReusableNext;
+>      final Token token = next(tokenWrapper.delegate);
+>      if (token == null) return null;
+>      tokenWrapper.delegate = token;
+>      return (Token) token.clone();
+>    }
+>  }
+>
+> and hasIncrementToken is true because I overloaded incrementToken();
+>
+> MethodSupport(Class clazz) {
+>    hasIncrementToken = isMethodOverridden(clazz, "incrementToken", 
+> METHOD_NO_PARAMS);
+>    hasReusableNext = isMethodOverridden(clazz, "next", 
+> METHOD_TOKEN_PARAM);
+>    hasNext = isMethodOverridden(clazz, "next", METHOD_NO_PARAMS);
+> }
+>
+> Seems like a "catch-22". From what I understand, if I override 
+> incrementToken() I should not call super.incrementToken()????
+>
+> Daniel S.
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

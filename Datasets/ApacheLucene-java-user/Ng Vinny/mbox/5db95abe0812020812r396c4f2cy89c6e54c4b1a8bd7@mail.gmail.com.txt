@@ -1,0 +1,143 @@
+FROM: "Ng Vinny" <ngvi...@gmail.com>
+SUBJECT: Re: PhraseQuery and non-letter characters
+DATE: 2 Dec 2008
+
+Hi Ian
+
+Thanks for the suggestion. I was able to write the custom analyzer to return
+non-letters as tokens, as well as to keep the numeric characters instead of
+skipping them.
+This is probably not the best solution, but at least i can have a demo
+without bugs :-)
+
+To save time for others who may have the same need, below is the code (based
+on the one mentioned in
+http://www.gossamer-threads.com/lists/lucene/java-user/402)
+
+
+/* This class is identical to the com.lucene.analysis.LowerCaseTokenizer
+ * class except that it will not trim off numbers, and will output
+non-letter characters as tokens
+ * this is to prevent matching, e.g. "information, technology" with
+"information technology"
+ */
+
+import java.io.Reader;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.Tokenizer;
+
+public final class LowerCaseNumericNonLetterTokenizer extends Tokenizer {
+
+    public LowerCaseNumericNonLetterTokenizer(Reader in) {
+        input = in;
+    }
+    private int offset = 0,  bufferIndex = 0,  dataLen = 0;
+    private final static int MAX_WORD_LEN = 255;
+    private final static int IO_BUFFER_SIZE = 1024;
+    private final char[] buffer = new char[MAX_WORD_LEN];
+    private final char[] ioBuffer = new char[IO_BUFFER_SIZE];
+
+    public final Token next() throws java.io.IOException {
+        int length = 0;
+        int start = offset;
+        while (true) {
+            final char c;
+
+            offset++;
+            if (bufferIndex >= dataLen) {
+                dataLen = input.read(ioBuffer);
+                bufferIndex = 0;
+            }
+
+            if (dataLen == -1) { //the end of the stream has been reached
+                if (length > 0) {
+                    break;
+                } else {
+                    return null;
+                }
+            } else {
+                c = (char) ioBuffer[bufferIndex++];
+            }
+
+            //return the non-letters as tokens instead of skipping them
+            if (!Character.isWhitespace(c) && !Character.isLetterOrDigit(c))
+{
+                //when c is at the end of the buffer, just return the buffer
+as a Token, and reset the offset and bufferIndex so that the next iteration
+will encounter the non-letter
+                if (length > 0) {
+                    offset--;
+                    bufferIndex--;
+                    break;
+                } else { //when the non-letter is at the start of token,
+return it as token
+                    start = offset - 1;
+                    buffer[length++] = c;
+                    break;
+                }
+            }
+
+            if (Character.isLetterOrDigit(c)) { // if it's a letter
+
+                if (length == 0) // start of token
+                {
+                    start = offset - 1;
+                }
+
+                buffer[length++] = Character.toLowerCase(c);// buffer it
+
+                if (length == MAX_WORD_LEN) // buffer overflow!
+                {
+                    break;
+                }
+
+            } else if (length > 0) // at non-Letter w/ chars
+            {
+                break; // return 'em
+            }
+        }
+
+        return new Token(new String(buffer, 0, length), start, start +
+length);
+    }
+}
+
+
+On Fri, Nov 28, 2008 at 6:09 PM, Ian Lea <ian.lea@gmail.com> wrote:
+
+> I suggest you write your own analyzer that doesn't remove non-letter
+> characters at index time. There might be one out there already, but
+> not that I can think of off hand.
+>
+> Instead of leaving the non-letters in place you might consider doing
+> something with position increments.  I think that would prevent phrase
+> queries from matching.
+>
+>
+> --
+> Ian.
+>
+>
+> On Fri, Nov 28, 2008 at 5:05 PM, Ng Vinny <ngvinny@gmail.com> wrote:
+> > Hi,
+> >
+> > I'm having an issue with PhraseQuery in which a query for the phrase
+> > "information technology" has among of its matches the strings
+> "information,
+> > technology" and "information. Technology",  which should not be
+> considered
+> > as matches.
+> > Both StopAnalyzer  StandardAnalyzer removes non-letter character at index
+> > time.
+> >
+> > Any suggestions?
+> >
+> > Thanks.
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

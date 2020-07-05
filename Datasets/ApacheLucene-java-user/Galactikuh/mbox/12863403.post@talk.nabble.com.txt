@@ -1,0 +1,287 @@
+FROM: Galactikuh <ksha...@gmail.com>
+SUBJECT: Re: Help with Snowball Analyzer
+DATE: 24 Sep 2007
+
+
+Hi, Well I believe I did, but I am not positive. The code I use to set it up
+is below. Actually I'm not even really sure how to specify which analyzer to
+use for indexing using Hibernate Search. This may be a question for their
+forum.
+
+Thanks,
+K
+
+Patrick Turcotte-2 wrote:
+> 
+> Hi,
+> 
+> Did you use the same snowball analyzer to create your index? Remember
+> that you usually need to use the same analyzer for indexing and
+> searching.
+> 
+> Patrick
+> 
+> On 9/21/07, Galactikuh <kshanti@gmail.com> wrote:
+>>
+>> Hi,
+>> After doing some more analysis with Luke it does seem like that it is
+>> something about that Analyzer, not my code, since I get the same results
+>> in
+>> there.
+>>
+>> K
+>>
+>> Erick Erickson wrote:
+>> >
+>> > Have you gotten a copy of Luke and examined your index
+>> > to see if what's in there is actually what you think? I've found
+>> > it invaluable (see the Lucene pages).
+>> >
+>> > Also, query.toString() is your friend. It'll show you what the
+>> > actual query looks like after parsing.
+>> >
+>> > You could also, as a test, construct a BooleanQuery
+>> > with the term "nut" and see what comes back....
+>> >
+>> > Is it possible that UseStemmer is being set to false somehow
+>> > for the query parser (perhaps in code you didn't post?). That
+>> > would account for it...
+>> >
+>> > Best
+>> > Erick
+>> >
+>> > On 9/21/07, Galactikuh <kshanti@gmail.com> wrote:
+>> >>
+>> >>
+>> >> I am using SnowballAnalyzer with Hibernate search. I am using it to
+>> >> search
+>> >> phrases in a database. It only seems to return the stemmed version of
+>> any
+>> >> query. So for example, I have two phrases in the DB:
+>> >>
+>> >> "Cheney is a nut"
+>> >> and
+>> >> "I hate nuts"
+>> >>
+>> >> When I do a search for either "nut" or "nuts" it only returns "Cheney
+>> is
+>> >> a
+>> >> nut"
+>> >>
+>> >> This is what seems to be inside my index file:
+>> >>
+>> >> 'cheney' 'hate' 'i' 'nut' 's'
+>> >>
+>> >> Here is the code, although it's hibernate so not sure if it's relevant
+>> or
+>> >> will mean anything to anyone here.
+>> >>
+>> >> Thanks,
+>> >> Kshanti
+>> >>
+>> >> import javax.persistence.EntityManager;
+>> >>
+>> >> import org.apache.lucene.analysis.snowball.SnowballAnalyzer;
+>> >> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+>> >> import org.apache.lucene.queryParser.QueryParser;
+>> >> import org.hibernate.*;
+>> >>
+>> >> public class LuceneSearch
+>> >> {
+>> >>
+>> >>    public enum Similarity
+>> >>    {
+>> >>       KEYWORDS,
+>> >>       HIGH,
+>> >>       EXPAND,
+>> >>       EXACT,
+>> >>
+>> >>    }
+>> >>
+>> >>    public static final String TEXT_FIELD = "TEXT";
+>> >>
+>> >>    private static final String HIBERNATE_FILE =
+>> >> "META-INF/persistence.xml";
+>> >>
+>> >>    private QueryParser _parser;
+>> >>
+>> >>    private String[] _stopWords;
+>> >>
+>> >>    private FullTextSession _textSession;
+>> >>
+>> >>    private EntityManager _entityManager;
+>> >>
+>> >>    private Similarity _defaultSimilarity=Similarity.KEYWORDS;
+>> >>
+>> >>    private boolean _beenIndexed=false;
+>> >>
+>> >>    public static boolean UseStemmer=true;
+>> >>
+>> >>    public LuceneSearch(EntityManager entityMgr)
+>> >>    {
+>> >>       if (null == entityMgr)
+>> >>          throw new IllegalArgumentException("entityMgr must not be
+>> >> null.");
+>> >>
+>> >>       _entityManager = entityMgr;
+>> >>       // Have to use sessions here
+>> >>       try
+>> >>       {
+>> >>          Session session = (Session) _entityManager.getDelegate();
+>> >>          _textSession = Search.createFullTextSession(session);
+>> >>          initialize(null);
+>> >>       }
+>> >>       catch (ClassCastException ce)
+>> >>       {
+>> >>          // this error supposedly should not get thrown as
+>> getDelegate()
+>> >>          // supposedly always returns a Session, but just in case.
+>> >>          // (this was from examples on the web and the #hibernate
+>> channel
+>> >> so
+>> >>          // needs to be verified
+>> >>          ce.printStackTrace();
+>> >>          // TODO: Wrap it up and do something else with it
+>> >>          throw ce;
+>> >>       }
+>> >>    }
+>> >>
+>> >>    private void initialize(String[] stopWords)
+>> >>    {
+>> >>       if (stopWords != null)
+>> >>       {
+>> >>          // first set up the parser with the new stop words
+>> >>
+>> >>          if(UseStemmer)
+>> >>          {
+>> >>             _parser = new QueryParser(TEXT_FIELD, new
+>> >> SnowballAnalyzer("English",stopWords));
+>> >>          }
+>> >>          else
+>> >>          {
+>> >>             _parser = new QueryParser(TEXT_FIELD, new
+>> >> StandardAnalyzer(stopWords));
+>> >>          }
+>> >>       }
+>> >>       else
+>> >>       {  // default stop words
+>> >>          if(UseStemmer)
+>> >>          {
+>> >>             _parser = new QueryParser(TEXT_FIELD, new
+>> >> SnowballAnalyzer("English"));
+>> >>          }
+>> >>          else
+>> >>          {
+>> >>             _parser = new QueryParser(TEXT_FIELD, new
+>> >> StandardAnalyzer());
+>> >>          }
+>> >>       }
+>> >>
+>> >>       _stopWords = stopWords;
+>> >>    }
+>> >>
+>> >>    /***
+>> >>     * Run the indexer
+>> >>     */
+>> >>    public void index()
+>> >>    {
+>> >>     //now index
+>> >>
+>> >>       Transaction tx = _textSession.beginTransaction();
+>> >>       List<Prediction> predictions = _textSession.createQuery("from
+>> >> Prediction as prediction").list();
+>> >>       for(Prediction pred: predictions)
+>> >>       {
+>> >>          _textSession.index(pred);
+>> >>       }
+>> >>       tx.commit(); //index are written at commit time
+>> >>       _beenIndexed=true;
+>> >>    }
+>> >>
+>> >>    public List<Prediction> searchPredictions(String queryStr)
+>> >>    {
+>> >>       // look in text column of predictions
+>> >>       try
+>> >>       {
+>> >>          if (queryStr != null && !queryStr.equals(""))
+>> >>          {
+>> >>             // need to add the field name to the querystring
+>> >>             queryStr = TEXT_FIELD + ":" + queryStr;
+>> >>             org.apache.lucene.search.Query luceneQuery =
+>> >> _parser.parse(queryStr);
+>> >>             Query query =
+>> _textSession.createFullTextQuery(luceneQuery,
+>> >>                   Prediction.class);
+>> >>             List<Prediction> ret = query.list();
+>> >>           //default fits the KEYWORDS similarity
+>> >>             if (ret != null)
+>> >>             {
+>> >>                switch(_defaultSimilarity)
+>> >>                {
+>> >>
+>> >>                   case KEYWORDS:
+>> >>                   case HIGH:
+>> >>                   case EXPAND:
+>> >>                   case EXACT:
+>> >>
+>> >>                      return ret;
+>> >>
+>> >>                }
+>> >>
+>> >>             }
+>> >>          }
+>> >>       }
+>> >>       catch (Exception pe)
+>> >>       {// KKG TODO: Turn this into a better exception
+>> >>          pe.printStackTrace();
+>> >>       }
+>> >>       return new ArrayList<Prediction>();
+>> >>    }
+>> >> }
+>> >>
+>> >>
+>> >>
+>> >> --
+>> >> View this message in context:
+>> >>
+>> http://www.nabble.com/Help-with-Snowball-Analyzer-tf4497960.html#a12827864
+>> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>> >>
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>> >
+>>
+>> --
+>> View this message in context:
+>> http://www.nabble.com/Help-with-Snowball-Analyzer-tf4497960.html#a12831941
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Help-with-Snowball-Analyzer-tf4497960.html#a12863403
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

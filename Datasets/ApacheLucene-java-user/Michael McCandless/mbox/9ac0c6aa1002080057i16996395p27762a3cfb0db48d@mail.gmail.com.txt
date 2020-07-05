@@ -1,0 +1,211 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Problems with IndexWriter#commit() on Linux
+DATE: 8 Feb 2010
+
+Thanks for sharing...
+
+Software RAID should be perfectly fine for Lucene, in general, unless
+the mount is configured to ignore fsync (I think the "data=writeback"
+mount option for ext3 does so on Linux).
+
+Can you check the mount options on your RAID filesystem?
+
+Mike
+
+On Mon, Feb 8, 2010 at 2:09 AM, Naama Kraus <naamakraus@gmail.com> wrote:
+> Hi All,
+>
+> I am back to this one after some while.
+> It appears the file system I was using resides on software RAID disks. I ran
+> the same code on the same Linux machine, but on another file system residing
+> on SCSI disks. I didn't observe the problem there.
+> Both file systems are ext3.
+> So I am guessing the problem relates to the RAID disks.
+>
+> I looked again at commit() API, and the following comment may be explaining:
+>
+> "Note that this operation calls Directory.sync on the index files. That call
+> should not return until the file contents & metadata are on stable storage.
+> For FSDirectory, this calls the OS's fsync. But, beware: some hardware
+> devices may in fact cache writes even during fsync, and return before the
+> bits are actually on stable storage, to give the appearance of faster
+> performance. If you have such a device, and it does not have a battery
+> backup (for example) then on power loss it may still lose data. Lucene
+> cannot guarantee consistency on such devices."
+>
+> Well, for me, running on the SCSI disks is just fine, I wanted to anyway
+> share my experience.
+>
+> Naama
+>
+> On Fri, Jan 8, 2010 at 12:09 AM, Naama Kraus <naamakraus@gmail.com> wrote:
+>
+>> Thanks all for the hints, I'll get back to my code and do some additional
+>> checks.
+>> Naama
+>>
+>>
+>> On Thu, Jan 7, 2010 at 6:57 PM, Michael McCandless <
+>> lucene@mikemccandless.com> wrote:
+>>
+>>> kill -9 is harsh, but, perfectly fine from Lucene's standpoint.
+>>> Likewise if the OS or JVM crashes, power is suddenly lost, the index
+>>> will just fallback to the last successful commit.  What will cause
+>>> corruption is if you have bit errors happening somewhere in the
+>>> machine... or if two writers are accidentally allowed to be open on
+>>> one index... then you're in trouble.
+>>>
+>>> What IO system (filesystem & hardware) are you using on Linux?
+>>> Boiling down to a smallish test case can help to isolate the
+>>> problem...
+>>>
+>>> Mike
+>>>
+>>> On Thu, Jan 7, 2010 at 11:51 AM, Erick Erickson <erickerickson@gmail.com>
+>>> wrote:
+>>> > Can you show us the code where you commit?
+>>> >
+>>> > And how do you kill your process? Kill -9 is...er...harsh....
+>>> >
+>>> > Yeah, I'm wondering whether the index file size *stays*
+>>> > changed after you kill you process. If it keeps its
+>>> > growing on every run (after you kill your process
+>>> > multiple times), then I'd suspect that you aren't
+>>> > adding documents like you think you are. Perhaps
+>>> > different fields, different analyzers, etc.
+>>> >
+>>> > Luke should show you the largest document by ID,
+>>> > as well as document counts. Comparing changes
+>>> > in the document count and the max doc ID should
+>>> > tell you something...
+>>> >
+>>> > Is it possible that you are updating existing docs
+>>> > rather than adding new ones?
+>>> >
+>>> > Best
+>>> > Erick
+>>> >
+>>> > On Thu, Jan 7, 2010 at 10:41 AM, Naama Kraus <naamakraus@gmail.com>
+>>> wrote:
+>>> >
+>>> >> Thanks dor the input.
+>>> >>
+>>> >> 1. While the process is running, I do see the index files growing on
+>>> disk
+>>> >> and the time stamps changing. Should I see a change in size right after
+>>> >> killing the process, is that what you mean ?
+>>> >> 2. Yes, same directory is being used for indexing and search.
+>>> >> 3. Didn't try Luke, good idea. Though I wonder, the same code runs well
+>>> on
+>>> >> Windows.
+>>> >>
+>>> >> Naama
+>>> >>
+>>> >> On Thu, Jan 7, 2010 at 3:37 PM, Erick Erickson <
+>>> erickerickson@gmail.com
+>>> >> >wrote:
+>>> >>
+>>> >> > Several questions:
+>>> >> > 1> are the index files larger after you kill your process?
+>>> >> >    Or have the timestamps changed?
+>>> >> > 2> are you absolutely sure that your indexer, when you
+>>> >> >     add documents, is pointing at the same directory your
+>>> >> >     search is pointing to?
+>>> >> > 3> Have you gotten a copy of Luke and examined your index
+>>> >> >     to see if, perhaps, your documents aren't being added the
+>>> >> >     way you think they are?
+>>> >> >
+>>> >> > Erick
+>>> >> >
+>>> >> > On Thu, Jan 7, 2010 at 7:13 AM, Naama Kraus <naamakraus@gmail.com>
+>>> >> wrote:
+>>> >> >
+>>> >> > > Hi,
+>>> >> > >
+>>> >> > > I am using IndexWriter#commit() methods in my program to commit
+>>> >> document
+>>> >> > > additions to the index. I do that once in a while, after a
+bunch of
+>>> >> > > documents were added. Since my indexing process is long, I
+want to
+>>> make
+>>> >> > > sure
+>>> >> > > I don't loose too many additions in case of a crash.
+>>> >> > > When running on Windows, things work as expected. But when
+running
+>>> my
+>>> >> > code
+>>> >> > > on Linux, seems like commit() has no effect. If I kill my
+program
+>>> and
+>>> >> > then
+>>> >> > > restart it, I don't see documents that I added and then committed
+>>> (they
+>>> >> > are
+>>> >> > > not returned by a search operation).
+>>> >> > > I am running Lucene 3.0.0
+>>> >> > >
+>>> >> > > Can anyone help ?
+>>> >> > >
+>>> >> > > Thanks, Naama
+>>> >> > >
+>>> >> > > --
+>>> >> > > "If you want your children to be intelligent, read them fairy
+>>> tales. If
+>>> >> > you
+>>> >> > > want them to be more intelligent, read them more fairy tales."
+>>> >> > > "What really interests me is whether God had any choice in
+the
+>>> creation
+>>> >> > of
+>>> >> > > the world."
+>>> >> > > (Albert Einstein)
+>>> >> > >
+>>> >> >
+>>> >>
+>>> >>
+>>> >>
+>>> >> --
+>>> >> "If you want your children to be intelligent, read them fairy tales.
+If
+>>> you
+>>> >> want them to be more intelligent, read them more fairy tales."
+>>> >> "What really interests me is whether God had any choice in the creation
+>>> of
+>>> >> the world."
+>>> >> (Albert Einstein)
+>>> >>
+>>> >
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>>
+>> --
+>> "If you want your children to be intelligent, read them fairy tales. If you
+>> want them to be more intelligent, read them more fairy tales."
+>> "What really interests me is whether God had any choice in the creation of
+>> the world."
+>> (Albert Einstein)
+>>
+>
+>
+>
+> --
+> "If you want your children to be intelligent, read them fairy tales. If you
+> want them to be more intelligent, read them more fairy tales."
+> "What really interests me is whether God had any choice in the creation of
+> the world."
+> "A table, a chair, a bowl of fruit and a violin; what else does a man need
+> to be happy? "
+> (Albert Einstein)
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

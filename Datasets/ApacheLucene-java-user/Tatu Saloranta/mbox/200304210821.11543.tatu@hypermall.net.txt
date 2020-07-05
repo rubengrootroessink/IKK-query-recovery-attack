@@ -1,0 +1,63 @@
+FROM: Tatu Saloranta <t...@hypermall.net>
+SUBJECT: Re: Thread question
+DATE: 21 Apr 2003
+
+On Monday 21 April 2003 07:30, Rob Outar wrote:
+...
+> they would like to search.  Then there is a RepositorySearcher class (one
+> instance for each repository) which is the class RepositoryFile calls to do
+  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+...
+> doing the same.  The methods in the middle tier which calls the Index
+> Manager tier are all synchronized yet I am getting requests for concurrent
+> write/delete operations.  I am getting several IOExceptions saying the
+> index is locked for wiring (the write.lock IOExceptions Lucene throws).  I
+> figured by synchronizing the methods in
+> the RepositorySearcher class
+          ^^^^^^^^^^^^^^^^^^^^^^^                                                        
+                      
+
+> calls Index Manager class to modify the index) it would make the program
+> thread safe.  I am new to whole multithreading environment, am I doing
+> something wrong here?
+
+Apologies if I misunderstood the scenario, but if not, synchronizing there 
+wouldn't give you the critical section. Each of RepositorySearchers would 
+have its own lock (one lock per object). Unless you make method(s) static, in 
+which case there's a single lock per class (alternatively you could just use 
+static member there, and sync on that, not use default synchronized keyword 
+or synchronized (this)).
+Synchronized keyword is equivalent to having 'synchronized (this) {' contain
+all code in the method.
+What you need is a central lock; either create a lock object (any Object does 
+fine) and share it with RepositySearchers, or use a static Object to lock on.
+
+> 	Also, I assume it is ok to query the index while a write/delete is
+> occurring?
+
+Not sure but I wouldn't count on that being true? For it to be true, whole 
+contents of the index would have to be kept in memory (to have unmodified 
+copy at all times)? Or file system would need to have atomic update sets (ie. 
+this could be done if index was in DB).
+Or alternatively, Lucene core would need to prevent read access while write is 
+going on, without throwing an exception?
+I'm sure someone else can give a definite answer though.
+
+In system I'm working on I actually duplicate an existing index each time an 
+update is needed, so existing read access (queries) use the old index up 
+until new one is ready to be used. When all old read access threads are done 
+using old index it can be deleted; new accesses go straight to newest index.
+This is not the most efficient way to do it I'm sure, but it works reliably 
+and (from query perspective) gives lowest latency. This because write access 
+does not block reads, and system is multi-CPU machine and (hopefully) can 
+parallelize read/write threads properly to multiple CPUs.
+
+-+ Tatu +-
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,100 @@
+FROM: "Beard, Brian" <Brian.Be...@mybir.com>
+SUBJECT: search performance & caching
+DATE: 28 Apr 2008
+
+
+I'm using lucene 2.2.0 & have two questions:
+
+1) Should search times be linear wrt number of queries hitting a  single
+searcher? I've run multiple search threads against a single searcher,
+and the search times are very linear - 10x slower for 10 threads vs 1
+thread, etc. I'm using a paralle multi-searcher with a custom hit
+collector.
+
+2) I'm performing some field caching during search warmup. For an index
+of 3.4 million doc's and 7GB, it's taking up to 30 minutes to execute
+the code snippet below. Most of this time is involved with the
+multireader.document call (where it says "THIS TAKES THE MOST TIME").
+
+I want to know if anyone has any ideas for speeding this up. There are
+multiple documents containing the same recordId. I want to figure out
+which two documents with the same recordId also have a documentName of
+CORE or WL.
+Then for each document in the index I store three pieces of information:
+- it's associated recordId
+- the CORE doc number for this recordId.
+- the WL doc number for this recordId
+
+Ideally, since the multiReader.document call is taking the most time,
+I'd like to not have to perform this. Although I can't figure out how to
+get around needing to read in the recordId.
+
+What I really need is something like a two dimensional termEnum I could
+iterate over - for the recordId and documentName fields.
+
+Any ideas are appreciated.
+
+// Now loop through all documents in the indexes and set the cache
+values.
+TermDocs termDocs = multiReader.termDocs();
+TermEnum termEnum = multiReader.terms (new Term ("RECORD_ID", ""));
+try {
+    FieldSelector fieldSelector = getFieldSelector();
+    List<Integer> docList = new ArrayList<Integer>();
+    int regularCoreDocId = -1;
+    int wlCoreDocId = -1;
+    int docId = -1;
+    Document document = null;
+    String documentName = null;
+	                
+    // Loop through each RECORD_ID with termEnums
+    do {
+        docList.clear();
+	  regularCoreDocId = -1;
+	  wlCoreDocId = -1;
+		            	
+	 Term term = termEnum.term();
+	 if (term == null || term.field() != field) {
+	   break;
+	  }
+	  String recordId = term.text();
+		                
+	  // Now loop through all documents with the same recordId
+	  // using the termDocs.
+	  termDocs.seek(termEnum);
+	  while (termDocs.next()) {
+		docId = termDocs.doc();
+		docList.add(Integer.valueOf(docId));
+            // THIS TAKES THE MOST TIME
+		document = multiReader.document(docId, fieldSelector);
+		documentName = document.get("DOCUMENT_NAME");
+		if ("CORE".equals(documentName)) {
+		    regularCoreDocId = docId;
+		} else if ("WL".equals(documentName)) {
+		    wlCoreDocId = docId;
+		}
+	    }
+		                
+	  // Map all docId's associated with this recordId
+	  for (Integer i : docList) {
+          doc2RecordId [i] = recordId;
+	  }
+		                
+	  // Map from the docId to the coreData docId for  
+	  // regular core and wl core documents.
+        for (Integer i : docList) {
+           doc2RegularCoreDoc[i] = regularCoreDocId;
+	     wlCoreDocId [i] = wlCoreDocId;
+        }
+   } while (termEnum.next());
+} finally {
+    termDocs.close();
+    termEnum.close();
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

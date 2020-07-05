@@ -1,0 +1,157 @@
+FROM: "Daniel Sanders" <dsand...@novell.com>
+SUBJECT: RE: Problem with Numeric range query.
+DATE: 23 Sep 2010
+
+
+Thank you for your timely response. 
+
+It's going to take me longer to create an isolated test case you can test this with.  I will
+see what I can do. 
+
+In the meantime, I have some follow up information in response to your other suggestions.
+
+
+1) I don't think my problem is that the IndexWriter has not committed the document.  Here's
+why: 
+
+
+In my test case, I first retrieve a document using a different lucene query on a different
+field.  From that document I extract the value for timestamp field and then perform the NumericRangeQuery
+on that value as described below.  I was doing as a way to create a unit test that would verify
+that the NumericRangeQuery was working properly.  I think the fact that first query found
+the document is evidence that the IndexWriter had committed the document.  Hence, I would
+expect that if I follow that query with a NumericRangeQuery it should be able to find the
+same document. 
+
+2) I also don't think my problem is values near Long.MIN_VALUE or Long.MAX_VALUE.  My values
+are all timestamps, which are positive integers that are not anywhere near those two extremes.
+ The values originally come from the java.util.Date.getTime() method. 
+
+3) I will try the upper+lower inclusive = true and using same value for min and max, although
+I don't see how that will change anything.  I have actually debugged through the code for
+NumericRangeQuery, and if minInclusive == false, then min is incremented, and if maxInclusive
+== false, then max is decremented.  So my query: 
+
+   NumericRangeQuery.newLongRange("timestamp",8,timeX-1,timeX,false,true) 
+
+is essentially equivalent to the query you suggest trying: 
+
+   NumericRangeQuery.newLongRange("timestamp",8,timeX,timeX,true,true) 
+
+right? 
+
+-Daniel Sanders 
+
+
+>>> "Uwe Schindler" <uwe@thetaphi.de> 9/23/2010 2:04 PM >>>
+Hi,
+
+Can you provide some self-containing testcase that shows your problem? In
+most cases those problems are caused by not committing changes to
+IndexWriter before opening the IndexReader.
+
+Additionally, if you only want to look for exactly one timestamp (like a
+TermQuery), use a NumericRangeQuery with upper+lower inclusive = true and
+use the specific value to search for as both upper and lower.
+
+You may also hit a bug, that's already solved in SVN (it happens when the
+lower bound is near Long.MAX_VALUE or the upper bound near Long.MIN_VALUE):
+https://issues.apache.org/jira/browse/LUCENE-2541
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Daniel Sanders [mailto:dsanders@novell.com]
+> Sent: Thursday, September 23, 2010 12:23 PM
+> To: java-user@lucene.apache.org
+> Subject: Problem with Numeric range query.
+>
+>
+> I have a set of documents that all have a "timestamp" field which is
+stored as a
+> long integer number. The field is indexed in my Lucene index as a number
+> using NumericField with a precision step of 8:
+>
+>    Field field = new NumericField("timestamp", 8);
+>    field.setLongValue( timestampValue);
+>
+> I do this so I can do numeric range queries to retrieve all documents that
+fall
+> within a specific time range.
+>
+> The query I construct has two parts to it, a query, and a filter. I get
+the
+> document hits as follows:
+>
+>    IndexReader reader = ...... some index reader.....
+>    IndexSearcher searcher = new IndexSearcher(reader);
+>
+>    Filter filter = NumericRangeFilter.newLongRange("timestamp", 8,
+startTime,
+> endTime, false, true);
+>    Query query = new MatchAllDocsQuery();
+>    searcher.search( query, filter, myCollector); // My collector is a
+super class of
+> Collector - saves all Hits
+>
+> Occasionally, I have a single document with a very specific timestamp I
+want to
+> retrieve. Suppose that timestamp is timeX, I will create the filter as
+follows:
+>
+>    Filter filter = NumericRangeFilter.newLongRange("timestamp", 8,
+timeX-1,
+> timeX, false, true);
+>
+> But with this filter, the document that should be found is never found. I
+have
+> even tried expanding the time range as follows, but with no success:
+>
+>    Filter filter = NumericRangeFilter.newLongRange("timestamp", 8,
+timeX-1,
+> timeX+500, false, true);
+>
+> Strangely, a filter that should NOT have found the document actually did
+find
+> the document:
+>
+>    Filter filter = NumericRangeFilter.newLongRange("timestamp", 8, timeX,
+> timeX+1000, false, true);
+>
+> This filter should NOT have found the document since the minInclusive
+> argument is false.
+>
+> I have also noticed that sometimes when I have several documents with
+exactly
+> the same timestamp, a query will return some, but not all, of the
+documents.
+>
+> I have also tried to use a NumericRangeQuery as follows:
+>
+>    Query query = NumericRangeQuery.newLongRange("timestamp", 8, timeX-1,
+> timeX, false, true);
+>    searcher.search( query, null, myCollector);
+>
+> This also fails to return my document(s).
+>
+> Am I doing something wrong here? Have I misunderstood how this is supposed
+> to work? Has anyone else had problems like this?
+>
+>
+> Thanks for any help or guidance or tips you can give me,
+>
+> -Daniel Sanders
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

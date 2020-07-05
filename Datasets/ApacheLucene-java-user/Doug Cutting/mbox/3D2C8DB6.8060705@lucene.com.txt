@@ -1,0 +1,52 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: Crash / Recovery Scenario
+DATE: 10 Jul 2002
+
+Karl Øie wrote:
+> A better solution would be to hack the FSDirectory to store each file it would 
+> store in a file-directory as a serialized  byte array in a blob of a sql 
+> table. This would increase performance because the whole Directory don't have 
+> to change each time, and it doesn't have to read the while directory into 
+> memory. I also suspect lucene to sort its records into these different files 
+> for increased performance (like: i KNOW that record will be in segment "xxx" 
+> if it is there at all).
+> 
+> I have looked at the source for the RAMDirectory and the FSDirectory and they 
+> could both be altered to store their internal buffers into a BLOB, but i 
+> haven't managed to do this successfully. The problem i have been pounding is 
+> the lucene.InputStream's seek() function. This really requires the underlying 
+> impl to be either a file, or a array in memory. For a BLOB this would mean 
+> that the blob has to be fetched, then read/seek-ed/written/ then stored back 
+> again. (is this correct?!?, and if so is there a way to know WHEN it is 
+> required to fetch/store the array).
+
+A BLOB can be randomly accessed:
+ 
+http://java.sun.com/j2se/1.4/docs/api/java/sql/Blob.html#getBytes(long,%20int)
+
+A good driver should page BLOBs over the connection.  A great driver 
+might even have a separate thread doing read-aheads.  (Dream on.)  It 
+looks like the leading JDBC driver for MySQL (mm) does not page blobs, 
+but rather always reads the entire blob.  Sigh.  On the bright side, the 
+JDBC driver for PostgreSQL does page BLOBS over the connection.
+
+So it should be easy to implement a Lucene InputStream based on a BLOB. 
+  The Directory should be a simple table of BLOBs.
+
+Lucene rarely seeks on writable streams.  In other words, nearly all 
+files are written sequentially.  With a quick scan, I can see only one 
+place where Lucene seeks an OutputStream: in TermInfosWriter it 
+overwrites the first four bytes once just before the file is closed.
+
+So to implement a Lucene OutputStream you could cache the value of 
+Blob.setBinaryStream(int), and only create a new underlying output 
+stream when seek() is called.
+
+Doug
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

@@ -1,0 +1,302 @@
+FROM: Victor Hadianto <vict...@nuix.com.au>
+SUBJECT: Re: '-' character not interpreted correctly in field names
+DATE: 10 Jul 2003
+
+Yep tried that. Actually there is more to the creation of the field than just 
+in this line:
+
+fieldToken=<TERM> <COLON> { field = fieldToken.image; }
+
+
+Because I've created a <FIELDNAME> which is exactly the same with <TERM> which
+
+looks like this:
+| <FIELDNAME: <_TERM_START_CHAR> (<_TERM_CHAR>)*  >
+
+and change fieldToken to:
+
+fieldToken=<FIELDNAME> <COLON> { field = fieldToken.image; }
+
+And it doesn't work. Simple query such as to:tom* is parsed as blank query.
+
+I will continue looking at this problem and will post my solution if I get it, 
+in the mean time I really do appreciate any help and suggestions.
+
+cheers,
+
+victor
+
+
+On Thu, 10 Jul 2003 03:24 am, Eric Isakson wrote:
+> You left out the ~ character in your _FIELDNAME_START_CHAR production. That
+> character tells the grammar that it should take all the characters except
+> the ones you specified (the complement).
+>
+> Change:
+> | <#_FIELDNAME_START_CHAR: ( [ " ", "\t", "+", "-", "!", "(", ")", ":",
+>
+> To:
+> | <#_FIELDNAME_START_CHAR: ( ~[ " ", "\t", "+", "-", "!", "(", ")", ":",
+>
+> and it should probably work.
+>
+> Eric
+>
+> -----Original Message-----
+> From: Victor Hadianto [mailto:victorh@nuix.com.au]
+> Sent: Wednesday, July 09, 2003 4:53 AM
+> To: Lucene Users List
+> Subject: Re: '-' character not interpreted correctly in field names
+>
+>
+> Hi Erik and others,
+>
+> I'm looking for a similar solution where I need QueryParser not to drop the
+> "-" characters from the field name. Hower outside the field I do want the -
+> sign interpreted as "not" modifier.
+>
+> I'm definitely not an expert in JavaCC and to be honest I only have a
+> limited idea about Erik's suggestion work,
+>
+> Anyway I followed the suggestion and added the following:
+> | <#_WHITESPACE: ( " " | "\t" ) >
+> | <#_FIELDNAME_START_CHAR: ( [ " ", "\t", "+", "-", "!", "(", ")", ":",
+> | "^",
+>
+>                                "[", "]", "\"", "{", "}", "~", "*", "?" ]
+>
+>                              | <_ESCAPED_CHAR> ) >
+> |
+> | <#_FIELDNAME_CHAR: ( <_FIELDNAME_START_CHAR> | <_ESCAPED_CHAR> ) >
+>
+> and again below I added:
+> | <TERM:      <_TERM_START_CHAR> (<_TERM_CHAR>)*  >
+> | <FIELDNAME: <_FIELDNAME_START_CHAR> (<_FIELDNAME_CHAR>)*  >
+>
+> And I changed:
+>
+>     LOOKAHEAD(2)
+>     fieldToken=<TERM> <COLON> { field = fieldToken.image; }
+>
+> to: ...
+>
+>     LOOKAHEAD(2)
+>     fieldToken=<FIELDNAME> <COLON> { field = fieldToken.image; }
+>
+>
+> Well after doing all this mods all the query that involved field names
+> cause problem, for example if I searched for
+>
+> fieldname:hello
+>
+> The query is blank (yes blank, nothing in it)
+>
+> and if the fieldname does contain a dash ("-") for example:
+> field-name:hello
+>
+> They query is: +field -name
+>
+> hello is dropped.
+>
+>
+> Does anyone has any idea? Help and suggestions will be much appreciated. I
+> really need to get this dash working, changing the field name will be my
+> last resort which I won't explore until I really have to.
+>
+>
+> Thanks,
+>
+> Victor
+>
+> On Thu, 15 May 2003 04:54 am, Eric Isakson wrote:
+> > I think the query parser changes would not be too bad, I've outlined a
+> > couple of relavant lines you should look at so you don't have to try
+> > and comprehend the productions for the entire QueryParser. I do not
+> > think I would like to have to maintain one of those myself though.
+> > Your other unmentioned alternative is to choose field names that match
+> > the <TERM> production of QueryParser.jj without escapes.
+> >
+> > QueryParser.jj line 557:
+> >     fieldToken=<TERM> <COLON> { field = fieldToken.image; }
+> >
+> > and earlier...
+> >  <#_ESCAPED_CHAR: "\\" [ "\\", "+", "-", "!", "(", ")", ":", "^",
+> >                           "[", "]", "\"", "{", "}", "~", "*", "?" ] >
+> >
+> > | <#_TERM_START_CHAR: ( ~[ " ", "\t", "+", "-", "!", "(", ")", ":",
+> > | "^",
+> >
+> >                            "[", "]", "\"", "{", "}", "~", "*", "?" ]
+> >
+> >                        | <_ESCAPED_CHAR> ) >
+> > |
+> > | <#_TERM_CHAR: ( <_TERM_START_CHAR> | <_ESCAPED_CHAR> ) >
+> >
+> > ...
+> >
+> > <TERM:      <_TERM_START_CHAR> (<_TERM_CHAR>)*  >
+> >
+> > So the characters you need to avoid in your field names are the ones
+> > from _ESCAPED_CHAR, [ "\\", "+", "-", "!", "(", ")", ":", "^", "[",
+> > "]", "\"", "{", "}", "~", "*", "?" ]
+> >
+> > If you need to modify the parser, you will probably want to add a
+> > FIELDNAME token and other supporting productions that look really
+> > similar to these lines I've copied but modify the complement, ~[...],
+> > at the beginning of _FIELDNAME_START_CHAR (you would add this
+> > production) so it will match the "-" that you are using in your field
+> > names (and fix it to match any other characters you want to use in
+> > field names that it doesn't allow right now).
+> >
+> > Eric
+> >
+> > -----Original Message-----
+> > From: Jon Pipitone [mailto:jpipitone@mshri.on.ca]
+> > Sent: Wednesday, May 14, 2003 2:26 PM
+> > To: Lucene Users List
+> > Subject: Re: '-' character not interpreted correctly in field names
+> >
+> > Eric Isakson wrote:
+> > > I just looked at the QueryParser.jj code, your field names
+> > >
+> >  > never get processed by the analyzer. It does look like the  > query
+> >
+> > parser will honor escapes though. I haven't tried  > this, but try a
+> > query like "foo\-bar:foo" and have
+> >
+> > > a look at the QueryParser.jj file for how it handles field
+> > >
+> >  > names when parsing your query.
+> >
+> > Hrm.. that's what I had found too.  So, you're saying that, other than
+> > escaping dashes, I'd have to change QueryParser.. ?
+> >
+> > I'm not too familiar just yet with JavaCC syntax, so reading through
+> > QueryParser is a little tough going.  Thanks Eric,
+> >
+> > jp
+> >
+> > > -----Original Message-----
+> > > From: Jon Pipitone [mailto:jpipitone@mshri.on.ca]
+> > > Sent: Monday, May 12, 2003 4:03 PM
+> > > To: Lucene Users List
+> > > Subject: Re: '-' character not interpreted correctly in field names
+> > >
+> > >
+> > > Hi Otis, Terry,
+> > >
+> > >  >>>You can write a custom Analyzer that does not remove dashes from
+> > > >>>
+> > > >>>tokens, and use it for both indexing and searching.  >>>
+ >>>This
+> > >
+> > > is a frequent question and answer on this list.
+> > >
+> > > Sorry for the noise, but I haven't been able to find a solution in
+> > > the mailing list archives, or by writing my own analyzer:
+> > >
+> > > 	public class MyAnalyzer extends Analyzer {
+> > > 	public TokenStream tokenStream(String fieldName, Reader reader) 		{
+> > > 		return new CharTokenizer(reader) {
+> > > 			protected boolean isTokenChar(char c) {
+> > > 				return Character.isLetter(c) || c == '-';
+> > > 			}
+> > > 		};
+> > > 	}
+> > > 	}
+> > >
+> > > I parse a query like this:
+> > >
+> > > 	String queryString = "foo-bar:foo";
+> > > 	String queryResult =
+> > > 		QueryParser.parse(queryString, "body", new MyAnalyzer())
+> > >
+> > > With the output:
+> > > 	body:foo -bar:foo
+> > >
+> > > But I would expect the output:
+> > > 	 foo-bar:foo
+> > >
+> > > If I print out the tokens that MyAnalyzer produces I do get
+> > > "foo-bar" and then "foo".
+> > >
+> > > Any pointers on what I'm doing wrong?
+> > >
+> > > jp
+> > >
+> > >>>>--- Jon Pipitone <jpipitone@mshri.on.ca> wrote:
+> > >>>>>Hi all,
+> > >>>>>
+> > >>>>>>I believe that the tokenizer treats a dash as a token
+> > >>>
+> > >>>separator.
+> > >>>
+> > >>>>>>Hence, the only way, as I recall, to eliminate this behavior
+> > >>>
+> > >>>is
+> > >>>
+> > >>>>>>to modify QueryParser.jj so it doesn't do this.  However,
+> > >>>
+> > >>>doing
+> > >>>
+> > >>>>>>this can cause some other problems, like hyphenated words
+at a
+> > >>>>>>line break and the like.
+> > >>>>>
+> > >>>>>I've recently started using lucene and I'm running into the
+same
+> > >>>>>issue with the query parser.  I'd like to use queries that
+> > >>>>>contain
+> > >>>
+> > >>>dashes
+> > >>>
+> > >>>>>in
+> > >>>>>the field name, but as far as I can tell it seems that the
+> > >>>
+> > >>>current
+> > >>>
+> > >>>>>query
+> > >>>>>grammar treats field names as terms, and so, as Terry notes,
+a
+> > >>>
+> > >>>dash
+> > >>>
+> > >>>>>becomes a token seperator.
+> > >>>>>
+> > >>>>>Terry suggests modifying the QueryParser.jj -- I would suspect
+by
+> > >>>>>creating a seperate non-terminal for field names.
+> > >>>>>
+> > >>>>>Has anyone done any work on this already?  Is modifying
+> > >>>>>QueryParser.jj the best approach?
+> > >>>>>
+> > >>>>>Thanks,
+> > >>>>>jp
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+-- 
+Victor Hadianto
+
+NUIX Pty Ltd
+Level 8, 143 York Street, Sydney 2000
+Phone: (02) 9283 9010
+Fax:   (02) 9283 9020
+
+This message is intended only for the named recipient. If you are not the
+intended recipient you are notified that disclosing, copying, distributing
+or taking any action in reliance on the contents of this message or
+attachment is strictly prohibited.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

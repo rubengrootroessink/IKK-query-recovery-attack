@@ -1,0 +1,98 @@
+FROM: eks dev <eks...@yahoo.co.uk>
+SUBJECT: Re: Analyzing performance and memory consumption for boolean queries
+DATE: 24 Jun 2009
+
+
+
+another performance tip, waht helps "a lot" is collection sorting before you index. 
+
+if you can somehow logically partition your index, you can improve locality of reference by
+sorting. 
+
+What I mean by this:
+imagine index with following fields: zip,  user_group, some text  
+
+if typical query on this index contains ZIP and user_group as a MUST fields,  by sorting on
+ZIP, user_group before indexing, you will get an index where Lucene does not have to seek
+back and forth during search, reducing disk contention. It is quite ok to sort once in a while...
+that is a standard trick database admins use.
+
+This improved our average response times by almost factor 2 on FSDisk. Of course, depends
+on your index distribution, but if you have a lot of categorical variables that segment your
+collection logically, it is worth trying. 
+
+
+ 
+
+> 
+> >Our query performance is surprisingly inconsistent, and I'm trying to figure
+> >out why.  I've realized that I need to better understand what's going on
+> >internally in Lucene when we're searching.  I'd be grateful for any answers
+> >(including pointers to existing docs, if any).
+> >
+> >Our situation is this: We have roughly 250 million docs spread across four
+> >indexes.  Each doc has about a dozen fields, all stored and most indexed.
+> >(They're the usual document things like author, date, title, contents,
+> >etc.)  Queries differ in complexity but always have at least a few terms in
+> >boolean combination, up to some larger queries with dozens or even hundreds
+> >of terms combined with ands, ors, nots, and parens.  There's no sorting,
+> >even by relevance: we just want to know what matches.  Query performance is
+> >often sub-second, but not infrequently it can take over 20 seconds (we the
+> >time-limited hit collector, so anything over 20 seconds is stopped).
+> >Obviously the more complex queries are slower on average, but a given query
+> >can sometimes be much slower or much faster.
+> >
+> >My assumption is that we're having memory problems or disk utilization
+> >problems or both.  Our app has a 5gb JVM heap on an 8gb server with no other
+> >user processes running, so we shouldn't be paging and should have some room
+> >for Linux disk cache.  The server is lightly loaded and concurrent queries
+> >are the exception rather than the norm.  Two of the four indexes are updated
+> >a few times a day via rsync and subsequently closed and re-opened, but poor
+> >query performance doesn't seem to be correlated with these times.
+> >
+> >So, getting to some specific questions:
+> >
+> >1) How is the inverted index for a given field structured in terms of what's
+> >in memory and what's on disk?  Is it dynamic, based on available memory, or
+> >tuneable, or fixed?  Is there a rule of thumb that could be used to estimate
+> >how much memory is required per indexed field, based on the number of terms
+> >and documents?  Likewise, is there a rule of thumb to estimate how many disk
+> >accesses are required to retrieve the hits for that field?  (I'm thinking,
+> >by perhaps false analogy, of how a database maintains a b-tree structure
+> >that may reside partially in RAM cache and partially in disk pages.)
+> >
+> >2) When boolean queries are searched, is it as simple as iterating the hits
+> >for each ANDed or ORed term and applying the appropriate logical operators
+> >to the results?  For example, is searching for "foo AND bar" pretty much the
+> >same resource-wise as doing two separate searches, and therefore should the
+> >query performance be a linear function of the number the number of search
+> >terms?  Or is there some other caching and/or decision logic (perhaps kind
+> >of like a database's query optimizer) at work here that makes the I/O and
+> >RAM requirements more difficult to model from the query?  (Remember that
+> >we're not doing any sorting.)
+> >
+> >I'm hoping that with some of this knowledge, I'll be able to better model
+> >the RAM and I/O usage of the indexes and queries, and thus eventually
+> >understand why things are slow or fast.
+> >
+> >Thanks,
+> >Chris
+> 
+> 
+> -- 
+> Ken Krugler
+> +1 530-210-6378
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,274 @@
+FROM: "Christopher Kolstad" <chri...@ovitas.no>
+SUBJECT: Re: Best practice for updating an index when reindexing is not an option
+DATE: 11 Jul 2008
+
+>
+> The only way to make this work with svn is if you can have svn perform a
+> switch without doing any removal, then restart your IndexSearcher, then do a
+> normal svn switch to remove the now unused files.  Does svn have an option
+> to "switch but don't remove any removed files"?  Because IndexSearcher holds
+> these files open, svn will not be able to remove the now unused files until
+> IndexSearcher switches.
+
+Exactly, I'll hear with the svn-user list to see if anyone has had any
+experiece with a similar problem, but it looks like the svn switch command
+automatically performs an svn up instantly after having switched to the new
+URL. (I.e. it will remove the file)
+
+Or ... for every update to your index you could plant 2 tags, the first one
+> reflecting only added files, and the 2nd one reflecting removed files.
+>  Then, with your IndexSearcher still running, do an svn switch to the first
+> tag, then restart the IndexSearcher, then svn switch to the 2nd one.  I
+> think that'd work?
+
+That sounds like a rather good idea, SVN does have diff between two
+different tags, so it should be possible to quickly figure out which files
+are added and which are removed (or modified (in the case of the index I
+guess all the files should be new)).
+
+This should only be necessary on Windows ... UNIX platforms let you remove a
+> file even when it's held open by a process ... the file's bytes still exist
+> on disk (just without a filename pointing to them) and are only deleted when
+> the last open file handle on that file is closed -- "delete on last close".
+
+
+That's what I thought, but it feels good to get confirmation. We've been
+trying to move our customer to linux for a long time. Hopefully it will
+happen this fall and we won't have to do it this way anymore.
+
+Appreciate all the help Mike, we got an OK from the customer to wait until
+the fall and hopefully a move to linux. So I'll leave it be for now, though
+not perfect, at least it works the way it did before I started to attempt
+the improvement ;)
+
+Christopher (Chris also works ;) )
+
+
+On Fri, Jul 11, 2008 at 11:47 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> OK, got it.
+>
+> The only way to make this work with svn is if you can have svn perform a
+> switch without doing any removal, then restart your IndexSearcher, then do a
+> normal svn switch to remove the now unused files.  Does svn have an option
+> to "switch but don't remove any removed files"?  Because IndexSearcher holds
+> these files open, svn will not be able to remove the now unused files until
+> IndexSearcher switches.
+>
+> Or ... for every update to your index you could plant 2 tags, the first one
+> reflecting only added files, and the 2nd one reflecting removed files.
+>  Then, with your IndexSearcher still running, do an svn switch to the first
+> tag, then restart the IndexSearcher, then svn switch to the 2nd one.  I
+> think that'd work?
+>
+> This should only be necessary on Windows ... UNIX platforms let you remove
+> a file even when it's held open by a process ... the file's bytes still
+> exist on disk (just without a filename pointing to them) and are only
+> deleted when the last open file handle on that file is closed -- "delete on
+> last close".
+>
+>
+> Mike
+>
+> Christopher Kolstad wrote:
+>
+>  Hi.
+>>
+>> First, thanks for the reply.
+>>
+>> Why does SubversionUpdate require shutting down the IndexSearcher?  What
+>>
+>>> goes wrong?
+>>>
+>>>
+>> SubversionUpdate requires shutting down the IndexSearcher in our current
+>> implementation because the old index files are deleted in the tag we're
+>> switching to. Sorry, just realised that my last mail didn't state that we
+>> don't in fact to an "svn up", but rather an "svn switch". Thus, when we
+>> try
+>> to perform the update SubversionUpdate fails due to file lock issues when
+>> trying to update (deleting the old lucene files) the lucene index
+>> directory
+>> (The relevant code for the update action is quoted below).
+>>
+>> You might want to switch instead to rsync.
+>>
+>>>
+>>>
+>> I'm hoping I won't have to, firstly because I'm more familiar with
+>> subversion, secondly because that would require me to configure rsync for
+>> windows, and I'm still not sure if that will help anything with the file
+>> lock issues we're trying to avoid.
+>>
+>> A Lucene index is fundamentally write once, so, syncing changes over
+>> should
+>>
+>>> simply be copying over new files and removing now-deleted files.  You
+>>> won't
+>>> be able to remove files held open by the IndexSearcher, but, once the
+>>> IndexSearcher restarts you'd then be able to delete those files on the
+>>> next
+>>> sync.
+>>>
+>>
+>>
+>> So I should be able to run the switch and then restart the IndexSearcher,
+>> instead of turning off the IndexSearcher, run the switch, turn on the
+>> IndexSearcher. I'd see how that would work with a linux box, having a bit
+>> more trouble seeing how I will get it to work with a windows box (and my
+>> live server is unfortunately a Windows 2003 box), Subversion keeps running
+>> into file lock issues when I switch from one tag to the other if I try to
+>> keep the search active. With Lucene 2.1 it even ran into file lock issues
+>> after I'd disabled the search and was performing the switch. Now, when
+>> we're
+>> using the Lucene 2.3.2 jar the lock issues has mostly gone (once in 3
+>> months, instead of every switch/update).
+>>
+>> Current code:
+>>
+>> disableSearch(request); //Sets the SearchActive boolean to false
+>>
+>>>
+>>> Search searcher =
+>>> (Search)ctx.getAttribute(FelleskatalogenStartupServlet.SEARCH);
+>>>     if (searcher != null) {
+>>>       searcher.clear();
+>>>    }
+>>>
+>>
+>>          String latestTag =
+>>
+>>> SubversionUtil.getInstance().getLatestTag(getTagUrl(request));
+>>>
+>>>           SubversionUtil.getInstance().runSwitch(getRoot(request),
+>>> getTagUrl(request) + "/" + latestTag);
+>>>
+>>>           if (log.isDebugEnabled()) {
+>>>               log.debug("Index set to " + getRoot(request) + "/lucene");
+>>>           }
+>>>
+>>>           ctx.setAttribute(FelleskatalogenStartupServlet.SEARCH, new
+>>> Search(getRoot(request) + "/lucene"));
+>>>           ctx.setAttribute(FelleskatalogenStartupServlet.SEARCHACTIVE,
+>>> new Boolean(true));
+>>>
+>>>
+>>
+>> BR,
+>>
+>> Christopher
+>>
+>> On Thu, Jul 10, 2008 at 4:27 PM, Michael McCandless <
+>> lucene@mikemccandless.com> wrote:
+>>
+>>
+>>
+>>
+>>> Why does SubversionUpdate require shutting down the IndexSearcher?  What
+>>> goes wrong?
+>>>
+>>> You might want to switch instead to rsync.
+>>>
+>>> A Lucene index is fundamentally write once, so, syncing changes over
+>>> should
+>>> simply be copying over new files and removing now-deleted files.  You
+>>> won't
+>>> be able to remove files held open by the IndexSearcher, but, once the
+>>> IndexSearcher restarts you'd then be able to delete those files on the
+>>> next
+>>> sync.
+>>>
+>>> Mike
+>>>
+>>>
+>>> Christopher Kolstad wrote:
+>>>
+>>> Hi.
+>>>
+>>>>
+>>>> Currently using Lucene 2.3.2 in a tomcat webapp. We have an action
+>>>> configured that performs reindexing on our staging server. However, our
+>>>> live
+>>>> server can not reindex since it does not have the necessary dtd files to
+>>>> process the xml.
+>>>>
+>>>> To update the index on the live server we perform a subversion update on
+>>>> the
+>>>> lucene index directory.
+>>>> Unfortunately this makes it necessary to stop the IndexSearcher while
+>>>> the
+>>>> SubversionUpdate is doing its thing.
+>>>>
+>>>> Presently we've had a requirement from our customer to not disable
+>>>> search.
+>>>>
+>>>> So my idea was to copy the index directory to another directory and then
+>>>> switch the IndexSearcher from the original index directory to the
+>>>> temporary
+>>>> directory.
+>>>> Then perform the Subversion update, and when done, switch the
+>>>> IndexSearcher
+>>>> back to the original (now, updated) index directory.
+>>>>
+>>>> Does anyone have any other suggestions on how to update the index
+>>>> directory
+>>>> from subversion without having to disable the IndexSearcher?
+>>>>
+>>>> BR
+>>>> Christopher
+>>>>
+>>>> --
+>>>> Regards,
+>>>> Christopher Kolstad
+>>>> =============================
+>>>> |100 little bugs in the code, debug one, |
+>>>> |recompile, 101 little bugs in the code |
+>>>> =============================
+>>>>
+>>>> E-mail: chriswk@ifi.uio.no (University)
+>>>> christopher.kolstad@gmail.com (Home)
+>>>> chriswk@ovitas.no (Job)
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>
+>> --
+>> Regards,
+>> Christopher Kolstad
+>> =============================
+>> |100 little bugs in the code, debug one, |
+>> |recompile, 101 little bugs in the code |
+>> =============================
+>>
+>> E-mail: chriswk@ifi.uio.no (University)
+>> christopher.kolstad@gmail.com (Home)
+>> chriswk@ovitas.no (Job)
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+Regards,
+Christopher Kolstad
+=============================
+|100 little bugs in the code, debug one, |
+|recompile, 101 little bugs in the code |
+=============================
+
+E-mail: chriswk@ifi.uio.no (University)
+christopher.kolstad@gmail.com (Home)
+chriswk@ovitas.no (Job)
+

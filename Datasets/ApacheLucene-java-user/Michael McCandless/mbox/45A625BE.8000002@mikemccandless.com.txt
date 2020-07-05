@@ -1,0 +1,76 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: "docs out of order" IllegalStateException during merge (LUCENE-140)
+DATE: 11 Jan 2007
+
+
+Hi all,
+
+I would like to draw your attention to an open and rather devious
+long-standing index corruption issue that we've only now finally
+gotten to the bottom of:
+
+     https://issues.apache.org/jira/browse/LUCENE-140
+
+If you hit this, you will typically see a "docs out of order"
+IllegalStateException during merge (which can happen under-the-hood
+during IndexWriter's addDocument, optimize, close, etc.).
+
+It turns out there were two very different cases that could lead to
+this:
+
+   1: If you call reader.deleteDocument(int docNum) with a
+      slightly-too-large (within up to 7 of the actual max docNum)
+      docNum, then no exception would be thrown and your index is
+      silently corrupted (only to hit that exception much later, during
+      merge).
+
+      This case only happens if you mis-use the deleteDocument API (ie
+      give it invalid doc numbers).  Document numbers are only valid to
+      the reader that you got them from.  If you follow that rule you
+      would never have hit this case.
+
+      Still, this case has now been fixed in the trunk (not released
+      yet): we now catch this boundary case and raise an
+      ArrayIndexOutOfBoundsException just like you get when the doc
+      number is way too large.
+
+   2: If you rebuild an index from scratch in an existing index
+      directory (which is common I think), but, you do not first remove
+      all index files in that directory.  In this case it's possible
+      that an old leftover _XXX.del file will be incorrectly re-opened
+      by Lucene, thus causing the exception (and possibly other
+      exceptions).
+
+      This is really a bug in Lucene, but it was already fixed in the
+      trunk (not released yet) as side-effect of lockless commits.
+
+      To avoid this it's best to make sure to remove all prior index
+      files from your index directory, before creating a new index
+      there.  The easiest way to do this is to instantiate IndexWriter
+      with a String or Path directory argument, and create=true.  If
+      instead you instantiate with a directory, make sure when you
+      called FSDirectory.getDirectory(...) you passed create=true to
+      that.
+
+      Notably and quite surpisingly, passing create=false to
+      FSDirectory.getDirectory(...)  and then create=true when you
+      instantiate IndexWriter with that directory, will NOT remove the
+      old index files and will result in hitting this bug.
+
+      Given that this is fixed in the trunk and there is a simple
+      workaround, we don't currently plan on fixing it in past releases
+      of Lucene so I'm publicizing it here instead.
+
+See the above link for all the gory details.
+
+I would like to thank Jed Wesley-Smith for his persistent testing on
+this issue that finally allowed us to get to the bottom of it!
+
+Mike
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

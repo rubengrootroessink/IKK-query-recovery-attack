@@ -1,0 +1,166 @@
+FROM: "Steffen Heinrich" <lucene-us...@atablis.com>
+SUBJECT: Re: Turning PrefixQuery into a TermQuery
+DATE: 12 Apr 2007
+
+On 12 Apr 2007 at 9:27, Erick Erickson wrote:
+
+> See below....
+...
+> Not quite. As I understand your problem, you want all the terms that
+> match (or at least a subset) for a field. For this, WildcardTermEnum
+> is really all you need. Think of it this way...
+> (Wildcard)TermEnum gives you a list of all the terms for a particular field.
+>       Each term will be mentioned exactly once regardless of how many
+>       times it appears in your corpus.
+> TermDocs will allow you to find documents with those terms.
+> 
+> Since you're trying to do a set of suggestions, you really don't need
+> to know anything about documents that the terms appear in, or even
+> how many documents they appear in. All you need is a list of
+> the unique terms. Thus you don't need TermDocs here at all.
+> 
+Oops, we have a different conception here.
+Its not individual terms that I want to suggest, but entire artist 
+names (usually > 1 term) or song titles or rather groups thereof. And 
+these are matching to documents in my model.
+
+I'm currently dealing with 2 separate indexes.
+1 song index has the fields 'artist' and 'title' indexed per (song-
+)document. It also has for both fields the relative frequency of 
+their distinct spellings in the original corpus.
+1 artist index contains only the unique artist names and has them 
+indexed and stored together with their commoness. 
+
+The first index is used when the artist is filled in and all his 
+songs are to be displayed or in cases where someone starts inputting 
+part of a song title.
+
+The latter index gets perused for performance reasons whenever there 
+is only input for the artist name.
+
+Continued and elaborated at the end of the mail...
+
+> Here's part of a chunk of code I have lying around. It
+> prints out all the terms that appear in a particular field and you
+> should easily be able to make it use a WIldcardTermEnum...
+> This is a hack I made for a one-off, so I don't have to be
+> proud of it......
+> 
+>     private void enumField(String field) throws Exception
+>     {
+>         long start = System.currentTimeMillis();
+>         TermEnum termEnum = this.reader.getIndexReader().terms(new
+> Term(field, ""));
+> 
+>         this.writer.println("Values for term " + field);
+> 
+>         Term term = termEnum.term();
+>         int idx = 0;
+> 
+>         while ((term != null) && term.field().equals(field)) {
+>             System.out.println(term.text());
+> 
+>             termEnum.next();
+> 
+>             term = termEnum.term();
+>             ++idx;
+>         }
+> 
+>         long interval = System.currentTimeMillis() - start;
+> 
+>         System.out.println(
+>                 String.format(
+>                         "%d terms took %d milliseconds (%d seconds) to
+> enumerate term %s",
+>                         idx,
+>                         interval,
+>                         interval / CaptureTerms.MILLIS_IN_SECOND,
+>                         field));
+>     }
+> 
+
+Yep, I think that now I understand where the TermEnum takes its place 
+in the lucene orchestra. Thank you.
+
+...
+
+> 
+> You'll have to elaborate what "fault tolerant search" means. If you're
+> worried about misspellings, that's tough. You could try FuzzyQuery,
+> or if that doesn't work you could think about working with soundex. But I
+> can't stress strongly enough that you need to be absolutely sure this
+> is a real problem *that your users will notice* before you invest time and
+> energy in solving it. I'm continually amazed how much time and energy
+> I spend solving non-existent problems <G>....
+Fuzzy and metaphone queries are absolutely out of question, I agree.
+
+> 
+> And for your sanity's sake, don't ask the produce manager anything
+> remotely like "would you like fault-tolearant searches?". The answer
+> will be yes. Regardless of whether it makes a difference to the end
+> user. And I'll only mention briefly that asking Sales if they'd like
+> a feature is the road to madness.....
+The manager in this case, am I :-)
+
+I picked this task all by myself as a private project that I hope 
+helps to get me into Java and Lucene.
+I have an interest in fulltext searches and IR systems ever since I 
+had to write a (simple) engine some years ago. In Perl that was.
+
+> 
+> And a spell checker isn't very useful with names anyway......
+> 
+....
+
+I very much agree that fault tolerance in most other search 
+applications makes no sense, confuses the user and is inferior to a 
+well suited choice of applicable search criteria.
+Here however, the idea is to direct the user's attention towards an 
+information that he didn't think of beforehand but that is present in 
+the database and possibly gives him pleasure to find out.
+
+I don't know whether your personal interest is rather books or music 
+but just imagine that you can enter into the form any terms from an 
+artist or song name that you vastly remember - et voila, there it is!
+Find yet unknown songs by your favourite group, find covers of your 
+favourite songs.
+
+An example of what I have in mind can be found here:
+http://tinyurl.com/35g3yo
+
+My 1.5 million songs is very small a corpus compared to theirs but 
+the basic problems are still the same:
+
+A huge number of documents (individual songs) with two fields of 
+little content to each of them.
+
+The content's spelling is as unreliable or rather 'diverse' as any 
+user input.
+I've already folded the originally much, much bigger corpus down to 
+those songs where at least 2 instances for the spellings of artist 
+and song name exist and yet any more popular song may still be 
+present in dozens of different forms.
+
+Thus, without any fault tolerance, a 'sharp' search executed for any 
+popular song or artist will probably return the expected result, or 
+possibly even a misspelled input.
+But much rarer, I think it will return suggestions for the more 
+uncommon songs. And that is basically what this whole suggest thingy 
+aims at.
+Suggestions must be artists or songs, not just terms.
+
+Hopefully my discription was not too confuse, maybe I am.
+
+I will now first try to find the most effective way to expand the 
+prefixes and leave the 'fuzzy' aspect for e 2nd step.
+
+
+Thank you for your thoughts,
+Steffen
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

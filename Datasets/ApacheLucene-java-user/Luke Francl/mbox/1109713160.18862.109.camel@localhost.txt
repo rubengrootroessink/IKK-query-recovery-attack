@@ -1,0 +1,85 @@
+FROM: Luke Francl <luke.fra...@stellent.com>
+SUBJECT: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 1 Mar 2005
+
+Lucene Users,
+
+We have a requirement for a new version of our software that it run in a
+clustered environment. Any node should be able to go down but the
+application must keep functioning.
+
+Currently, we use Lucene on a single node but this won't meet our fail
+over requirements. If we can't find a solution, we'll have to stop using
+Lucene and switch to something else, like full text indexing inside the
+database.
+
+So I'm looking for best practices on distributing Lucene indexing and
+searching. I'd like to hear from those of you using Lucene in a
+multi-process environment what is working for you. I've done some
+research, and based on on what I've seen so far, here's a bit of
+brainstorming on what seems to be possible:
+
+1. Don't. Have a single indexing and searching node. [Note: this is the
+last resort.]
+
+2. Don't distribute indexing. Searching is distributed by storing the
+index on NFS. A single indexing node would process all requests.
+However, using Lucene on NFS is *not* recommended. See:
+http://lucenebook.com/search?query=nfs ...it can result in "stale NFS
+file handle" problem:
+http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg12481.html
+So we'd have to investigate this option. Indexing could use an JMS queue
+so if the box goes down, when it comes back up, indexing could resume
+where it left off.
+
+3. Distribute indexing and searching into separate indexes for each
+node. Combine results using ParallelMultiSearcher. If a box went down, a
+piece of the index would be unavailable. Also, there would be serious
+issues making sure assets are indexed in the right place to prevent
+duplicates, stale results, or deleted assets from showing up in the
+index. Another possibility would be a hashing scheme for
+indexing...assets could be put into buckets based on their
+IDs to prevent duplication. Keeping results consistent as you're
+changing the number of the buckets as the nodes come up and down would
+be a challenge though
+
+4. Distribute indexing and searching, but index everything at each node.
+Each node would have a complete copy of the index. Indexing would be
+slower. We could move to a 5 or 15 minute batch approach.
+
+5. Index centrally and push updated indexes to search nodes on a
+periodic basis. This would be easy and might avoid the problems with
+using NFS.
+
+6. Index locally and synchronize changes periodically. This is an
+interesting idea and bears looking into. Lucene can combine multiple
+indexes into a single one, which can be written out somewhere else, and
+then distributed back to the search nodes to replace their existing
+index.
+
+7. Create a JDBCDirectory implementation and let the database handle the
+clustering. A JDBCDirectory exists
+(http://ppinew.mnis.com/jdbcdirectory/), but has only been tested with
+MySQL. It would probably require modification (the code is under the
+LGPL). At one time, an OracleDirectory implementation existed but that
+was in 2000 and so it is surely badly outdated. But in principle, the
+concept is possible. However, these database-based directories are
+slower at indexing and searching than the traditional style, probably
+mostly due to BLOB handling.
+
+8. Can the Berkely DB-based DBDirectory help us? I am not sure what
+advantages it would bring over the traditional FSDirectory, but maybe
+someone else has some ideas.
+
+Please let me know if you've got any other ideas or a best practice to
+follow.
+
+Thanks,
+Luke Francl
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

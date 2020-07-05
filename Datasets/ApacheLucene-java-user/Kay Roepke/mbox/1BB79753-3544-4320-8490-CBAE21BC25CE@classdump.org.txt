@@ -1,0 +1,109 @@
+FROM: Kay Roepke <kroe...@classdump.org>
+SUBJECT: Re: java gc with a frequently changing index?
+DATE: 30 Jul 2007
+
+Hi Tim!
+
+On Jul 25, 2007, at 8:41 PM, Tim Sturge wrote:
+
+> I am indexing a set of constantly changing documents. The change  
+> rate is moderate (about 10 docs/sec over a 10M document collection  
+> with a 6G total size) but I want to be  right up to date (ideally  
+> within a second but within 5 seconds is acceptable) with the index.
+
+We have a change rate between 2-3 to 60 docs/sec over a bit smaller  
+index (but not too much smaller). We are actually reopening  
+IndexSearchers every five seconds or if the amount of index changes  
+exceeds a certain threshold (100 changes IIRC). The latter is to  
+guard against spikes in updates we like to see reflected earlier.  
+This is purely an implementation detail, though.
+
+> Right now I have code that adds new documents to the index and  
+> deletes old ones using updateDocument() in the 2.1 IndexWriter. In  
+> order to see the changes, I need to recreate the IndexReader/ 
+> IndexSearcher every second or so. I am not calling optimize() on  
+> the index in the writer, and the mergeFactor is 10.
+
+Is there a separation between the code that inserts/updates and the  
+one that searches? We have that distinction and it's been working  
+great. Might not possible for your application (I simply don't know  
+what your objectives are) but might be worth considering. In other  
+words we have separate VMs doing the updates and searches, so we can  
+set different heap sizes and GC strategies.
+
+> The problem I am facing is that java gc is terrible at collecting  
+> the IndexSearchers I am discarding. I usually have a 3msec query  
+> time, but I get gc pauses of 300msec to 3 sec (I assume is is  
+> collecting the "tenured" generation in these pauses, which is my  
+> old IndexSearcher)
+
+We used to have that, too, until we switched GC algorithms. It was  
+unbearable.
+
+> I've tried "-Xincgc", "-XX:+UseConcMarkSweepGC -XX:+UseParNewGC"  
+> and calling System.gc() right after I close the old index without  
+> much luck (I get the pauses down to 1sec, but get 3x as many. I  
+> want < 25 msec pauses). So my question is, should I be avoiding  
+> reloading my index in this way? Should I keep a separate  
+> IndexReader (which only deletes old documents) and one for new  
+> documents? Is there a standard technique for a quickly changing index?
+
+So, these are the settings we use for the search application (this is  
+Java 6, though, YMMV):
+-XX:+UseConcMarkSweepGC
+-XX:+CMSIncrementalMode
+-XX:+CMSIncrementalPacing
+-XX:CMSIncrementalDutyCycleMin=0
+-XX:CMSIncrementalDutyCycle=10
+
+You might have to tweak the generation sizes for your application.  
+That is rather tricky business, but
+-verbosegc
+-XX:+PrintGCDetails
+-XX:+PrintGCTimeStamps
+
+might help you to figure out what the correct sizes are. Those  
+settings should also tell you whether your tweaks are actually  
+working for you.
+Systems.gc() is just asking for trouble, really. I have yet to see a  
+situation where it really helped me. The best way is to figure out  
+the right settings for the GC itself, and then forget about it. It  
+actually took some experimenting and load-testing to find the right  
+mixture for us.
+
+GC pauses aren't user-noticable in our application (which is web- 
+based). Given our architecture we have a certain amount of latency  
+between a document change and the reflection of that in the index,  
+but it is not limited by GC. The machines are 64bit P4 Xeons with 4GB  
+RAM, so nothing out of the ordinary.
+Java 6 made a noticable difference for us, on the order of some 10%  
+performance increase, both in load average and response time.
+We have yet to encounter problems with it...
+
+The updating part of the application runs with a simple -XX: 
++UseParallelGC and its max heap size is much smaller.
+
+Also we are using a custom refcounted scheme for index searchers, so  
+that new requests always get the latest IndexSearcher opened. We  
+reopen searchers constantly, as I mentioned above. This pretty much  
+ensures that we meet our 5 second max delay time. I cannot say that  
+it actually takes that long to reopen, though we have made some  
+modifications to the Lucene core which should make it even slower to  
+reopen and write to disc. So I guess this is not your bottleneck,  
+either.
+
+HTH,
+-k
+-- 
+Kay Röpke
+http://classdump.org/
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

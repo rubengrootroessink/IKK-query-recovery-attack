@@ -1,0 +1,148 @@
+FROM: "Norton, James" <jnor...@yellowbrix.com>
+SUBJECT: RE: QueryParser Behavior and Token.setPositionIncrement
+DATE: 26 Apr 2004
+
+Thanks for the reply.  I had reached the same conclusion as you regarding the analyzer for
+queries (no multiple tokens per position), but I would still reqard the behaviour of 
+QueryParser as incorrect.
+
+-----Original Message-----
+From: Erik Hatcher [mailto:erik@ehatchersolutions.com]
+Sent: Monday, April 26, 2004 3:45 PM
+To: Lucene Users List
+Subject: Re: QueryParser Behavior and Token.setPositionIncrement
+
+
+QueryParser is a mixed blessing.  It has plenty of quirks.  As you've 
+proven to yourself, it ignores position increments and constructs a 
+PhraseQuery of all the tokens in order, regardless of position 
+increment.
+
+Another oddity is that PhraseQuery doesn't deal with position 
+increments either - each term added to it is considered in a successive 
+position.
+
+My best suggestion so far is to use a different analyzer for indexing 
+than you do for querying.  There is really no need to add multiple 
+tokens per position at query time anyway, if all the relevant ones were 
+added at indexing time.  So use something that emits a more 
+straight-forward incrementing position set of tokens during querying.
+
+	Erik
+
+
+On Apr 26, 2004, at 2:34 PM, Norton, James wrote:
+
+>> I am attempting to use Token.setPositionIncrement() to provide 
+>> alternate forms of tokens and I have encountered strange
+>> behavior with QueryParser.  It seems to be constructing phrase 
+>> queries with the alternate tokens.  I don't know why the
+>> query would be parsed as a phrase.
+>>
+>> For example, consider an Analyzer that adds lowercase tokens to the 
+>> token stream as alternate forms (position increment = 0).
+>> Parsing the query "Bush" (quotes added for emphasis and not part of 
+>> query) results in a query of text:"Bush bush" ("text" is
+>> the default field).  Whereas parsing the query "bush" results in the 
+>> query text:bush.  Notice the lack of quotes in the second
+>> case, which has no alternate form appended because the token is 
+>> already lowercase.  Is this a bug or is there some
+>> explanation of which I am not aware?
+>>
+>> The following two classes provide test code verifying this behaviour.
+>>
+>>
+>>
+>> /**
+>>  * A test analyzer employing a TestLowerCaseFilter to demonstrate 
+>> problems with
+>>  * QueryParser when dealing with multiple tokens at the same position.
+>>  */
+>> public class TestAnalyzer extends Analyzer {
+>> 	/**
+>> 	 * Constructs a {@link StandardTokenizer} filtered by a {@link
+>> 	 * StandardFilter} and a {@link TestLowerCaseFilter}.
+>> 	 */
+>> 	public final TokenStream tokenStream(String fieldName, Reader 
+>> reader) {
+>> 		TokenStream result = new StandardTokenizer(reader);
+>> 		result = new StandardFilter(result);
+>> 		result = new TestLowerCaseFilter(result, Locale.getDefault());
+>> 		return result;
+>> 	}
+>> 	
+>> 	public static void main(String[] args) {
+>> 		TestAnalyzer analyzer = new TestAnalyzer();
+>> 		try {
+>> 			Query lowerCaseQuery = QueryParser.parse("bush", "text", analyzer);
+>> 			Query upperCaseQuery = QueryParser.parse("Bush", "text", analyzer);
+>> 			
+>> 			System.out.println("lower case: " + lowerCaseQuery.toString());
+>> 			System.out.println("upper case: " + upperCaseQuery.toString());
+>> 		} catch (ParseException e) {
+>> 			// TODO Auto-generated catch block
+>> 			e.printStackTrace();
+>> 		}
+>> 		
+>> 	}
+>> }
+>>
+>> /**
+>>  *
+>>  * A {@link Filter} that adds alternate forms (lower case) for upper 
+>> case
+>>  * tokens to a {@link TokenStream}.
+>>  */
+>> public class TestLowerCaseFilter extends TokenFilter {
+>> 	private Locale locale;
+>> 	private Token alternateToken;
+>>
+>> 	public TestLowerCaseFilter(TokenStream stream, Locale locale) {
+>> 		super(stream);
+>> 		this.locale = locale;
+>> 		this.alternateToken = null;
+>> 	}
+>>
+>> 	/* (non-Javadoc)
+>> 	 * @see org.apache.lucene.analysis.TokenStream#next()
+>> 	 */
+>> 	public Token next() throws IOException {
+>> 	
+>> 		Token rval = null;
+>> 		if (alternateToken != null) {
+>> 			rval = alternateToken;
+>> 			alternateToken = null;
+>> 		} else {
+>> 			Token nextToken = input.next();
+>> 			if (nextToken == null) {
+>> 				return null;
+>> 			}
+>> 			String text = nextToken.termText();
+>> 			String lc = text.toLowerCase(locale);
+>> 			rval = nextToken;
+>> 			if (!lc.equals(text)) {
+>>
+>> 				alternateToken =
+>> 					new Token(
+>> 						lc,
+>> 						nextToken.startOffset(),
+>> 						nextToken.endOffset());
+>> 				alternateToken.setPositionIncrement(0);
+>> 			}
+>> 		}
+>> 		return rval;
+>> 	}
+>>
+>> }
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

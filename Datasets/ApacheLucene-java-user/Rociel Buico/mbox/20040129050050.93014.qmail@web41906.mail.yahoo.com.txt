@@ -1,0 +1,106 @@
+FROM: Rociel Buico <buics...@yahoo.com>
+SUBJECT: Re: The case of the disappearing index files
+DATE: 29 Jan 2004
+
+i also had an experience on this, what i did is i wrap my 
+searcher into a singleton object, and check if it is being used 
+by another thread, then i let the thread caller to put on wait state, 
+until the other thread finish using the searcher.
+ 
+maybe it can help
+ 
+buics
+
+
+Scott Smith <SSmith@MainstreamData.com> wrote:
+We have started using lucene as the indexer for messages on our website. We
+are seeing a problem where some index files seem to disappear (we've seen
+the segment file vanish as well as some others).
+
+My first thought after looking though some archives is that maybe we are
+getting the "too many open files" problem and this means that a file might
+get deleted in preparation for being rewritten, but it can't be rewritten
+because there are no file handles (this is on a Windows XP box). Since the
+indexer is pretty staight forward in that it opens an IndexWriter, adds new
+messages received in the last minute and then closes the IndexWriter, I'm
+pretty sure it's ok. Besides, we didn't see this problem until we started
+doing lots of searches.
+
+I'm feeling less comfortable with the search code. Here are a couple of
+snippets. The first was a transliteration of some code that I saw in a Doug
+C. posting (it was in v1.2 form and I needed it in v1.3)
+
+private Searcher m_Searcher = null;
+private long m_LastModified;
+private void getSearcher()
+throws IOException
+{
+// has the index been modified since last we looked?
+long newModified =
+IndexReader.getCurrentVersion(m_IndexDirectory);
+if (m_LastModified != newModified)
+{
+// Get a new searcher and orphan the old one w/o
+closing
+m_Searcher = new IndexSearcher(m_IndexDirectory);
+m_LastModified = newModified; }
+}
+
+Here's a somewhat simplified version (I search more fields) of the search
+code that calls it.
+
+public synchronized Hits SimpleSearch(String a_SearchString)
+throws IOException, ParseException
+{
+Query q = QueryParser.parse(a_SearchString, "Body",
+m_Analyzer);
+
+try
+{
+getSearcher();
+}
+catch (IOException e)
+{
+// if we can't generate searcher, then claim
+// nothing is there
+m_lggr.error(e.getMessage());
+return null;
+}
+
+Hits hits = m_Searcher.search(q);
+
+return hits;
+}
+
+The caller then can walk through the hits list to get the messages.
+
+Originally, I would close the searcher after I got the hits, but I found
+that you couldn't access the documents in the Hits structure once the
+IndexSearcher was closed (Looking at the source, it looks like the Hits list
+doesn't actually have the documents in it, but simply has references to them
+which it uses the Searcher object to get at). So, I now never close the
+Searcher (though I'll create a new one if the index has been modified since
+the last time I looked).
+
+One other thing, I know the web guy using this is creating a new object
+everytime he does a search (which I will talk to him about since I think
+that's the wrong thing based on what I've read). Is that my only problem?
+Do I really want to wait until garbage collection deletes the old Searchers
+for the files it has opened to get closed?
+
+Does anyone see anything wrong with the above code or anything I should do
+to optimize it? Suggestions anyone?
+
+Scott
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+"We shape clay into a pot but it is the emptyness inside that holds whatever we want." Lao
+Tzu
+
+---------------------------------
+Do you Yahoo!?
+Yahoo! SiteBuilder - Free web site building tool. Try it!

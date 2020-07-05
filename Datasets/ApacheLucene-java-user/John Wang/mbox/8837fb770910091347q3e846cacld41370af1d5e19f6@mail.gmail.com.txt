@@ -1,0 +1,164 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: Realtime & distributed
+DATE: 9 Oct 2009
+
+I can provide some preliminary numbers (we will need to do some detailed
+analysis and post it somewhere):
+
+Dataset: medline
+starting index: empty.
+add only, no update, for 30 min.
+maximum indexing load, 1000 docs/ sec
+
+Under stress, we take indexing events (add only) and stream into both
+systems: Zoie and NRT consumer.
+
+First dimension to track: realtime-ness:
+
+making document available to searcher as readily as possible, so for each
+batch stream we are getting, we call IndexWriter.commit for NRT:
+
+We found the indexing speed for NRT is slow, e.g. in 30 min, zoie indexed
+1.4 million docs, where as NRT indexed only 200k. This is actually expected,
+because zoie is batching in memory to the disk index, the actual index is
+into the small memory index. Where as NRT is always adding to the target
+disk index.
+
+We added batching to NRT, e.g. only call indexWriter.commit when the number
+of requests = 1000. This made the indexing speed with NRT more comparable.
+However, at this point, zoie remained to be realtime, and NRT is not.
+
+IMHO, lucene NRT provides a good way to do stream/batch indexing without
+having to make cumbersome calls to track IndexReader/Writer instances.
+Furthermore, one of biggest benefit of Lucene NRT, 2.9 is the segment level
+search. This is a major refactor that provided major benefits to lucene, and
+it really shows off the incremental update feature for lucene.
+
+The question of "how realtime", can lead to a very academic discussion :)
+
+because under stress and heavy load, batching is fine, because load is
+pushing the docs to be indexed, so the delay is small. It is one of those
+semi-heavy load, docs are being batch until the queue size is "ripe" before
+added to document, but when the load is lighter, the impact on indexing
+performance becomes less significant.
+
+To be truly realtime, IMHO, you need some sort of memory helper to handle
+transient indexing requests. Doing that is where the actual challenge is.
+
+-John
+
+On Fri, Oct 9, 2009 at 1:06 PM, Jason Rutherglen <jason.rutherglen@gmail.com
+> wrote:
+
+> The dimensions sound good.  It's unclear if you're going to post a
+> chart again, numbers, or code?  There's a LUCENE-1577 Jira issue for
+> code.
+>
+> On Fri, Oct 9, 2009 at 12:37 PM, Jake Mannix <jake.mannix@gmail.com>
+> wrote:
+> > Jason,
+> >
+> >  We've been running some perf/load/stress tests lately, but on a
+> suggestion
+> >
+> > from Ted Dunning, I've been trying to come up with a more "realistic" set
+> of
+> > stress
+> > tests and indexing rates to see where NRT performs well and where it does
+> > not,
+> > instead of just indexing at maximum rate, looping over all docs in the
+> test
+> > set
+> > and then doing them again and again.
+> >
+> >  Once we've got a good test set, which hits on the variety of dimensions:
+> > indexing
+> > rate, document size, query rate while indexing, and delay-to-visibility
+> of
+> > indexed docs,
+> > we'll certainly post that, as John did for the zoie tests on the zoie
+> wiki.
+> >
+> >  -jake
+> >
+> > On Fri, Oct 9, 2009 at 12:29 PM, Jason Rutherglen <
+> > jason.rutherglen@gmail.com> wrote:
+> >
+> >> Jake and John,
+> >>
+> >> It would be interesting and enlightening to see NRT performance
+> >> numbers in a variety of configurations. The best way to go about
+> >> this is to post benchmarks that others may run in their
+> >> environment which can then be tweaked for their unique edge
+> >> cases. I wish I had more time to work on it.
+> >>
+> >> -J
+> >>
+> >> On Thu, Oct 8, 2009 at 8:18 PM, Jake Mannix <jake.mannix@gmail.com>
+> wrote:
+> >> > Jason,
+> >> >
+> >> > On Thu, Oct 8, 2009 at 7:56 PM, Jason Rutherglen <
+> >> jason.rutherglen@gmail.com
+> >> >> wrote:
+> >> >
+> >> >> Today near realtime search (with or without SSDs) comes at a
+> >> >> price, that is reduced indexing speed due to continued in RAM
+> >> >> merging. People typically hack something together where indexes
+> >> >> are held in a RAMDir until being flushed to disk. The problem
+> >> >> with this is, merging in the background becomes really tricky
+> >> >> unless it's performed inside of IndexWriter (see LUCENE-1313 and
+> >> >> IW.getReader). There is the Zoie system which uses the RAMDir
+> >> >> solution, however it's implemented using a customized deleted
+> >> >> doc set based on a bloomfilter backed by an inefficient RB tree
+> >> >> which slows down queries. There's always a trade off when trying
+> >> >> to build an NRT system, currently.
+> >> >>
+> >> >
+> >> >  I'm not sure what numbers you are using to justify saying that zoie
+> >> > "slows down queries" - latency at LinkedIn using zoie has a typical
+> >> > median response time of 4-8ms at the searcher node level (slower
+> >> > at the broker due to a lot of custom stuff that happens before
+> >> > queries are actually sent to the nodex), while dealing with sustained
+> >> > rapid indexing throughput, all with basically zero time between
+> indexing
+> >> > event to index visibility (ie. true real-time, not "near real time",
+> >> unless
+> >> > indexing events are coming in *very* fast).
+> >> >
+> >> >  You say there's a tradeoff, but as you should remember from your
+> >> > time at LinkedIn, we do distributed realtime faceted search while
+> >> > maintaining extremely low latency and still indexing sometimes more
+> >> > than a thousand new docs a minute per node (I should dredge up
+> >> > some new numbers to verify what that is exactly these days).
+> >> >
+> >> >
+> >> > Deletes can pile up in segments so the
+> >> >> BalancedSegmentMergePolicy could be used to remove those faster
+> >> >> than LogMergePolicy, however I haven't tested it, and it may be
+> >> >> trying to not do large segment merges altogether which IMO
+> >> >> is less than ideal because query performance soon degrades
+> >> >> (similar to an unoptimized index).
+> >> >>
+> >> >
+> >> > Not optimizing all the way has shown in our case to actually be
+> >> > *better* than the "optimal" case of a 1-segment index, at least in
+> >> > the case of realtime indexing at rapid update pace.
+> >> >
+> >> >
+> >> >  -jake
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

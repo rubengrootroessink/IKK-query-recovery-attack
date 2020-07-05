@@ -1,0 +1,74 @@
+FROM: "Eger, Patrick" <pe...@automotive.com>
+SUBJECT: Binary indexing / query efficiency
+DATE: 14 Apr 2009
+
+Hi, was recently looking to incorporate Lucene for a simple
+"parametric"/"faceted" type search.  The documents are very small,
+roughly 15 fields of short length (5-15 characters, generally strings
+and padded integers). When profiling query performance of our
+application, which inserts 1 million documents then
+ 1) filters on 1-3 fields with simple boolean/term matches
+ 2) stores these docids in a BitSet
+ 3) calls IndexSearcher.doc() to retrieve all matching documents (all
+fields, 100 - 1,000,000 results per call)
+
+It turns out that 98% of the query time was spent not actually doing the
+query, but within the IndexSearcher.doc() call.
+
+My first question is, is there any way to more efficiently get
+(all/most) of the fields for a set of documents, other than iterating
+and calling doc()?
+
+Additionally, is there any way (or planned feature) to index *binary*
+data? Using a profiler, I have determined that String decoding is a
+significant performance limiter for my use-case:
+
+90% of the application time is spent in this method:
+---------------------------------------
+org.apache.lucene.index.FieldsReader.addField(Document, FieldInfo,
+boolean, boolean, boolean)
+
+
+46% of the application time is spent decoding strings (half of the above
+addField() time):
+---------------------------------------org.apache.lucene.store.IndexInpu
+t.readString()
+	java.lang.String.<init>(byte[], int, int, String)
+		java.lang.StringCoding.decode(String, byte[], int, int)
+	
+java.lang.StringCoding$StringDecoder.decode(byte[], int, int)
+
+(YJP profiler output available if needed)
+
+String.intern() was my top hot spot, but my patch was accepted and fixed
+this: https://issues.apache.org/jira/browse/LUCENE-1600. I'm not
+familiar enough with the lucene codebase to figure out the above though,
+so thought I would ask.
+
+
+
+//ideally i'd be able to do add a binary field as such:
+doc.add(new Field("f1",new
+byte[]{1,2,3,4},Field.Store.YES,Field.Index.NOT_ANALYZED_NO_NORMS));
+
+//then query like:
+Query q = new TermQuery(new Term("f1",byte[]{1,2,3,4}))
+searcher.search(q,...);
+
+Which would allow me to avoid the Integer -> String -> Padded String ->
+String -> Integer coding/decoding to index an integer, and avoid Object
+-> String -> Object conversion (which per above is quite expensive). 
+
+
+Thanks for any help!
+
+
+Regards, 
+
+Patrick
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

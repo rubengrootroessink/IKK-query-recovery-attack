@@ -1,0 +1,224 @@
+FROM: Jie Yang <jyang_w...@yahoo.co.uk>
+SUBJECT: Re: Two possible solutions on Parallel Searching
+DATE: 13 Nov 2003
+
+In this case, probably using a single RAMDirectory
+would allow me to run parallel searching without worry
+about disk access. Well, anyone tried to have a
+RAMDirectory of 5G in size?
+
+ --- Otis Gospodnetic <otis_gospodnetic@yahoo.com>
+wrote: > Multiple threads against the same index or
+multiple
+> indices - no
+> advantage - think about the mechanical parts
+> involved (disk head).
+> 
+> Multiple threads against indices on different disks
+> (not just
+> paritions!) - yes, that would be faster.
+> 
+> Reading the index from the disk is the bottleneck,
+> not the CPU.
+> So if you split the index over multiple disks and
+> access them in
+> parallel, you have a good solution.
+> 
+> When you hit the CPU limit, then you spread this
+> over multiple search
+> servers then you again hit in parallel.
+> 
+> If each of them has multiple disks, you can search
+> them in parallel.
+> 
+> And so on.... :)
+> 
+> Otis
+> 
+> 
+> --- Jie Yang <jyang_work@yahoo.co.uk> wrote:
+> >  --- Doug Cutting <cutting@lucene.com> wrote: >
+> First,
+> > note that the approaches you describe will
+> > > only improve 
+> > > performance if you have multiple CPUs and/or
+> > > multiple disks holding the 
+> > > indexes.
+> > > 
+> > > Second, MultiSearcher is currently implemented
+> to
+> > > search indexes 
+> > > serially, not each in a separate thread.  To
+> > > implement multi-threaded 
+> > > searching one could subclass MultiSearcher with,
+> > > e.g., ParallelSearcher, 
+> > > and override the search() methods with
+> > > multi-threaded implemenations. 
+> > > This would be a great contribution if someone is
+> > > interested!
+> > 
+> > That's the solution I have in mind, since I do not
+> > have multiple machines avaiable to me. Would
+> > multi-threads on a single disk produces any
+> > performance advantage? since i don't see CPU is
+> > utilised 100% normally. In this case, does the
+> > bottleneck happens on the mutli-thread concurrent
+> > process sharing or on the single disk read? if its
+> the
+> > latter, probably, I can get away by putting
+> multiple
+> > indexes on seperate hard disks, but still runs on
+> > single CPU. 
+> > 
+> > Are you going to have a try on building a
+> > multi-threaded MultiSearcher? if so, what's the
+> > timescale you have in mind? I may have to look
+> into
+> > myself if I don't find out any better solutions on
+> my
+> > 500+ terms search problems.   
+> > 
+> > > 
+> > > The parallel approach I prefer is to maintain a
+> set
+> > > of indexes, each on 
+> > > a separate machine, then use something like a
+> > > ParallelSearcher of 
+> > > RemoteSearchables to search them all.
+> > > 
+> > > Doug
+> > > 
+> > > Jie Yang wrote:
+> > > > I had a thought on my earlier post on "Poor
+> > > > Performance when searching for 500+ terms". 
+> > > > 
+> > > > The problem is on how to improve the
+> performance
+> > > when
+> > > > searching for 500+ OR search terms. i.e. enter
+> a
+> > > > search string of :
+> > > > 
+> > > > W1 OR W2 OR W3 OR ...... OR w500.
+> > > > 
+> > > > I thought I could rewrite the MultiSearcher
+> class
+> > > so
+> > > > that it can initiate multiple parallel
+> > > IndexSearchers
+> > > > to perform the search.
+> > > > 
+> > > > Solution 1 would be divide the query string of
+> > > "500 OR
+> > > > conditions terms" into 25 "20 OR conditions
+> > > terms",
+> > > > and then pass them to MultiSearcher,
+> MultiSearcher
+> > > > then initiate 25 threads to search on a single
+> > > index
+> > > > directory.
+> > > > 
+> > > > Solution 2 would be when building an index of
+> 1
+> > > > million docs, instead of building one single
+> index
+> > > > containing 1 million docs,
+> > > > build 10 index directory eaching containing
+> 100K
+> > > > records. then I pass a single query string of
+> "500
+> > > OR
+> > > > conditions terms" to
+> > > > MultiSearcher, MultiSearcher then initiate 10
+> > > threads
+> > > > to search for 10 different index directories. 
+> > > > 
+> > > > Has anyone tried something similar, which
+> solution
+> > > > would be a better one. Also is using multiple
+> > > threads
+> > > > on a single directory a good ideal? Are there
+> any
+> > > > bottlenecks for threads acessing resources, or
+> > > > I better pass requests into different
+> processes. 
+> > > > 
+> > > > Thanks a lot
+> > > > 
+> > > > 
+> > > > 
+> > > > 
+> > > >  --- Jie Yang <jyang_work@yahoo.co.uk> wrote:
+> >
+> > > Thanks
+> > > > Julian
+> > > > 
+> > > >>I am not using RAMDirectory due to the large
+> size
+> > > of
+> > > >>index file. the index generated on hard disc
+> is
+> > > >>1.57G
+> > > >>for 1 million documents, each document has
+> average
+> > > >>500
+> > > >>terms. I am using Field.UnStored(fieldName,
+> > > terms),
+> > > >>so
+> > > >>i beliece I am not storing the documents, just
+> the
+> > > >>index. (is that right?) is there anyway to
+> reduce
+> > > >>the
+> > > >>index size created? also What is the maximum
+> size
+> > > of
+> > > >>data can be stored in RAMDirectory? I suppose
+> I
+> > > >>could
+> > > >>get a 10G RAM solaris box, but would that be
+> > > >>advisable
+> > > >>say storing 2-3G of index data in memory?
+> Also,
+> > > what
+> > > >>is the performance boost factor when
+> RAMDirectory
+> > > >>comparing to FSDirectory. Are we taling about
+> >
+> > > 100%
+> > > >>here?
+> > > >>
+> > > >>On your 2nd and 3rd suggestion, I probably run
+> the
+> > > >>latest code that includes the fix by Dmitry
+> > > >>Serebrennikov, the build was checked out from
+> CVS
+> > > >>yesterday. and I used a QueryParser similar to
+> the
+> > > >>one
+> > > >>used in the demo code.
+> > > >>
+> > > >>Again, I still feel a bit curious and want to
+> find
+> > > >>out
+> > > >>does lucene do (or in the future) pre-filter
+> on
+> > > "AND
+> > > >>join conditions". For example, A AND (B OR C
+> OR
+> > > D).
+> > > >>if
+> > > >>A finds 100 docs out of 1 million, can lucene
+> > > >>restrict
+> 
+=== message truncated === 
+
+________________________________________________________________________
+Want to chat instantly with your online friends?  Get the FREE Yahoo!
+Messenger http://mail.messenger.yahoo.co.uk
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

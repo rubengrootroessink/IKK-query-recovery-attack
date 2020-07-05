@@ -1,0 +1,205 @@
+FROM: "Andreas Guther" <andreas.gut...@gmail.com>
+SUBJECT: Re: How to filter fields with hits from result set
+DATE: 26 May 2007
+
+Erick,
+
+I think I found an inexpensive solution for the problem (I still need to
+make performance tests against our production copy but so far so good):
+
+I am using the rewritten Query, extract all terms, collect the search words
+and then search in the field for a match against the extracted words until I
+find a match.  Since I only need to find one match and then can stop the
+string.contains() calls, and because we are limiting the number of listed
+pages, this seems to be an acceptable and easy to implement approach.
+
+What makes it really easy is the fact that the set of terms provided by the
+rewritten Query contains all possilbe variations for wild card and fuzzy
+searches.
+
+Thanks again for your input. I am deeply impressed by the number of answers
+you provide to this forum.
+
+Andreas
+
+On 5/24/07, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> Well, my data may not be too helpful. But some of the books I'm
+> counting hits for are a thousand-plus pages. We haven't had
+> performance issues, but that's only saying "no customer has
+> complained yet".
+>
+> The old solution we used did something similar to what you're
+> talking about, basically streaming the highlighted text back
+> and counting the highlight tags (non-lucene). This is much faster.
+> That said, it's apples and oranges since they are two different
+> search engines.
+>
+> One other possibility worth mentioning is MemoryIndex, which is
+> designed for rapid, in-memory manipulation of a single document. It
+> *might* work faster than what you're trying to do.
+>
+> The non-trivial part is turning your ad-hoc query into a SpanQuery.
+> I'm not able to post that much of our company's code, so you're
+> on your own. But search the mail archive for a long exchange
+> between Mark Miller and a bunch of others under the unlikely
+> subject "multiword highlighting" for Marks cut at the code and
+> other helpful comments.....
+>
+> I can't really give you performance numbers since we didn't
+> collect them. It's "fast enough" that the customers aren't
+> complaining, and the servers aren't breathing hard, so we didn't
+> pursue it.
+>
+> Good luck!
+> Erick
+>
+> On 5/24/07, Andreas Guther <Andreas.Guther@markettools.com> wrote:
+> >
+> > Eric,
+> >
+> > I was pursuing a different direction yesterday which is not fast enough.
+> > Basically I was using the highlighter to figure out if a page has a hit
+> > or not.  But that is too expensive.  I end up with 15 ms per page and
+> > that sums up.
+> >
+> > I have to allow ad-hoc queries, so it sounds like the solution will not
+> > be trivial from what I understand from your reply.
+> >
+> > Just one question before I start using the SpanQuery approach:  Do you
+> > have anything you can say about performance regarding your solution?
+> > How many pages per document in average you have to deal with? How
+> > performant or expensive is the approach?
+> >
+> > As usual, many thanks in advance for your input.
+> >
+> > Andreas
+> >
+> >
+> >
+> > -----Original Message-----
+> > From: Erick Erickson [mailto:erickerickson@gmail.com]
+> > Sent: Wednesday, May 23, 2007 2:05 PM
+> > To: java-user@lucene.apache.org
+> > Subject: Re: How to filter fields with hits from result set
+> >
+> > Two things to watch...
+> >
+> > 1> Think about indexing the special page-end token with an
+> > increment gap of 0 (see SynonymAnalyzer in Lucene In
+> > Action). That preserves the sense of phrases across
+> > page breaks.
+> >
+> > 2> Assembling the span query is tricky. Search the mail archive
+> > for SpanQuery to see an exchange I had with the originator of
+> > this concept. Suffice it to say that converting an ad-hoc query
+> > into a set of SpanQueries is not trivial, but it certainly is do-able.
+> > But you'd have a much easier time of it if you were able to
+> > control the queries and dis-allow ad-hoc queries. It all depends
+> > upon the requirements of the application. Any time you can
+> > avoid supporting arbitrary boolean logic for the user input, your
+> > job is easier <G>....
+> >
+> > But you should be able to run up a demo with simple queries that
+> > you control to prove out the methodology in any case.....
+> >
+> > Best
+> > Erick
+> >
+> >
+> > On 5/23/07, Andreas Guther <Andreas.Guther@markettools.com> wrote:
+> > >
+> > > Eric,
+> > >
+> > > Thank you very much for your response.  That sounds very interesting.
+> > > Let me do some experimenting to see if I fully understood your
+> > solution.
+> > > Otherwise I have to come back to you with more questions.
+> > >
+> > > Andreas
+> > >
+> > >
+> > >
+> > >
+> > > -----Original Message-----
+> > > From: Erick Erickson [mailto:erickerickson@gmail.com]
+> > > Sent: Wednesday, May 23, 2007 12:00 PM
+> > > To: java-user@lucene.apache.org
+> > > Subject: Re: How to filter fields with hits from result set
+> > >
+> > > As luck would have it, I've done something very similar. What I had
+> > > to do is index a special token at the end of each page. Then I could
+> > > get the term offsets for each page....
+> > >
+> > > Then I used one of the SpanQuery.getSpans to get all of the
+> > > offsets of the hits throughout all of the pages.
+> > >
+> > > now I have a list of all the offsets of the *last* term on each
+> > > page and a list of the offsets of the hits. From these two
+> > > lists I can know which pages have hits.
+> > >
+> > >
+> > > Best
+> > > Erick
+> > >
+> > > On 5/23/07, Andreas Guther <Andreas.Guther@markettools.com> wrote:
+> > > >
+> > > > Hi,
+> > > >
+> > > > If a search returns a document that has multiple fields with the
+> > same
+> > > > name, is there a way to filter only those fields that contain hits?
+> > > >
+> > > >
+> > > > Background:
+> > > >
+> > > > I am indexing documents and we store all content in our index for
+> > > > display reasons.  We want to show only those pages containing hits.
+> > > My
+> > > > first implementation was saving each page in a Lucene document.  For
+> > > > performance reasons why are now looking into indexing the complete
+> > > > indexed document as a single Lucene document.
+> > > >
+> > > > Every page is added to a field in the Lucene document named
+> > > > page-content.  That means I am ending with as many fields named
+> > > > page-content as the document has pages.
+> > > >
+> > > > My search now returns me a single Lucene document in contrary to my
+> > > > first approach with page per Lucene document.  My problem right now
+> > > is:
+> > > > how can I limit the returned page-contents fields for pages to those
+> > > > field entries that contain hits.  If I have hits on pages five pages
+> > > > from a document with 10 pages I would like to have only the pages
+> > with
+> > > > the hits, not all.
+> > > >
+> > > > Is there anything in Lucene that limits the returned fields to
+> > fields
+> > > > with hits only?
+> > > >
+> > > > Thanks in advance,
+> > > >
+> > > > Andreas
+> > > >
+> > > >
+> > > >
+> > > >
+> > ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> > > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+

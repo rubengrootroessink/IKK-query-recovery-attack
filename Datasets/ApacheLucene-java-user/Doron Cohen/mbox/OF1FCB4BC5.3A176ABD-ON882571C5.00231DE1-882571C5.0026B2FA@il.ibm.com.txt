@@ -1,0 +1,98 @@
+FROM: Doron Cohen <DOR...@il.ibm.com>
+SUBJECT: Re: Poor performance "race condition" in FieldSortedHitQueue
+DATE: 9 Aug 2006
+
+Hi Otis,
+
+I think that synchronizing the entire method would be an overkill - instead
+it would be sufficient to synchronize on a "by field" object so that only
+if two requests for the same "cold/missing" field are racing, one of them
+would wait for the other to complete loading that field.  I think there is
+no need to that a lookup() for field2 would wait while a different field1
+is being loaded.  I am not sure if IO wise it makes sense to serialize the
+loading of two different fields (i.e. the case that both field1 and field2
+are not in the readerCache), I would prefer not to.
+One fast way to do this, for testing performance impact in Oliver's test
+case, would be to sync on the interned field name. as follows:
+
+  public StringIndex getStringIndex (IndexReader reader, String field)
+  throws IOException {
+    field = field.intern();
+    synchronize(field) {  // < ----------- line added
+      Object ret = lookup (reader, field, STRING_INDEX, null);
+      if (ret == null) {
+         final int[] retArray = new int[reader.maxDoc()];
+         ... load field to cache ...
+      }
+
+This way only requests for (loading) the same field would wait. But for the
+working code, it wouls be better to maintain a by-field (and by-reader)
+object to avoid messing up with a system wide string - who knows who else
+is synchronizing on it...
+
+Hope this makes sense,
+Doron
+
+Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote on 08/08/2006 21:07:41:
+
+> Hi Oliver,
+>
+> I think Yonik simply misunderstood you in that earlier email.
+> Have you tried modifying that FieldSortedHitQueue class and making
+> the appropriate method(s) synchronized?
+> It sounds like that would fix the issue. If it does, please let us know.
+>
+> Otis
+>
+> ----- Original Message ----
+> From: hutchiko@gmail.com
+> To: java-user@lucene.apache.org
+> Sent: Tuesday, August 8, 2006 2:05:36 AM
+> Subject: Poor performance "race condition" in FieldSortedHitQueue
+>
+> Hey all, just want to run an issue that I've recently identified while
+> looking at some performance issues we are having with our larger
+> indexes past you all.
+>
+> Basically what we are seeing is that when there are a number of
+> concurrent searches being executed over a new IndexSearcher, the quite
+> expensive ScoreDocComparator generation that is done in the
+> FieldSortedHitQueue#getCachedComparator method ends up executing
+> multiple times rather the ideal case of once. This issue does not
+> effect the correctness of the searches only performance.
+>
+> For my relatively weak understanding of the code the core of this
+> issue appears to lie with the FieldCacheImpl#getStringIndex method
+> which allows multiple concurrent requests to each generate their own
+> StringIndex rather than allowing the first request to do the
+> generation and then blocking subsequent requests until the first
+> request has finished.
+>
+> Is this a know problem? Should I raise this as an issue or is this
+> "expected" behaviour. A solution would naturally require more
+> synchronization than is currently used but nothing particularly
+> complex.
+>
+> Thanks,
+>
+> Oliver
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

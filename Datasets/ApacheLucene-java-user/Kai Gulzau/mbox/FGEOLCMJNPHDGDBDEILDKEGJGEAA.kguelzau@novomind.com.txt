@@ -1,0 +1,139 @@
+FROM: "Kai Gulzau" <kguel...@novomind.com>
+SUBJECT: RE: only getting Hits with score >= threshold
+DATE: 17 May 2005
+
+> -----Original Message-----
+> From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> 
+> You could use HitCollector for this:
+> http://lucene.apache.org/java/docs/api/org/apache/lucene/search/HitCollector.html
+> 
+
+After playing around i'm a bit stuck :-\
+
+I use lucene as client server application with the help of
+RemoteSearchable and MultiSearcher.
+
+
+My first approach was to use a wrapper on client side for Hits which only
+delivers Hits with a "good" score.
+
++ easy to implemt
++ works on normalized scores
+- poor performance
+
+Testquery was:
+  (NAME:peter AUTHOR:peter^0.9 NAME_AUTHOR:peter^0.6 SUBTITLE:peter^0.2)
+  LANG_PRIO:100^0.0010
+
+Due to "LANG_PRIO:100^0.0010" lucene got ~200.000 Hits (~85% of the documents
+have LANG_PRIO=100).
+
+
+In the wrapper class i determine the real length() of Hits (without the docs
+beneath myThresh with a kind of quicksort(?))
+
+  private int getLength(int nFrom, int nTo) {
+    int nHalf = (nFrom+(nTo-nFrom)/2);
+    if (nFrom == nTo) return nFrom;
+    if (score(nHalf)*100 < myThresh) {
+      return getLength(nFrom, nHalf);
+    }
+    return getLength(nHalf+1, nTo);
+  }
+
+
+On server side this results to 2 IndexSearcher Calls:
+
+  search(org.apache.lucene.search.BooleanQuery$BooleanWeight2@4a6cbf, null, 100)
+  search: 391ms
+  search(org.apache.lucene.search.BooleanQuery$BooleanWeight2@2c1e6b, null, 220420)
+  search: 813ms
+
+
+I think "getMoreDocs(int min)" doesn't work well with my queries, because it
+prefetches to many TopDocs:
+
+  int n = min * 2;  // double # retrieved
+
+Additionally "getMoreDocs()" does score all docs on every call. So some work
+is done which has already done in the first call.
+It's a bit tricky to know how many docs are needed in advance :-\
+
+
+
+Second try was to use a ThresholdHitCollector.
+
+When calling
+
+  searcher.search(query, filter, new ThresholdHitCollector(...));
+
+i got the following exception:
+
+java.io.NotSerializableException: org.apache.lucene.search.MultiSearcher$1
+java.rmi.MarshalException: error marshalling arguments; nested exception is: 
+	java.io.NotSerializableException: org.apache.lucene.search.MultiSearcher$1
+	at sun.rmi.server.UnicastRef.invoke(Unknown Source)
+	at org.apache.lucene.search.RemoteSearchable_Stub.search(Unknown Source)
+	at org.apache.lucene.search.MultiSearcher.search(MultiSearcher.java:245)
+	at org.apache.lucene.search.Searcher.search(Searcher.java:110)
+      ...
+
+
+
+My current approach is to call
+
+     searcher.search(query, filter);
+
+on client side and subclassing IndexSearcher on server side.
+The class MyIndexSearcher uses the ThresholdHitCollector:
+
+  public TopDocs search(Weight weight, Filter filter, final int nDocs)
+   throws IOException {
+    // nDocs is ignored. return all TopDocs instead
+    Scorer scorer = weight.scorer(getIndexReader());
+    if (scorer == null) return new TopDocs(0, new ScoreDoc[0]);
+
+    ThresholdHitCollector hc = new ThresholdHitCollector();
+    hc.setScoreThreshold(0.0025f);
+    hc.setFilter(filter);
+
+    scorer.score(hc);
+
+    return new TopDocs(hc.getTotalHits(), hc.getScoreDocs());
+  }
+
+
+  search(org.apache.lucene.search.BooleanQuery$BooleanWeight2@1d3c6fd, null, 50)
+  search: 234ms
+
+
+Unfortunately this solution has 2 disadvantages:
+
+- threshold works on raw scores
+- lucene has to be patched (access privileges, making Hits an Interface, ...)
++ but: good performance (for me)
+
+
+
+1.)
+Is it possible to get normalized scores in HitCollector?
+(e.g. via custom Similarity?)
+
+2.)
+Is it a good idea to patch Lucene for subclassing?
+
+
+
+Oh oh, i hope somebody does understand my weird mail ;)
+
+
+Thanks,
+
+	Kai Gulzau
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

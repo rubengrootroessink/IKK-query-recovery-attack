@@ -1,0 +1,98 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Use a date field for ranking
+DATE: 11 Jan 2005
+
+: > : have to use something that boosts the scores at _search_ time.
+
+: Yes, I know I can boost Query objects, but that is not the same as
+: boosting the document score by a factor. By boosting query objects I
+: _add_ values to the score. Let me show you an example:
+
+well, sure it is ... you have to have some way (add search time) to
+indicate that you want to want documents that meet a certain critera to
+have their scores affected in a certain way -- that's exactly what a Query
+is.  there may not be an existing Query subclass that meets you needs
+exactly, but if you want the scores of documents to be influnced
+conditionally at search time, a Query object is the way to indicate that.
+
+: If I had used a boost of 3.0 per document and left the date part of the
+: query out I would have:
+:
+: Query 1: 0.3
+: Query 2: 0.03
+:
+: Which maintains the original proportion. Now if I want to specify a
+: function (like 1/x) that calculates the boost factor of a specific
+: publish date I can't emulate this by using Query boosts because the
+: query boost must be adjusted to the first part of the query to achieve
+: an equal distribution for any query.
+
+Based on a recent thread about scores, I *think* you are making an
+incorrect assumption about the relative scores of documents...
+
+http://mail-archives.apache.org/eyebrowse/SearchList?listName=lucene-user%40jakarta.apache.org&searchText=%22A+question+about+scoring+function+in+Lucene%22&defaultField=subject
+
+...but I'll be totally honest, I'm not sure exactly what your point is.
+you're talking about comparing the final scores of too different queries,
+but I'm not sure if you mean the score of a specific document against two
+different queries, or the score of two documents against a single query in
+which one document is more relevant to the term you search for.
+
+: date but don't contain the first part of the query. So we might use a
+: query like this:
+:
+: (a word) AND (date:20050108^3 OR date:20050107^1)
+:
+: But now I have to specify _all_ possible dates in the date part to reach
+: all documents the index contains. This smells ;) Because it's all only
+: an emulation of the real strategy.
+
+well, this is why i proposed finding a feasible "granularity" and
+"age" that you were comfortable with to use in picking your boosts.  If
+you must have at least single day granularity, and you must provide a
+gradually decreasing boost for every day back to the begining of time,
+then you are correct: my suggestion was not practical. but if you are
+willing to go with "week" based granularity, and only boost items from the
+last 6 weeks, then you can do something like...
+
+(a word) AND (    [date:20050108-20050114]^7
+               OR [date:20050101-20050107]^6
+               OR [date:20041225-20041231]^5
+               OR [date:20041218-20041224]^4
+               OR [date:20041211-20041217]^3
+               OR [date:20041204-20041210]^2
+               OR [date:00000000-20041204]^1 )
+
+...except that i loath doing DateRange queries (see my first post in the
+archives for why i think they are a silly/inefficient way of doing things)
+which is why i suggested just using special keywords to denote which week
+an item was published
+
+: > 3) I'm sure there is a very cool and efficient way to do this using a
+: > custom Similarity implimentation (which somhow causes the default score
+: > to be divided by the age of the document) but i've never acctualy played
+: > with the SImilarity class, so i won't say for certain it can be done that
+: > way (hopefully someone else can chime in)
+:
+: AFAIK, Similarity can only be used on term level. But as outlined above
+: I need a boost factor on document level.
+
+You're right ... I was thinking of the Scorer class ... there was a recent
+discussion about creating your own Scorer to return an arbitrary value
+value as the Score of a (new class of) Query.  I don't know how much work
+is involved, but take a look at this message...
+
+http://mail-archives.apache.org/eyebrowse/ReadMsg?listName=lucene-user@jakarta.apache.org&msgId=2055565
+
+...maybe it would be easy to crank out "RecentDocsScorer" and
+"RecentQuery" classes which can do what you want (by returning the date
+difference from a field and "now" as a score of the query)
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

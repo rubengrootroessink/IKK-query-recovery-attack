@@ -1,0 +1,164 @@
+FROM: Steve Liles <st...@knowledgeview.co.uk>
+SUBJECT: Re: ways to minimize index size?
+DATE: 20 Jun 2007
+
+Compression aside you could index the "contents" as terms in separate 
+fields instead of tokenized text, and disable storing of norms:
+
+String outgoingNumber="9198408365809";
+String incomingNumber="9840861114";
+
+_doc.add(new Field("outgoingNumber", outgoingNumber, Store.NO, 
+Index.NO_NORMS));
+_doc.add(new Field("incomingNumber", incomingNumber, Store.NO, 
+Index.NO_NORMS));
+
+According to the docs "Index.NO_NORMS" will save you one byte per 
+document in the index.
+
+Or you could index all of the data as separate terms in the same 
+"contents" field if you wanted (make the first param "contents" for all 
+of the terms), which is more comparable to what you are currently doing.
+(Another advantage is that the Analyzer will not be used for fields 
+which are untokenized, and indexing should be faster.)
+
+...
+
+One way to compress numerical data (possibly not the best - i'm no 
+expert) is to change the base of the number that is indexed / stored in 
+the index.
+
+java.lang.Long and java.math.BigInteger have methods for converting from 
+one radix to another. Taking your "outgoingNumber" as an example:
+
+//compression
+BigInteger  _bi = new java.math.BigInteger("9198408365809", 10);
+System.out.println(_bi.toString(36));
+
+ > 39douufap
+
+//decompression
+BigInteger _bi = new java.math.BigInteger("39douufap", 36);
+System.out.println(_bi.toString(10));
+
+ >9198408365809
+
+Converting to a higher radix will give you better compression but you'll
+have to do it yourself as the jdk classes only work up to base 36
+<http://en.wikipedia.org/wiki/Base_36>.
+
+It's worth compressing your unstored "contents" field as well as your 
+stored "records" field, as the unique terms in the "contents" field will 
+effectively be stored.
+
+Also don't forget to convert the terms when you search too, otherwise 
+you won't find anything ;)
+
+Steve.
+
+
+Sebastin wrote:
+> When i use the standardAnalyzer storage size increases.how can i minimize
+> index store
+>
+> Sebastin wrote:
+>   
+>>                        
+>> String outgoingNumber="9198408365809";
+>> String incomingNumber="9840861114";
+>> String datesc="070601";
+>> String imsiNumber="444021365987";
+>> String callType="1";
+>>
+>> //Search Fields
+>>  String contents=(outgoingNumber+" "+incomingNumber+" "+dateSc+"
+>> "+imsiNumber+" "+callType );
+>>
+>> //Display Fields
+>>                      
+>>                           String records=(callingPartyNumber+"
+>> "+calledPartyNumber+" "+dateSc+" "+chargDur+" "+incomingRoute+"
+>> "+outgoingRoute+" "+timeSc);
+>>                           
+>>                      
+>>                        IndexWriter indexWriter = new
+>> IndexWriter(indexDir,new StandardAnalyzer(),true);  
+>>                         
+>>                           Document document = new Document();
+>>   
+>>                              document.add(new
+>> Field("contents",contents,Field.Store.NO,Field.Index.TOKENIZED));
+>>                              
+>>                      
+>>                      
+>>                 document.add(new
+>> Field("records",records,Field.Store.YES,Field.Index.NO));
+>>                              
+>>                            
+>>                              indexWriter.setUseCompoundFile(true);
+>>                              indexWriter.addDocument(document);
+>>                           }
+>>
+>> please help me to acheive the minimum size
+>>
+>>
+>>
+>>
+>>
+>> Erick Erickson wrote:
+>>     
+>>> Show us the code you use to index. Are you storing the fields?
+>>> omitting norms? Throwing out stop words?
+>>>
+>>> Best
+>>> Erick
+>>>
+>>> On 6/19/07, Sebastin <sebasmtech@gmail.com> wrote:
+>>>       
+>>>> Hi Does anyone give me an idea to reduce the Index size to down.now i am
+>>>> getting 42% compression in my index store.i want to reduce upto 70%.i
+>>>> use
+>>>> standardanalyzer to write the document.when i use SimpleAnalyzer it
+>>>> reduce
+>>>> upto 58% but i couldnt search the document.please help me to acheive.
+>>>>
+>>>> Thanks in advance
+>>>>
+>>>> Jeff-188 wrote:
+>>>>         
+>>>>>> I found that reducing my index from 8G to 4G (through not stemming)
+>>>>>>             
+>>>> gave
+>>>> me
+>>>>         
+>>>>> about a 10% performance improvement.
+>>>>>
+>>>>> How did you do this? I don't see this as an option.
+>>>>>
+>>>>> Jeff
+>>>>>
+>>>>>
+>>>>>           
+>>>> --
+>>>> View this message in context:
+>>>> http://www.nabble.com/ways-to-minimize-index-size--tf3401213.html#a11195406
+>>>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>         
+>>>       
+>>     
+>
+>   
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

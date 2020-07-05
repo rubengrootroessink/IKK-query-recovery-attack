@@ -1,0 +1,222 @@
+FROM: Jirí Kuhn <k...@fg.cz>
+SUBJECT: RE: indexes won't close on windows
+DATE: 20 Sep 2004
+
+Hi,
+
+	I guess you have answered yourself. I can imagine that Tomcat was serving your servlet with
+constructed index searcher while your command line application wanted to recreate the index.
+Are you protected against this situation?
+
+Jiri.
+
+-----Original Message-----
+From: Fred Toth [mailto:ftoth@synernet.com]
+Sent: Monday, September 20, 2004 3:40 PM
+To: Lucene Users List
+Subject: Re: indexes won't close on windows
+
+
+Hi Sergiu,
+
+Thanks for your suggestions. I will try using just the IndexSearcher(String...)
+and see if that makes a difference in the problem. I can confirm that
+I am doing a proper close() and that I'm checking for exceptions. Again,
+the problem is not with the search function, but with the command-line
+indexer. It is not run at startup, but on demand when the index needs
+to be recreated.
+
+Thanks,
+
+Fred
+
+At 08:50 AM 9/20/2004, you wrote:
+>Hi Fred,
+>
+>That's right, there are many references to this kind of problems in the 
+>lucene-user list.
+>This suggestions were already made, but I'll list them once again:
+>
+>1. One way to use the IndexSearcher is to use yopur code, but I don't 
+>encourage users to do that
+>            IndexReader reader = null;
+>        IndexSearcher searcher = null;
+>        reader = IndexReader.open(indexName);
+>          searcher = new IndexSearcher(reader);
+>
+>    It's better to use the constructor that uses a String to create a 
+> IndexSearcher.
+>|*IndexSearcher 
+><http://localhost:8080/webdoc/lucene/docs/api/org/apache/lucene/search/IndexSearcher.html#IndexSearcher%28java.lang.String%29>*(String
+
+><http://java.sun.com/j2se/1.4/docs/api/java/lang/String.html> path)|. I 
+>even suggest that the path to be obtained as
+>
+>File indexFolder = new File(luceneIndex);
+>IndexSearcher searcher = new IndexSearcher(indexFolder.toString()).
+>
+>2. I can imagine situations when the lucene index must be created at each 
+>startup, but I think that this is very rare,
+>so I suggest to use code like
+>
+>if(indexExists(indexFolder))
+>    writer = new IndexWriter(index, new StandardAnalyzer(), false);
+>else
+>    writer = new IndexWriter(index, new StandardAnalyzer(), true);
+>//don#t forget to close the indexWriter when you create the index and to 
+>open it again
+>
+>I use a indexExists function like
+>boolean indexExists(File indexFolder)
+>    return indexFolder.exists()
+>
+>and it works propertly .... even if that's not the best example of testing 
+>the existence of the index
+>
+>3.'It is here that I get a failure, "can't delete _b9.cfs"'
+>
+>that's ptobably because of the way you use the searcher, and probably 
+>because you don't close the readers, writers and searchers propertly.
+>4. be sure that all close() methods are guarded with
+>    catch(Exception e){
+>          logger.log(e);
+>    } blocks
+>
+>5. Pay attention if you use a multithreading environment, in this case you 
+>have to make indexing, delition and search synchronized
+>
+>   So ...
+>
+>  Have fun,
+>
+>    Sergiu
+>
+>PS: I think that I'll submit some code with synchronized 
+>index/delete/search operations and to tell why I need to use it.
+>
+>
+>Fred Toth wrote:
+>
+>>Hi Sergiu,
+>>
+>>My searches take place in tomcat, in a struts action, in a single method
+>>Abbreviated code:
+>>
+>>         IndexReader reader = null;
+>>         IndexSearcher searcher = null;
+>>         reader = IndexReader.open(indexName);
+>>           searcher = new IndexSearcher(reader);
+>>         // code to do a search and extract hits, works fine.
+>>         searcher.close();
+>>           reader.close();
+>>
+>>I have a command-line indexer that is a minor modification of the
+>>IndexHTML.java that comes with Lucene. It does this:
+>>
+>>         writer = new IndexWriter(index, new StandardAnalyzer(), create);
+>>         // add docs
+>>
+>>(with the create flag set true). It is here that I get a failure, "can't 
+>>delete _b9.cfs"
+>>or similar. This happens when tomcat is completely idle (we're still 
+>>testing and
+>>not live), so all readers and searchers should be closed, as least as far as
+>>java is concerned. But windows will not allow the indexer to delete the 
+>>old index.
+>>
+>>I restarted tomcat and the problem cleared. It's as if the JVM on windows 
+>>doesn't
+>>get the file closes quite right.
+>>
+>>I've seen numerous references on this list to similar behavior, but it's 
+>>not clear
+>>what the fix might be.
+>>
+>>Many thanks,
+>>
+>>Fred
+>>
+>>At 02:32 AM 9/20/2004, you wrote:
+>>
+>>>  Hi Fred,
+>>>
+>>>I think that we can help you if you provide us your code, and the 
+>>>context in which it is used.
+>>>we need to see how you open and close the searcher and the reader, and 
+>>>what operations are you doing on index.
+>>>
+>>>  All the best,
+>>>
+>>>  Sergiu
+>>>
+>>>
+>>>
+>>>Fred Toth wrote:
+>>>
+>>>>Hi,
+>>>>
+>>>>I have built a nice lucene application on linux with no problems,
+>>>>but when I ported to windows for the customer, I started experiencing
+>>>>problems with the index not closing. This prevents re-indexing.
+>>>>
+>>>>I'm using lucene 1.4.1 under tomcat 5.0.28.
+>>>>
+>>>>My search operation is very simple and works great:
+>>>>
+>>>>create reader
+>>>>create searcher
+>>>>do search
+>>>>extract N docs from hits
+>>>>close searcher
+>>>>close reader
+>>>>
+>>>>However, on several occasions, when trying to re-index, I get
+>>>>"can't delete file" errors from the indexer. I discovered that restarting
+>>>>tomcat clears the problem. (Note that I'm recreating the index
+>>>>completely, not updating.)
+>>>>
+>>>>I've spent the last couple of hours trolling the archives and I've
+>>>>found numerous references to windows problems with open files.
+>>>>
+>>>>Is there a fix for this? How can I force the files to close? What's
+>>>>the best work-around?
+>>>>
+>>>>Many thanks,
+>>>>
+>>>>Fred
+>>>>
+>>>>
+>>>>---------------------------------------------------------------------
+>>>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>
+>>>
+>>>
+>>>---------------------------------------------------------------------
+>>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+>>
+>>
+>>
+>>---------------------------------------------------------------------
+>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

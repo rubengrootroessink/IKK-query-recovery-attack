@@ -1,0 +1,203 @@
+FROM: "Boleslawski, Slavomir" <Slavomir.Boleslaw...@crimecommission.gov.au>
+SUBJECT: Numeric range search: wrong results (take 2) [SEC=PERSONAL]
+DATE: 28 Jul 2011
+
+Hello  Ian,
+
+I did send the Java source code file (and I'm sending it right now just to prove) but the
+email system lost it somehow. I inline the Java code below:
+
+ " I have created a self-contained test to show that Lucene returns wrong results when a simple
+index with some date numeric fields is searched.
+Could someone try to replicate this problem and confirm if it is a bug.
+I attach readme.txt with the description of the problem and all necessary files. "
+
+The source code of the TestLucene.java file:
+
+import java.io.*;
+import java.text.*;
+import java.util.*;
+
+
+import org.apache.lucene.index.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.KeywordAnalyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.*;
+
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.util.*;
+
+public class TestLucene {
+ private static final SimpleDateFormat dateFormatter = new SimpleDateFormat("dd/MM/yy HH:mm:ss.SSS");
+ private static final SimpleDateFormat updateDateFormatter = new SimpleDateFormat("yyyy-MMM-dd
+HH:mm:ss.SSS");
+
+ private static final int PRECISION_STEP = 4;
+ private static final String DATES_FILEPATH = "startDates.txt";
+ private static final String UPDATE_DATES_FILEPATH = "updateStartDates.txt";
+
+ private String format(Date date) {
+  synchronized(dateFormatter) {
+   return dateFormatter.format(date);
+  }
+ }
+
+ private void createIndex(String indexDir) throws Exception {
+  FSDirectory directory = FSDirectory.open(new File(indexDir));
+  Analyzer analyzer = new KeywordAnalyzer();
+  IndexWriter writer = new IndexWriter(directory, analyzer, true, IndexWriter.MaxFieldLength.UNLIMITED);
+
+  //Populates index with some dates
+  List dates = readDates(DATES_FILEPATH);
+
+  for(int i = 0; i < dates.size(); i++) {
+   Date startDate = (Date)dates.get(i);
+
+   NumericField startDateField = new NumericField("startdatetime", PRECISION_STEP, Field.Store.YES,
+true);
+   startDateField.setLongValue(startDate.getTime());
+
+   Document doc = new Document();
+   doc.add(startDateField);
+   writer.addDocument(doc);
+  }
+
+  writer.commit();
+
+  //Updates index with some dates
+  List updateDates = readUpdateDates(UPDATE_DATES_FILEPATH);
+
+  for(int i = 0; i < updateDates.size(); i++) {
+   Date updateDate = (Date)updateDates.get(i);
+   long time = updateDate.getTime();
+   Query query = NumericRangeQuery.newLongRange("startdatetime", PRECISION_STEP, time, time,
+true, true);
+   writer.deleteDocuments(query);
+
+   NumericField startDateField = new NumericField("startdatetime", PRECISION_STEP, Field.Store.YES,
+true);
+   startDateField.setLongValue(updateDate.getTime());
+
+   Document doc = new Document();
+   doc.add(startDateField);
+   writer.addDocument(doc);
+  }
+
+  writer.commit();
+
+  writer.close();
+
+  directory.close();
+ }
+
+
+ public TestLucene(String indexDir) {
+  try {
+   createIndex(indexDir);
+
+   final FSDirectory directory = FSDirectory.open(new File(indexDir));
+   Analyzer analyzer = new KeywordAnalyzer();
+
+   IndexSearcher searcher = new IndexSearcher(directory, true);
+
+   String startDateSt = "27/07/11 09:00:00.000";
+   Date startDate = dateFormatter.parse(startDateSt);
+   long time1 = startDate.getTime();
+   long time2 = time1 + 1000L * 60 * 10;
+   System.out.println("startDate: " + startDateSt);
+   System.out.println("endDate: " + format(new Date(time2)));
+   Query query = NumericRangeQuery.newLongRange("startdatetime", 4, time1, time2, true, true);
+   searcher.search(query, new HitCollector(searcher));
+   searcher.close();
+
+  } catch (Throwable th) {
+   th.printStackTrace();
+  }
+ }
+
+ private List readDates(String filepath) throws IOException, ParseException {
+  List dateList = new ArrayList();
+  BufferedReader in = new BufferedReader(new FileReader(filepath));
+  String line;
+
+  while((line = in.readLine()) != null) {
+   Date startDate = dateFormatter.parse(line);
+   dateList.add(startDate);
+  }
+
+  in.close();
+
+  return dateList;
+ }
+
+ private List readUpdateDates(String filepath) throws IOException, ParseException {
+  List dateList = new ArrayList();
+  BufferedReader in = new BufferedReader(new FileReader(filepath));
+  String line;
+
+  while((line = in.readLine()) != null) {
+   Date updateDate = updateDateFormatter.parse(line);
+   dateList.add(updateDate);
+  }
+
+  in.close();
+
+  return dateList;
+ }
+
+ public static void main(String[] args) {
+  if (args.length == 0) {
+   System.out.println("Usage: java TestLucene indexDirectory");
+   System.exit(1);
+  }
+
+  new TestLucene(args[0]);
+ }
+
+ private class HitCollector extends Collector {
+  private IndexSearcher searcher;
+
+  public HitCollector(IndexSearcher searcher) {
+   this.searcher = searcher;
+  }
+
+  public boolean acceptsDocsOutOfOrder() {
+   return true;
+  }
+
+  public void collect(int docIndex) throws IOException {
+   Document document = searcher.doc(docIndex);
+   System.out.println(format(new Date(Long.parseLong(document.get("startdatetime")))));
+  }
+
+  public void setNextReader(IndexReader reader, int docBase) throws IOException {}
+  public void setScorer(org.apache.lucene.search.Scorer scorer) throws IOException {}
+ }
+}
+
+Regards
+
+Slav Boleslawski
+
+######################################################################
+                         Warning
+
+This email message and any attached files may contain information 
+that is confidential and subject of legal privilege intended only
+for use by the individual or entity to whom they are addressed. If 
+you are not the intended recipient or the person responsible for 
+delivering the message to the intended recipient be advised that
+you have received this message in error and that any use, copying, 
+circulation, forwarding, printing or publication of this message or
+attached files is strictly forbidden, as is the disclosure of the 
+information contained therein. If you have received this message in
+error, please notify the sender immediately and delete it from your
+Inbox.
+
+ACC Web Site: www.crimecommission.gov.au
+######################################################################
+

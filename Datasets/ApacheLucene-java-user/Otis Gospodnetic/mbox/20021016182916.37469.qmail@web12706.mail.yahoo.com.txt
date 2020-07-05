@@ -1,0 +1,170 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Question: using boost for sorting
+DATE: 16 Oct 2002
+
+This sounds good to me, as it would lead us to pluggable similarity
+computation...mmmm.
+I can refactor some of this tonight.
+
+Otis
+
+
+--- Doug Cutting <cutting@lucene.com> wrote:
+> This looks like a good approach.  When I get a chance, I'd like to
+> make 
+> Similarity an interface or an abstract class, whose default 
+> implementation would do what the current class does, but whose
+> methods 
+> can be overridden.  Then I'd add methods like:
+> 
+>    public static void Similarity.setDefaultSimilarity(Similarity
+> sim);
+>    public void IndexWriter.setSimilarity(Similarity sim);
+>    public void Searcher.setSimilarity(Similarity sim);
+> 
+> So to override Similarity methods you'd define a subclass of the 
+> standard implementation, then either install yours globally via 
+> setDefaultSimilarity, or set it in your IndexWriter before adding 
+> documents and in your Searcher before searching.  Does that sound 
+> reasonable?
+> 
+> This would let you do what you describe below without changing
+> Lucene's 
+> sources.  However I'm very short on time right now and don't know how
+> 
+> soon I'll get to this.
+> 
+> Doug
+> 
+> David Birtwell wrote:
+> > Hi Dmitry,
+> > 
+> > I was faced with a similar problem.  We wanted to have a numeric
+> rank 
+> > field in each document influence the order in which the documents
+> were 
+> > returned by lucene.  While investigating a solution for this, I
+> wanted 
+> > to see if I could implement strict sorting based on this numeric
+> value. 
+> > I was able to accomplish this using document boosting, but not
+> without 
+> > modifying the lucene source.  Our "ranking" field is an integer
+> value 
+> > from one to one hundred.  I'm not sure if this will help you, but
+> I'll 
+> > include a summary of what I did.
+> > 
+> > In DocumentWriter remove the normalization by field length:
+> >    float norm = fieldBoosts[n] * 
+> > Similarity.normalizeLength(fieldLengths[n]);
+> > to
+> >    float norm = fieldBoosts[n];
+> > 
+> > In TermScorer and PhraseScorer, modify the score() method to ignore
+> the 
+> > lucene base score:
+> >    score *= Similarity.decodeNorm(norms[d]);
+> > to
+> >    score = Similarity.decodeNorm(norms[d]);
+> > 
+> > In Similarity.java, make byteToFloat() public.
+> > 
+> > At index time, use Similarity.byteToFloat() to determine your boost
+> 
+> > value as in the following pseudocode:
+> >    Document d = new Document();
+> >    ... add your fields ...
+> >    int rank = d.getField("RANK"); (range of rank can be 0 to 255)
+> >    float sortVal = Similarity.byteToFloat(rank)
+> >    d.setBoost(sortVal)
+> > 
+> > If you'd like the reasoning behind any or all of these items, let
+> me know.
+> > 
+> > DaveB
+> > 
+> > 
+> > 
+> > Dmitry Serebrennikov wrote:
+> > 
+> >> Greetings Everyone,
+> >>
+> >> I'm thinking of trying to build something that manipulates a query
+> 
+> >> score in order to achieve a sort order other then the default 
+> >> relevance sort. The idea is to create a new type of query:
+> >> SortingQuery( Query query, String sortByField )
+> >>
+> >> It would run the sub-query and return results in an order of the 
+> >> values found in the "sortByField" for those documents. Now, I've 
+> >> looked at all of the sorting discussion prior to this, and the
+> best 
+> >> approach (recommended by Doug among others) is to provide some
+> sort of 
+> >> a fast access to the field values inside the HitCollector. Reading
+> 
+> >> documents at search time is too slow, so people access the data 
+> >> elsewhere or build an in-memory index of that data (such as is
+> done in 
+> >> the SearchBean's SortField).
+> >>
+> >> My idea is different. I want to try to do the following:
+> >> - compose a query that consists of the original sub-query followed
+> by 
+> >> a special "sorting query"
+> >> - "boost" the score of the original sub-query to 0
+> >> - compute the score of the sorting query such that it would
+> reflect 
+> >> the desired sort order
+> >>
+> >> Has anyone tried to do something like this?
+> >> Would this work?
+> >> Is this worth doing?
+> >> If it would, would then I have to do something during the indexing
+> 
+> >> time to set normalization / scoring factors for that field to 
+> >> something or other?
+> >>
+> >> Thanks.
+> >> Dmitry.
+> >>
+> >>
+> >>
+> >> -- 
+> >> To unsubscribe, e-mail:   
+> >> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> >> For additional commands, e-mail: 
+> >> <mailto:lucene-user-help@jakarta.apache.org>
+> >>
+> >>
+> > 
+> > 
+> > 
+> > -- 
+> > To unsubscribe, e-mail:   
+> > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > For additional commands, e-mail: 
+> > <mailto:lucene-user-help@jakarta.apache.org>
+> > 
+> 
+> 
+> 
+> --
+> To unsubscribe, e-mail:  
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+> 
+
+
+__________________________________________________
+Do you Yahoo!?
+Faith Hill - Exclusive Performances, Videos & More
+http://faith.yahoo.com
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

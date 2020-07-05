@@ -1,0 +1,53 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Real time indexing and distribution to lucene on separate boxes (long)
+DATE: 11 Mar 2004
+
+Kevin A. Burton wrote:
+  > 3. Have two directories on the searcher.  The indexer would then 
+sync to
+> a tmp
+> directory and then at run time swap them via a rename once the sync is 
+> over.
+> The downside here is that this will take up 2x disk space on the 
+> searcher.  The
+> upside is that the box will only slow down while the rsync is happening.
+
+For maximal search performance, this is your best bet.  Disk space is 
+cheap.  At some point all newly issued queries start going against the 
+new index, and, pretty soon, you can close and delete the old index. 
+But you never have to stop searching.  Disk i/o will spike a bit during 
+the changeover, as the new working set is swapped in.
+
+Note that, if folks are paging through results by re-querying (the 
+standard method) and the index is updated then things can get funky. 
+One approach is to hang onto the old index longer, to make this less 
+likely.  In any case, you might want to add an index-id to the search 
+parameters, so that, if a next-page is issued when the index is no 
+longer there you can give some sort of "stale query" error.
+
+> PS.. Random question.  The performance of the MultiSearcher is Mlog(N) 
+> correct?
+> Where N is the number of documents in the index and M is the number of 
+> indexes?
+> Is this about right?
+
+No.
+
+The added cost of a MultiSearcher is mostly proportional to just M, the 
+number of indexes.  The normal cost of searching is still mostly 
+proportional to N, the number of documents.  So M+N would probably be 
+more accurate.  There is a log(M) here and there, to, e.g., figure out 
+which index a doc id belongs to, but I doubt these are significant.
+
+The significant costs of a MultiSearcher over an IndexSearcher are that 
+it adds more term dictionary reads (one per query term per index) and 
+more seeks (also one per query term per index, or two if you're using 
+phrases).
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

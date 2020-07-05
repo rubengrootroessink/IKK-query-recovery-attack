@@ -1,0 +1,80 @@
+FROM: Daniel Noll <dan...@nuix.com.au>
+SUBJECT: Re: De-duping MultiSearcher results
+DATE: 15 Nov 2005
+
+Jason Calabrese wrote:
+
+>All,
+>
+>In the project I'm working on we have a separate index for each database.  
+>There are 12 databases now. but in the future there may be as many as 20.  
+>They all have their own release cycle so I don't want to merge the indexes.
+>
+>The databases all have some overlap between them.  We manage this by creating 
+>a unique GUID for each entity.  If an entity is in multiple db's it will have 
+>the same GUID in each db.
+>
+>Currently I'm using the MultiSearcher to run a users query against each of the 
+>db's, then I use the brute force approach of looping through all the returned 
+>docs to removed dups using the guid field in the index.
+>
+>This work fine when the results are under about 5,000 documents, but when 
+>there is a large number of results a search take way too long.
+>
+>Does anyone know of a better and more efficient way to do this?
+>  
+>
+You probably want to build a Filter.
+
+I've been planning to do exactly this on our own system, only our 
+duplicates are indicated by documents having the same value in an MD5 
+digest field, instead of a GUID field.
+
+For a single Reader, such a filter would work something like this:
+
+    public class UniqueFilter extends Filter {
+        public BitSet bits(IndexReader reader) throws IOException {
+            BitSet result = new BitSet(reader.maxDoc());
+            TermDocs termDocs = reader.termDocs();
+            TermEnum terms = reader.terms(new Term("guid", ""));
+            while (terms.next() && terms.term().field().equals("guid")) {
+                termDocs.seek(terms.term());
+                if (termDocs.next()) {
+                    result.set(termDocs.doc());
+                }
+            }
+            return result;
+       }
+    }
+
+If you were to wrap this in a CachingWrapperFilter, the hard work would 
+only be executed once, and that's the main benefit of using a filter.
+
+However, for multiple indexes it might be more tricky.  If you're not 
+willing to switch to MultiReader (we're in the same boat, if that's the 
+case) then you'll have to build a different set of bits for each reader, 
+and loop through all readers' TermEnums at once.  If you step them all 
+through one at a time, you can get fairly good efficiency as you can 
+skip calling termDocs on readers where the term didn't occur.
+
+Daniel
+
+-- 
+Daniel Noll
+
+NUIX Pty Ltd
+Level 8, 143 York Street, Sydney 2000
+Phone: (02) 9283 9010
+Fax:   (02) 9283 9020
+
+This message is intended only for the named recipient. If you are not
+the intended recipient you are notified that disclosing, copying,
+distributing or taking any action in reliance on the contents of this
+message or attachment is strictly prohibited.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

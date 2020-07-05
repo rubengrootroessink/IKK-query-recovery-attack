@@ -1,0 +1,74 @@
+FROM: Mark Harwood <markharw...@yahoo.co.uk>
+SUBJECT: Re: on-the-fly "filters" from docID lists
+DATE: 23 Jul 2010
+
+> What is the best way to efficiently convert that list of primary keys to Lucene docIds.
+  
+
+
+Avoid disk seeks. Lucene is fast but still beholden to the laws of physics. Random disk seeks
+will cost you  eg. 50,000 * 5ms =250 seconds (minus any effects of OS disk caching).
+Best way to handle this lookup is a PK-docid cache which can be reused for all users. Since
+2.9 Lucene holds caches e.g. FieldCache down at segment level so a commit   or merge should
+only invalidate a subset of cached items. Trouble is I think FieldCache is for docID->FieldValue
+lookups whereas you want a cache that works the other way around.
+
+Cheers
+Mark
+
+> 
+> I was looking at the Lucene in Action example code (which was not designed for this use
+case) where the Lucene docId is retrieved by iteratively calling termDocs.read. How expensive
+is this operation?  Would 50,000 calls return in a few seconds or less?  
+> 
+> for (String isbn : isbns) {
+> 	if (isbn != null) {
+> 	TermDocs termDocs =
+> 	reader.termDocs(new Term("isbn", isbn));
+> 	int count = termDocs.read(docs, freqs);
+> 	if (count == 1) {
+> 	bits.set(docs[0]);
+> }
+> 
+>>> That could involve a lot of disk seeks unless you cache a pk->docid lookup
+in ram.
+> That sounds interesting. How would the pk->docid lookup get populated?
+> Wouldn't a pk->docid cache be invalidated with each commit or merge?
+> 
+> Tom
+> 
+> -----Original Message-----
+> From: Mark Harwood [mailto:markharw00d@yahoo.co.uk] 
+> Sent: Friday, July 23, 2010 2:56 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: on-the-fly "filters" from docID lists
+> 
+> Re scalability of filter construction - the database is likely to hold stable primary
+keys not lucene doc ids which are unstable in the face of updates. You therefore need a quick
+way of converting stable database keys read from the db into current lucene doc ids to create
+the filter. That could involve a lot of disk seeks unless you cache a pk->docid lookup
+in ram.  You should use cachingwrapperfilter too to cache the computed  user permissions from
+one search to the next. 
+> This can get messy. If the access permissions are centred around roles/groups it is normally
+faster to tag docs with these group names and query them with the list of roles the user holds.
+
+> If individual user-doc-level perms are required you could also consider dynamically looking
+up perms for just the top n results being shown at the risk of needing to repeat the query
+with a larger n if insufficient matches pass the lookup. 
+> 
+> Cheers 
+> Mark
+> ----------------------------------------
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

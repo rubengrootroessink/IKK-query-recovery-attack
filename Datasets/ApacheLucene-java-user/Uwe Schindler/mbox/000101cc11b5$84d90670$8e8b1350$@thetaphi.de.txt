@@ -1,0 +1,225 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: A bug in multisearcher?
+DATE: 13 May 2011
+
+Hi,
+
+This is a well-known bug, which is unfixable (query rewrite across different
+searchers is wrong). In general you should use a MultiReader on your
+IndexReaders and use a simple IndexSearcher on top of that MultiReader.
+MultiSearcher and ParallelMultiSearcher were deprecated in 3.1 because of
+this and disappear in coming Lucene 4.0. ParallelMultiSearcher is included
+in IndexSearcher in 3.1 (it parallelizes across index segments).
+
+For more information, see: https://issues.apache.org/jira/browse/LUCENE-2756
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: hao yan [mailto:hyan2008@gmail.com]
+> Sent: Friday, May 13, 2011 10:56 PM
+> To: java-user@lucene.apache.org
+> Cc: Xiaoyang Gu; hao yan
+> Subject: A bug in multisearcher?
+> 
+> hi, guys
+> 
+> Xiaoyang and I today just found a bug of lucene.
+> This is actually a Multi-searcher bug. In particular,
+> 
+> If we search with Not on NumericRange and we use MultiSearcher, we will
+> wrong search results (However, if we use IndexSearcher, the result is
+> correct).  Basically the NotOfNumericRange does not have impact on
+> multisearcher. We suspect it is because the createWeight() function in
+> MultiSearcher and hope some of you guys can help us confirm or fix this
+bug
+> of lucene. I attached the code to reproduce this case. Please check it
+out.
+> 
+> In the attached code, I have two separate functions :
+> 
+> (1) testNumericRangeSingleSearcher(Query query)
+>     where I create 6 documents, with a field called "id"= 1,2,3,4,5,6
+> respectively . Then I search by the query which is
+>     +MatchAllDocs -NumericRange(3,3). The expected result then should be 5
+> hits since the document 3 is MUST_NOT.
+> 
+> (2) testNumericRangeMultiSearcher(Query query)
+>     where i create 2 RamDirectory(), each of which has 3 documents, 1,2,3;
+and
+> 4,5,6. Then I search by the same query as above using multiSearcher. The
+> expected result should also be 5 hits.
+> 
+> However, from (1), we get 5 hits = expected results, while in (2) we get 6
+hits
+> != expected results.
+> 
+> 
+> Thank you very much!
+> 
+> 
+> Code:  (based on lucene 3.0.x)
+> 
+> 
+> 
+> import java.io.IOException;
+> import java.io.PrintStream;
+> import java.text.DecimalFormat;
+> 
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field; import
+> org.apache.lucene.document.NumericField;
+> import org.apache.lucene.index.CorruptIndexException;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.BooleanQuery;
+> import org.apache.lucene.search.FieldCache;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.MatchAllDocsQuery;
+> import org.apache.lucene.search.MultiSearcher;
+> import org.apache.lucene.search.NumericRangeQuery;
+> import org.apache.lucene.search.Query;
+> import org.apache.lucene.search.ScoreDoc;
+> import org.apache.lucene.search.Searchable;
+> import org.apache.lucene.search.Sort;
+> import org.apache.lucene.search.SortField;
+> import org.apache.lucene.search.TermQuery;
+> import org.apache.lucene.search.TopDocs; import
+> org.apache.lucene.search.BooleanClause.Occur;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.LockObtainFailedException;
+> import org.apache.lucene.store.RAMDirectory;
+> 
+> import com.convertlucene.ConvertFrom2To3;
+> 
+> public class TestNumericRange
+> {
+>  public final static void main(String[] args)  {
+>    try
+>    {
+>      BooleanQuery query = new  BooleanQuery();
+>      query.add(NumericRangeQuery.newIntRange("numId", 3, 3, true, true),
+> Occur.MUST_NOT);
+>      query.add(new MatchAllDocsQuery(), Occur.MUST);
+> 
+>      testNumericRangeSingleSearcher(query);
+>      testNumericRangeMultiSearcher(query);
+> 
+>    }
+>    catch(Exception e)
+>    {
+>      e.printStackTrace();
+>    }
+>  }
+> 
+> 
+> 
+>  public static void testNumericRangeSingleSearcher(Query query) throws
+> CorruptIndexException, LockObtainFailedException, IOException  {
+>     String[] ids = {"1", "2", "3", "4", "5", "6"};
+> 
+>    Directory directory = new RAMDirectory();
+> 
+>    IndexWriter writer = new IndexWriter(directory, new
+> WhitespaceAnalyzer(),  IndexWriter.MaxFieldLength.UNLIMITED);
+> 
+>    for (int i = 0; i < ids.length; i++)
+>    {
+>      Document doc = new Document();
+>      doc.add(new Field("id", ids[i],
+>                        Field.Store.YES,
+>                        Field.Index.NOT_ANALYZED));
+>      doc.add(new
+> NumericField("numId").setIntValue(Integer.valueOf(ids[i])));
+>      writer.addDocument(doc);
+>    }
+>    writer.close();
+> 
+> 
+>    IndexSearcher searcher = new IndexSearcher(directory);
+> 
+>    TopDocs docs = searcher.search(query, 10);
+>    System.out.println("SingleSearcher: testNumericRange: hitNum: " +
+> docs.totalHits);
+>    for(ScoreDoc doc : docs.scoreDocs)
+>    {
+>      System.out.println(searcher.explain(query, doc.doc));
+>    }
+>    searcher.close();
+> 
+>    directory.close();
+>  }
+> 
+>  public static void testNumericRangeMultiSearcher(Query query) throws
+> CorruptIndexException, LockObtainFailedException, IOException  {
+>     String[] ids1 = {"1", "2", "3"};
+>    Directory directory1 = new RAMDirectory();
+>    IndexWriter writer1 = new IndexWriter(directory1, new
+> WhitespaceAnalyzer(),  IndexWriter.MaxFieldLength.UNLIMITED);
+>    for (int i = 0; i < ids1.length; i++)
+>    {
+>      Document doc = new Document();
+>      doc.add(new Field("id", ids1[i],
+>                        Field.Store.YES,
+>                        Field.Index.NOT_ANALYZED));
+>      doc.add(new
+> NumericField("numId").setIntValue(Integer.valueOf(ids1[i])));
+>      writer1.addDocument(doc);
+>    }
+>    writer1.close();
+> 
+>    String[] ids2 = {"4", "5", "6"};
+>    Directory directory2 = new RAMDirectory();
+>    IndexWriter writer2 = new IndexWriter(directory2, new
+> WhitespaceAnalyzer(),  IndexWriter.MaxFieldLength.UNLIMITED);
+>    for (int i = 0; i < ids2.length; i++)
+>    {
+>      Document doc = new Document();
+>      doc.add(new Field("id", ids2[i],
+>                        Field.Store.YES,
+>                        Field.Index.NOT_ANALYZED));
+>      doc.add(new
+> NumericField("numId").setIntValue(Integer.valueOf(ids2[i])));
+>      writer2.addDocument(doc);
+>    }
+>    writer2.close();
+> 
+>    IndexSearcher[] searchers = new IndexSearcher[2];
+>    searchers[0] = new IndexSearcher(directory1);
+>    searchers[1] = new IndexSearcher(directory2);
+>    MultiSearcher multiSearcher = new MultiSearcher(searchers);
+>    TopDocs docs = multiSearcher.search(query, 10);
+>    System.out.println("MultiSearcher: testNumericRange: hitNum: " +
+> docs.totalHits);
+>    for(ScoreDoc doc : docs.scoreDocs)
+>    {
+>      System.out.println(multiSearcher.explain(query, doc.doc));
+>    }
+>    multiSearcher.close();
+> 
+>    directory1.close();
+>    directory2.close();
+>  }
+> 
+> 
+> }
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

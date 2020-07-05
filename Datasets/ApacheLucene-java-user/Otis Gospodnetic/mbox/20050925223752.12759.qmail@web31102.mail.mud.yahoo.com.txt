@@ -1,0 +1,274 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Lucene trunk update question. WAS RE: search performance enhancement
+DATE: 25 Sep 2005
+
+As Erik Hatcher noted in another email (it might have been on the -dev
+list), we'll go through JIRA before making the next release and try to
+push the patches like this one into the core.  Personally, it has been
+bugging me to see all these nice contributions sitting outside the core
+all this time, and I know it doesn't make contributors feel good.  I
+may have more time to focus on Lucene in the near future, in which case
+I'll do some of what I described above.
+
+Otis
+
+--- Paul Elschot <paul.elschot@xs4all.nl> wrote:
+
+> On Thursday 22 September 2005 11:45, Peter Gelderbloem wrote:
+> > I noticed you posted links to bits of code below.
+> > How and when will these be made part of the svn trunk?
+> > It seems universally useful and I think should be the default
+> behaviour.
+> 
+> The code has the same licence as the trunk, so you can basically
+> use it as you like. Off course, more improvements would be
+> appreciated.
+> I don't know when/if it will become part of the trunk.
+> 
+> Regards,
+> Paul Elschot
+> 
+> > Peter Gelderbloem 
+> > -----Original Message-----
+> > From: Paul Elschot [mailto:paul.elschot@xs4all.nl] 
+> > Sent: 21 September 2005 19:16
+> > To: java-user@lucene.apache.org
+> > Subject: Re: search performance enhancement
+> > 
+> > On Wednesday 21 September 2005 03:29, John Wang wrote:
+> > > Hi Paul and other gurus:
+> > > 
+> > > In a related topic, seems lucene is scoring documents that would
+> hit
+> > in a 
+> > > "prohibited" boolean clause, e.g. NOT field:value. It doesn't
+> seem to
+> > make 
+> > > sense to score a document that is to be excluded from the result.
+> Is
+> > this a 
+> > > difficult thing to fix?
+> > 
+> > In the svn trunk (the development version) excluded clauses of
+> > BooleanQuery are no not scored.
+> > The default scoring method is so cheap on CPU time that this is
+> hardly
+> > noticeable.
+> > 
+> > > Also in Paul's ealier comment: "... unless you have large
+> indexes,
+> > this will 
+> > > probably not make much difference", what is "large" in this case.
+> 
+> > 
+> > A BitSet takes one bit per document in the index, and a
+> SortedVIntList
+> > takes about 1 byte per document passing the filter.
+> > So when you need many filters, each passing less than 1/8 of the
+> indexed
+> > docs, a SortedVIntList takes less memory.
+> >  
+> > > In our case, say millions of documents match some query, but
+> after
+> > either a 
+> > > Filter is applied or after a NOT query (e.g. query with a
+> > NOT/prohibited 
+> > > clause) is applied, the resulting hit list has only 10 documents.
+> > Seems the 
+> > > millions of calls to score() is wasted, some of the score() call
+> can
+> > be 
+> > > computational intensive.
+> > 
+> > The FilteredQuery posted here:
+> > http://issues.apache.org/jira/browse/LUCENE-330
+> > will score only the documents passing the filter, for both a BitSet
+> and
+> > a SortedVIntList filter. Btw. this is the new place for the related
+> > filter
+> > implementations:
+> > http://issues.apache.org/jira/browse/LUCENE-328
+> > 
+> > > 
+> > > Am I on the right track?
+> > 
+> > That's easy: you're using Lucene.
+> > 
+> > Regards,
+> > Paul Elschot
+> > 
+> > 
+> > > Thanks
+> > > 
+> > > -John
+> > > 
+> > > On 8/19/05, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+> > > > 
+> > > > On Friday 19 August 2005 18:09, John Wang wrote:
+> > > > > Hi Paul:
+> > > > >
+> > > > > Thanks for the pointer.
+> > > > >
+> > > > > How would I extend from the patch you submitted to filter out
+> > > > > more documents not using a Filter. e.g.
+> > > > >
+> > > > > have a class to skip documents based on a docID: boolean
+> > > > > isValid(int docID)
+> > > > >
+> > > > > My problem is I want to discard documents at query time
+> without
+> > > > > having to construct a BitSet via filter. I have my own memory
+> > > > > structure to help me skip documents based the query and a
+> docid.
+> > > > 
+> > > > Basically, you need to implement the next() and skipTo(int
+> > targetDoc)
+> > > > methods from Scorer on your memory structure. They are somewhat
+> > > > redundant (skipTo(doc() + 1) has the same semantics as next(),
+> > except
+> > > > initially), but that is for a mix of historical and performance
+> > reasons.
+> > > > Have a look at how this is done in the posted FilteredQuery
+> class
+> > > > for SortedVIntList and BitSet.
+> > > > With only isValid(docId) these next() and skipTo() methods
+> would
+> > > > have to count over the document numbers, which is less than
+> ideal.
+> > > > 
+> > > > When you use the posted code, iirc it is only necessary to
+> implement
+> > the
+> > > > SkipFilter interface on your memory structure. One can use that
+> > interface
+> > > > to build/cache such memory structures using an IndexReader, and
+> > > > from there the DocNrSkipper interface will do the rest (of the
+> top
+> > of
+> > > > my head).
+> > > > One slight problem with the current Lucene implementation is
+> that
+> > > > java.lang.BitSet is not interface.
+> > > > 
+> > > > Regards,
+> > > > Paul Elschot.
+> > > > 
+> > > > > Thanks
+> > > > >
+> > > > > -John
+> > > > >
+> > > > > On 8/16/05, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+> > > > > > Hi John,
+> > > > > >
+> > > > > > On Wednesday 17 August 2005 04:46, John Wang wrote:
+> > > > > > > Hi:
+> > > > > > >
+> > > > > > > I posted a bug (36147) a few days ago and didn't hear
+> > anything, so
+> > > > > > > I thought I'd try my luck on this list.
+> > > > > > >
+> > > > > > > The idea is to avoid score calculations on documents to
+> be
+> > filtered
+> > > > > > > out anyway. (e.g. via Filter object passed to the
+> searcher
+> > class)
+> > > > > > >
+> > > > > > > This seems to be an easy change.
+> > > > > >
+> > > > > > Have a look here:
+> > > > > > http://issues.apache.org/bugzilla/show_bug.cgi?id=32965
+> > > > > >
+> > > > > > > Also it would be nice to expose a method to return a
+> score
+> > given a
+> > > > > > > docid, e.g.
+> > > > > > >
+> > > > > > > float getScore(int docid)
+> > > > > > >
+> > > > > > > on the Scorer class.
+> > > > > >
+> > > > > > skipTo(int docid) and score() will do that.
+> > > > > >
+> > > > > > > I am gonna make the change locally and do some
+> performance
+> > analysis
+> > > > > > > on it and will post some numbers later.
+> > > > > >
+> > > > > > The default score computations are mostly table lookups,
+> and
+> > pretty 
+> > > > fast.
+> > > > > > So, unless you have large indexes, this will probably not
+> make
+> > > > > > much difference, but any performance improvement is
+> wellcome.
+> > > > > > In larger indexes, it helps to use skipTo() while
+> searching.
+> > > > > >
+> > > > > > Regards,
+> > > > > > Paul Elschot
+> > > > > >
+> > > > > >
+> > > > > >
+> >
+> ---------------------------------------------------------------------
+> > > > > > To unsubscribe, e-mail:
+> java-user-unsubscribe@lucene.apache.org
+> > > > > > For additional commands, e-mail:
+> > java-user-help@lucene.apache.org
+> > > > > >
+> > > > > >
+> > > > >
+> > > > >
+> >
+> ---------------------------------------------------------------------
+> > > > > To unsubscribe, e-mail:
+> java-user-unsubscribe@lucene.apache.org
+> > > > > For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > 
+> > > > 
+> > > >
+> >
+> ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> > > > 
+> > > >
+> > > 
+> > 
+> > 
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > 
+> > 
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > 
+> > 
+> > 
+> > 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,323 @@
+FROM: "Aaron Galea" <ag...@nextgen.net.mt>
+SUBJECT: Re: Searching with Multiple Queries
+DATE: 15 Nov 2002
+
+Hi Rob
+
+Here is how I think in my case I will do it but the code is not tested so it
+might not work:
+
+1. Create a filter class
+class SearcherFilter extends Filter {
+
+    protected String Directory;
+
+    public SearcherFilter(String dir) {
+      Directory = dir;
+    }
+
+    public BitSet bits(IndexReader reader) throws IOException {
+
+      BitSet bits = new BitSet(reader.maxDoc());
+
+      TermDocs termDocs = reader.termDocs();
+      while (termDocs.next()) {
+          int iDoc = termDocs.doc();
+          org.apache.lucene.document.Document doc = reader.document(iDoc);
+
+          Field fldDirectory = doc.getField("Directory");
+          String str = fldDirectory.stringValue();
+          if (str.startsWith(Directory)){
+            bits.set(iDoc);
+          }
+      }
+
+      return bits;
+
+    }
+
+}
+
+
+2. Create an Anlayzer class
+
+
+
+class SearcherAnalyzer extends Analyzer {
+    /*
+     * An array containing some common words that
+     * are not usually useful for searching.
+     */
+    private static final String[] STOP_WORDS =
+    {
+      "a"       , "and"     , "are"     , "as"      ,
+      "at"      , "be"      , "but"     , "by"      ,
+      "for"     , "if"      , "in"      , "into"    ,
+      "is"      , "it"      , "no"      , "not"     ,
+      "of"      , "on"      , "or"      , "s"       ,
+      "such"    , "t"       , "that"    , "the"     ,
+      "their"   , "then"    , "there"   , "these"   ,
+      "they"    , "this"    , "to"      , "was"     ,
+      "will"    ,
+      "with"
+    };
+
+    /*
+     * Stop table
+     */
+    final static private Hashtable stopTable =
+StopFilter.makeStopTable(STOP_WORDS);
+
+    /*
+     * create a token stream for this analyser
+     */
+    public final TokenStream tokenStream(final Reader reader) {
+      try {
+          TokenStream result = new StandardTokenizer(reader);
+
+          result = new StandardFilter(result);
+          result = new LowerCaseFilter(result);
+          result = new StopFilter(result,stopTable);
+          result = new PorterStemFilter(result);
+
+          return result;
+      } catch (Exception e) {
+          return null;
+      }
+    }
+}
+
+
+3. In the main code use it this way:
+
+          IndexSearcher searcher =new IndexSearcher(indexLocation);
+          Query qry = QueryParser.parse(question, "body", new
+SearcherAnalyzer());
+
+          Hits hits = searcher.search(qry, new SearcherFilter(directory));
+
+
+In your case if you do not want for example to use the LetterTokenizer() do
+not included in the tokenStream method of the Anlayzer.
+
+Hope this helps,
+
+Aaron
+
+----- Original Message -----
+From: "Rob Outar" <routar@ideorlando.org>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Friday, November 15, 2002 4:13 PM
+Subject: RE: Searching with Multiple Queries
+
+
+> For example JGuru has this:
+>
+> public class MyAnalyzer extends Analyzer
+> {
+>     private static final Analyzer STANDARD = new StandardAnalyzer();
+>
+>     public TokenStream tokenStream(String field, final Reader reader)
+>     {
+>         // do not tokenize field called 'element'
+>         if ("element".equals(field))
+>         {
+>             return new CharTokenizer(reader)
+>             {
+>                 protected boolean isTokenChar(char c)
+>                 {
+>                     return true;
+>                 }
+>             };
+>         }
+>         else
+>         {
+>             // use standard analyzer
+>             return STANDARD.tokenStream(field, reader);
+>         }
+>     }
+> }
+>
+>
+> I do not want any of my fields toekenized for now, so I was thinking about
+> use the above code with a few slight modifications...
+>
+> Thanks,
+>
+> Rob
+>
+>
+> -----Original Message-----
+> From: Rob Outar [mailto:routar@ideorlando.org]
+> Sent: Friday, November 15, 2002 10:10 AM
+> To: Lucene Users List
+> Subject: RE: Searching with Multiple Queries
+>
+>
+> I thought this was my problem :-), anyhow can I just write an analyzer tha
+t
+> does not tokenize the search string and use it with QueryPaser?
+>
+> Thanks,
+>
+> Rob
+>
+> -----Original Message-----
+> From: Aaron Galea [mailto:agale@nextgen.net.mt]
+> Sent: Friday, November 15, 2002 9:44 AM
+> To: Lucene Users List
+> Subject: Re: Searching with Multiple Queries
+>
+>
+> Ok I will let you know the result....
+>
+> thanks
+> Aaron
+> ----- Original Message -----
+> From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Friday, November 15, 2002 3:37 PM
+> Subject: Re: Searching with Multiple Queries
+>
+>
+> > I say: try it :)
+> >
+> > Otis
+> >
+> > --- Aaron Galea <agale@nextgen.net.mt> wrote:
+> > > I am not sure but I was going to do it by using a QueryParser and
+> > > creating a
+> > > filter that iterates over the documents. For each document I check
+> > > the
+> > > directory field and use the String.startsWith() function to make it
+> > > kinda
+> > > work like Prefix query. The Query and the Filter are then used in the
+> > > IndexSearcher. Have not tried it yet but I think it will work, what
+> > > do you
+> > > say?
+> > >
+> > > Thanks
+> > > Aaron
+> > >
+> > >
+> > > ----- Original Message -----
+> > > From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+> > > To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> > > Sent: Friday, November 15, 2002 3:06 PM
+> > > Subject: Re: Searching with Multiple Queries
+> > >
+> > >
+> > > > Sounds like 2 queries to me.
+> > > > You could do a prefix AND phrase, but that won't be exactly the
+> > > same as
+> > > > doing a phrase query on subset of results of prefix query.
+> > > >
+> > > > Otis
+> > > >
+> > > > --- Aaron Galea <agale@nextgen.net.mt> wrote:
+> > > > > Hi everyone,
+> > > > >
+> > > > > I have indexed my documents using a hierarchical indexing by
+> > > adding a
+> > > > > directory field that is indexible but non-tokenized as suggested
+> > > in
+> > > > > the FAQ. Now I want to do a search first using a prefix query and
+> > > > > then apply Phrase query on the returning results. Is this
+> > > possible?
+> > > > > Can it be applied at one go? Not sure whether
+> > > MultiFieldQueryParser
+> > > > > can be used this way. Any suggestions???
+> > > > >
+> > > > > Thanks
+> > > > > Aaron
+> > > > >
+> > > >
+> > > >
+> > > > __________________________________________________
+> > > > Do you Yahoo!?
+> > > > Yahoo! Web Hosting - Let the expert host your site
+> > > > http://webhosting.yahoo.com
+> > > >
+> > > > --
+> > > > To unsubscribe, e-mail:
+> > > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > > > For additional commands, e-mail:
+> > > <mailto:lucene-user-help@jakarta.apache.org>
+> > > >
+> > > > ---
+> > > > [This E-mail was scanned for spam and viruses by NextGen.net.]
+> > > >
+> > > >
+> > > >
+> > >
+> > >
+> > > ---
+> > > [This E-mail was scanned for spam and viruses by NextGen.net.]
+> > >
+> > >
+> > > --
+> > > To unsubscribe, e-mail:
+> > > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > > For additional commands, e-mail:
+> > > <mailto:lucene-user-help@jakarta.apache.org>
+> > >
+> >
+> >
+> > __________________________________________________
+> > Do you Yahoo!?
+> > Yahoo! Web Hosting - Let the expert host your site
+> > http://webhosting.yahoo.com
+> >
+> > --
+> > To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+> >
+> > ---
+> > [This E-mail was scanned for spam and viruses by NextGen.net.]
+> >
+> >
+> >
+>
+>
+> ---
+> [This E-mail was scanned for spam and viruses by NextGen.net.]
+>
+>
+> --
+> To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+>
+>
+> --
+> To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+>
+>
+> --
+> To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+>
+> ---
+> [This E-mail was scanned for spam and viruses by NextGen.net.]
+>
+>
+>
+
+
+---
+[This E-mail was scanned for spam and viruses by NextGen.net.]
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

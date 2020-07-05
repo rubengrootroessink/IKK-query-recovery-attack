@@ -1,0 +1,108 @@
+FROM: Daniel Noll <dan...@nuix.com.au>
+SUBJECT: Re: Memory Usage
+DATE: 16 Nov 2005
+
+Doug Cutting wrote:
+
+> Marvin Humphrey wrote:
+>
+>> You *can't* set it on the reader end.  If you could set it, the  
+>> reader would get out of sync and break.  The value is set 
+>> per-segment  at write time, and the reader has to be able to adapt on 
+>> the fly.
+>
+>
+> It would actually not be too hard to change things so that there was 
+> such a parameter that could be set on an IndexReader.  It would 
+> determine the fraction of entries in the .tii file that are kept in 
+> RAM.  So if the parameter were, e.g., 10, then only every tenth entry 
+> in the .tii file would be kept in RAM, equivalent to 10x the 
+> indexInterval used.
+
+This turned out to be an incredibly elegant way to do the testing, 
+thanks. :-D
+
+It involved:
+  - Adding a new "skipPeriod" field to TermInfosReader (set to 1 to get
+    the default behaviour.)
+  - Modifying readIndex() to store one in every skipPeriod terms
+    (total size = (indexSize - 1) / skipPeriod + 1);
+  - Changing maths throughout by replacing
+        enumerator.indexInterval
+    with
+        (enumerator.indexInterval * skipPeriod)
+
+After all this, everything worked as it previously did, and tweaking the
+skipInterval didn't break anything.  Since then, I've been doing some
+timing runs.
+
+Index statistics:
+  - Size on disk: ~ 4.4GB (compound index)
+  - Term count: ~ 33,000,000
+  - Doc count: ~ 970,000
+
+Timings were obtained by performing the same search 1,000 times and
+averaging the total time.  This was then performed five times in a row
+to get the range that's displayed below.  Memory usage was obtained
+using a 20-second sleep after loading the index, and then using the
+Windows task manager to see the memory usage 10 seconds into the sleep
+(the garbage collector tends to free up some memory during the first
+few seconds of the sleep.)
+
+Timings for a simple TermQuery on the term "one" (docFreq = 22):
+
+    skip    time range for query (ms)    approx mem usage of JVM (MB)
+      1      28 ~  30                     49.2
+      2      28 ~  30                    
+      4      28 ~  30                    
+      8      29 ~  31                    
+     16      29 ~  32                     15.9 (!!)
+     32      29 ~  33                    
+     64      38 ~  42                    
+    128      59 ~  61                    
+    256      99 ~ 102                     14.1
+
+Timings for a simple TermQuery on the term "test" (docFreq = 31,356):
+
+    skip    time range for query (ms)
+      1       6.8 ~  7.6
+     16       9.7 ~ 10.2
+    256      69   ~ 72
+
+123456789012345678901234567890123456789012345678901234567890123456789012
+
+So, more frequent terms get a larger penalty due to this modification,
+but the time was relatively fast to start with.  Rarer terms get less of
+a penalty, perhaps because they already take so much longer to find.
+I also tested several kinds of boolean query as well and had approx.
+10-15% slower performance when using a skip of 16, compared to using
+a skip of 1.
+
+My final conclusion is that memory usage can be significantly reduced by
+tweaking this value, without penalising performance too much unless you
+go too far.  The sweet spot is an indexInterval somewhere between 2048
+and 4096 for indexes of this size.  The optimisation can be done entirely
+in the reader, but the index would load faster if we set it for writing
+as well, so we may just end up taking a hybrid approach.
+
+Daniel  
+
+-- 
+Daniel Noll
+
+NUIX Pty Ltd
+Level 8, 143 York Street, Sydney 2000
+Phone: (02) 9283 9010
+Fax:   (02) 9283 9020
+
+This message is intended only for the named recipient. If you are not
+the intended recipient you are notified that disclosing, copying,
+distributing or taking any action in reliance on the contents of this
+message or attachment is strictly prohibited.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

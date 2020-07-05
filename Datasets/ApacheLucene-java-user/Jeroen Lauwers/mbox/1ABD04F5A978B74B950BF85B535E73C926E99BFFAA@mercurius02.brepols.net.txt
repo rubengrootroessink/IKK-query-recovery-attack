@@ -1,0 +1,818 @@
+FROM: Jeroen Lauwers <Jeroen.Lauw...@CTLO.NET>
+SUBJECT: RE: Advanced NearSpanQuery
+DATE: 15 Jul 2011
+
+Hi Mike and Simon,
+
+Thanks again for your help, but I've created my own solution by writing a custom span query.
+Now, I can perform searches where some of the terms that I supply in the query can be missing
+from the result.
+This way it allows for a slop at the query side AND on the result side.
+
+In case you are interested, here's the code: It's C# and not Java, I know, but hey, look at
+it as pseudo-code.
+
+---------------------------
+using System;
+
+using IndexReader = Lucene.Net.Index.IndexReader;
+using Query = Lucene.Net.Search.Query;
+using ToStringUtils = Lucene.Net.Util.ToStringUtils;
+
+namespace Lucene.Net.Search.Spans
+{
+    [Serializable]
+    public class SpanNearWithMinRequiredSubSpanHitsQuery : SpanQuery
+    {
+        private System.Collections.ArrayList clauses;
+        private int slop;
+        private bool inOrder;
+        private int minRequiredTerms;
+
+        private System.String field;
+
+
+        public SpanNearWithMinRequiredSubSpanHitsQuery(SpanQuery[] clauses, int slop, bool
+inOrder, int minRequiredSubSpanHits)
+        {
+
+            // copy clauses array into an ArrayList
+            this.clauses = new System.Collections.ArrayList(clauses.Length);
+            for (int i = 0; i < clauses.Length; i++)
+            {
+                SpanQuery clause = clauses[i];
+                if (i == 0)
+                {
+                    // check field
+                    field = clause.GetField();
+                }
+                else if (!clause.GetField().Equals(field))
+                {
+                    throw new System.ArgumentException("Clauses must have same field.");
+                }
+                this.clauses.Add(clause);
+            }
+
+            this.slop = slop;
+            this.inOrder = inOrder;
+            this.minRequiredTerms = minRequiredSubSpanHits;
+        }
+
+        /// <summary>Return the clauses whose spans are matched. </summary>
+        public virtual SpanQuery[] GetClauses()
+        {
+            return (SpanQuery[])clauses.ToArray(typeof(SpanQuery));
+        }
+
+        /// <summary>Return the maximum number of unmatched terms permitted.</summary>
+        public virtual int GetMinRequiredTerms()
+        {
+            return minRequiredTerms;
+        }
+
+        /// <summary>Return the maximum number of intervening unmatched positions permitted.</summary>
+        public virtual int GetSlop()
+        {
+            return slop;
+        }
+
+        /// <summary>Return true if matches are required to be in-order.</summary>
+        public virtual bool IsInOrder()
+        {
+            return inOrder;
+        }
+
+        public override System.String GetField()
+        {
+            return field;
+        }
+
+
+        public override System.Collections.ICollection GetTerms()
+        {
+            System.Collections.ArrayList terms = new System.Collections.ArrayList();
+            System.Collections.IEnumerator i = clauses.GetEnumerator();
+            while (i.MoveNext())
+            {
+                SpanQuery clause = (SpanQuery)i.Current;
+                terms.AddRange(clause.GetTerms());
+            }
+            return terms;
+        }
+
+        public override void ExtractTerms(System.Collections.Hashtable terms)
+        {
+            System.Collections.IEnumerator i = clauses.GetEnumerator();
+            while (i.MoveNext())
+            {
+                SpanQuery clause = (SpanQuery)i.Current;
+                clause.ExtractTerms(terms);
+            }
+        }
+
+
+        public override System.String ToString(System.String field)
+        {
+            System.Text.StringBuilder buffer = new System.Text.StringBuilder();
+            buffer.Append("spanNear([");
+            System.Collections.IEnumerator i = clauses.GetEnumerator();
+            while (i.MoveNext())
+            {
+                SpanQuery clause = (SpanQuery)i.Current;
+                buffer.Append(clause.ToString(field));
+                buffer.Append(", ");
+            }
+            if (clauses.Count > 0) buffer.Length -= 2;
+            buffer.Append("], ");
+            buffer.Append(slop);
+            buffer.Append(", ");
+            buffer.Append(inOrder);
+            buffer.Append(")");
+            buffer.Append(ToStringUtils.Boost(GetBoost()));
+            return buffer.ToString();
+        }
+
+        public override Spans GetSpans(IndexReader reader)
+        {
+            if (clauses.Count == 0)
+                // optimize 0-clause case
+                return new SpanOrQuery(GetClauses()).GetSpans(reader);
+
+            if (clauses.Count == 1)
+                // optimize 1-clause case
+                return ((SpanQuery)clauses[0]).GetSpans(reader);
+
+            return inOrder ? (Spans)new NearSpansWithMinRequiredSubSpanHitsOrdered(this, reader)
+: (Spans)new NearSpansWithMinRequiredSubSpanHitsUnordered(this, reader);
+        }
+
+        public override Query Rewrite(IndexReader reader)
+        {
+            SpanNearWithMinRequiredSubSpanHitsQuery clone = null;
+            for (int i = 0; i < clauses.Count; i++)
+            {
+                SpanQuery c = (SpanQuery)clauses[i];
+                SpanQuery query = (SpanQuery)c.Rewrite(reader);
+                if (query != c)
+                {
+                    // clause rewrote: must clone
+                    if (clone == null)
+                        clone = (SpanNearWithMinRequiredSubSpanHitsQuery)this.Clone();
+                    clone.clauses[i] = query;
+                }
+            }
+            if (clone != null)
+            {
+                return clone; // some clauses rewrote
+            }
+            else
+            {
+                return this; // no clauses rewrote
+            }
+        }
+
+        /// <summary>Returns true iff <code>o</code> is equal to this. </summary>
+        public override bool Equals(System.Object o)
+        {
+            if (this == o)
+                return true;
+            if (!(o is SpanNearWithMinRequiredSubSpanHitsQuery))
+                return false;
+
+            SpanNearWithMinRequiredSubSpanHitsQuery spanNearQuery = (SpanNearWithMinRequiredSubSpanHitsQuery)o;
+
+            if (inOrder != spanNearQuery.inOrder)
+                return false;
+            if (slop != spanNearQuery.slop)
+                return false;
+            if (clauses.Count != spanNearQuery.clauses.Count)
+                return false;
+            System.Collections.IEnumerator iter1 = clauses.GetEnumerator();
+            System.Collections.IEnumerator iter2 = spanNearQuery.clauses.GetEnumerator();
+            while (iter1.MoveNext() && iter2.MoveNext())
+            {
+                SpanNearWithMinRequiredSubSpanHitsQuery item1 = (SpanNearWithMinRequiredSubSpanHitsQuery)iter1.Current;
+                SpanNearWithMinRequiredSubSpanHitsQuery item2 = (SpanNearWithMinRequiredSubSpanHitsQuery)iter2.Current;
+                if (!item1.Equals(item2))
+                    return false;
+            }
+
+            return GetBoost() == spanNearQuery.GetBoost();
+        }
+
+        public override int GetHashCode()
+        {
+            long result;
+            result = clauses.GetHashCode();
+            // Mix bits before folding in things like boost, since it could cancel the
+            // last element of clauses.  This particular mix also serves to
+            // differentiate SpanNearQuery hashcodes from others.
+            result ^= ((result << 14) | (result >> 19)); // reversible
+            result += System.Convert.ToInt32(GetBoost());
+            result += slop;
+            result ^= (inOrder ? (long)0x99AFD3BD : 0);
+            return (int)result;
+        }
+    }
+}
+
+--------------------------------------------------------------
+using System;
+using System.Collections.Generic;
+
+using IndexReader = Lucene.Net.Index.IndexReader;
+
+namespace Lucene.Net.Search.Spans
+{
+    class NearSpansWithMinRequiredSubSpanHitsOrdered : Spans
+    {
+        private int allowedSlop;
+        private bool firstTime = true;
+        private bool more = true;
+
+        /// <summary>The spans in the same order as the SpanNearQuery </summary>
+        private Spans[] subSpans;
+
+        private int matchDoc = -1;
+        private int matchStart = -1;
+        private int matchEnd = -1;
+
+        private SpanNearWithMinRequiredSubSpanHitsQuery query;
+
+        public NearSpansWithMinRequiredSubSpanHitsOrdered(SpanNearWithMinRequiredSubSpanHitsQuery
+spanNearWithTermSkipQuery, IndexReader reader)
+        {
+            if (spanNearWithTermSkipQuery.GetClauses().Length < 2)
+            {
+                throw new System.ArgumentException("Less than 2 clauses: " + spanNearWithTermSkipQuery);
+            }
+            allowedSlop = spanNearWithTermSkipQuery.GetSlop();
+
+            // get sub spans
+            SpanQuery[] clauses = spanNearWithTermSkipQuery.GetClauses();
+            subSpans = new Spans[clauses.Length];
+            for (int i = 0; i < clauses.Length; i++)
+            {
+                subSpans[i] = clauses[i].GetSpans(reader);
+            }
+
+            query = spanNearWithTermSkipQuery; // kept for toString() only.
+
+        }
+
+        // inherit javadocs
+        public virtual int Doc()
+        {
+            return matchDoc;
+        }
+
+        // inherit javadocs
+        public virtual int Start()
+        {
+            return matchStart;
+        }
+
+        // inherit javadocs
+        public virtual int End()
+        {
+            return matchEnd;
+        }
+
+        // inherit javadocs
+        public virtual bool Next()
+        {
+            if (firstTime)
+            {
+                firstTime = false;
+                // read all sub spans
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (!subSpans[i].Next()) // read
+                        subSpans[i] = null; // set null when EOF
+                }
+            }
+            else if (more)
+            {
+                // read from the first still active sub span
+                bool atLeastOneRead = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null)
+                        if (subSpans[i].Next()) // read
+                        {
+                            atLeastOneRead = true;
+                            break;
+                        }
+                        else
+                            subSpans[i] = null; // set null when EOF
+                }
+                if (!atLeastOneRead) // if nothing read => quit
+                {
+                    more = false;
+                    return false;
+                }
+            }
+            else
+                return false;
+
+            more = AdvanceToNext(); // make shure all hits of the sub spans are in the same
+doc, in order and slop is OK
+
+            return more;
+        }
+
+        // inherit javadocs
+        public virtual bool SkipTo(int target)
+        {
+            if (firstTime)
+            {
+                firstTime = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (!subSpans[i].SkipTo(target))
+                        subSpans[i] = null;
+                }
+            }
+            else if (more)
+            {
+                bool atLeastOneRead = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null)
+                    {
+                        if (subSpans[0].Doc() < target)
+                        {
+                            if (subSpans[i].SkipTo(target))
+                            {
+                                atLeastOneRead = true;
+                                break;
+                            }
+                            else
+                                subSpans[i] = null;
+                        }
+                        else
+                            return true;
+                    }
+                }
+                if (!atLeastOneRead)
+                {
+                    more = false;
+                    return false;
+                }
+            }
+            else
+                return false;
+
+            more = AdvanceToNext();
+
+            return more;
+        }
+
+        private bool AdvanceToNext()
+        {
+            while (true)
+            {
+                // get doc id's from sub spans
+                int[] docIds = new int[subSpans.Length];
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] == null)
+                        docIds[i] = int.MaxValue;
+                    else
+                        docIds[i] = subSpans[i].Doc();
+                }
+
+                // Sort doc ids
+                Array.Sort(docIds);
+
+                // get docid of 'GetMinRequiredTerms'-th item
+                int docIdOfXthspan = docIds[query.GetMinRequiredTerms() - 1];
+
+                // check too many missing
+                if (docIdOfXthspan == int.MaxValue)
+                {
+                    more = false;
+                    return false;
+                }
+
+                // we need at least ... items in the same doc, so the docId of the ...th item
+should be equal to the doc id of the first item.
+                // if not, all items before the ...th can be moved forward to the doc id of
+the ...th item
+                if (docIdOfXthspan != docIds[0])
+                {
+                    for (int i = 0; i < subSpans.Length; i++)
+                    {
+                        if (subSpans[i] != null)
+                            if (subSpans[i].Doc() < docIdOfXthspan)
+                                if (!subSpans[i].SkipTo(docIdOfXthspan))
+                                    subSpans[i] = null;
+                    }
+                    continue;
+                }
+
+                //// get number of subspans in lowest doc id
+                List<int> matchingSpans = new List<int>();
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null && subSpans[i].Doc() == docIdOfXthspan)
+                        matchingSpans.Add(i);
+                }
+
+                // check if spans are in order within the document
+                bool extraReadNeeded = false;
+                int tmpMatchDoc = subSpans[matchingSpans[0]].Doc();
+                for(int i = 1; i < matchingSpans.Count; i++)
+                {
+                    if  (!DocSpansOrdered(subSpans[matchingSpans[i - 1]], subSpans[matchingSpans[i]]))
+                    {
+                        if (!subSpans[matchingSpans[i]].Next())
+                            subSpans[matchingSpans[i]] = null;
+
+                        extraReadNeeded = true;
+                        break;
+                    }
+                }
+
+                // check if a read was needed, if so restart from beginning (optimization
+possible)
+                if (extraReadNeeded)
+                {
+                    matchDoc = -1;
+                    continue;
+                }
+
+                // check slop
+                matchStart = subSpans[matchingSpans[0]].Start();
+                matchEnd = subSpans[matchingSpans[matchingSpans.Count-1]].End();
+                int matchSlop = matchEnd - matchStart - (query.GetMinRequiredTerms() - 1);
+                if (matchSlop > allowedSlop)
+                {
+                    if(!subSpans[matchingSpans[0]].Next())
+                        subSpans[matchingSpans[0]] = null;
+                    continue;
+                }
+
+                //all checks pass
+                matchDoc = tmpMatchDoc;
+                break;
+            }
+
+            return true;
+        }
+
+        internal static bool DocSpansOrdered(Spans spans1, Spans spans2)
+        {
+            if (spans1.Doc() == int.MaxValue || spans2.Doc() == int.MaxValue)
+                return true;
+            System.Diagnostics.Debug.Assert(spans1.Doc() == spans2.Doc(), "doc1 " + spans1.Doc()
++ " != doc2 " + spans2.Doc());
+            int start1 = spans1.Start();
+            int start2 = spans2.Start();
+            /* Do not call DocSpansOrdered(int,int,int,int) to avoid invoking .end() : */
+            return (start1 == start2) ? (spans1.End() < spans2.End()) : (start1 < start2);
+        }
+
+         public override System.String ToString()
+        {
+            return GetType().FullName + "(" + query.ToString() + ")@" + (firstTime ? "START"
+: (more ? (Doc() + ":" + Start() + "-" + End()) : "END"));
+        }
+    }
+}
+
+----------------------------------------------------
+
+using System;
+using System.Collections.Generic;
+
+using IndexReader = Lucene.Net.Index.IndexReader;
+
+namespace Lucene.Net.Search.Spans
+{
+    class NearSpansWithMinRequiredSubSpanHitsUnordered
+    {
+        private int allowedSlop;
+        private bool firstTime = true;
+        private bool more = true;
+
+        /// <summary>The spans in the same order as the SpanNearQuery </summary>
+        private Spans[] subSpans;
+
+        private int matchDoc = -1;
+        private int matchStart = -1;
+        private int matchEnd = -1;
+
+        private SpanNearWithMinRequiredSubSpanHitsQuery query;
+
+        public NearSpansWithMinRequiredSubSpanHitsUnordered(SpanNearWithMinRequiredSubSpanHitsQuery
+spanNearWithTermSkipQuery, IndexReader reader)
+        {
+            if (spanNearWithTermSkipQuery.GetClauses().Length < 2)
+            {
+                throw new System.ArgumentException("Less than 2 clauses: " + spanNearWithTermSkipQuery);
+            }
+            allowedSlop = spanNearWithTermSkipQuery.GetSlop();
+
+            // get sub spans
+            SpanQuery[] clauses = spanNearWithTermSkipQuery.GetClauses();
+            subSpans = new Spans[clauses.Length];
+            for (int i = 0; i < clauses.Length; i++)
+            {
+                subSpans[i] = clauses[i].GetSpans(reader);
+            }
+
+            query = spanNearWithTermSkipQuery; // kept for toString() only.
+
+        }
+
+        // inherit javadocs
+        public virtual int Doc()
+        {
+            return matchDoc;
+        }
+
+        // inherit javadocs
+        public virtual int Start()
+        {
+            return matchStart;
+        }
+
+        // inherit javadocs
+        public virtual int End()
+        {
+            return matchEnd;
+        }
+
+        // inherit javadocs
+        public virtual bool Next()
+        {
+            if (firstTime)
+            {
+                firstTime = false;
+                // read all sub spans
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (!subSpans[i].Next()) // read
+                        subSpans[i] = null; // set null when EOF
+                }
+            }
+            else if (more)
+            {
+                // read from the first still active sub span
+                bool atLeastOneRead = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null)
+                        if (subSpans[i].Next()) // read
+                        {
+                            atLeastOneRead = true;
+                            break;
+                        }
+                        else
+                            subSpans[i] = null; // set null when EOF
+                }
+                if (!atLeastOneRead) // if nothing read => quit
+                {
+                    more = false;
+                    return false;
+                }
+            }
+            else
+                return false;
+
+            more = AdvanceToNext(); // make shure all hits of the sub spans are in the same
+doc, in order and slop is OK
+
+            return more;
+        }
+
+        // inherit javadocs
+        public virtual bool SkipTo(int target)
+        {
+            if (firstTime)
+            {
+                firstTime = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (!subSpans[i].SkipTo(target))
+                        subSpans[i] = null;
+                }
+            }
+            else if (more)
+            {
+                bool atLeastOneRead = false;
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null)
+                    {
+                        if (subSpans[0].Doc() < target)
+                        {
+                            if (subSpans[i].SkipTo(target))
+                            {
+                                atLeastOneRead = true;
+                                break;
+                            }
+                            else
+                                subSpans[i] = null;
+                        }
+                        else
+                            return true;
+                    }
+                }
+                if (!atLeastOneRead)
+                {
+                    more = false;
+                    return false;
+                }
+            }
+            else
+                return false;
+
+            more = AdvanceToNext();
+
+            return more;
+        }
+
+        private bool AdvanceToNext()
+        {
+            while (true)
+            {
+                // get doc id's from sub spans
+                int[] docIds = new int[subSpans.Length];
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] == null)
+                        docIds[i] = int.MaxValue;
+                    else
+                        docIds[i] = subSpans[i].Doc();
+                }
+
+                // Sort doc ids
+                Array.Sort(docIds);
+
+                // get docid of 'GetMinRequiredTerms'-th item
+                int docIdOfXthspan = docIds[query.GetMinRequiredTerms() - 1];
+
+                // check too many missing
+                if (docIdOfXthspan == int.MaxValue)
+                {
+                    more = false;
+                    return false;
+                }
+
+                // we need at least ... items in the same doc, so the docId of the ...th item
+should be equal to the doc id of the first item.
+                // if not, all items before the ...th can be moved forward to the doc id of
+the ...th item
+                if (docIdOfXthspan != docIds[0])
+                {
+                    for (int i = 0; i < subSpans.Length; i++)
+                    {
+                        if (subSpans[i] != null)
+                            if (subSpans[i].Doc() < docIdOfXthspan)
+                                if (!subSpans[i].SkipTo(docIdOfXthspan))
+                                    subSpans[i] = null;
+                    }
+                    continue;
+                }
+
+                //// get number of subspans in lowest doc id
+                List<int> matchingSpans = new List<int>();
+                for (int i = 0; i < subSpans.Length; i++)
+                {
+                    if (subSpans[i] != null && subSpans[i].Doc() == docIdOfXthspan)
+                        matchingSpans.Add(i);
+                }
+
+                int tmpMatchDoc = subSpans[matchingSpans[0]].Doc();
+
+                // check slop
+                matchStart = subSpans[matchingSpans[0]].Start();
+                matchEnd = subSpans[matchingSpans[matchingSpans.Count-1]].End();
+                int matchSlop = matchEnd - matchStart - (query.GetMinRequiredTerms() - 1);
+                if (matchSlop > allowedSlop)
+                {
+                    if(!subSpans[matchingSpans[0]].Next())
+                        subSpans[matchingSpans[0]] = null;
+                    continue;
+                }
+
+                //all checks pass
+                matchDoc = tmpMatchDoc;
+                break;
+            }
+
+            return true;
+        }
+
+        internal static bool DocSpansOrdered(Spans spans1, Spans spans2)
+        {
+            if (spans1.Doc() == int.MaxValue || spans2.Doc() == int.MaxValue)
+                return true;
+            System.Diagnostics.Debug.Assert(spans1.Doc() == spans2.Doc(), "doc1 " + spans1.Doc()
++ " != doc2 " + spans2.Doc());
+            int start1 = spans1.Start();
+            int start2 = spans2.Start();
+            /* Do not call DocSpansOrdered(int,int,int,int) to avoid invoking .end() : */
+            return (start1 == start2) ? (spans1.End() < spans2.End()) : (start1 < start2);
+        }
+
+         public override System.String ToString()
+        {
+            return GetType().FullName + "(" + query.ToString() + ")@" + (firstTime ? "START"
+: (more ? (Doc() + ":" + Start() + "-" + End()) : "END"));
+        }
+    }
+}
+
+
+
+-----Original Message-----
+From: Mike Sokolov [mailto:sokolov@ifactory.com]
+Sent: woensdag 13 juli 2011 23:02
+To: java-user@lucene.apache.org
+Cc: Simon Willnauer
+Subject: Re: Advanced NearSpanQuery
+
+Sorry for the misdirection ...
+
+On 07/13/2011 11:37 AM, Simon Willnauer wrote:
+> I don't think this is possible with spans today. Once
+> https://issues.apache.org/jira/browse/LUCENE-2878 is due this should
+> be possible with a boolean query I think.
+>
+> to work around this you need to write a SpanOR query with a
+> minShouldMatch functionality though.
+>
+> simon
+>
+> On Wed, Jul 13, 2011 at 5:09 PM, Jeroen Lauwers<Jeroen.Lauwers@ctlo.net>  wrote:
+>
+>> Hi Mike,
+>>
+>> Thanks for your quick reply, but do not seem to find any documentation on "DisjunctionSumQuery"
+and I'm not familiar with that concept.
+>>
+>> Could you point me in the right direction?
+>>
+>> Jeroen
+>>
+>> -----Original Message-----
+>> From: Mike Sokolov [mailto:sokolov@ifactory.com]
+>> Sent: woensdag 13 juli 2011 15:23
+>> To: java-user@lucene.apache.org
+>> Cc: Jeroen Lauwers
+>> Subject: Re: Advanced NearSpanQuery
+>>
+>> Can you wrap a SpanNearQuery around an DisjunctionSumQuery with minNrShouldMatch=8?
+>>
+>> -Mike
+>>
+>> On 07/13/2011 08:53 AM, Jeroen Lauwers wrote:
+>>
+>>> Hi,
+>>>
+>>> I was wondering if anyone could help me on this:
+>>>
+>>> I want to search for:
+>>>
+>>> 1.       a set of words (eg. 10)
+>>>
+>>> 2.       only a couple of words may come in between (eg. 3) in the result document
+>>>
+>>> 3.       of the supplied set of (10) words, at least 8 must be present (or in
+other words: 2 of the supplied words can be missing)
+>>>
+>>> I use the SpanNearQuery for (1.) and (2.), but it is the third part that's lacking.
+>>>
+>>> Any ideas?
+>>>
+>>> Jeroen
+>>>
+>>>
+>>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

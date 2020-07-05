@@ -1,0 +1,73 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: MultiFieldQueryParser seems broken... Fix attached.
+DATE: 9 Sep 2004
+
+Bill Janssen wrote:
+> I'd think that if a user specified a query "cutting lucene", with an
+> implicit AND and the default fields "title" and "author", they'd
+> expect to see a match in which both "cutting" and "lucene" appears.  That is,
+> 
+> (title:cutting OR author:cutting) AND (title:lucene OR author:lucene)
+
+Your proposal is certainly an improvement.
+
+It's interesting to note that in Nutch I implemented something 
+different.  There, a search for "cutting lucene" expands to something like:
+
+  (+url:cutting^4.0 +url:lucene^4.0 +url:"cutting lucene"~2147483647^4.0)
+  (+anchor:cutting^2.0 +anchor:lucene^2.0 +anchor:"cutting lucene"~4^2.0)
+  (+content:cutting +content:lucene +content:"cutting lucene"~2147483647)
+
+So a page with "cutting" in the body and "lucene" in anchor text won't 
+match: the body, anchor or url must contain all query terms.  A single 
+authority (content, url or anchor) must vouch for all attributes.
+
+Note that Nutch also boosts matches where the terms are close together. 
+  Using "~2147483647" permits them to be anywhere in the document, but 
+boosts more when they're closer and in-order.  (The "~4" in anchor 
+matches is to prohibit matches across different anchors.  Each anchor is 
+separated by a Token.positionIncrement() of 4.)
+
+But perhaps this is not a feature.  Perhaps Nutch should instead expand 
+this to:
+
+  +(url:cutting^4.0 anchor:cutting^2.0 content:cutting)
+  +(url:lucene^4.0 anchor:lucene^2.0 content:lucene)
+  url:"cutting lucene"~2147483647^4.0
+  anchor:"cutting lucene"~4^2.0
+  content:"cutting lucene"~2147483647
+
+That would, e.g., permit a match with only "lucene" in an anchor and 
+"cutting" in the content, which the earlier formulation would not.
+
+Can anyone tell whether Google has this requirement?  I have not been 
+able to construct a two-word query that returns a page without both 
+words in either the content, the title, the url or in a single anchor. 
+Can you?
+
+If you're interested, the Nutch query expansion code in question is:
+
+http://cvs.sourceforge.net/viewcvs.py/nutch/nutch/src/plugin/query-basic/src/java/net/nutch/searcher/basic/BasicQueryFilter.java?view=markup
+
+To play with it you can download Nutch and use the command:
+
+   bin/nutch net.nutch.searcher.Query
+
+>>http://issues.apache.org/eyebrowse/ReadMsg?listName=lucene-user@jakarta.apache.org&msgId=1798116
+> 
+> 
+> Yes, the approach there is similar.  I attempted to complete the
+> solution and provide a working replacement for MultiFieldQueryParser.
+
+But, inspired by that message, couldn't MultiFieldQueryParser just be a 
+subclass of QueryParser that overrides getFieldQuery()?
+
+Cheers,
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

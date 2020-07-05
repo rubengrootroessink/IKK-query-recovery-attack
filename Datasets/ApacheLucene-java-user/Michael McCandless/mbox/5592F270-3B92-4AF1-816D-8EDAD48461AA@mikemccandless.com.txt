@@ -1,0 +1,71 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Document ID shuffling under 2.3.x (on merge?)
+DATE: 17 Mar 2008
+
+
+Daniel Noll wrote:
+
+> On Thursday 13 March 2008 19:46:20 Michael McCandless wrote:
+>> But, when a normal merge of segments with deletions completes, your
+>> docIDs will shift.  In trunk we now explicitly compute the docID
+>> shifting that happens after a merge, because we don't always flush
+>> pending deletes when flushing added docs, but this is all done
+>> privately to IndexWriter.
+>
+> I don't need to worry about deleted documents as such things don't  
+> exist in
+> our system, hence the optimisation based on document IDs.
+>
+>> I'm a little confused: you said optimize() introduces the problem,
+>> but, it sounds like optimize() should be fixing the problem because
+>> it compacts all docIDs to match what you were "guessing" outside of
+>> Lucene?  Can you post the full stack trace of the exceptions you're
+>> hitting?
+>
+> You're misunderstanding how we're getting the ID, that's all.   
+> We're getting
+> it by calling docCount() (after adding) and subtracting 1, which is
+> guaranteed to give the right ID at the time of indexing, although  
+> of course,
+> later is another matter entirely.  We were operating from now out  
+> of date
+> information which says the IDs don't shift unless you call delete...
+>
+> Example:
+>
+>   add document, assume ID 0 (docCount = 1)
+>   add document, assume ID 1 (docCount = 2)
+>   add document, FAILS - assumed not added
+>   re-add document minus reader fields, assume ID 3 (docCount = 4)
+>
+> So the ID assumptions are correct at this point; when optimize() is  
+> called, it
+> shifts the third document sucht that it then has ID 2, and our  
+> internal
+> counts become wrong.
+
+OK now I understand: docCount() is correct at the time, but then when  
+a merge or optimize merges a segment that has a document that hit an  
+exception, the IDs shift.
+
+> I've backported the expungeDeleted() patch into 2.3 and will be  
+> testing it out
+> next; seems it will do more or less what we want and merging the  
+> deleted
+> document should be relatively quick as it will only ever exist in  
+> the in
+> DocumentsWriter's in-memory buffer.
+
+Well ... expungeDeletes() first forces a flush, at which point the  
+deletions are flushed as a .del file against the just flushed  
+segment.  Still, if you call expungeDeletes after every flush  
+(commit) then it's only 1 segment whose deletions need to be expunged  
+so it should be fast.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

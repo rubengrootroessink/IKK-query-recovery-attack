@@ -1,0 +1,109 @@
+FROM: Antony Sequeira <antony.seque...@gmail.com>
+SUBJECT: Re: pre computing possible search results narrowing and hit counts on those
+DATE: 30 Mar 2005
+
+On Wed, 30 Mar 2005 09:42:32 -0800, Doug Cutting <cutting@apache.org> wrote:
+> Antony Sequeira wrote:
+> > A user does a search for say "condominium", and i show him the 50,000
+> > properties that meet that description.
+> >
+> > I need two other pieces of information for display -
+> > 1. I want to show a "select" box on the UI, which contains all the
+> > cities that appear in those 50,000 documents
+> > 2. Against each city I want to show the count of matching documents.
+> >
+> > For example the drop down might look like
+> > "Los Angeles"  10000
+> > "San Francisco" 5000
+> >
+> > (But, I do not want to show "San Jose" if none of the 50,000 documents
+> > contain it)
+> 
+> You can use the FieldCache & HitCollector:
+> 
+> private class Count { int value; }
+> 
+> String[] docToCity = FieldCache.getStrings(indexReader, "city");
+> Map cityToCount = new HashMap();
+> 
+> searcher.search(query, new HitCollector() {
+>    public void collect(int doc, float score) {
+>      String city = docToCity[doc];
+>      Count count = cityToCount.get(city);
+>      if (count == null) {
+>        count = new Count();
+>        cityToCount.put(city, count);
+>      }
+>      count.value++;
+>    }
+> });
+> 
+> // sort & display entries in cityToCount
+> 
+> Doug
+> 
+Based on a previous reply , I went through the java docs and came up with
+
+ public class PreFilterCollector extends HitCollector {
+        final BitVector bits = new BitVector(reader.maxDoc());
+        java.util.HashMap<String,Integer> statemap = new    
+java.util.HashMap<String,Integer>() ;
+
+        public void collect(int id, float score) {
+            bits.set(id);
+        }
+
+        public java.util.HashMap<String,Integer> getStateCounts() {
+            try {
+                int k = bits.size();
+                int j = 0;
+                for (int i =0; i < k; i++) {
+                    if (!bits.get(i))
+                        continue;
+                    Document doc = reader.document(i); 
+                    j++;
+                    String state = doc.get("state"); // we assume one
+state for now
+                    if (statemap.containsKey(state)) {
+                        statemap.put(state,statemap.get(state) + 1); 
+                    } else {
+                        statemap.put(state,1);
+                    }
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            return statemap;
+        }
+  }
+
+But, I have the following questions
+1. My code first collects all the doc ids and then iterates over them
+to collect field info. I did this becasue,
+http://lucene.apache.org/java/docs/api/org/apache/lucene/search/HitCollector.html
+says "This is called in an inner search loop. For good search
+performance, implementations of this method should not call
+Searchable.doc(int) or IndexReader.document(int) on every document
+number encountered"
+Have I misunderstood and doing this wrongly ?
+
+2. Would your code be faster (under what circumstances) ?
+
+3.  One problem i see with my current solution is that it accesses
+every doc of the result  set.
+One of the previous responses pointed to a solution in
+http://www.mail-archive.com/java-dev@lucene.apache.org/msg00034.html
+After reading it, to me it looked like that solution won't be any
+better. (Looks like it walks values of terms that do not even occur in
+teh current search result set).  Have I got this right ?
+
+
+I am a newbee to lucene. Thanks for all the replies. Appreciate it very much.
+
+-Antony
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

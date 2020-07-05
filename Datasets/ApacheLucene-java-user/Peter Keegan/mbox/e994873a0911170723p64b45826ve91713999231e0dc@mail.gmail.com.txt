@@ -1,0 +1,112 @@
+FROM: Peter Keegan <peterlkee...@gmail.com>
+SUBJECT: Re: Use of AllTermDocs with custom scorer
+DATE: 17 Nov 2009
+
+>This is a generic solution, but just make sure you don't do the
+>map lookup for every doc collected, if you can help it, else that'll
+>slow down your search.
+
+What I just learned is that a Scorer is created for each segment (lights
+on!).
+So, couldn't I just do the subreader->docBase map lookup once when the
+custom scorer is created? No need to access the map for every doc this way.
+
+Peter
+
+On Tue, Nov 17, 2009 at 8:58 AM, Peter Keegan <peterlkeegan@gmail.com>wrote:
+
+> The external data is just an array of fixed-length records, one for each
+> Lucene document. Indexes are updated at regular intervals in one jvm. A
+> searcher jvm opens the index and reads all the fixed-length records into
+> RAM. Given an index-wide docId, the custom scorer can quickly access the
+> corresponding fixed-length external data.
+>
+> Could you explain a bit more about how mapping the external data to be per
+> segment would work? As I said, rebuilding the whole file isn't a big deal
+> and the single file keeps the Searcher's use of it simple.
+>
+> With or without a SegmentReader->docBase map (which does sound like a huge
+> performance hit), I still don't see how the custom scorer gets the segment
+> number. Btw, the custom scorer usually becomes part of a ConjunctionScorer
+> (if that matters)
+>
+>
+> >FSHQ expects you to init it with the top-level reader, and then insert
+> using top docIDs.
+> For sorting, I'm using FSHQ directly with a custom collector that inserts
+> docs to the FSHQ. But the custom collector is passed the segment-relative
+> docId and the custom comparator needs the index-wide docId. The custom
+> collector extends HitCollector. I'm missing where this type of collector
+> finds the docBase.
+>
+> Thanks,
+> Peter
+>
+>
+> On Tue, Nov 17, 2009 at 5:49 AM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>> On Mon, Nov 16, 2009 at 6:38 PM, Peter Keegan <peterlkeegan@gmail.com>
+>> wrote:
+>>
+>> >>Can you remap your external data to be per segment?
+>> >
+>> > That would provide the tightest integration but would require a major
+>> > redesign. Currently, the external data is in a single file created by
+>> > reading a stored field after the Lucene index has been committed.
+>> Creating
+>> > this file is very fast with 2.9 (considering the cost of reading all
+>> those
+>> > stored fields).
+>>
+>> OK.  Though if you update a few docs and open a new reader, you have
+>> to fully recreate the file?  (Or, your app may simply never need to do
+>> that...).
+>>
+>> >>For your custom sort comparator, are you using FieldComparator?
+>> >
+>> > I'm using the deprecated FieldSortedHitQueue. I started looking into
+>> > replacing it with FieldComparator, but it was much more involved than I
+>> had
+>> > expected, so I postponed. Also, this would only be a partial solution to
+>> a
+>> > query with a custom scorer and custom sorter.
+>>
+>> You are using FSHQ directly, yourself?  (Ie, not via
+>> TopFieldDocCollector)?
+>>
+>> FSHQ expects you to init it with the top-level reader, and then insert
+>> using top docIDs.
+>>
+>> >>Failing these, Lucene currently visits the readers in index order.
+>> >>So, you could accumulate the docBase by adding up the reader.maxDoc()
+>> >>for each reader you've seen.  However, this may change in future
+>> >>Lucene releases.
+>> >
+>> > This would work for the Scorer but not the Sorter, right?
+>>
+>> I don't fully understand the question -- the sorter is simply a
+>> Collector impl, and Collector.setNextReader tells you docBase when a
+>> the search advances to the next reader.
+>>
+>> >>You could also, externally, build your own map from SegmentReader ->
+>> >>docBase, by calling IndexReader.getSequentialSubReaders() and stepping
+>> >>through adding up the maxDoc.  Then, in your search, you can lookup
+>> >>the SegmentReader you're working on to get the docBase?
+>> >
+>> > I think this would work for both Scorer and Sorter, right?
+>> > This seems like the best solution right now.
+>>
+>> This is a generic solution, but just make sure you don't do the
+>> map lookup for every doc collected, if you can help it, else that'll
+>> slow down your search.
+>>
+>> Mike
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

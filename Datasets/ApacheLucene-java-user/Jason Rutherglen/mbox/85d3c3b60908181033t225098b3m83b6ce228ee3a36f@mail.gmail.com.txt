@@ -1,0 +1,167 @@
+FROM: Jason Rutherglen <jason.rutherg...@gmail.com>
+SUBJECT: Re: Bizarre indexing issue where thousands of files get created
+DATE: 18 Aug 2009
+
+Micah,
+
+If you can post some of your code, it may be easier to identify the
+problem you're experiencing.
+
+-J
+
+On Tue, Aug 18, 2009 at 9:55 AM, Micah Jaffe<micah@affinitycircles.com> wrote:
+> Hi, thanks for the response!  The (custom) searchers that are falling out of
+> cache are indeed calling close on their IndexReader in finalize(); they are
+> not calling close on themselves as that appears to be a no-op when creating
+> an IndexSearcher with a reader.  The searchers are just extended
+> IndexSearchers which have notion of their lifetime and are only built with
+> IndexReaders.
+>
+> The OOM does appear to be a symptom of reopening an IndexWriter, I haven't
+> seen an OOM originate from the IndexWriter.  Here's a partial stack trace
+> (fyi, we are closing the old reader following the pattern of "if the fresh
+> reader != old reader"):
+>
+> java.lang.OutOfMemoryError: Java heap space at
+> org.apache.lucene.index.MultiSegmentReader.<init>(MultiSegmentReader.java:160)
+> at
+> org.apache.lucene.index.MultiSegmentReader.doReopen(MultiSegmentReader.java:203)
+> at
+> org.apache.lucene.index.DirectoryIndexReader$2.doBody(DirectoryIndexReader.java:98)
+> at
+> org.apache.lucene.index.SegmentInfos$FindSegmentsFile.run(SegmentInfos.java:636)
+> at
+> org.apache.lucene.index.DirectoryIndexReader.reopen(DirectoryIndexReader.java:92)
+> [... many more lines of our server code and Tomcat stack ...]
+> What I don't have visibility to right now is what a IndexWriter(s) might be
+> up to at that point, nor which index just exploded the memory.
+> Everything  I've read about trying to handle OOMs in Java is "be careful,
+> but you're likely screwed", so I'm unsure if I should try to capture the
+> error and mop up what I can or if that will just cause more problems.  On
+> indexes that have the large number of files problem, it appears the next
+> time an IndexWriter is opened on that index in a new process (after the
+> write.lock is nuked post shut-down), it collapses the files back down to a
+> sane number (at close() maybe?).
+> I'll see if I can work in the infoStream suggestion, thanks...
+> -Micah
+> On Aug 18, 2009, at 4:35 AM, Michael McCandless wrote:
+>
+>> Are you .close()ing your IndexReaders when they fall out of the MRU cache?
+>>
+>> Seems like there are two problems... 1) why are you hitting OOMEs?
+>> Seems likely you're just doing too much at once.... can you ask the
+>> JRE to get you a heap dump when it hits OOME?
+>>
+>> 2) Why is IndexWriter creating zillions of tiny files?  This one is
+>> a.... does the OOME pass through IndexWriter?  If you turn on
+>> infoStream in your writer, get the problem to happen, and post back
+>> the resulting output, it'll give us a better idea what's going on.
+>> Could you also post a representative subset of these 200K filenames?
+>> It sounds like somehow IndexWriter is getting stuck into a state where
+>> it thinks it must flush segments far too frequently.
+>>
+>> Mike
+>>
+>> On Mon, Aug 17, 2009 at 9:31 PM, Micah Jaffe<micah@affinitycircles.com>
+>> wrote:
+>>>
+>>> The Problem: periodically we see thousands of files get created from an
+>>> IndexWriter in a Java process in a very short period of time.  Since we
+>>> started trying to track this, we saw an index go from ~25 files to over
+>>> 200K
+>>> files in about a half hour.
+>>>
+>>> The Context: a hand-rolled, all-in-one Lucene server (2.3.2 codebase)
+>>> that
+>>> can respond to searches and perform index updates, running under Tomcat,
+>>> on
+>>> Java 1.6 on 32-bit Linux using 2GB of memory, reading/writing to local
+>>> disk.
+>>>  This is a threaded environment where we're serving about 15-20/requests
+>>> a
+>>> second (mostly searches, with a 10:1 search/update ratio).  We wrap all
+>>> of
+>>> the update code around IndexWriter to make sure all threads are only ever
+>>> using one writer and never close an actively used writer.  We cache about
+>>> 40
+>>> IndexSearchers (really IndexReaders) using an MRU cache and leave it to
+>>> Java
+>>> to garbage collect those that leave scope.  We can potentially serve ~150
+>>> different search indexes, most with document count under 1 million, with
+>>> fairly sparsely populated fields and under about 100 fields.  We do not
+>>> store a lot of information in any index, generally just IDs that we then
+>>> use
+>>> for DB look-ups.  Our biggest index is about 7GB on disk and comprises
+>>> roughly 18 million records and is almost always in use (either searched
+>>> or
+>>> updated).  We sometimes go days without seeing the The Problem and we've
+>>> seen it happen twice in the span of 4 hours.
+>>>
+>>> Accompanying Symptom: we see an OOM error where we do not have enough
+>>> heap
+>>> space.  I'm not sure if the explosion of files triggers or results from
+>>> the
+>>> error.  This is the only error we see accompanying the problem;
+>>> performance
+>>> and memory usage seem fine up to the OOM error.
+>>>
+>>> Current Workaround: taking the same server to a 64-bit machine and
+>>> throwing
+>>> 10GB of RAM at it seems (4 days counting now) to have "solved" the
+>>> problem.
+>>>
+>>> What I'd really like is to understand the underlying problem, and we have
+>>> some theories, but before charging down one way or another I was hoping
+>>> to
+>>> get an idea if a) people have seen something similar before and b) what
+>>> they
+>>> did.  Our theories:
+>>> - Opening IndexReaders faster than Java can garbage collect those that
+>>> are
+>>> out of scope.  We do know that too many open readers (e.g. around 100 of
+>>> our
+>>> indexes) can exhaust memory.  This scenario seems unlikely given our
+>>> usage;
+>>> we have 2-3 heavily used indexes and very light usage on the rest.  That
+>>> said, the with some recent code changes we decided to rely on garbage
+>>> collection to fix another bug (race condition where a searcher was being
+>>> used as it was being closed).
+>>> - Hit a race condition with IndexWriter, with our code or in this version
+>>> of
+>>> the library, and it goes nuts.
+>>> - Particular heavy-duty search/update hits, e.g. potentially iterating
+>>> across all documents (not likely) or updating a large number of documents
+>>> in
+>>> an index (more likely).
+>>>
+>>> Really scientific, I know, but I'd welcome any discussion that involves
+>>> juggling Java heap (what do you do with your OOMs?), our particular
+>>> problem
+>>> or a threaded environment using Lucene (like Solr).
+>>>
+>>> thanks!
+>>> Micah
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

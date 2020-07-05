@@ -1,0 +1,99 @@
+FROM: "Hackl, Rene" <Rene.Ha...@FIZ-Karlsruhe.DE>
+SUBJECT: Re: derive tokens from single token
+DATE: 30 Sep 2003
+
+> As Erik says, it seems that you basically want a PhraseQuery.
+
+A PhraseQuery would do - and certainly perform much better - if I could
+guarantee, that two conditions are fulfilled:
+
+1. as you mentioned, the analyzer must be intelligent enough to rip such
+formulas into the right tokens. Sometimes however only the context makes
+clear where a descriptor ends and another one starts. Moreover, there are
+hundreds if not thousands of possible constituents (like "bi", "tri",
+"penta", "hexa" etc. ).
+
+2. users do not only enter queries in terms of the smallest possible
+constituents, but also combinations of these, for instance
+Q:"*hydronaphthalene*". If the resulting answer set contains
+"hydro-something-naphtalene" this will raise eyebrows.
+
+What is more, the index will consist of english and german documents.
+Therefore it would be nice to put a wildcard at the right place and get hits
+in both languages.
+
+> what about bi/tri-grams + some sort of hit filtering? It will do the 
+> job. 
+
+Yes, we thought about some kind of n-gram support. At first glance though we
+couldn't see how to reduce the noise efficiently, but if there's time, I'll
+give it a try.
+
+As for the AliasFilter class: when I realized how easy it would be to make
+the necessary changes I hardly couldn't believe it. Thanks again, Erik! 
+
+For the sake of "compile-and-go" I put the slightly modified class at the
+bottom. 
+
+Best regards,
+
+René Hackl
+
+-----------------------------------
+
+package org.apache.lucene.analysis;
+
+import java.io.IOException;
+import java.util.Stack;
+import java.util.StringTokenizer;
+
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.TokenStream;
+
+public class CutOffFilter extends TokenFilter {  
+
+   private Stack currentTokenAliases;
+
+   public CutOffFilter(TokenStream in) {
+     currentTokenAliases = new Stack();
+     input = in;
+   }
+
+   public Token next() throws IOException {
+     if(currentTokenAliases.size() > 0) {     	
+       return (Token)currentTokenAliases.pop();      
+     }
+
+     Token nextToken = input.next();
+     addAliasesToStack(nextToken, currentTokenAliases);     
+         
+     return nextToken;
+   }
+
+   private void addAliasesToStack(Token token, Stack aliasStack) {
+     if(token == null) return;
+
+     String tokenString = token.termText();
+     String tokenSubString = "";
+               
+     int x = 1;
+     
+     for( int i = tokenString.length(); i > 4; i-- ) {
+     	tokenSubString += tokenString.substring( x, tokenString.length() );
+     	tokenSubString += " ";     	
+     	x++;     		
+     }                              
+
+     //System.out.println( "SUBSTRING ELEMENTS: "+tokenSubString );
+
+     StringTokenizer tokenizer = new StringTokenizer(tokenSubString, " ");
+     while(tokenizer.hasMoreElements()) {
+       String nextAlias = tokenizer.nextToken();       
+       Token nextTokenAlias = new Token(nextAlias, 0, nextAlias.length());
+
+       aliasStack.push(nextTokenAlias);
+     }
+   }
+}
+

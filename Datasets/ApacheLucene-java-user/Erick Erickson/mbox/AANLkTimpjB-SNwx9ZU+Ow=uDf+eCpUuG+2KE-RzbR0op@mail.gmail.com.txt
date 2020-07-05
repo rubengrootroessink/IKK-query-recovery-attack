@@ -1,0 +1,166 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: flushing index
+DATE: 28 Sep 2010
+
+Flushing an index to disk is just an IndexWriter.commit(), there's nothing
+really special about that...
+
+About running your code continuously, you have several options:
+1> schedule a recurring job to do this. On *nix systems, this is a cron job,
+on Windows systems there's a job scheduler.
+2> Just start it up in an infinite loop. That is, your main is just a
+while(1){}.
+you'll probably want to throttle it a bit, that is run, sleep for some
+interval
+and start again.
+3> You can get really fancy and try to put some filesystem hooks in that
+notify you when anything changes in a directory, but I really wouldn't go
+there.
+
+Note that you'll have to keep some kind of timestamp (probably in a separate
+file or configuration somewhere) that you can compare against to figure out
+whether you've already indexed the current version of the file.
+
+The other thing you'll have to worry about is deletions. That is, how do you
+*remove* a file from your index if it has been deleted on disk? You may have
+to ask your index for all the file paths.
+
+You want to think about storing the file path NOT analyzed (perhaps with
+keywordtokenizer). That way you'll be able to know which files to remove
+if they are no longer in your directory. As well as which files to update
+when they've changed.
+
+HTH
+Erick
+
+On Tue, Sep 28, 2010 at 2:18 AM, Yakob <jacobian@opensuse-id.org> wrote:
+
+> On 9/27/10, Uwe Schindler <uwe@thetaphi.de> wrote:
+> >
+> >
+> > Yes. You must close before, else the addIndexes call will do nothing, as
+> the
+> > index looks empty for the addIndexes() call (because no committed
+> segments
+> > are available in the ramDir).
+> >
+> > I don't understand what you mean with flushing? If you are working on
+> Lucene
+> > 2.9 or 3.0, the ramWriter is flushed to the RAMDir on close. The
+> addIndexes
+> > call will add the index to the on-disk writer. To flush that fsWriter
+> (flush
+> > is the wrong thing, you probably mean commit), simply call
+> fsWriter.commit()
+> > so the newly added segments are written to disk and IndexReaders opened
+> in
+> > parallel "see" the new segments.
+> >
+> > Btw: If you are working on Lucene 3.0, the addIndexes call does not need
+> the
+> > new Directory[] {}, as the method is Java 5 varargs now.
+> >
+> > Uwe
+> >
+> >
+>
+> I mean I need to flush the index periodically.that's mean that the
+> index will be regularly updated as the document being added.what do
+> you reckon is the solution for this? I need a sample source code to be
+> able to flush an index.
+>
+> ok just like this source code below.
+>
+> public class SimpleFileIndexer {
+>
+>        public static void main(String[] args) throws Exception {
+>
+>                File indexDir = new
+> File("C:/Users/Raden/Documents/lucene/LuceneHibernate/adi");
+>                File dataDir = new
+> File("C:/Users/Raden/Documents/lucene/LuceneHibernate/adi");
+>                String suffix = "txt";
+>
+>                SimpleFileIndexer indexer = new SimpleFileIndexer();
+>
+>                int numIndex = indexer.index(indexDir, dataDir, suffix);
+>
+>                System.out.println("Total files indexed " + numIndex);
+>
+>        }
+>
+>        private int index(File indexDir, File dataDir, String suffix) throws
+> Exception {
+>
+>                IndexWriter indexWriter = new IndexWriter(
+>                                FSDirectory.open(indexDir),
+>                                new SimpleAnalyzer(),
+>                                true,
+>                                IndexWriter.MaxFieldLength.LIMITED);
+>                indexWriter.setUseCompoundFile(false);
+>
+>                indexDirectory(indexWriter, dataDir, suffix);
+>
+>                int numIndexed = indexWriter.maxDoc();
+>                indexWriter.optimize();
+>                indexWriter.close();
+>
+>                return numIndexed;
+>
+>        }
+>
+>        private void indexDirectory(IndexWriter indexWriter, File dataDir,
+> String suffix) throws IOException {
+>                File[] files = dataDir.listFiles();
+>                for (int i = 0; i < files.length; i++) {
+>                        File f = files[i];
+>                        if (f.isDirectory()) {
+>                                indexDirectory(indexWriter, f, suffix);
+>                        }
+>                        else {
+>                                indexFileWithIndexWriter(indexWriter, f,
+> suffix);
+>                        }
+>                }
+>        }
+>
+>        private void indexFileWithIndexWriter(IndexWriter indexWriter, File
+> f, String suffix) throws IOException {
+>                if (f.isHidden() || f.isDirectory() || !f.canRead() ||
+> !f.exists()) {
+>                        return;
+>                }
+>                if (suffix!=null && !f.getName().endsWith(suffix)) {
+>                        return;
+>                }
+>                System.out.println("Indexing file " + f.getCanonicalPath());
+>
+>                Document doc = new Document();
+>                doc.add(new Field("contents", new FileReader(f)));
+>                doc.add(new Field("filename", f.getCanonicalPath(),
+> Field.Store.YES,
+> Field.Index.ANALYZED));
+>
+>                indexWriter.addDocument(doc);
+>        }
+>
+> }
+>
+>
+> the above source code can index documents when given the directory of
+> text files. now what I am asking is how can I made the code to run
+> continuously? what class should I use? so that everytime there is new
+> documents added to that directory then lucene will index those
+> documents automatically, can you help me out on this one. I really
+> need to know what is the best solution.
+>
+> thanks
+> --
+> http://jacobian.web.id
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

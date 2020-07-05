@@ -1,0 +1,78 @@
+FROM: Steven A Rowe <sar...@syr.edu>
+SUBJECT: RE: scoring adjacent terms without proximity search
+DATE: 30 Oct 2009
+
+Hi Joel,
+
+You could index every possible word combination in your document text, with one field for
+each possible distance.  (You would have to write an index-time analyzer to do this, since
+AFAIK nothing like this exists currently.  Shingles wouldn't work, since you want to ignore
+intervening terms when you query.)
+
+E.g. doc#1: For "Toasted Cheese Sandwich", you would index "Toasted Cheese" and "Cheese Sandwich"
+in the "d0" field, and "Toasted Sandwich" in the "d1" field.
+
+E.g. doc#2: For "Cheese and Potato, Tuna sandwich", you would index d0:"Cheese and", d1:"Cheese
+Potato", d2:"Cheese Tuna", d3:"Cheese sandwich", d0:"and Potato", d1:"and Tuna", d2:"and sandwich",
+d0:"Potato Tuna", d1:"Potato sandwich", and d0:"Tuna sandwich".
+
+To query, search against all possible distance fields, up-boosting those fields that are closer
+to zero distance.  E.g. to search for "cheese sandwich", knowing that the maximum distance
+is 3, you would search for:
+ 
+   d0:"cheese sandwich"^4 d1:"cheese sandwich"^3
+   d2:"cheese sandwich"^2 d3:"cheese sandwich"^1
+
+(To disregard order, you would want to either index the reverse of everything or query for
+the reverse term.)
+
+Doc #1 would get a hit in the "d0" field, while doc #2 would get a hit in the "d3" field,
+and since you boosted the "d0" field higher in your query than the "d3" field, doc #1's score
+would be higher.  (If you don't want document length to be a factor in the score, you should
+to turn off normalization on these fields.)
+
+If you want to extend this scheme to more than two words, you could use the sum of the distances
+between terms to name the fields.  But: holy exploding index size, Batman.  Especially if
+you index all possible term permutations.
+
+If you only care about terms within X distance, your analyzer could limit the terms in that
+way.  This would also reduce index size.
+
+To avoid using a whole bunch of fields, one per distance, you could add the distance to the
+text of each indexed and queried term, e.g. instead of indexing d0:"Toasted Cheese", you could
+index "Toasted Cheese d0", etc.  Then your queries would look like:
+
+   "cheese sandwich d0"^4 "cheese sandwich d1"^3
+   "cheese sandwich d2"^2 "cheese sandwich d3"^1
+
+Steve
+
+> -----Original Message-----
+> From: Joel Halbert [mailto:joel@su3analytics.com]
+> Sent: Friday, October 30, 2009 5:49 AM
+> To: Lucene Users
+> Subject: scoring adjacent terms without proximity search
+> 
+> Hi,
+> 
+> Without using a proximity search i.e. "cheese sandwich"~5
+> 
+> What's the best way of up-scoring results in which the search terms are
+> closer to each other?
+> 
+> E.g. so if I search for:
+> content:cheese  content:sandwich
+> 
+> How do you ensure that a document with content:
+> "Toasted Cheese Sandwich"
+> scores higher then:
+> "Cheese and Potato, Tuna sandwich"
+> 
+> Joel
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

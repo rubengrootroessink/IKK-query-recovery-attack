@@ -1,0 +1,182 @@
+FROM: v.se...@lombardodier.com
+SUBJECT: Re: recurrent IO/CPU peaks
+DATE: 22 Feb 2011
+
+Hi,
+
+I did some tests with the BalancedSegmentMergePolicy, looking specifically 
+at the optimize. I have an index that is 70 Gb large, and contains around 
+35 millions documents.
+I duplicated the index 4 times, and I ran 2 optimize with the default 
+merge policy, and 2 with the balanced policy.
+
+Here is how long it took for each run : 
+ - default : run 1 = 55 minutes, run 2 = 59 minutes
+ - balanced : run 1 = 145 minutes, run 2 = 121 minutes
+
+Is that an expected behavior?
+
+Here is how looks like the index:
+
+17.02.2011  21:17                20 segments.gen
+17.02.2011  21:17             2'873 segments_3o28n
+17.02.2011  02:35    41'789'132'035 _41kn6.fdt
+17.02.2011  02:35       276'660'588 _41kn6.fdx
+17.02.2011  01:59             5'163 _41kn6.fnm
+17.02.2011  03:31    15'498'740'184 _41kn6.frq
+17.02.2011  03:31     6'664'489'716 _41kn6.prx
+17.02.2011  03:31        98'362'869 _41kn6.tii
+17.02.2011  03:31     8'756'995'362 _41kn6.tis
+17.02.2011  14:13         4'322'830 _41kn6_3.del
+17.02.2011  09:24       401'321'405 _41xfs.cfs
+17.02.2011  09:45       215'300'691 _41yhd.cfs
+17.02.2011  10:25       280'570'874 _42084.cfs
+17.02.2011  11:30       307'418'387 _422jg.cfs
+17.02.2011  14:54       205'896'267 _428l0.cfs
+17.02.2011  18:48       102'062'480 _42ebh.cfs
+17.02.2011  19:28        21'168'238 _42fpz.cfs
+17.02.2011  21:11        16'359'338 _42i2q.cfs
+17.02.2011  21:17           909'887 _42i5t.cfs
+17.02.2011  21:17            18'484 _42i5u.cfs
+              20 File(s) 74'639'737'691 bytes
+
+I did not change the default merge factor. Do you think I should?
+
+Thanks,
+
+Vincent 
+
+
+
+
+
+
+
+Michael McCandless <lucene@mikemccandless.com> 
+ 
+ 
+19.01.2011 14:38
+Please respond to
+java-user@lucene.apache.org
+
+
+
+To
+java-user@lucene.apache.org
+cc
+
+Subject
+Re: recurrent IO/CPU peaks
+
+
+
+
+
+
+This is normal behavior, unfortunately.
+
+The default LogByteSizeMergePolicy does mergeFactor (default 10) small
+merges in a row, then must do a 10X bigger merge.  Every 100 small
+merges it does a 100X bigger merge, etc.
+
+You can try using the BalancedSegmentMergePolicy (in contrib/misc) --
+it tries to reduce the large merges, and never "inadvertently
+optimizes" like Lucene's default merge policy.
+
+If you do use it, please report back... we are tempted to improve the
+default merge policy by either slurping BSMP into core, or, borrowing
+it's approach...
+
+If you are on Linux, you could also try using the
+DirectIOLinuxDirectory, which avoid messing up the OS's buffer cache
+due to merging.  But that dir impl is experimental, and you can't just
+"use" it across the board (you should use it only for IndexWriter, and
+possibly only when merges are kicking off).
+
+Mike
+
+On Wed, Jan 19, 2011 at 2:31 AM,  <v.sevel> wrote:
+>
+> Hi,
+>
+> I have an application that continously indexes 140 documents/s (we 
+commit
+> after each second) using lucene 2.9. at the beginning of the test the 
+index
+> is empty. during the test, I monitored this application, specifically in
+> terms of IOs and CPU.
+>
+> what I have seen, is that, on a regular basis (a few minutes), there are
+> small peaks both for IOs and CPU, and once in a while, there is a much
+> higher peak. the small peaks are small enough that do not disrupt the
+> system, however, the high peak tends to steal some resources out of the
+> other processes, and gets disruptive when the machine is loaded.
+>
+> I logged the internal activity of the lucene writer during the high 
+peak,
+> and what I have seen that could correlate is the number of merge 
+documents
+> that suddenly grows, and executes shortly after another merge:
+>
+>         Line 131: 17:46:26.268 IW 0 [Lucene Merge Thread #215]: merge: 
+total
+> 1391 docs
+>         Line 539: 17:46:36.449 IW 0 [Lucene Merge Thread #216]: merge: 
+total
+> 1462 docs
+>         Line 570: 17:46:36.565 IW 0 [Lucene Merge Thread #216]: merge: 
+total
+> 13753 docs
+>         Line 597: 17:46:37.381 IW 0 [Lucene Merge Thread #216]: merge: 
+total
+> 171593 docs
+>         Line 991: 17:46:46.503 IW 0 [Lucene Merge Thread #217]: merge: 
+total
+> 1537 docs
+>         Line 1439: 17:46:57.602 IW 0 [Lucene Merge Thread #218]: merge:
+> total 1710 docs
+>         Line 1874: 17:47:07.680 IW 0 [Lucene Merge Thread #219]: merge:
+> total 1532 docs
+>         Line 2282: 17:47:17.804 IW 0 [Lucene Merge Thread #220]: merge:
+> total 1555 docs
+>
+>
+> Assuming this is a normal behavior, are there ways to minimize the 
+amplitude
+> of the high peaks?
+>
+> I am attaching the lucene writer log and the systar report.
+>
+> Thanks for the help.
+>
+>
+>
+>
+> Vincent
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+************************ DISCLAIMER ************************
+This message is intended only for use by the person to
+whom it is addressed. It may contain information that is
+privileged and confidential. Its content does not
+constitute a formal commitment by Lombard Odier
+Darier Hentsch & Cie or any of its branches or affiliates.
+If you are not the intended recipient of this message,
+kindly notify the sender immediately and destroy this
+message. Thank You.
+*****************************************************************
+

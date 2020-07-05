@@ -1,0 +1,42 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: locking problems
+DATE: 8 Oct 2004
+
+Aad Nales wrote:
+> 1. can I have one or multiple searchers open when I open a writer?
+> 2. can I have one or multiple readers open when I open a writer?
+
+Yes, with one caveat: if you've called the IndexReader methods delete(), 
+undelete() or setNorm() then you may not open an IndexWriter until 
+you've closed that IndexReader instance.
+
+In general, only a single object may modify an index at once, but many 
+may access it simultaneously in a read-only manner, including while it 
+is modified.  Indexes are modified by either an IndexWriter or by the 
+IndexReader methods delete(), undelete() and setNorm().
+
+Typically an application which modifies and searches simultaneously 
+should keep the following open:
+
+   1. A single IndexReader instance used for all searches, perhaps 
+opened via an IndexSearcher.  Periodically, as the index changes, this 
+is discarded, and replaced with a new instance.
+
+   2. Either:
+      a. An IndexReader to delete documents.
+      b. An IndexWriter to add documents; or
+
+So an updating thread might open (2a), delete old documents, close it, 
+then open (2b) add new documents, perhaps optimize, then close.  At this 
+point, when the index has been updated (1) can be discarded and replaced 
+with a new instance.  Typically the old instance of (1) is not 
+explicitly closed, rather the garbage collector closes it when the last 
+thread searching it completes.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

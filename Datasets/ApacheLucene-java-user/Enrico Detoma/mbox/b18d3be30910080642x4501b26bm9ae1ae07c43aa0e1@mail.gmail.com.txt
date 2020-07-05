@@ -1,0 +1,63 @@
+FROM: Enrico Detoma <enrico.det...@gmail.com>
+SUBJECT: Lucene 2.9.0 [PROBLEM] : TokenStream API (incrementToken /	captureState / restoreState), cannot implement a "stop phrases filter"
+DATE: 8 Oct 2009
+
+Hi all,
+
+I'm trying to implement a "stop phrases filter" with the new TokenStream
+API.
+
+I would like to be able to peek into N tokens ahead, see if the current
+token + N subsequent tokens match a "stop phrase" (the set of stop phrases
+are saved in a HashSet), then discard all these tokens when they match a
+stop phrase, or keep them all if they don't match.
+
+For this purpose I would like to use captureState() and then restoreState()
+to get back to the starting point of the stream.
+
+I tried many combinations of these API. My last attempt is in the code
+below, which doesn't work.
+
+
+
+    static private HashSet<String> m_stop_phrases = new HashSet<String>();
+    static private int m_max_stop_phrase_length = 0;
+...
+    public final boolean incrementToken() throws IOException {
+        if (!input.incrementToken())
+            return false;
+        Stack<State> stateStack = new Stack<State>();
+        StringBuilder match_string_builder = new StringBuilder();
+        int skippedPositions = 0;
+        boolean is_next_token = true;
+        while (is_next_token && match_string_builder.length() <
+m_max_stop_phrase_length) {
+            if (match_string_builder.length() > 0)
+                match_string_builder.append(" ");
+            match_string_builder.append(termAtt.term());
+            skippedPositions += posIncrAtt.getPositionIncrement();
+            stateStack.push(captureState());
+            is_next_token = input.incrementToken();
+            if (m_stop_phrases.contains(match_string_builder.toString())) {
+              // Stop phrase is found: skip the number of tokens
+              // without restoring the state
+
+posIncrAtt.setPositionIncrement(posIncrAtt.getPositionIncrement() +
+skippedPositions);
+              return is_next_token;
+            }
+        }
+        // No stop phrase found: restore the stream
+        while (!stateStack.empty())
+            restoreState(stateStack.pop());
+        return true;
+    }
+
+
+Which is the correct direction I should look into to implement my "stop
+phrases" filter?
+
+Thank you
+Regards
+Enrico
+

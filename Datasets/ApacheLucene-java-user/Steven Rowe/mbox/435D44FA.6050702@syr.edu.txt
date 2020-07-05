@@ -1,0 +1,80 @@
+FROM: Steven Rowe <sar...@syr.edu>
+SUBJECT: Re: Is there a way to get absolutely exact phrase matching (no stop words, etc)
+DATE: 24 Oct 2005
+
+Hi Bob,
+
+StandardAnalyzer filters the token stream created by StandardTokenizer 
+through StandardFilter, LowercaseFilter, and then StopFilter.  Unless 
+you supply a stoplist to the StandardAnalyzer constructor, you get the 
+default set of English stopwords, from StopAnalyzer:
+
+   public static final String[] ENGLISH_STOP_WORDS = {
+     "a", "an", "and", "are", "as", "at", "be", "but", "by",
+     "for", "if", "in", "into", "is", "it",
+     "no", "not", "of", "on", "or", "s", "such",
+     "t", "that", "the", "their", "then", "there", "these",
+     "they", "this", "to", "was", "will", "with"
+   };
+
+One approach to the problem you're seeing is to advance the token 
+position in StopFilter with each stopword encountered, so that phrase 
+queries like
+
+    "group effect"
+
+will fail to match against
+
+    "...group of ~a- The effect..."
+
+because the positions for tokens "group" and "effect" would not be adjacent.
+
+(My naive reading of StandardTokenizer.jj, the JavaCC grammar used to 
+create StandardTokenizer.java, is that "~a-" will generate a single 
+token "a", which will then be filtered out by StopFilter.)
+
+A patch implementing this approach was actually applied to 
+StopFilter.java in late 2003, but was reverted shortly afterward, 
+because this approach conflicts with the QueryParser and PhraseQuery 
+implementations.
+
+See Doug Cutting's description of the problem with the position 
+increment modification approach here:
+<http://mail-archives.apache.org/mod_mbox/lucene-java-dev/200312.mbox/%3c3FCFB3CA.9000103@lucene.com%3e>
+
+See a colored diff of StopFilter.java, just before and after the 
+position increment modification patch was reverted, here:
+<http://svn.apache.org/viewcvs.cgi/lucene/java/trunk/src/java/org/apache/lucene/analysis/StopFilter.java?rev=150152&r1=150150&r2=150152&diff_format=h>
+
+This modification is simple and straightforward.  You could make the 
+same changes to a local copy of StopFilter (call it PosIncrStopFilter), 
+then create and use a StandardAnalyzer clone that uses PosIncrStopFilter 
+instead of StopFilter.
+
+Good luck,
+Steve Rowe
+
+Bob Mason wrote:
+> We have a large body of documents that have xml
+> and ocr embedded within one of the xml fields.
+> 
+> Searches such as "group effect"
+> 
+> are returning hits for docs such as ones that include the following:
+> 
+>  ...group of ~a- The effect...
+> 
+> because, I take it, stop words like 'of' and 'the' and punctuation
+> are ignored. Is there anything I can do about this other
+> than write an alternative to the Standard Analyzer?
+> 
+> thanks,
+> 
+> Bob Mason
+> UCSF Tobacco Industy Digital Library
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

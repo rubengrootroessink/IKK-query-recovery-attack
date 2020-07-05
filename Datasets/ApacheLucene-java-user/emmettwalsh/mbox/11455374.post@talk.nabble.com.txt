@@ -1,0 +1,167 @@
+FROM: emmettwalsh <emmettwa...@gmail.com>
+SUBJECT: Re: Lucene Indexing and searching - help
+DATE: 5 Jul 2007
+
+
+ok heres the deal with my application...
+
+
+I have got an xml file with about 8000 of these properties...
+
+<property id="80000438">
+		<name>Dighton Rock</name>
+		<name>The Rock</name>
+		<address>Across the Taunton River from Dighton in Dighton Rock State
+Park</address>
+		<city>Dighton</city>
+		<state>MA</state>
+</property>
+
+
+I parse this file and convert each into a Property object (to store in a
+hashmap)
+
+
+Meanwhile I have a web front end that has a search box which through ajax
+calls a servlet to do a search.
+
+On initialisation the servlet reads the xml file and builds the lucene index
+(FSDirectory type).
+
+My idea was to have the servlet hold a hashmap of the objects (keyed on the
+id of each property) and have lucene searches return the keys of properties 
+
+from its index so I can retrieve the correct objetcs then from the hashmap.
+
+
+As I said I have a class like the following...
+
+public class PropertyImpl implements Property {
+> :
+> : String id;
+> :
+> : List<String> names = new ArrayList<String>();
+> :
+> : String address = "";
+> :
+> : String city = "";
+> :
+> : String street = "";
+> :
+> : String state = "";
+> :
+> : String cachedMatchingString;
+> :
+> : ...
+> :
+> : ..
+> : public String toString() {
+> : // save some time
+> : if (cachedMatchingString == null) {
+> :
+> : StringBuffer buf = new StringBuffer();
+> :
+> : for (String name : names) {
+> : buf.append(name + " ");
+> : }
+> :
+> : if (address != null) {
+> : buf.append(address + " ");
+> : }
+> : if (city != null) {
+> : buf.append(city + " ");
+> : }
+> : if (street != null) {
+> : buf.append(street + " ");
+> : }
+> : if (state != null) {
+> : buf.append(state);
+> : }
+> :
+> : // get rid of any spaces
+> : //cachedMatchingString = buf.toString().replace(" ", "");
+> : cachedMatchingString = buf.toString();
+> : }
+> : return cachedMatchingString;
+> : } 
+
+
+For now I am just adding the address field and id to the index:
+
+		Field field = new Field("id", prop.getId(), Store.YES, Index.NO);
+		doc.add(field);
+
+		Field field2 = new Field("address", prop.getAddress().replace("
+","").toLowerCase(), Store.NO,
+				Index.UN_TOKENIZED);  //take out spaces
+		doc.add(field2);
+
+
+A search example...
+
+
+ok lets say the search box on the gui might take in a string like:   
+	1. M
+     or	2. Main St
+
+when theses gets back to the servlet the following code will get executed:
+
+			QueryParser parser = new QueryParser("content",
+					new StandardAnalyzer());
+			
+			org.apache.lucene.search.Query query =
+parser.parse("*"+queryString.toLowerCase()+"**");
+
+where luceneQuery.toString() would be:
+	1. *m**
+    or	2. *mainst**   //apparently I need to trail with 2 asterisks when
+using a leading wildcard
+
+
+
+I expect to get a Hits object back where I can get the id(s) of the objects
+i need from the hashmap
+		int hitCount = hits.length();
+		for(int i=0;i<hitCount;i++)
+		{
+			Document doc = (Document)hits.doc(i);
+			String id = doc.get("id");
+			Property prop = (Property) propMap.get(id);
+			results.add(prop);
+			
+		}
+
+
+but I get the following:
+
+Lucene Index built. Took 329 seconds
+Aug 5, 2007 10:41:54 PM org.apache.tomcat.util.http.Parameters
+processParameters
+WARNING: Parameters: Invalid chunk ignored.
+org.apache.lucene.search.BooleanQuery$TooManyClauses: maxClauseCount is set
+to 2048
+	at org.apache.lucene.search.BooleanQuery.add(BooleanQuery.java:165)
+	at org.apache.lucene.search.BooleanQuery.add(BooleanQuery.java:156)
+	at org.apache.lucene.search.MultiTermQuery.rewrite(MultiTermQuery.java:63)
+	at org.apache.lucene.search.WildcardQuery.rewrite(WildcardQuery.java:54)
+	at org.apache.lucene.search.IndexSearcher.rewrite(IndexSearcher.java:138)
+	at org.apache.lucene.search.Query.weight(Query.java:94)
+	at org.apache.lucene.search.Hits.<init>(Hits.java:42)
+	at org.apache.lucene.search.Searcher.search(Searcher.java:45)
+	at org.apache.lucene.search.Searcher.search(Searcher.java:37)
+	at
+com.sodaitsolutions.instantsearch.model.PropertyDatabaseImpl.search(PropertyDatabaseImpl.java:306)
+
+
+
+
+-- 
+View this message in context: http://www.nabble.com/Lucene-Indexing-and-searching---help-tf4022884.html#a11455374
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

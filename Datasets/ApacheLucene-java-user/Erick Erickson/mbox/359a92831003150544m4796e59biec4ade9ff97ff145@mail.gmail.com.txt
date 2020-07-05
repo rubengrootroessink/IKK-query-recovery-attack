@@ -1,0 +1,432 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: issue querying index.
+DATE: 15 Mar 2010
+
+No that's not strange at all. You probably opened Luke (or
+refreshed the reader) after the writer closed.
+
+This'll trip you up repeatedly if you don't get it straight, it
+already has twice.....
+
+When Lucene opens an IndexReader, pretend that the
+IR made copied the *current* index to a temporary
+file location and used that *and only that* copy until the reader
+is reopened. It doesn't matter what the various writers did
+after the reader was opened, those changes are invisible to
+the reader until it's reopened.
+
+Further, the indexwriter must commit changes for them to be
+guaranteed to be visible to the newly opened reader.
+
+HTH
+Erick
+
+On Mon, Mar 15, 2010 at 5:12 AM, Paulo Avelar <phavelar@gmail.com> wrote:
+
+> Awesome! Thanks a lot for your help,  as I build my app I have with me
+> a copy of Lucene in Action :)  very nice book indeed.
+>
+> I will verify what you just told me. :)  what is strange is that I can
+> see the documents using Luke,  (in the debugger I had a break point
+> before the search
+> call and I inspected the document in Luke, so I believed the documents
+> are there.)
+>
+> Paul
+>
+>
+>
+> On Mon, Mar 15, 2010 at 2:01 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> > It looks like you have opened the searcher before indexing. This make the
+> searcher only see the empty index as at the time of opening, it contains no
+> documents.
+> >
+> > For the test you should move the searcher creation after the close of IW.
+> But in a real-world example, you should use IndexReader.reopen() to
+> efficiently reopening the IndexReader after making changes to the Index.
+> >
+> > Look at Lucene in Action 2, there is a good example of a SearcherManager
+> that handles index reopening.
+> >
+> > -----
+> > Uwe Schindler
+> > H.-H.-Meier-Allee 63, D-28213 Bremen
+> > http://www.thetaphi.de
+> > eMail: uwe@thetaphi.de
+> >
+> >
+> >> -----Original Message-----
+> >> From: Paulo Avelar [mailto:phavelar@gmail.com]
+> >> Sent: Monday, March 15, 2010 9:44 AM
+> >> To: java-user@lucene.apache.org
+> >> Subject: Re: issue querying index.
+> >>
+> >> I would love to, but it's a bit more complicated then that, there are
+> >> several classes....
+> >>
+> >> once you see the test you will probably understand why...
+> >>
+> >>
+> >> Here is the test:
+> >>
+> >>
+> >>
+> >> package net.resumage.se.searcher;
+> >>
+> >> import net.resumage.se.FileUtils;
+> >> import net.resumage.se.extractor.DocumentExtractor;
+> >> import net.resumage.se.extractor.DocumentExtractorImpl;
+> >> import net.resumage.se.indexer.DocumentIndexer;
+> >> import net.resumage.se.indexer.DocumentIndexerImpl;
+> >> import net.resumage.se.indexer.ResumeContainer;
+> >> import org.apache.lucene.search.TopDocs;
+> >> import org.junit.Before;
+> >> import org.junit.Test;
+> >> import org.semanticdesktop.aperture.rdf.RDFContainer;
+> >> import
+> >> org.springframework.context.annotation.AnnotationConfigApplicationConte
+> >> xt;
+> >>
+> >> import java.io.File;
+> >>
+> >> import static org.junit.Assert.assertEquals;
+> >> import static org.junit.Assert.assertNotNull;
+> >>
+> >> //TODO: add a bunch of test methods
+> >> public class SearcherTest
+> >> {
+> >>     private Searcher searcher;
+> >>     //TODO: mock the documentExtractor and documentIndexer:
+> >>     private DocumentExtractor documentExtractor;
+> >>     private DocumentIndexer documentIndexer;
+> >>
+> >>     private AnnotationConfigApplicationContext ctx = new
+> >> AnnotationConfigApplicationContext();
+> >>
+> >>     @Before
+> >>     public void initializeBeans()
+> >>     {
+> >>         ctx.scan("net.resumage");
+> >>         ctx.refresh();
+> >>         documentExtractor = ctx.getBean(DocumentExtractorImpl.class);
+> >>         documentIndexer = ctx.getBean(DocumentIndexerImpl.class);
+> >>         searcher = ctx.getBean(SearcherImpl.class);
+> >>     }
+> >>
+> >>     @Test
+> >>     public void searchForDocuments() throws IOException
+> >>     {
+> >>         RDFContainer container1 =
+> >> documentExtractor.extract(getFile("ResumeOfDude.docx"));
+> >>         RDFContainer container2 =
+> >> documentExtractor.extract(getFile("sample01.docx"));
+> >>
+> >>         documentIndexer.indexResume(new ResumeContainer(container1,
+> >> "paulo@gmail.com"), false);
+> >>         documentIndexer.indexResume(new ResumeContainer(container2,
+> >> "dude@gmail.com"), true);
+> >>
+> >>         TopDocs topDocs = searcher.search("Java", 10);
+> >>         assertNotNull(topDocs);
+> >>
+> >>         //Problem, only works second time!
+> >>         assertEquals(1, topDocs.totalHits);
+> >>
+> >>         searcher.close();
+> >>     }
+> >>
+> >>     private File getFile(String filename)
+> >>     {
+> >>         return
+> >> FileUtils.getInstance().getFile("net/resumage/se/searcher/",
+> >> filename);
+> >>     }
+> >> }
+> >>
+> >>
+> >> and here are some other relevant peaces:
+> >>
+> >>
+> >> @Component
+> >> public class DocumentIndexerImpl implements DocumentIndexer
+> >> {
+> >>     @Autowired
+> >>     private IndexWriter indexWriter;
+> >>     @Autowired
+> >>     private DocumentBuilderImpl documentBuilder;
+> >>     @Autowired
+> >>     private Analyzer analyzer;
+> >>
+> >>     private static final Logger logger =
+> >> LoggerFactory.getLogger(DocumentIndexerImpl.class);
+> >>
+> >>
+> >>     /**
+> >>      * @see DocumentIndexer#indexResume(ResumeContainer,boolean)
+> >>      */
+> >>     @Override
+> >>     public void indexResume(ResumeContainer resumeContainer, boolean
+> >> closeIndexWriter)
+> >>     {
+> >>         try
+> >>         {
+> >>
+> >> getIndexWriter().addDocument(getDocumentBuilder().buildResume(resumeCon
+> >> tainer),
+> >> getAnalyzer());
+> >>             if (closeIndexWriter)
+> >>             {
+> >>                 getIndexWriter().close();
+> >>             }
+> >>         }
+> >>         catch (IOException ioe)
+> >>         {
+> >>             logger.error("Error while indexing document!");
+> >>             throw new ResumageSearchEngineException("Error while
+> >> indexing document!", ioe);
+> >>         }
+> >>     }
+> >>
+> >>     /**
+> >>      * @see net.resumage.se.indexer.DocumentIndexer#close()
+> >>      */
+> >>     @Override
+> >>     public void close()
+> >>     {
+> >>         try
+> >>         {
+> >>             getIndexWriter().close();
+> >>         }
+> >>         catch (IOException ioe)
+> >>         {
+> >>             throw new ResumageSearchEngineException("Error closing
+> >> indexingWriter!", ioe);
+> >>         }
+> >>     }
+> >>
+> >>     @Override
+> >>     public IndexWriter getIndexWriter()
+> >>     {
+> >>         return indexWriter;
+> >>     }
+> >>
+> >>     public DocumentBuilderImpl getDocumentBuilder()
+> >>     {
+> >>         return documentBuilder;
+> >>     }
+> >>
+> >>     public Analyzer getAnalyzer()
+> >>     {
+> >>         return analyzer;
+> >>     }
+> >> }
+> >>
+> >>
+> >>
+> >> @Component
+> >> public class SearcherImpl implements Searcher
+> >> {
+> >>     @Autowired
+> >>     private IndexSearcher indexSearcher;
+> >>     @Autowired
+> >>     private QueryBuilder queryBuilder;
+> >>
+> >>     private static final Logger logger =
+> >> LoggerFactory.getLogger(SearcherImpl.class);
+> >>
+> >>     @Override
+> >>     public TopDocs search(String query, int numberOfHits)
+> >>     {
+> >>         return search(query, null, numberOfHits);
+> >>     }
+> >>
+> >>     @Override
+> >>     public TopDocs search(String query, final Filter filter, int
+> >> numberOfHits)
+> >>     {
+> >>         return search(getQueryBuilder().buildResumeContentQuery(query),
+> >> filter, numberOfHits);
+> >>     }
+> >>
+> >>     @Override
+> >>     public TopDocs search(final Query query, final Filter filter, int
+> >> numberOfHits)
+> >>     {
+> >>         TopDocs topDocs;
+> >>         try
+> >>         {
+> >>             topDocs = getIndexSearcher().search(query, filter,
+> >> numberOfHits);
+> >>         }
+> >>         catch (IOException ioe)
+> >>         {
+> >>             logger.error("Error while searching document!", ioe);
+> >>             throw new ResumageSearchEngineException("Error while
+> >> searching document!", ioe);
+> >>         }
+> >>         return topDocs;
+> >>     }
+> >>
+> >>     @Override
+> >>     public void close()
+> >>     {
+> >>         try
+> >>         {
+> >>             getIndexSearcher().close();
+> >>         }
+> >>         catch (IOException ioe)
+> >>         {
+> >>             logger.error("Error while closing indexSearcher!", ioe);
+> >>             throw new ResumageSearchEngineException("Error while
+> >> closing indexSearcher!", ioe);
+> >>         }
+> >>     }
+> >>
+> >>     public QueryBuilder getQueryBuilder()
+> >>     {
+> >>         return queryBuilder;
+> >>     }
+> >>
+> >>     public IndexSearcher getIndexSearcher()
+> >>     {
+> >>         return indexSearcher;
+> >>     }
+> >> }
+> >>
+> >>
+> >>
+> >>
+> >>
+> >>
+> >>
+> >> On Mon, Mar 15, 2010 at 1:30 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> >> > Can you send us the test code?
+> >> >
+> >> > -----
+> >> > Uwe Schindler
+> >> > H.-H.-Meier-Allee 63, D-28213 Bremen
+> >> > http://www.thetaphi.de
+> >> > eMail: uwe@thetaphi.de
+> >> >
+> >> >
+> >> >> -----Original Message-----
+> >> >> From: Paulo Avelar [mailto:phavelar@gmail.com]
+> >> >> Sent: Monday, March 15, 2010 9:24 AM
+> >> >> To: java-user@lucene.apache.org
+> >> >> Subject: Re: issue querying index.
+> >> >>
+> >> >> Thanks for the answer,
+> >> >>
+> >> >> But I thought about that, and yes I did close the indexWriter before
+> >> I
+> >> >> search.
+> >> >> I experimented with both calling commit and close, but yet I get
+> >> same
+> >> >> behavior.
+> >> >> It's like there is a flushing issue, not sure.
+> >> >>
+> >> >>
+> >> >> On Mon, Mar 15, 2010 at 1:21 AM, Uwe Schindler <uwe@thetaphi.de>
+> >> wrote:
+> >> >> > I think you forgot to commit your changes in IndexWriter or have
+> >> not
+> >> >> closed it before creating Searcher/IndexReader. So on the second
+> >> run,
+> >> >> the index is seen, because of the previous run, which was committed
+> >> on
+> >> >> jvm exit.
+> >> >> >
+> >> >> > If you are using NearRealtimeSearch (IndexWriter#getIndexReader),
+> >> >> please tell as its different here.
+> >> >> >
+> >> >> > -----
+> >> >> > Uwe Schindler
+> >> >> > H.-H.-Meier-Allee 63, D-28213 Bremen
+> >> >> > http://www.thetaphi.de
+> >> >> > eMail: uwe@thetaphi.de
+> >> >> >
+> >> >> >
+> >> >> >> -----Original Message-----
+> >> >> >> From: Paulo Avelar [mailto:phavelar@gmail.com]
+> >> >> >> Sent: Monday, March 15, 2010 9:15 AM
+> >> >> >> To: java-user@lucene.apache.org
+> >> >> >> Subject: issue querying index.
+> >> >> >>
+> >> >> >> Hello,
+> >> >> >>
+> >> >> >> I'm using the latest Lucene 3.0.1.
+> >> >> >>
+> >> >> >> I have written a simple test, which does the usual, creates
+an
+> >> >> index,
+> >> >> >> then add 2 tests documents to it.
+> >> >> >>
+> >> >> >> I'm having a strange problem, first time I run my test, which
+> >> runs a
+> >> >> >> query I get nothing.
+> >> >> >> but the second time I run my test (exactly the same code)
+,  the
+> >> >> query
+> >> >> >> wild results.
+> >> >> >>
+> >> >> >> Any idea what could be causing this?   I'm going crazy trying
+to
+> >> >> >> figure this out.
+> >> >> >>
+> >> >> >> I noticed the index segments_  file is incremented the second
+> >> time I
+> >> >> >> run the test to 3. (segments_3)
+> >> >> >>
+> >> >> >>
+> >> >> >> Any help is very much appreciated.
+> >> >> >>
+> >> >> >> Thank you,
+> >> >> >>
+> >> >> >> Paul
+> >> >> >>
+> >> >> >> -----------------------------------------------------------------
+> >> ---
+> >> >> -
+> >> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >> >
+> >> >> >
+> >> >> >
+> >> >> > ------------------------------------------------------------------
+> >> ---
+> >> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >> >
+> >> >> >
+> >> >>
+> >> >> --------------------------------------------------------------------
+> >> -
+> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >> >
+> >> > ---------------------------------------------------------------------
+> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

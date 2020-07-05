@@ -1,0 +1,662 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Lucene : avoiding locking
+DATE: 12 Nov 2004
+
+Hello,
+
+--- Luke Shannon <lshannon@hypermedia.com> wrote:
+
+> Currently I am experimenting with checking if the index is lock using
+> IndexReader.locked before creating a writer. If this turns out to be
+> the
+> case I was thinking of just unlocking the file.
+> 
+> Do you think this is a good strategy?
+
+Only if you synchronize well and only if all index-modifying accesses
+are contained in the same JVM.  Alternatively, you could add a 'sleep
+and retry' logic around the lock check, and perhaps 'give up or force
+unlock if you got too much sleep'.
+
+Otis
+
+ 
+> ----- Original Message ----- 
+> From: "Luke Francl" <luke.francl@stellent.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Friday, November 12, 2004 10:38 AM
+> Subject: Re: Lucene : avoiding locking
+> 
+> 
+> > Luke,
+> >
+> > I also integrated Lucene into a content management application with
+> > incremental updates and ran into the same problem you did.
+> >
+> > You need to make sure only one process (which means, no multiple
+> copies
+> > of the application writing to the index simultaneously) or thread
+> ever
+> > writes to the index. That includes deletes as in your code below,
+> so
+> > make sure that is synchronized, too.
+> >
+> > Also, you will find that opening and closing the index for writing
+> is
+> > very costly, especially on a large index, so it pays to batch up
+> all
+> > changes in a transaction (inserts and deletes) together in one go
+> at the
+> > Lucene index. If this still isn't enough, you can batch up 5
+> minutes
+> > worth of changes and apply them at once. We haven't got to that
+> point
+> > yet.
+> >
+> > I am curious, though, how many people on this list are using Lucene
+> in
+> > the incremental update case. Most examples I've seen all assume
+> batch
+> > indexing.
+> >
+> > Regards,
+> >
+> > Luke Francl
+> >
+> >
+> >
+> > On Thu, 2004-11-11 at 18:33, Luke Shannon wrote:
+> > > Syncronizing the method didn't seem to help. The lock is being
+> detected
+> > > right here in the code:
+> > >
+> > > while (uidIter.term() != null
+> > >       && uidIter.term().field() == "uid"
+> > >       && uidIter.term().text().compareTo(uid) < 0) {
+> > >      //delete stale docs
+> > >      if (deleting) {
+> > >       reader.delete(uidIter.term());
+> > >      }
+> > >      uidIter.next();
+> > >     }
+> > >
+> > > This runs fine on my own site so I am confused. For now I think I
+> am
+> going
+> > > to remove the deleting of "stale" files etc and just rebuild the
+> index
+> each
+> > > time to see what happens.
+> > >
+> > > ----- Original Message ----- 
+> > > From: <yahootintin-lucene@yahoo.com>
+> > > To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> > > Sent: Thursday, November 11, 2004 6:56 PM
+> > > Subject: Re: Lucene : avoiding locking
+> > >
+> > >
+> > > > I'm working on a similar project...
+> > > > Make sure that only one call to the index method is occuring at
+> > > > a time.  Synchronizing that method should do it.
+> > > >
+> > > > --- Luke Shannon <lshannon@hypermedia.com> wrote:
+> > > >
+> > > > > Hi All;
+> > > > >
+> > > > > I have hit a snag in my Lucene integration and don't know
+> what
+> > > > > to do.
+> > > > >
+> > > > >  My company has a content management product. Each time
+> > > > > someone changes the
+> > > > >  directory structure or a file with in it that portion of the
+> > > > > site needs to
+> > > > >  be re-indexed so the changes are reflected in future
+> searches
+> > > > > (indexing
+> > > > > must
+> > > > >  happen during run time).
+> > > > >
+> > > > >  I have written a Indexer class with a static Index() method.
+> > > > > The idea is
+> > > > > too
+> > > > >  call the method every time something changes and the index
+> > > > > needs to be
+> > > > >  re-examined. I am hoping the logic put in by Doug Cutting
+> > > > > surrounding the
+> > > > >  UID will make indexing efficient enough to be called so
+> > > > > frequently.
+> > > > >
+> > > > >  This class works great when I tested it on my own little
+> site
+> > > > > (I have about
+> > > > >  2000 file). But when I drop the functionality into the QA
+> > > > > environment I get
+> > > > >  a locking error.
+> > > > >
+> > > > >  I can't access the stack trace, all I can get at is a log
+> > > > > file the
+> > > > >  application writes too. Here is the section my class wrote.
+> > > > > It was right in
+> > > > >  the middle of indexing and bang lock issue.
+> > > > >
+> > > > >  I don't know if the problem is in my code or something in
+> the
+> > > > > existing
+> > > > >  application.
+> > > > >
+> > > > >  Error Message:
+> > > > >  ENTER|SearchEventProcessor.visit(ContentNodeDeleteEvent)
+> > > > >  |INFO|INDEXING INFO: Start Indexing new content.
+> > > > >  |INFO|INDEXING INFO: Index Folder Did Not Exist. Start
+> > > > > Creation Of New
+> > > > > Index
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING INFO: Beginnging Incremental update
+> > > > > comparisions
+> > > > >  |INFO|INDEXING ERROR: Unable to index new content Lock
+> obtain
+> > > > > timed out:
+> > > > >
+> > > > >
+> > > >
+> > >
+>
+Lock@/usr/tomcat/jakarta-tomcat-5.0.19/temp/lucene-398fbd170a5457d05e2f4d432
+> > > > >  10f7fe8-write.lock
+> > > > >
+> > > > >
+> |ENTER|UpdateCacheEventProcessor.visit(ContentNodeDeleteEvent)
+> > > > >
+> > > > >  Here is my code. You will recognize it pretty much as the
+> > > > > IndexHTML class
+> > > > >  from the Lucene demo written by Doug Cutting. I have put a
+> > > > > ton of comments
+> > > > >  in a attempt to understand what is going on.
+> > > > >
+> > > > >  Any help would be appreciated.
+> > > > >
+> > > > >  Luke
+> > > > >
+> > > > >  package com.fbhm.bolt.search;
+> > > > >
+> > > > >  /*
+> > > > >   * Created on Nov 11, 2004
+> > > > >   *
+> > > > >   * This class will create a single index file for the
+> Content
+> > > > >   * Management System (CMS). It contains logic to ensure
+> > > > >   * indexing is done "intelligently". Based on IndexHTML.java
+> > > > >   * from the demo folder that ships with Lucene
+> > > > >   */
+> > > > >
+> > > > >  import java.io.File;
+> > > > >  import java.io.IOException;
+> > > > >  import java.util.Arrays;
+> > > > >  import java.util.Date;
+> > > > >
+> > > > >  import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> > > > >  import org.apache.lucene.document.Document;
+> > > > >  import org.apache.lucene.index.IndexReader;
+> > > > >  import org.apache.lucene.index.IndexWriter;
+> > > > >  import org.apache.lucene.index.Term;
+> > > > >  import org.apache.lucene.index.TermEnum;
+> > > > >  import org.pdfbox.searchengine.lucene.LucenePDFDocument;
+> > > > >  import org.apache.lucene.demo.HTMLDocument;
+> > > > >
+> > > > >  import com.alaia.common.debug.Trace;
+> > > > >  import com.alaia.common.util.AppProperties;
+> > > > >
+> > > > >  /**
+> > > > >   * @author lshannon Description: <br
+> > > > >   *   This class is used to index a content folder. It
+> > > > > contains logic to
+> > > > >   *   ensure only new or documents that have been modified
+> > > > > since the last
+> > > > >   *   search are indexed. <br
+> > > > >   *   Based on code writen by Doug Cutting in the IndexHTML
+> > > > > class found in
+> > > > >   *   the Lucene demo
+> > > > >   */
+> > > > >  public class Indexer {
+> > > > >   //true during deletion pass, this is when the index already
+> > > > > exists
+> > > > >   private static boolean deleting = false;
+> > > > >
+> > > > >   //object to read existing indexes
+> > > > >   private static IndexReader reader;
+> > > > >
+> > > > >   //object to write to the index folder
+> > > > >   private static IndexWriter writer;
+> > > > >
+> > > > >   //this will be used to write the index file
+> > > > >   private static TermEnum uidIter;
+> > > > >
+> > > > >   /*
+> > > > >    * This static method does all the work, the end result is
+> > > > > an up-to-date
+> > > > >  index folder
+> > > > >   */
+> > > > >   public static void Index() {
+> > > > >    //we will assume to start the index has been created
+> > > > >    boolean create = true;
+> > > > >    //set the name of the index file
+> > > > >    String indexFileLocation =
+> > > > >
+> > > > >
+> > > >
+>
+AppProperties.getPropertyAsString("bolt.search.siteIndex.index.root");
+> > > > >    //set the name of the content folder
+> > > > >    String contentFolderLocation =
+> > > > >  AppProperties.getPropertyAsString("site.root");
+> > > > >    //manage whether the index needs to be created or not
+> > > > >    File index = new File(indexFileLocation);
+> > > > >    File root = new File(contentFolderLocation);
+> > > > >    //the index file indicated exists, we need an incremental
+> > > > > update of the
+> > > > >    // index
+> > > > >    if (index.exists()) {
+> > > > >     Trace.TRACE("INDEXING INFO: An index folder exists at: "
+> +
+> > > > >  indexFileLocation);
+> > > > >     deleting = true;
+> > > > >     create = false;
+> > > > >     try {
+> > > > >      //this version of index docs is able to execute the
+> > > > > incremental
+> > > > >      // update
+> > > > >      indexDocs(root, indexFileLocation, create);
+> > > > >     } catch (Exception e) {
+> > > > >      //we were unable to do the incremental update
+> > > > >      Trace.TRACE("INDEXING ERROR: Unable to execute
+> > > > > incremental update "
+> > > > >          + e.getMessage());
+> > > > >     }
+> > > > >     //after exiting this loop the index should be current
+> with
+> > > > > content
+> > > > >     Trace.TRACE("INDEXING INFO: Incremental update
+> > > > > completed.");
+> > > > >    }
+> > > > >    try {
+> > > > >     //create the writer
+> > > > >     writer = new IndexWriter(index, new StandardAnalyzer(),
+> > > > > create);
+> > > > >     //configure the writer
+> > > > >     writer.mergeFactor = 10000;
+> > > > >     writer.maxFieldLength = 100000;
+> > > > >     try {
+> > > > >      //get the start date
+> > > > >      Date start = new Date();
+> > > > >      //call the indexDocs method, this time we will add new
+> > > > >      // documents
+> > > > >      Trace.TRACE("INDEXING INFO: Start Indexing new
+> > > > > content.");
+> > > > >      indexDocs(root, indexFileLocation, create);
+> > > > >      Trace.TRACE("INDEXING INFO: Indexing new content
+> > > > > complete.");
+> > > > >      //optimize the index
+> > > > >      writer.optimize();
+> > > > >      //close the writer
+> > > > >      writer.close();
+> > > > >      //get the end date
+> > > > >      Date end = new Date();
+> > > > >      long totalTime = end.getTime() - start.getTime();
+> > > > >      Trace.TRACE("INDEXING INFO: All Indexing Operations
+> > > > > Completed in "
+> > > > >          + totalTime + " milliseconds");
+> > > > >     } catch (Exception e1) {
+> > > > >      //unable to add new documents
+> > > > >      Trace.TRACE("INDEXING ERROR: Unable to index new content
+> > > > > "
+> > > > >          + e1.getMessage());
+> > > > >     }
+> > > > >    } catch (IOException e) {
+> > > > >     Trace.TRACE("INDEXING ERROR: Unable to create IndexWriter
+> > > > > "
+> > > > >       + e.getMessage());
+> > > > >    }
+> > > > >   }
+> > > > >
+> > > > >   /*
+> > > > >    * Walk directory hierarchy in uid order, while keeping uid
+> > > > > iterator from
+> > > > >  /*
+> > > > >    * existing index in sync. Mismatches indicate one of: (a)
+> > > > > old documents
+> > > > > to
+> > > > >  /*
+> > > > >    * be deleted; (b) unchanged documents, to be left alone;
+> or
+> > > > > (c) new /*
+> > > > >    * documents, to be indexed.
+> > > > >    */
+> > > > >
+> > > > >   private static void indexDocs(File file, String index,
+> > > > > boolean create)
+> > > > >     throws Exception {
+> > > > >    //the index already exists we do an incremental update
+> > > > >    if (!create) {
+> > > > >     Trace.TRACE("INDEXING INFO: Incremental Update Request
+> > > > > Confirmed");
+> > > > >     //open existing index
+> > > > >     reader = IndexReader.open(index);
+> > > > >     //this gets an enummeration of uid terms
+> > > > >     uidIter = reader.terms(new Term("uid", ""));
+> > > > >     //jump to the index method that does the work
+> > > > >     //this will use the Iteration above and does
+> > > > >     //all the "smart" indexing
+> > > > >     indexDocs(file);
+> > > > >     //this will be true everytime the index already existed
+> > > > >     //we are not going to delete documents that are old
+> > > > >     if (deleting) {
+> > > > >      Trace.TRACE("INDEXING INFO: Deleting Old Content Phase
+> > > > > Started. All
+> > > > >  Deleted Docs will be listed.");
+> > > > >      while (uidIter.term() != null
+> > > > >        && uidIter.term().field() == "uid") {
+> > > > >       //basically we are deleting all the document we have
+> > > > >       // indexed before
+> > > > >       Trace.TRACE("INDEXING INFO: Deleting document "
+> > > > >         + HTMLDocument.uid2url(uidIter.term().text()));
+> > > > >       //delete the term from the reader
+> > > > >       reader.delete(uidIter.term());
+> > > > >       //go to the nextfield
+> > > > >       uidIter.next();
+> > > > >      }
+> > > > >      Trace.TRACE("INDEXING INFO: Deleting Old Content Phase
+> > > > > Completed");
+> > > > >      //turn off the deleting flag
+> > > > >      deleting = false;
+> > > > >     }//close the deleting branch
+> > > > >     //close the enummeration
+> > > > >     uidIter.close(); // close uid iterator
+> > > > >     //close the reader
+> > > > >     reader.close(); // close existing index
+> > > > >
+> > > > >    }
+> > > > >    //we go here is the index already existed
+> > > > >    else {
+> > > > >     Trace.TRACE("INDEXING INFO: Index Folder Did Not Exist.
+> > > > > Start Creation
+> > > > > Of
+> > > > >  New Index");
+> > > > >     // don't have exisiting
+> > > > >     indexDocs(file);
+> > > > >    }
+> > > > >   }
+> > > > >
+> > > > >   private static void indexDocs(File file) throws Exception {
+> > > > >    //check if we are at the top of a directory
+> > > > >    if (file.isDirectory()) {
+> > > > >     //get a list of the files
+> > > > >     String[] files = file.list();
+> > > > >     //sort them
+> > > > >     Arrays.sort(files);
+> > > > >     //index each file in the directory recursively
+> > > > >     //we keep repeating this logic until we hit a
+> > > > >     //file
+> > > > >     for (int i = 0; i < files.length; i++)
+> > > > >      //pass in the parent directory and the current file
+> > > > >      //into the file constructor and index
+> > > > >      indexDocs(new File(file, files[i]));
+> > > > >
+> > > > >    }
+> > > > >    //we have an actual file, so we need to consider the
+> > > > >    //file extensions so the correct Document is created
+> > > > >    else if (file.getPath().endsWith(".html")
+> > > > >      || file.getPath().endsWith(".htm")
+> > > > >      || file.getPath().endsWith(".txt")
+> > > > >      || file.getPath().endsWith(".doc")
+> > > > >      || file.getPath().endsWith(".xml")
+> > > > >      || file.getPath().endsWith(".pdf")) {
+> > > > >
+> > > > >     //if this is reached it means we were in the midst
+> > > > >     //of an incremental update
+> > > > >     if (uidIter != null) {
+> > > > >      //get the uid for the document we are on
+> > > > >      String uid = HTMLDocument.uid(file);
+> > > > >      //now compare this document to the one we have in the
+> > > > >      //enummeration of terms.
+> > > > >      //if the term in the enummeration is less than the
+> > > > >      //term we are on it must be deleted (if we are indeed
+> > > > >      //doing an incrementatal update)
+> > > > >      Trace.TRACE("INDEXING INFO: Beginnging Incremental
+> update
+> > > > >  comparisions");
+> > > > >      while (uidIter.term() != null
+> > > > >        && uidIter.term().field() == "uid"
+> > > > >        && uidIter.term().text().compareTo(uid) < 0) {
+> > > > >       //delete stale docs
+> > > > >       if (deleting) {
+> > > > >        reader.delete(uidIter.term());
+> > > > >       }
+> > > > >       uidIter.next();
+> > > > >      }
+> > > > >      //if the terms are equal there is no change with this
+> > > > > document
+> > > > >      //we keep it as is
+> > > > >      if (uidIter.term() != null && uidIter.term().field()
+==
+> > > > > "uid"
+> > > > >        && uidIter.term().text().compareTo(uid) == 0) {
+> > > > >       uidIter.next();
+> > > > >      }
+> > > > >      //if we are not deleting and the document was not there
+> > > > >      //it means we didn't have this document on the last
+> index
+> > > > >      //and we should add it
+> > > > >      else if (!deleting) {
+> > > > >       if (file.getPath().endsWith(".pdf")) {
+> > > > >        Document doc = LucenePDFDocument.getDocument(file);
+> > > > >        Trace.TRACE("INDEXING INFO: Adding new document to the
+> > > > > existing
+> > > > > index:
+> > > > >  "
+> > > > >            + doc.get("url"));
+> > > > >        writer.addDocument(doc);
+> > > > >       } else if (file.getPath().endsWith(".xml")) {
+> > > > >        Document doc = XMLDocument.Document(file);
+> > > > >        Trace.TRACE("INDEXING INFO: Adding new document to the
+> > > > > existing
+> > > > > index:
+> > > > >  "
+> > > > >            + doc.get("url"));
+> > > > >        writer.addDocument(doc);
+> > > > >       } else {
+> > > > >        Document doc = HTMLDocument.Document(file);
+> > > > >        Trace.TRACE("INDEXING INFO: Adding new document to the
+> > > > > existing
+> > > > > index:
+> > > > >  "
+> > > > >            + doc.get("url"));
+> > > > >        writer.addDocument(doc);
+> > > > >       }
+> > > > >      }
+> > > > >     }//end the if for an incremental update
+> > > > >     //we are creating a new index, add all document types
+> > > > >     else {
+> > > > >      if (file.getPath().endsWith(".pdf")) {
+> > > > >       Document doc = LucenePDFDocument.getDocument(file);
+> > > > >       Trace.TRACE("INDEXING INFO: Adding a new document to
+> the
+> > > > > new index: "
+> > > > >           + doc.get("url"));
+> > > > >       writer.addDocument(doc);
+> > > > >      } else if (file.getPath().endsWith(".xml")) {
+> > > > >       Document doc = XMLDocument.Document(file);
+> > > > >       Trace.TRACE("INDEXING INFO: Adding a new document to
+> the
+> > > > > new index: "
+> > > > >           + doc.get("url"));
+> > > > >       writer.addDocument(doc);
+> > > > >      } else {
+> > > > >       Document doc = HTMLDocument.Document(file);
+> > > > >       Trace.TRACE("INDEXING INFO: Adding a new document to
+> the
+> > > > > new index: "
+> > > > >           + doc.get("url"));
+> > > > >       writer.addDocument(doc);
+> > > > >      }//close the else
+> > > > >     }//close the else for a new index
+> > > > >    }//close the else if to handle file types
+> > > > >   }//close the indexDocs method
+> > > > >
+> > > > >  }
+> > > > >
+> > > > >
+> > > > >  ----- Original Message ----- 
+> > > > >  From: "Craig McClanahan" <craigmcc@gmail.com
+> > > > >  To: "Jakarta Commons Users List"
+> > > > > <commons-user@jakarta.apache.org
+> > > > >  Sent: Thursday, November 11, 2004 6:13 PM
+> > > > >  Subject: Re: avoiding locking
+> > > > >
+> > > > >
+> > > > >   In order to get any useful help, it would be nice to know
+> > > > > what you are
+> > > > >   trying to do, and (most importantly) what commons component
+> > > > > is giving
+> > > > >   you the problem :-).  The traditional approach is to put a
+> > > > > prefix on
+> > > > >   your subject line -- for commons package "foo" it would be:
+> > > > >
+> > > > >     [foo] avoiding locking
+> > > > >
+> > > > >   It's also generally helpful to see the entire stack trace,
+> > > > > not just
+> > > > >   the exception message itself.
+> > > > >
+> > > > >   Craig
+> > > > >
+> > > > >
+> > > > >   On Thu, 11 Nov 2004 17:27:19 -0500, Luke Shannon
+> > > > >   <lshannon@hypermedia.com wrote:
+> > > > >    What can I do to avoid locking issues?
+> > > > >
+> > > > >    Unable to execute incremental update Lock obtain timed
+> out:
+> > > > >
+> > > > >
+> > > >
+> > >
+>
+Lock@/usr/tomcat/jakarta-tomcat-5.0.19/temp/lucene-398fbd170a5457d05e2f4d432
+> > > > >  10f7fe8-write.lock
+> > > > >
+> > > > >    Thanks,
+> > > > >
+> > > > >    Luke
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > >   To unsubscribe, e-mail:
+> > > > > commons-user-unsubscribe@jakarta.apache.org
+> > > > >   For additional commands, e-mail:
+> > > > > commons-user-help@jakarta.apache.org
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > >  To unsubscribe, e-mail:
+> > > > > commons-user-unsubscribe@jakarta.apache.org
+> > > > >  For additional commands, e-mail:
+> > > > > commons-user-help@jakarta.apache.org
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > > To unsubscribe, e-mail:
+> > > > > lucene-user-unsubscribe@jakarta.apache.org
+> > > > > For additional commands, e-mail:
+> > > > > lucene-user-help@jakarta.apache.org
+> > > > >
+> > > > >
+> > > >
+> > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail:
+> lucene-user-unsubscribe@jakarta.apache.org
+> > > > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> > > >
+> > > >
+> > >
+> > >
+> > >
+> > >
+> ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail:
+> lucene-user-unsubscribe@jakarta.apache.org
+> > > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> > >
+> >
+> >
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

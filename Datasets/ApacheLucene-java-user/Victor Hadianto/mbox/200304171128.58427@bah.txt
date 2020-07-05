@@ -1,0 +1,113 @@
+FROM: Victor Hadianto <vict...@nuix.com.au>
+SUBJECT: Re: Getting the term that matches in the result.
+DATE: 17 Apr 2003
+
+Okay,
+
+I sort of managed to achieve this (the code sort of a rip off from the 
+explain() API) by adding the following interface in 
+Weights.java
+
+Term[] explainTerm(IndexReader reader, int doc) throws IOException;
+
+While the implementation is as follow:
+
+BooleanWeight:
+
+      public Term[] explainTerm(IndexReader reader, int doc) 
+          throws IOException  {
+          // Collate all the term matches from the query vector.
+          List termList = new ArrayList();
+          for (int i = 0 ; i < weights.size(); i++) {
+              Weight w = (Weight) weights.elementAt(i);
+              Explanation e = w.explain(reader, doc);
+              if (e.getValue() > 0.0) {
+                  Term[] terms = w.explainTerm(reader, doc);
+                  for (int j = 0; j < terms.length; j++) {
+                      Term term = terms[j];
+                      termList.add(term);
+                  }
+              }
+          }
+        
+          return (Term[]) termList.toArray(new Term[termList.size()]);
+      }
+
+
+TermWeight:
+    public Term[] explainTerm(IndexReader reader, int doc) 
+        throws IOException {
+        // One query match.          
+        return new Term[] {term};
+    }
+
+PhraseWeight and PhrasePrefixWeight:
+
+      public Term[] explainTerm(IndexReader reader, int doc) 
+          throws IOException {
+          // Only one term match per phrase query search, which is the query 
+itself.
+          return new Term[] {new Term(field, getQuery().toString(field))};  
+      }
+
+
+And in IndexSearcher add the convenient method:
+
+  public Term[] explainTerm(Query query, int doc) throws IOException {
+    return query.weight(this).explainTerm(reader, doc);
+  }
+
+
+This method will returns all term matches for the given Query and Lucene's 
+document id.
+
+Anyway if anyone interested there it is seems to work fine for me. Also if 
+anyone can point a mistake/problem I will be eternaly grateful.
+
+Cheers,
+
+victor
+
+
+On Mon, 14 Apr 2003 04:25 pm, Victor Hadianto wrote:
+> Hi all,
+>
+> What I'm trying to do is exactly the same with this discussion:
+>
+> http://nagoya.apache.org/eyebrowse/ReadMsg?listName=&msgId=117093
+>
+> Basically I want to know from my search terms which one that found a
+> specific documents. For example
+>
+> Search: apple OR orange OR banana
+>
+> Found:
+>
+> Doc1: apple orange
+> Doc2: orange
+> Doc3: apple banana
+>
+> There is a reply from Dmitry:
+> http://nagoya.apache.org/eyebrowse/ReadMsg?listName=&msgId=117102
+>
+> Hinting that this can be done. However I couldn't find any other reference
+> about doing this.
+>
+> Can this be done? Does anyone has anyone pointer about where I need to
+> look?
+>
+> thanks,
+>
+> victor
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,48 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: File Handle Leaks During Lucene 3.0.2 Merge
+DATE: 30 Sep 2010
+
+Comments inline...
+
+On Thu, Sep 30, 2010 at 5:26 AM, Jamie <jamie@stimulussoft.com> wrote:
+>  Uwe
+>
+> If I recall correctly when you call writer.getReader(), the returned
+> IndexReader can consume alot of memory with large indexes
+
+The reopened reader shares sub-readers with the previous one, so, if
+all that's changed since a last reopen was flushing a small segment,
+then the additional resources consumed will be small.
+
+> To ensure that
+> the same index reader is reused across multiple search threads, I keep a
+> cached copy of the reader and return it. If a search thread closes the
+> reader, then it will be closed for the other search threads and the search
+> will fail.
+
+It's good to cache the reader, but, finalize would worry me too since
+you have no control over when GC gets around to calling it... you risk
+tying up resources for longer than necessary.
+
+> From my test, the finalize method in VolumeIndexReader example I
+> gave you is called. The file handle leaks are coming from the core index
+> loop, where I call .commit() as opposed to closing the index. Since the
+> writer stays open, handles left by merge operations are never deleted. A
+> solution is too close the index periodically to force the handles to be
+> swept up by the OS.
+
+IndexWriter has a reader pool, internally, where it holds open
+SegmentReaders for the still-live segments in the index.  This is used
+by IndexReader.reopen to share open SegmentReaders.
+
+But the open files should correspond only to segments still "live" in
+the index.  After segments are merged away, these readers are dropped.
+ Is this what you are seeing?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

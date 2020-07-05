@@ -1,0 +1,64 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: termDocs / termEnums performance increase for 2.4.0
+DATE: 17 Feb 2009
+
+
+It's interesting that you found this speedup... I'm not sure offhand  
+what changes led to the speedup (but I'm still happy about it!).
+
+But... why do you need to iterate through all terms, and all docs for  
+each term, in the first place?
+
+EG this is what FieldCache does in order to populate values the first  
+time a given field is loaded.  It's also what segment merging does.
+
+In 2.9, we've switched searching to proceed segment by segment,  
+instead of using the MultiSegmentReader API to get TermEnum/TermDocs  
+(this was LUCENE-1483).  This gives a good speedup for sort-by- 
+relevance queries, and also especially sort-by-field queries.  And,  
+when sorting by field it no longer loads the FieldCache at the  
+MultiReader level, which means reopen cost for a large index that has  
+sort-by-field queries should be much better on average since the cost  
+is now in proportion to which segments are new.
+
+Mike
+
+Beard, Brian wrote:
+
+> Thought I would report a performance increase noticed in migrating  
+> from
+> 2.3.2 to 2.4.0.
+>
+> Performing an iterated loop using termDocs & termEnums like below is
+> about 30% faster.
+> The example test set I'm running has about 70K documents to go through
+> and process (on a dual processor windows machine) which takes about
+> 0.8-0.9 sec in 2.4.0 (vs 1.3-1.4 secs in 2.3.2)
+>
+> TermDocs termDocs = multiReader.termDocs();
+> TermEnum termEnum = multiReader.terms (new Term (field, ""));
+>
+> do {
+> 	term = termEnum.term();
+> 	termDocs.seek(term);			
+>      .....
+> 	while (termDocs.next()) {
+>        ....
+> 	}
+>
+> } while (termEnum.next());
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

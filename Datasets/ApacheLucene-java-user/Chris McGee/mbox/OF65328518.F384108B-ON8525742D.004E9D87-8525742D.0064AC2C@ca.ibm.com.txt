@@ -1,0 +1,315 @@
+FROM: Chris McGee <cbmc...@ca.ibm.com>
+SUBJECT: Re: How to improve performance of large numbers of successive searches?
+DATE: 16 Apr 2008
+
+Hi Erick,
+
+Thanks for the information. I changed over my code to use a reader and get 
+a term enumeration. Once I find a value that matches an element in my set, 
+I use a TermDocs object to seek to that term and open all of the matching 
+documents. This has sped up my searches by a large amount. Some cases went 
+from around one minute and are now down around 700ms.
+
+Here is the motivation for my trying to optimize the performance. I had 
+found at one point that it was actually quicker to manually parse my data 
+set looking for a set of values (100-1000) with a specialized parser than 
+it was to search lucene. Sometimes the difference was very large 
+(especially when the data set was large and the number of values to search 
+for were in the thousands). Because we are taking the cost to build up the 
+lucene directory in the first place it was hoped that we would be able to 
+save enough on each search to justify that up front cost. If this was not 
+the case then it would be difficult to justify the use of Lucene in some 
+cases.
+
+Thanks again for your help,
+Chris
+
+
+
+
+"Erick Erickson" <erickerickson@gmail.com> 
+14/04/2008 04:25 PM
+Please respond to
+java-user@lucene.apache.org
+
+
+To
+java-user@lucene.apache.org
+cc
+
+Subject
+Re: How to improve performance of large numbers of successive searches?
+
+
+
+
+
+
+OK, if you're going after simple terms without any logic (or with
+very simple logic), why search at all? Why not just use TermDocs and/or
+TermEnum to flip through the index noticing documents that match?
+
+I'd only recommend this if you are NOT trying to parse complex
+queries. That is, say, you are searching ONLY on individual
+terms or all simple terms are joined by AND (or OR).
+
+You can use Filters to store intermediate results (they're really
+bitsets). That way, you bypass all the search logic.
+
+But a simpler way might be ConstantScoreQuery.
+
+But first I'd just try a HitCollector, possibly with a
+ConstantScoreQuery and then.
+
+But, again, what leads you to believe that performance is
+not adequate yet? What is your target?
+
+Best
+Erick
+
+On Mon, Apr 14, 2008 at 1:46 PM, Chris McGee <cbmcgee@ca.ibm.com> wrote:
+
+> Hi Erick,
+>
+> Here is a quick overview of what I hope to accomplish with lucene. I am
+> using a lucene database to store condensed information about a 
+collection
+> of data that I have. The data has to be constantly updated for 
+correctness
+> so that when one part changes certain other parts can be changed. Also,
+> various queries will be performed on this data but in all cases the 
+total
+> result set must be retrieved and not just a select few hits. The results
+> are used to manage the overall correctness of my data store and not to
+> present to the user in some filtered way (by rank and only the top 100
+> hits for example). Also, there could be cases where there will be a 
+large
+> set of terms to search for. To load all of this data into RAM is not
+> feasible in most cases because there is too much data even if it was
+> compressed.
+>
+> So, I hope to be able to minimize the time to update the lucene database
+> from my data store. I have already upgraded to Lucene 2.3.1 and 
+performed
+> a number of the suggestions on the lucene wiki with some success. As 
+well,
+> I want to help speed up the time it takes to query for a large number of
+> terms (in most cases the terms have the same field name but different
+> values).
+>
+> In all cases I want to retrieve all matching documents at once. Because
+> all matching documents must be retrieved I have no need for scoring,
+> weights, boosts or any ranking of the results. Is there a way to strip
+> away any of these pieces for better querying and directory building
+> performance?
+>
+> Thanks for your help,
+> Chris
+>
+>
+>
+>
+> "Erick Erickson" <erickerickson@gmail.com>
+> 14/04/2008 10:36 AM
+> Please respond to
+> java-user@lucene.apache.org
+>
+>
+> To
+> java-user@lucene.apache.org
+> cc
+>
+> Subject
+> Re: How to improve performance of large numbers of successive searches?
+>
+>
+>
+>
+>
+>
+> As I stated in my original reply, a Hits object re-executes the
+> search every 100 or so objects you examine. So some loop like
+> Hits hits = search....
+> for (int idx = 0; idx < hits.length; ++idx ) {
+>    Document doc = hits.get(idx);
+> }
+>
+> really does something like
+>
+> for (int idx = 0; idx < hits.length; ++idx ) {
+>    if (idx > 99 && (idx % 100) == 0) {
+>        re-execute the search and throw away entries 0-idx);
+>    }
+>    Document doc = hits.get(idx);
+> }
+>
+> So the farther you get into the process, the more you throw away.
+>
+> About collecting all the documents.... I wouldn't bother putting your
+> index in RAM until you've fully explored the alternatives. The first
+> of which is to determine what you really mean by "gather all result
+> documents"
+> If you have to return the entire contents of each document, you may have
+> to rethink your problem. If you're returning some subset of the data 
+(say
+> some summary information), then you may get significant improvements
+> by indexing (perhaps UN_TOKENIZED) the data you need. That way, using
+> FieldSelector will grab things from the index rather than the stored 
+data.
+> And, assuming your returned data is a small portion of your total
+> document,
+> that should fix you up.
+>
+> But a higher-level statement of the problem you're trying to resolve 
+would
+> sure be helpful in terms of making reasonable suggestions. You haven't
+> characterized the problem you're trying to solve at all. As in *why* you
+> need
+> to return all the documents, the characteristics of the docs you're 
+trying
+> to fetch. How big your data set is (as in # of docs). etc. etc. Unless 
+and
+> until you
+> provide some of those details, all the advice in the world is just a 
+shot
+> in the dark.
+>
+> Shy do you think that " To perform 1000 term query searches each
+> with around 2000 hits" taking "well over a minute" is unacceptable?
+> After all, that's 2,000,000 documents you're analyzing. A minute
+> seems reasonable. What problem are you *really* trying to solve? or
+> is this just a load test?
+>
+> Best
+> Erick
+>
+>
+> On Mon, Apr 14, 2008 at 10:17 AM, Chris McGee <cbmcgee@ca.ibm.com> 
+wrote:
+>
+> > Hi Erick,
+> >
+> > Thanks for the information. I tried using a HitCollector and a
+> > FieldSelector. I'm getting some dramatic improvements gathering large
+> > result sets using the FieldSelector. As it turned out I was able to
+> assume
+> > in many cases that I could break out after a specific field in each
+> > document.
+> >
+> > Assuming that I need to gather all result documents each time, what 
+are
+> > the advantages of using a HitCollector over Hits?
+> >
+> > Is there some way that I can load the index portion of the lucene data
+> > storage into RAM without loading everything into a RAMDirectory?
+> >
+> > Thanks,
+> > Chris McGee
+> >
+> >
+> >
+> >
+> > "Erick Erickson" <erickerickson@gmail.com>
+> > 10/04/2008 04:18 PM
+> > Please respond to
+> > java-user@lucene.apache.org
+> >
+> >
+> > To
+> > java-user@lucene.apache.org
+> > cc
+> >
+> > Subject
+> > Re: How to improve performance of large numbers of successive 
+searches?
+> >
+> >
+> >
+> >
+> >
+> >
+> > From this <<< iterate over all of the hits>>> I infer that you're
+> > using a Hits object. This is a no-no when getting more than 100
+> > or so objects. In a nutshell, the query gets re-executed every 100
+> > fetches. So your 2,000 hits are executing the query 20 times.
+> >
+> > The Hits object is optimized for returning the top few scoring
+> > documents rather than get the entire result set.
+> >
+> > See HitCollector/TopDocs/TopDocCollector etc. for better ways
+> > of doing this.
+> >
+> > Also, if you're calling IndexReader.document(i) for each document
+> > you'll inevitably take a lot of time as you're loading all of each
+> > document.
+> > Think about lazy field loading (see FieldSelector).
+> >
+> > Best
+> > Erick
+> >
+> > P.S. If this is totally off base, perhaps you could post some of the
+> > code you think is slow....
+> >
+> > On Thu, Apr 10, 2008 at 2:34 PM, Chris McGee <cbmcgee@ca.ibm.com> 
+wrote:
+> >
+> > > Hello,
+> > >
+> > > I am building fairly large directories (200-500 MB of disk space)
+> using
+> > > lucene-java. Sometimes it can take upwards of 10-15 mins to create 
+the
+> > > documents and write them to disk using my current configuration. I
+> have
+> > > upgraded to the latest 2.3.1 version and followed many of the
+> > > recommendations offered on the wiki:
+> > >
+> > > http://wiki.apache.org/lucene-java/ImproveIndexingSpeed
+> > >
+> > > These tips have significantly improved the time to build the 
+directory
+> > and
+> > > search it. However, I have noticed that when I perform term queries
+> > using
+> > > a searcher many times in rapid succession and iterate over all of 
+the
+> > hits
+> > > it can take a significant time. To perform 1000 term query searches
+> each
+> > > with around 2000 hits it takes well over a minute. The time seems to
+> > vary
+> > > linearly based on the number of searches (ie. 10 times more searches
+> > take
+> > > 10 times longer). I tried combining the searches into a BooleanQuery
+> but
+> > > it only shaves off a small percentage (5-10%) of the total time.
+> > >
+> > > I was wondering if there is a faster way to retrieve all of the
+> results
+> > > for my large collections of terms without using more memory and
+> without
+> > > taking more time to build the directory? I already looked at 
+bypassing
+> > the
+> > > searcher and using the IndexReader.termDocs() method directly to
+> > retrieve
+> > > the documents but there did not seem to be much performance
+> improvement.
+> > > In the majority of my cases I am simplying looking for a large 
+number
+> of
+> > > values to the same field. Also, I'm not interested in scoring 
+results
+> > > based on frequency or weights I need to retrieve all of the results
+> > > anyway.
+> > >
+> > > Any help with this would be great.
+> > >
+> > > Thanks,
+> > > Chris McGee
+> >
+> >
+>
+>
+
+

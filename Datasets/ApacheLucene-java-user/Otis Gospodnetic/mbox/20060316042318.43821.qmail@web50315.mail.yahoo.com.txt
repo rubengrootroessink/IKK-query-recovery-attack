@@ -1,0 +1,134 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Multiple languages - possible approach
+DATE: 16 Mar 2006
+
+Hi Paul,
+
+I don't have any first-hand experience with this, but your suggestion about pluggable analyzers
+sounds both reasonable and interesting to me.  One thing you did not mention as a mechanism
+for figuring out which analyzer to use is language identification (like the one you can find
+among Nutch plugins).  If you can't tell which analyzer to use by looking at characters and
+unicode ranges, perhaps you can (also) read in/ahead a few tokens and pass them to language
+identifier before selecting the best analyzer.
+
+This would be a great contribution, of course! :)
+
+Otis
+
+----- Original Message ----
+From: Paul Cowan <cowan@aconex.com>
+To: java-user@lucene.apache.org
+Sent: Wednesday, March 15, 2006 10:49:48 PM
+Subject: Multiple languages - possible approach
+
+Hi everyone,
+
+We are currently using Lucene to index correspondence between various 
+people, who may or may not use the same language in their discussions to 
+each other. Think an email system where participants might use the 
+language that seems most appropriate to the thought at the time, just as 
+they would in conversation.
+
+An example (CN = some chinese text. Use your imagination!):
+
+    From: Someone in the UK
+    To: Someone in China
+    Subject: Re: CNCNCNCNCNCNCNCNCNCNCN
+
+    > CNCNCNCNCNCNCNCN
+
+    Yes, I think that's fine. I'm OK with that as long as Bob is.
+
+    > CNCNCNCNCNCN
+
+    CNCN?
+
+    > Tuesday OK?
+
+    I need it by Monday, sorry. CNCN!
+
+We need to index that, and be able to search on it -- for both the 
+Chinese and English text. Note that stemming is not a particular need of 
+ours -- we're happy to search for literal tokens, but of course that may 
+not apply to other languages where stemming is expected behaviour, not 
+just a 'nicety'.
+
+Anyway: so far, fine -- StandardAnalyzer is perfectly suitable to our 
+needs. The problem is, the next language out of the starting blocks is 
+Arabic, which StandardAnalyzer doesn't seem to be up to.
+
+I've looked into previous discussions about this on the various lists, 
+and it seems to me there are a few options:
+
+1) Maintain multiple indexes (StandardAnalyzer-analyzed, 
+ArabicAnalyzer-analyzed, LanguageXXXAnalyzer-analyzed) and search across 
+all of them, merging results
+
+2) Maintain multiple indexes, ask the user which one to use at search-time:
+    Search for the [Arabic \/] text: [______________________]
+
+3) Use StandardAnalyzer and hope for the best.
+
+4) Write a new... "Super Analyzer" that tries to deal with this. This is 
+POSSIBLY the best idea -- and, of course, almost certainly the hardest!
+
+Basically, what we're considering is writing some sort of new 
+CompositeAnalyzer class which applies the following algorithm (in very 
+simple terms):
+
+a) Start reading the stream
+
+b) Look at the next character
+
+c) Use some sort of Character.UnicodeBlock (or Character.Subset 
+generally) -> Analyzer mapping to work out which Analyzer we want to 
+use. e.g. find a member of Character.UnicodeBlock.GREEK, load a 
+GreekAnalyzer.
+
+d) Keep reading until we hit something that makes us think we need to 
+change analyzers (either end-of-stream or something incongruous -- e.g. 
+something from Character.UnicodeBlock.CYRILLIC). Then bundle up what 
+we've got, hand it to the GreekAnalyzer, and then start the process 
+again with a RussianAnalyzer (or whatever).
+
+Obviously the best way to do this would be to have these mappings 
+dynamic, not set in stone -- some people might like all 
+CJK_COMPATABILITY to be handed to the CJKAnalyzer, some to the 
+ChineseAnalyzer, some might like to use their own, etc. Of course 
+there's no reason default mappings can't be supplied.
+
+I guess the basic question is -- what does everyone think? Is this 
+useful/workable/are there any fatal flaws with it? Obviously the biggie 
+is that sometimes Unicode ranges are not sufficient to determine which 
+analyzer to use -- for example, we may want to specifically use the 
+GermanAnalyzer for German text, but that is basically impossible to tell 
+from English purely based on the Unicode block of the next character. At 
+least this way, though, we'd have the OPTION of farming off to more 
+specific Analyzers based on Character set; being able to have an 
+Analyzer which can tell Urdu from Arabic is something of separate issue; 
+at least the "CompositeAnalyzer" would bring us a bit closer to the 
+goal. It may be rudimentary but I think the 'pluggable' architecture 
+could be useful -- certainly more useful in our case than just running 
+the StandardAnalyzer over everything.
+
+If this project goes ahead, it's possible (even likely) that it would be 
+contributed back to the Lucene sandbox. As such, I'm very interested to 
+hear about any suggestions, criticisms, or other feedback you might have.
+
+Cheers,
+
+Paul Cowan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

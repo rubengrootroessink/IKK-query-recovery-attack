@@ -1,0 +1,189 @@
+FROM: John Moylan <jo...@rte.ie>
+SUBJECT: Re: Accent filter
+DATE: 28 Sep 2004
+
+Loads of very well thought out ISO-8859 + French/Irish Filters available 
+here too: (I think they are all GPL'd)
+
+http://www.nongnu.org/sdx/
+
+Best Regards,
+JOhn
+
+Bo Gundersen wrote:
+> Hi,
+> 
+> I am certainly not the first, and probably not the last, that have had 
+> problems with accented characters in my index. But unfortunately I 
+> couldnt find anything in neither lucene nor the lucene-sandbox to solve 
+> the problem.
+> Så I wrote an accent filter and thought that I might as well share it 
+> with you guys :)
+> 
+> 
+> ------------------------------------------------------------------------
+> 
+> package dk.atira.search;
+> 
+> import java.io.IOException;
+> import java.util.Collection;
+> import java.util.HashMap;
+> import java.util.HashSet;
+> import java.util.Map;
+> import org.apache.lucene.analysis.Token;
+> import org.apache.lucene.analysis.TokenFilter;
+> import org.apache.lucene.analysis.TokenStream;
+> 
+> /**
+>  * This filter converts accent characters to their non-accented versions.
+>  * Also it strips unwanted characters from the tokens, mening anything 
+>  * but A-Z,a-z,0-9,ÆÅØæøå and -
+>  * The valid characters can be changed by adding them to the string validCharsStr.
+>  * 
+>  * Created by Bo Gundersen at Sep 28, 2004 12:39:04 PM 
+>  *
+>  * @author Bo Gundersen (bg@atira.dk)
+>  */
+> public class AccentFilter
+> 		extends TokenFilter
+> 	{
+> 		private static final Collection validChars = new HashSet();
+> 		private static final String validCharsStr = 
+> 			"abcdefghijklmnopqrstuvwxyz\u00E6\u00F8\u00E5" +
+> 			"ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00C6\u00D8\u00C5" +
+> 			"0123456789" +
+> 			"-";
+> 		static {
+> 			for(int i=0; i<validCharsStr.length(); i++)
+> 				validChars.add(new Character(validCharsStr.charAt(i)));
+> 		}
+> 		
+> 		private static final Map accents = new HashMap();
+> 		static {
+> 			accents.put(new Character('\u00C0'), "A");
+> 			accents.put(new Character('\u00C1'), "A");
+> 			accents.put(new Character('\u00C2'), "A");
+> 			accents.put(new Character('\u00C3'), "A");
+> 			accents.put(new Character('\u00E0'), "a");
+> 			accents.put(new Character('\u00E1'), "a");
+> 			accents.put(new Character('\u00E2'), "a");
+> 			accents.put(new Character('\u00E3'), "a");
+> 			accents.put(new Character('\u00E4'), "a");
+> 			
+> 			accents.put(new Character('\u00C8'), "E");
+> 			accents.put(new Character('\u00C9'), "E");
+> 			accents.put(new Character('\u00CA'), "E");
+> 			accents.put(new Character('\u00CB'), "E");
+> 			accents.put(new Character('\u00E8'), "e");
+> 			accents.put(new Character('\u00E9'), "e");
+> 			accents.put(new Character('\u00EA'), "e");
+> 			accents.put(new Character('\u00EB'), "e");
+> 
+> 			accents.put(new Character('\u00CC'), "I");
+> 			accents.put(new Character('\u00CD'), "I");
+> 			accents.put(new Character('\u00CE'), "I");
+> 			accents.put(new Character('\u00CF'), "I");
+> 			accents.put(new Character('\u00EC'), "i");
+> 			accents.put(new Character('\u00ED'), "i");
+> 			accents.put(new Character('\u00EE'), "i");
+> 			accents.put(new Character('\u00EF'), "i");
+> 
+> 			accents.put(new Character('\u00D1'), "N");
+> 			accents.put(new Character('\u00F1'), "n");
+> 			
+> 			accents.put(new Character('\u00D2'), "O");
+> 			accents.put(new Character('\u00D3'), "O");
+> 			accents.put(new Character('\u00D4'), "O");
+> 			accents.put(new Character('\u00D5'), "O");
+> 			accents.put(new Character('\u00D6'), "O");
+> 			accents.put(new Character('\u00F2'), "o");
+> 			accents.put(new Character('\u00F3'), "o");
+> 			accents.put(new Character('\u00F4'), "o");
+> 			accents.put(new Character('\u00F5'), "o");
+> 			accents.put(new Character('\u00F6'), "o");
+> 			
+> 			accents.put(new Character('\u00D9'), "U");
+> 			accents.put(new Character('\u00DA'), "U");
+> 			accents.put(new Character('\u00DB'), "U");
+> 			accents.put(new Character('\u00DC'), "U");
+> 			accents.put(new Character('\u00F9'), "u");
+> 			accents.put(new Character('\u00FA'), "u");
+> 			accents.put(new Character('\u00FB'), "u");
+> 			accents.put(new Character('\u00FC'), "u");
+> 			
+> 			accents.put(new Character('\u00DD'), "Y");
+> 			accents.put(new Character('\u00FD'), "y");
+> 			accents.put(new Character('\u00FF'), "y");
+> 			
+> 			accents.put(new Character('\u00C6'), "AE");
+> 			accents.put(new Character('\u00E6'), "ae");
+> 			accents.put(new Character('\u00D8'), "OE");
+> 			accents.put(new Character('\u00F8'), "oe");
+> 			accents.put(new Character('\u00C5'), "AA");
+> 			accents.put(new Character('\u00E5'), "aa");
+> 		}
+> 		
+> 		private Token token = null;
+> 
+> 		public AccentFilter(TokenStream in)
+> 		{
+> 			super(in);
+> 		}
+> 
+> 		public Token next()
+> 			throws IOException
+> 		{
+> 			if ((token = input.next()) == null)
+> 				return null;
+> 			String s = process(token.termText());
+> 			if (!s.equals(token.termText())) {
+> 				return new Token(s, token.startOffset(), token.endOffset(), token.type());
+> 			} else {
+> 				return token;
+> 			}
+> 		}
+> 
+> 		private String process(String str)
+> 		{
+> 			StringBuffer sb = new StringBuffer(str);
+> 			// First check for accents
+> 			for(int i=0; i<sb.length(); i++) {
+> 				Character c = new Character(sb.charAt(i));
+> 				String rep = (String)accents.get(c);
+> 				if(rep != null)
+> 					sb.replace(i, i+1, rep);
+> 			}
+> 				
+> 			// Then check for blocked chars
+> 			for(int i=0; i<sb.length(); i++) {
+> 				Character c = new Character(sb.charAt(i));
+> 				if(!validChars.contains(c))
+> 					sb.replace(i, i--+1, "");
+> 			}
+> 			return sb.toString();
+> 		}
+> 		
+> 	}
+> 
+> 
+> ------------------------------------------------------------------------
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+******************************************************************************
+The information in this e-mail is confidential and may be legally privileged.
+It is intended solely for the addressee. Access to this e-mail by anyone else
+is unauthorised. If you are not the intended recipient, any disclosure,
+copying, distribution, or any action taken or omitted to be taken in reliance
+on it, is prohibited and may be unlawful.
+Please note that emails to, from and within RTÉ may be subject to the Freedom
+of Information Act 1997 and may be liable to disclosure.
+******************************************************************************
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

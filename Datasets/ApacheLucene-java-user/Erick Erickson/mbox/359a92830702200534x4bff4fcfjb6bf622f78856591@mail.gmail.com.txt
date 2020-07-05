@@ -1,0 +1,112 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: ranking / scoring by field which contains a given rank?
+DATE: 20 Feb 2007
+
+I'm puzzled why you don't index a salesrank when you build your index and
+use Lucene's built-in sorting to sort them at query time. This probably
+means that I didn't read your e-mail carefully enough, but... If salesrank
+is something that you can pre-calculate and put in your index, this should
+fix you right up.
+
+But do be aware that the native sort is lexical, meaning that if you indexed
+values 1, 2, 3, 10, the sorting would be 1, 10, 2, 3. So you need to
+normalize fields like this to get them to sort correctly, perhaps padding
+them with 0 (i.e. 000001, 000002, 000003, 000010). See Lucene's NumberTools
+class...
+
+Best
+Erick
+
+On 2/20/07, Dennis Berger <dennis.berger@bsdsystems.de> wrote:
+>
+> Hi List,
+> is it possible to sort or rank by a specific field which contains only
+> integer numbers? I have a few million products with a specific salesrank.
+> If somebody searches "palm", he will get thousands of items, pocket
+> adapter, pens everything else but not the most selled items. Which are
+> not accessoires, but the main palm handheld. I would like that he got it
+> sorted by salesrank. And it would be nice if this could be done while
+> indexing. Is this possible?
+> If not, are there alternatives?
+>
+> Right now I fetch 2000 items and sort them by hand and kick 1900
+> products away to get the best 100 items. But thats a bad idea since you
+> always have to fetch a lot more items than you actually need to get
+> proper results..
+> So I had an idea an implemented the following:
+>
+> I have to say that I concat all textfields "articleno, description, long
+> description" to one fulltext field.
+> I parse the salesrank of each item, and calculate a boost factor by
+> using and logarithmic interpolation with two given points.
+> x0/f0 = 1/5000 and x2/f2 = 250,1.
+> That Way I can get very high numbers for the best selled items. Linear
+> boosting shouldn't be enough.
+> Now I set this boostfactor on the fulltext field and after that I add
+> the field and add the document.
+> One should expect that searching a common item, you should get the best
+> selled first.
+> But my tests showed that it doesn't matter how I set my x0/f0 x1/f1 the
+> results are nearly the same bad results.
+> First item is salesrank 238 second is salesrank 36.
+> If you take this example I boosted the fulltext field of the item with
+> salesrank 36 with a factor of 1510.
+> salesrank 238 was only boostet with a factor of 1,507. (this is german
+> notation for the decimal number one dot five. NOT one thousand five
+> hundred.)
+> I wonder why boosting one item with a factor of thousand and one with a
+> factor of ONE doesn't make a difference?
+> The search term appeared 2 to 3 times on each item.
+> I tried values between 100000 and 1. even setting boost evertime to 1,
+> gives me the quite same results. With exactly the same first 20 items.
+>
+> I'm stuck, maybe you can help.
+>
+> My code follows.
+>
+>
+> Code
+> -----
+> public float calcBoostinterpolLog(int x){
+>         if(x > 1000)
+>                 return 0.001F;
+>         double result;
+>         int x0 = 1;
+>         int f0 = 50000;
+>         int x1 = 250;
+>         int f1 = 1;
+>
+>         result = f0 * Math.exp(  ((x - x0)*(Math.log(f1) - Math.log(f0))
+> ) / (x1 -x0));
+>         return new Float(result);
+>     }
+> -----
+>
+> Field field_fulltext = new
+> Field(Messages.getString("Indexer.FieldFulltext"), fulltext,
+> Store.YES,Index.TOKENIZED);
+>         field_fulltext.setBoost(boost);
+>         document.add(field_fulltext);
+> -----
+>
+> kinda regards,
+> -Dennis
+>
+>
+> --
+> Dennis Berger
+> BSDSystems
+> Eduardstrasse 43b
+> 20257 Hamburg
+>
+> Phone: +49 (0)40 54 00 18 17
+> Mobile: +49 (0) 179 123 15 09
+> E-Mail: db@bsdsystems.de
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

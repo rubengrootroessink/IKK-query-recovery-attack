@@ -1,0 +1,404 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: Search returning documents matching a NOT range
+DATE: 8 Nov 2010
+
+This does seem extremely odd.  David sent me a copy of his index and
+I've played around with it and also written a self-contained RAM index
+program, below, that shows the same problem, namely that if the second
+index has 1000+ docs the one and only doc in the first index is
+incorrectly matched if the search is done with a MultiSearcher.  In
+answer to Uwe's question, it works correctly if use a single
+IndexSearcher on top of a MultiReader.
+
+Tests run with lucene-core-3.0.2.jar.
+
+Snippet from program output:
+
+Larger index with 999 docs
+--- multi reader ---
+Query: +author:aaa -pubdate:[aaa TO bbb]
+MaxDocs: 1000
+Hit count: 0
+--- multi searcher ---
+Query: +author:aaa -pubdate:[aaa TO bbb]
+MaxDocs: 1000
+Hit count: 0
+
+Larger index with 1000 docs
+--- multi reader ---
+Query: +author:aaa -pubdate:[aaa TO bbb]
+MaxDocs: 1001
+Hit count: 0
+--- multi searcher ---
+Query: +author:aaa -pubdate:[aaa TO bbb]
+MaxDocs: 1001
+Hit count: 1
+Docno: 0
+author: /aaa/, indexed: true
+pubdate: /abc/, indexed: true
+
+-----------------------------------------------------------------------
+package test;
+
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.standard.*;
+import org.apache.lucene.document.*;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
+import org.apache.lucene.util.Version;
+
+public class LuceneTest8 {
+
+    static public void main(String[] args) throws Exception {
+	test(999);
+	test(1000);
+	test(1001);
+    }
+
+
+    static void test(int _max) throws Exception {
+	System.out.printf("\n\nLarger index with %s docs\n", _max);
+	Analyzer anl = new StandardAnalyzer(Version.LUCENE_30);
+	Directory dir1 = loadIndex(anl, 1, "aaa", "abc");
+	Directory dir2 = loadIndex(anl, _max, "zzz", "zzz");
+	QueryParser qp = new QueryParser(Version.LUCENE_30, "author", anl);
+	String qstr = "author:aaa AND NOT pubdate:[aaa TO bbb]";
+	Query q = qp.parse(qstr);
+	IndexReader ir1 = IndexReader.open(dir1);
+	IndexReader ir2 = IndexReader.open(dir2);
+	Searcher searcher1 = new IndexSearcher(ir1);
+	Searcher searcher2 = new IndexSearcher(ir2);
+	MultiReader mr = new MultiReader(ir1, ir2);
+	Searcher searcherm1 = new IndexSearcher(mr);
+	MultiSearcher searcherm2 = new MultiSearcher(searcher1, searcher2);
+	search(q, searcher1, "small index");
+	search(q, searcher2, "larger index");
+	search(q, searcherm1, "multi reader");
+	search(q, searcherm2, "multi searcher");
+    }
+
+
+
+    static Directory loadIndex(Analyzer _anl,
+			       int _max,
+			       String _author,
+			       String _pd) throws Exception {
+	RAMDirectory dir = new RAMDirectory();
+	IndexWriter iw = new IndexWriter(dir,
+					 _anl,
+					 true,
+					 IndexWriter.MaxFieldLength.UNLIMITED);
+	for (int i = 0; i < _max; i++) {
+	    Document d = new Document();
+	    d.add(new Field("author", _author,
+			    Field.Store.YES, Field.Index.ANALYZED));
+	    d.add(new Field("pubdate", _pd,
+			    Field.Store.YES, Field.Index.ANALYZED));
+	    iw.addDocument(d);
+	}
+	iw.close();
+	return dir;
+    }
+
+
+    static void search(Query _q,
+		       Searcher _searcher,
+		       String _what) throws Exception {
+	System.out.printf("--- %s ---\n", _what);
+	System.out.printf("Query: %s\n", _q.toString());
+	System.out.printf("MaxDocs: %s\n", _searcher.maxDoc());
+	TopDocs topDocs = _searcher.search(_q, 10);
+	System.out.printf("Hit count: %s\n", topDocs.totalHits);
+	for (int in = 0; in < topDocs.totalHits; in++) {
+	    int docno = topDocs.scoreDocs[in].doc;
+	    Document ldoc = _searcher.doc(docno);
+	    System.out.printf("Docno: %s\n", docno);
+	    for (Fieldable f : ldoc.getFields()) {
+		System.out.printf("%s: /%s/, indexed: %s\n",
+				  f.name(), f.stringValue(), f.isIndexed());
+	    }
+	}
+    }
+}
+
+
+--
+Ian.
+
+
+On Mon, Nov 8, 2010 at 4:32 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> Does the same happen with a MultiReader on top of both indexes and using a
+> single IndexSearcher on top of this MultiReader?
+>
+> P.S.: How about using NumericField?
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+>
+>> -----Original Message-----
+>> From: David Fertig [mailto:dfertig@cymfony.com]
+>> Sent: Monday, November 08, 2010 4:21 AM
+>> To: java-user@lucene.apache.org
+>> Subject: RE: Search returning documents matching a NOT range
+>>
+>> publish_date is a string, formatted as YYYYMMDD, so it string sorting
+> should
+>> work correctly for this field.
+>>
+>> The field is indexed as a keyword and the field's value is also stored.
+>>
+>> I have previously reviewed the terms and optimized the index with luke
+>> 1.0.1 to make sure there was no index corruption. It is a very useful
+> tool,
+>> however it can only open 1 index at a time so I can't reproduce the issue
+> with
+>> it.
+>>
+>> At your suggestion I added code to enumerate all terms in the indexes and
+>> there are no inconsistencies.
+>>
+>> The two fields being searched each only have 1 term in the first index (as
+>> expected) and those terms are not in the second index.
+>>
+>> David
+>>
+>>
+>>
+>> -----Original Message-----
+>> From: Erick Erickson [mailto:erickerickson@gmail.com]
+>> Sent: Sunday, November 7, 2010 11:12 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Search returning documents matching a NOT range
+>>
+>> What kind of field is publish_date? And how do you store data there?
+>> Is it possible you're getting some date presentation wonkiness in here?
+>> One thing that might shed light on your problem is if you enumerated the
+>> terms in that field and printed them out rather than the document.get.
+> That is,
+>> be sure you're getting what's in the index (and thus being searched)
+> rather than
+>> wha's stored in the document.
+>>
+>> Luke might get you there faster/easier....
+>>
+>> Best
+>> Erick
+>>
+>> On Fri, Nov 5, 2010 at 5:18 PM, David Fertig <dfertig@cymfony.com>
+>> wrote:
+>>
+>> > Ian,
+>> > Thank you for getting back to me.  No, I do not get a bogus hit from
+>> > searching the small index alone.  Also, I do not get a hit if I delete
+>> any
+>> > more documents from the larger index.
+>> >
+>> > I have updated my test to use RamDirectory and also print maxDoc() for
+>> the
+>> > searchables and the searcher, all numbers are as expected.  I have
+>> posted
+>> > all the code, but did not want to post the indexes due to their size
+>> (2.2
+>> > meg uncompressed).  I will mail them to anyone who can help.
+>> >
+>> > Here is the complete latest test code and its output
+>> >
+>> >
+>> >
+>> > public class LuceneTest {
+>> >    static public void main(String[] args) {
+>> >        try {
+>> >            QueryParser queryParser = new
+>> QueryParser(Version.LUCENE_30,
+>> > "author", new KeywordAnalyzer());
+>> >            Query query = queryParser.parse("author:bentalcella AND NOT
+>> > publish_date:[20100601 TO 20100630]");
+>> >            Searchable[] searchables = new Searchable[2];
+>> >             RAMDirectory ram1 = new RAMDirectory(new
+>> NIOFSDirectory(new
+>> > File("/home/dfertig/testIndexes/b1")));
+>> >            RAMDirectory ram2 = new RAMDirectory(new NIOFSDirectory(new
+>> > File("/home/dfertig/testIndexes/m1")));
+>> >            searchables[0] = new IndexSearcher(ram1, true);
+>> >            searchables[1] = new IndexSearcher(ram2, true);
+>> >            MultiSearcher searcher = new MultiSearcher(searchables);
+>> >            System.out.println("MaxDocs for index 1: " +
+>> > searchables[0].maxDoc());
+>> >            System.out.println("MaxDocs for index 2: " +
+>> > searchables[1].maxDoc());
+>> >            System.out.println("MaxDocs for MultiSearcher: " +
+>> > searcher.maxDoc());
+>> >             System.out.println("Query: " + query.toString());
+>> >            TopDocs topDocs = searcher.search(query, 10);
+>> >            System.out.println("Results: " + topDocs.totalHits);
+>> >            for (int in = 0; in < topDocs.totalHits; in++) {
+>> >                Document document =
+>> searcher.doc(topDocs.scoreDocs[in].doc);
+>> >                System.out.println("publish_date: " +
+>> > document.get("publish_date"));
+>> >            }
+>> >            searcher.close();
+>> >             ram1.close();
+>> >            ram2.close();
+>> >         } catch (Exception e) {
+>> >            System.out.println(e.getMessage());
+>> >            e.printStackTrace();
+>> >        }
+>> >    }
+>> > }
+>> >
+>> > Output:
+>> > MaxDocs for index 1: 1
+>> > MaxDocs for index 2: 1000
+>> > MaxDocs for MultiSearcher: 1001
+>> > Query: +author:bentalcella -publish_date:[20100601 TO 20100630]
+>> > Results: 1
+>> > publish_date: 20100606
+>> >
+>> >
+>> >
+>> >
+>> > -----Original Message-----
+>> > From: Ian Lea [mailto:ian.lea@gmail.com]
+>> > Sent: Friday, November 5, 2010 4:57 PM
+>> > To: java-user@lucene.apache.org
+>> > Subject: Re: Search returning documents matching a NOT range
+>> >
+>> > Do you get the bogus hit on the small index if search that index
+>> > alone?  Are you positive it only holds the one doc? Loading the one
+>> > doc into a new RAM based index in the test would prove it.
+>> >
+>> > You are more likely to get help if post a self-contained example -
+>> > people can see everything relevant and are more likely to spot a
+>> > problem.
+>> >
+>> >
+>> > --
+>> > Ian.
+>> >
+>> >
+>> > On Thu, Nov 4, 2010 at 4:52 PM, David Fertig <dfertig@cymfony.com>
+>> wrote:
+>> > > I have an active lucene implementation that has been in place for a
+>> > > couple years and was recently upgraded to the 3.02 branch. We are
+>> now
+>> > > occasionally seeing documents returned from searches that should not
+>> be
+>> > > returned. I have reduced the code and indexes to the smallest set
+>> > > possible where I can still repeat the issue.
+>> > >
+>> > >
+>> > >
+>> > > My test cases uses 2 indexes.  These indexes have been
+>> rebuilt/optimized
+>> > > using Luke 1.0.1 to make them the smallest possible.  One index has
+>> 1
+>> > > document, which is being returned by the query but should not.   The
+>> > > other index has 1000 documents, none of which match the search
+>> criteria.
+>> > > The query should bring back 0 results, but brings back 1.  I can zip
+>> and
+>> > > mail the indexes if it would aid in helping track down this issue.
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > > public class LuceneTest {
+>> > >
+>> > >    static public void main(String[] args) {
+>> > >
+>> > >        try {
+>> > >
+>> > >            QueryParser queryParser = new
+>> QueryParser(Version.LUCENE_30,
+>> > > "author", new KeywordAnalyzer());
+>> > >
+>> > >            Query query = queryParser.parse("author:bentalcella AND
+>> NOT
+>> > > publish_date:[20100601 TO 20100630]");
+>> > >
+>> > >            Searchable[] searchables = new Searchable[2];
+>> > >
+>> > >            searchables[0] = new IndexSearcher(new NIOFSDirectory(new
+>> > > File("/home/dfertig/testIndexes/b1")), true);
+>> > >
+>> > >            searchables[1] = new IndexSearcher(new NIOFSDirectory(new
+>> > > File("/home/dfertig/testIndexes/m1")), true);
+>> > >
+>> > >            Searcher searcher = new MultiSearcher(searchables);
+>> > >
+>> > >            System.out.println("Query: " + query.toString());
+>> > >
+>> > >            TopDocs topDocs = searcher.search(query, 10);
+>> > >
+>> > >            System.out.println("Results: " + topDocs.totalHits);
+>> > >
+>> > >            for (int in = 0; in < topDocs.totalHits; in++) {
+>> > >
+>> > >                Document document =
+>> > > searcher.doc(topDocs.scoreDocs[in].doc);
+>> > >
+>> > >                System.out.println("publish_date: " +
+>> > > document.get("publish_date"));
+>> > >
+>> > >            }
+>> > >
+>> > >            searcher.close();
+>> > >
+>> > >        } catch (Exception e) {
+>> > >
+>> > >            System.out.println(e.getMessage());
+>> > >
+>> > >            e.printStackTrace();
+>> > >
+>> > >        }
+>> > >
+>> > >    }
+>> > >
+>> > > }
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

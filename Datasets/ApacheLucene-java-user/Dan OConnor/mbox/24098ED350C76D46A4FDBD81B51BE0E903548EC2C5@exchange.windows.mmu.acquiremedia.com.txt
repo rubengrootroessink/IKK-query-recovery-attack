@@ -1,0 +1,152 @@
+FROM: Dan OConnor <docon...@acquiremedia.com>
+SUBJECT: RE: simultaneous indexing and searching causing intermitently long searches.
+DATE: 4 Apr 2009
+
+Mike,
+Thanks for the response -- we've already jumped on a couple of your suggestions.
+
+Here is some feedback and follow ups:
+
+We have watched GC times closely in the past. Most of the results of us trying various settings
+was to make GC worse instead of better.
+
+We didn't know about reopen() until recently so we still create a new IndexSearcher in the
+background and warm it up before we put it into service. We are going to switch to ping-ponging
+between to IndexSearchers. When we call reopen(), do we have to warm it up again if reopen
+returns a new IndexReader?
+
+After I sent this email, I found that the ConcurrentMergeScheduler has both a setMaxThreadCount
+and a setMergeThreadPriority. Does this allow our code to tell the JVM to run merge at a lower
+priority (and perhaps with more threads) than our IndexWriter and IndexSearcher threads (which
+are created with normal priority)?
+
+For warm-ups, since we sort on a couple of date fields within the document (in addition to
+the straight relevance sort), I'm reading your suggestion that it is important to issue warm
+up queries that date sort as well?
+
+Thanks again for your time and effort.
+
+Regards,
+Dan
+
+
+-----Original Message-----
+From: Michael McCandless [mailto:lucene@mikemccandless.com] 
+Sent: Saturday, April 04, 2009 6:38 AM
+To: java-user@lucene.apache.org
+Subject: Re: simultaneous indexing and searching causing intermitently long searches.
+
+On Fri, Apr 3, 2009 at 10:21 PM, Dan OConnor <doconnor@acquiremedia.com> wrote:
+> All,
+>
+> I have a several questions regarding query response time and I would appreciate any help
+that can be provided.
+>
+> We have a system that indexes approximately 200,000 documents per day at a fairly constant
+rate and holds them in a cfs-style file system directory index for 8 days. The index is approximately
+50 GBs when optimized - which we do semi-monthly.
+>
+> We are running lucene 2.3.2 with jre 1.6. 0_10 on Centos5 on 64-bit Dell 2950s - 3GHz
+dual/quad core processors with local ext3 Raid-5 15k disks (approximately 1.7TBs) The box
+has 16GB and the JVM is allocated 11G (both Xms and Xmx)
+
+With such a large heap, I would watch the GC times closely.  Turn on
+verbose GC and see what's happening, when.  There have been threads
+recently around how to tune the JRE's GC when using such a large heap.
+
+> Every 15 minutes, we flush the IndexWriter and create a new IndexSearcher to expose the
+newly indexed content.
+
+Are you using reopen() to open the new reader?
+
+> Every hour, approximately 1 hours worth of content (approximately 8,000 documents) is
+deleted, we flush the IndexWriter, and create a new IndexSearcher.
+>
+> Q1: Given these settings, are there general rules of thumb for setting the MergeFactor,
+MaxMergeDocs, MaxBufferedDocs, and RAMBufferSizeMB?
+
+Large maxRamBufferSizeMB.  I would keep mergeFactor smallish (<=
+10)... it means more frequent merges, but possibly less IO saturation.
+ You should experiment...
+
+The lack of IO prioritization from Java (and really from the OS) is a
+big problem.  We have no way to tell the OS that the IO being done for
+a merge is very low priority.
+
+> We do a series of warm up searches every time we create a new IndexSearcher. Right now
+we are directly calling the IndexSearcher.search() method with a query, null filter, and 10
+documents to return. We run searches against all of the index fields.
+>
+> Q1: Are there any rules of thumb for the number or complexity of warm up searches?
+
+The goal is to warm Lucene's internal caches (norms & field cache).
+So run one search per field that's searchable (loads the norms), and
+one search per sorted field (loads field cache).
+
+A secondary goal may be to warm the OS's IO cache, though that's
+trickier because you'd need to track the common and large terms that
+need to be queried.  I believe Solr does this (carries over its query
+cache to the warmed reader), but I'm not certain.
+
+Note that by far the biggest bang for you bug is to switch to a solid
+state device to hold your index. EG Fusion IO's devices are insanely
+fast.
+
+Note that 2.9 has some performance improvements on the warm
+performance after reopen, if you use field sort.
+
+> Q2: Is it important to "warmup" the query parser, analyzer, etc or the ranges we use
+in queries or the sorting?
+
+Not important -- only the IndexReader needs warming.
+
+> When the system is receiving regular queries, between 1 and 5 per second for example,
+the search response times are extremely fast (sub 500ms) and mostly independent of query complexity.
+We see slower query responses (on the order of 2-4 seconds) for the first few queries  when
+using a newly created IndexSearcher. However, the extremely fast response times return quickly
+and continue.
+>
+> When the system has not received any search requests for a period of time, as little
+as 5 seconds, the query response time for even a simple query starts climbing (5 -8 seconds)
+and the longer the idle period between queries, the longer the query response time (growing
+to 15-30 seconds if the idle time is 30seconds to a minute). NOTE: the system is still indexing
+new content and removing old content when there are no incoming queries.
+
+You should try to watch your process, eg with top, to see if the OS is
+moving pages out in favor of populating the system's IO cache.  Watch
+for page faults when you see a slow query happening. If so, there's a
+linux kernel parameter called "swapiness" that you should tune to
+prevent swapout (though I'm not certain if CentOS exposes it; I would
+assume so).
+
+It's also possible the slowness comes from the OS swapping out the IO
+cache for those queries' posting lists, in which case an SSD device
+should solve it.
+
+> Q3: Is there a known issue where the IndexSearcher cache empties over time?
+
+IndexSearcher doesn't free its caches, but the OS may.
+
+> Finally, there are times when the query response times completely go off the charts -
+to 100s of seconds.
+
+Gotta watch with top to see what's happening then.
+
+> Q4: Is it possible that this is due to segments being merged together? If so, besides
+the MergeFactor, etc. settings are there ways to mitigate this?
+
+Yes this is possible.  Turn on IndexWriter.setInfoStream to see if you
+can correlate massively slow queries with ongoing merging.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

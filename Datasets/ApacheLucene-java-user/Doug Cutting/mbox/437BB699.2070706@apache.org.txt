@@ -1,0 +1,67 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Filtering on a SpanQuery without losing spans
+DATE: 16 Nov 2005
+
+Greg K wrote:
+> Now, however, I'd like to be able restrict the search to certain documents
+> in the index, so I don't have to stream through a couple of thousand spans
+> to produce the 10 excerpts on a subset of the documents.
+> 
+> I've tried added a term to the SpanNearQueries that targets a keyword field
+> containing the document ids, but SNQ (understandably) can't handle that.
+> There isn't a SpanBooleanQuery and if I wrap the SpanOrQuery in a
+> BooleanQuery I'll lose access to the getSpans() method - same if I use a
+> Filter - can't get spans out of a Hits object, right?
+> 
+> Am I missing something? Is there a straightforward way to do what I'm trying
+> to do that I'm missing?
+
+I think what you need is a SpanAndQuery, with a constructor like:
+
+    SpanAndQuery(SpanQuery spanQ, Query docsQ);
+
+This would return the subset of spans matching spanQ whose documents 
+match docQ.  This should not be too hard to implement.  Its Spans 
+implementation might look something like:
+
+private Spans spans;
+private Scorer docs;
+private boolean more;
+
+public SpanAndSpans(SpanQuery spanQ, Query docQ,
+                     IndexReader reader, Searcher searcher) {
+   spans = spanQ.getSpans(reader);
+   docs = docQ.weight(searcher).scorer(reader);
+   more = docs.next();
+}
+
+public boolean next() throws IOException {
+   if (!more) return false;
+   more = spans.next();
+   while (more) {
+     if (spans.doc() > docs.doc()) {
+       more = docs.skipTo(spans.doc());
+     } else if (spans.doc() < docs.doc()) {
+       more = spans.skipTo(docs.doc());
+     } else if (spans.doc() == docs.doc()) {
+       return true;
+     }
+   }
+   return false;
+}
+
+public boolean skipTo(int doc) throws IOException {
+   if (!more) return false;
+   more = docs.skipTo(doc);
+   return next();
+}
+
+This is untested and incomplete, but does it look like the right direction?
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,123 @@
+FROM: Jamie <ja...@stimulussoft.com>
+SUBJECT: Re: Lucene 2.9.0-rc2 [PROBLEM] : TokenStream API (incrementToken / AttributeSource), cannot implement a LookaheadTokenFilter.
+DATE: 29 Jan 2010
+
+Hi THere
+
+In the absense of documentation, I am trying to convert an EmailFilter 
+class to Lucene 3.0. Its not working! Obviously, my understanding of the 
+new token filter mechanism is misguided.
+Can someone in the know help me out for a sec and let me know where I am 
+going wrong. Thanks.
+
+import org.apache.commons.logging.*;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.tokenattributes.TermAttribute;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Stack;
+
+/* Many thanks to Michael J. Prichard" <michael_prich...@mac.com> for his
+  * original the email filter code. It is rewritten. */
+
+public class EmailFilter extends TokenFilter  implements Serializable {
+
+     public EmailFilter(TokenStream in) {
+         super(in);
+     }
+
+     public final boolean incrementToken() throws java.io.IOException {
+
+         if (!input.incrementToken()) {
+             return false;
+         }
+
+
+         TermAttribute termAtt = (TermAttribute) 
+input.getAttribute(TermAttribute.class);
+
+         char[] buffer = termAtt.termBuffer();
+         final int bufferLength = termAtt.termLength();
+         String emailAddress = new String(buffer, 0,bufferLength);
+         emailAddress = emailAddress.replaceAll("<", "");
+         emailAddress = emailAddress.replaceAll(">", "");
+         emailAddress = emailAddress.replaceAll("\"", "");
+
+         String [] parts = extractEmailParts(emailAddress);
+         clearAttributes();
+         for (int i = 0; i < parts.length; i++) {
+             if (parts[i]!=null) {
+                 TermAttribute newTermAttribute = 
+addAttribute(TermAttribute.class);
+                 newTermAttribute.setTermBuffer(parts[i]);
+                 newTermAttribute.setTermLength(parts[i].length());
+             }
+         }
+         return true;
+     }
+
+     private String[] extractWhitespaceParts(String email) {
+         String[] whitespaceParts = email.split(" ");
+         ArrayList<String> partsList = new ArrayList<String>();
+         for (int i=0; i < whitespaceParts.length; i++) {
+             partsList.add(whitespaceParts[i]);
+         }
+         return whitespaceParts;
+     }
+
+     private String[] extractEmailParts(String email) {
+
+         if (email.indexOf('@')==-1)
+             return extractWhitespaceParts(email);
+
+         ArrayList<String> partsList = new ArrayList<String>();
+
+         String[] whitespaceParts = extractWhitespaceParts(email);
+
+          for (int w=0;w<whitespaceParts.length;w++) {
+
+              if (whitespaceParts[w].indexOf('@')==-1)
+                  partsList.add(whitespaceParts[w]);
+              else {
+                  partsList.add(whitespaceParts[w]);
+                  String[] splitOnAmpersand = whitespaceParts[w].split("@");
+                  try {
+                      partsList.add(splitOnAmpersand[0]);
+                      partsList.add(splitOnAmpersand[1]);
+                  } catch (ArrayIndexOutOfBoundsException ae) {}
+
+                 if (splitOnAmpersand.length > 0) {
+                     String[] splitOnDot = splitOnAmpersand[0].split("\\.");
+                      for (int i=0; i < splitOnDot.length; i++) {
+                          partsList.add(splitOnDot[i]);
+                      }
+                 }
+                 if (splitOnAmpersand.length > 1) {
+                     String[] splitOnDot = splitOnAmpersand[1].split("\\.");
+                     for (int i=0; i < splitOnDot.length; i++) {
+                         partsList.add(splitOnDot[i]);
+                     }
+
+                     if (splitOnDot.length > 2) {
+                         String domain = splitOnDot[splitOnDot.length-2] 
++ "." + splitOnDot[splitOnDot.length-1];
+                         partsList.add(domain);
+                     }
+                 }
+              }
+          }
+         return partsList.toArray(new String[0]);
+     }
+
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

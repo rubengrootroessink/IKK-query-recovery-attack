@@ -1,0 +1,67 @@
+FROM: "Doron Cohen" <cdor...@gmail.com>
+SUBJECT: Re: Payloads and tokenizers
+DATE: 17 Aug 2008
+
+>
+> Implementing payloads via Tokens explicitly prevents the use of payloads
+> for untokenized fields, as they only support field.stringValue().  There
+> seems no way to override this.
+
+
+I assume you already know this but just to make sure what I meant was clear
+- on tokenization but still indexing just means that the entire field's text
+becomes a single unchanged token. I believe this is exactly what
+SingleTokenTokenStream can buy you - a single token, for which you can pre
+set a payload.
+
+My field is currently stored, so the tokenStream approach you suggested,
+> (Lucene-580) will not work as it's theoretically only for non-stored fields.
+>
+
+
+This is new input :) - the original code snippet said - new Field("myField",
+"A1", Field.Store.NO, Field.Index.UNTOKENIZED) - so I thought the token
+stream approach would work.
+
+
+> In practice, I expect I can create a stored/indexed Field with a dummy
+> string value, then use setValue(TokenStream).  At least I can have stored
+> fields with Payloads using the analyzer/tokenStream route.  Is this illegal?
+
+
+It is.  Field maintains its  value and it is either string/stream/etc. Once
+you set it to tokenStream the string value is lost and there's no way to
+store it.
+
+What if the Fieldable had a tokenValue(), in addition to the existing
+> stream/string/binary/reader values, which could be used for untokenized
+> fields and used in invertField()?
+
+
+With this too, at least in current design, the stored string is gone once
+the value is set to the suggested token.
+
+I'd rather stick with core Lucene than start making proprietary changes, but
+> it seems I can't quite get to where I want to be without some quite cludgy
+> code for a very simple use case :(
+>
+
+There is LUCENE-1231 that will allow payloads per field, but I didn't follow
+is closely enough to tell if it would solve your need to both store and have
+payload? It is interesting that you need the two together.
+
+How about adding this field in two parts, one part for indexing with the
+payload and the other part for storing, i.e. something like this:
+
+    Token token = new Token(...);
+    token.setPayload(...);
+    SingleTokenTokenStream ts = new SingleTokenTokenStream(token);
+
+    Field f1 = new Field("f","some-stored-content",Store.YES,Index.NO);
+    Field f2 = new Field("f", ts);
+
+    doc.add(f1);
+    doc.add(f2);
+
+Doron
+

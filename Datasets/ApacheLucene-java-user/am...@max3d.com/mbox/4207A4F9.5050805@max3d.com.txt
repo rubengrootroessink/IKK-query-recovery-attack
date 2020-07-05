@@ -1,0 +1,179 @@
+FROM: "amigo@max3d.com" <am...@max3d.com>
+SUBJECT: Re: PHP-Lucene Integration
+DATE: 7 Feb 2005
+
+Howdy,
+
+For starters, compile and install the java bridge (and if necessary 
+recompile PHP and Apache2) and make sure it works (there's a test php 
+file supplied).
+
+Then, here's a simplified part of my code, just to give you an example 
+how it works. This is the part that does the searching, indexing is done 
+in a similar way.
+
+PHP:
+
+...some code here for HTML page setup etc...
+
+$lucene_dir = $GLOBALS["lucene_dir"];
+java_set_library_path("/path/to/your/custom/lucene-classes.jar");
+$obj = new Java("searcher"); // searcher is the custom written class 
+that does actual searching and data output
+$writer = new Java("java.io.StringWriter");
+$obj->setWriter($writer);
+$obj->initSearch($lucene_dir);
+$obj->getQuery($query); // $query is the user supplied query from the 
+HTML form, not visible here
+
+// get the last exception
+$e = java_last_exception_get();
+
+if ($e) {
+    // print error
+    echo $e->toString();
+} else {
+    echo $writer->toString();
+    $writer->flush();
+    $writer->close();
+}
+java_last_exception_get();
+// clear the exception
+java_last_exception_clear();
+
+---------------------------------
+
+JAVA (custom written class located in the 
+/path/to/your/custom/lucene-classes.jar):
+
+import ...whatever is needed here for the class...
+
+public class searcher {
+
+   IndexReader reader     = null;
+   IndexSearcher s        = null;          //the searcher used to 
+open/search the index
+   Query q                = null;          //the Query created by the 
+QueryParser
+   BooleanQuery query  = new BooleanQuery();
+   Hits hits              = null;          //the search results
+   
+   public Writer out;
+
+   public void setWriter(Writer out) {
+                this.out=out;
+   }
+
+  public void initSearch(String indexName) throws Exception {
+        try {
+                File indexFile            = new File(indexName);
+                Directory activeDir       = 
+FSDirectory.getDirectory(indexFile, false);
+                if(reader.isLocked(activeDir)) {
+                        //out.write("Lucene index is locked, waiting 5 
+sec.");
+                        Thread.sleep(5000);
+                }
+                reader = IndexReader.open(indexName);
+                s = new IndexSearcher(reader);
+                //out.write("Index opened");
+        } catch (Exception e) {
+                throw new Exception(e.getMessage());
+        }
+   }
+
+   public void getQuery(String queryString) throws Exception {
+
+        int totalhits   = 0;
+        Analyzer analyzer = new StandardAnalyzer();
+       
+        String[] queryFields = 
+{"field1","field2","field3","field4","field5};
+        float[] boostFields = {10, 6, 2, 1, 1};
+
+        try {
+                for ( int i = 0; i < queryFields.length; i++)
+                {
+                q = QueryParser.parse(queryString, queryFields[i], 
+analyzer);
+                if (boostFields[i] > 1)
+                        q.setBoost(boostFields[i]);
+                query.add(q, false, false);
+                }
+        } catch (ParseException e) {
+                throw new Exception(e.getMessage());
+        }
+
+        try {
+                hits = s.search(query);
+        } catch (Exception e) {
+                throw new Exception(e.getMessage());
+        }
+       
+        totalhits = hits.length();
+
+        if (totalhits == 0) {                             // if we find 
+no hits, tell the user
+                out.write("<br>I'm sorry I couldn't find your query: " + 
+queryString);
+        } else {
+
+        for (int i = 0; i < totalhits; i++) {
+            Document doc = hits.doc(i);
+            String field1 = doc.get("field1");
+            String field2 = doc.get("field2");
+            String field3 = doc.get("field3");
+            String field4 = doc.get("field4");
+            String field5 = doc.get("field5");
+            out.write("Field1: " + field1 + ", Field2: " + field2 + ", 
+Field3: " + field3 + ", Field4: " + field4 + ", Field5: " + field5 + 
+"<br>");
+        }
+  }
+}
+
+
+
+Sanyi said the following on 2/7/2005 3:54 AM:
+
+>Hi!
+>
+>Can you please explain how did you implement the java and php part to let them communicate
+through
+>this bridge?
+>The brige's project summary talks about "java "application-server" or a dedicated java
+process"
+>and I'm not into Java that much.
+>Currenty I'm using a self-written command-line search program and it outputs its results
+to the
+>standard output.
+>I guess your solution must be better ;)
+>
+>If the "communication parts" of your code aren't top secret, can you please share them
+with me/us?
+>
+>Regards,
+>Sanyi
+>
+>
+>
+>		
+>__________________________________ 
+>Do you Yahoo!? 
+>Read only the mail you want - Yahoo! Mail SpamGuard. 
+>http://promotions.yahoo.com/new_mail 
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+>
+>  
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

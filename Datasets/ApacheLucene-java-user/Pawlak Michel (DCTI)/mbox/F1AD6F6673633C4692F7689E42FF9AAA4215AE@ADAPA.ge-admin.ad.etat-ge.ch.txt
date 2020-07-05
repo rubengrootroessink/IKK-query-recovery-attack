@@ -1,0 +1,195 @@
+FROM: "Pawlak Michel (DCTI)" <michel.paw...@etat.ge.ch>
+SUBJECT: RE: Questions about Lucene usage recommendations
+DATE: 28 Sep 2010
+
+Hello,
+
+I *hope* they do it this way, I'll have to check it. The number of fields cannot be made smaller
+as it has to respect an existing standard, regard to what you explain, searching concatened
+fields seems to be a smart way to do it. Thank you for the tip.
+
+Michel
+
+
+____________________________________________________
+Michel Pawlak
+Architecte Solution
+
+Centre des Technologies de l'Information (CTI)
+Service Architecture et Composants Transversaux (ACT)
+Case postale 2285 - 64-66, rue du Grand Pré - 1211 Genève 2
+Tél. direct : +41 (0)22 388 00 95
+michel.pawlak@etat.ge.ch
+
+
+-----Message d'origine-----
+De : Danil ŢORIN [mailto:torindan@gmail.com] 
+Envoyé : mardi, 28. septembre 2010 07:57
+À : java-user@lucene.apache.org
+Objet : Re: Questions about Lucene usage recommendations
+
+You said you have 1000 fields...when performing search do you search
+in all 1000 fields?
+That could definitely be a major performance hit, as it translates to
+a BooleanQuery with 1000 TermQueries inside
+
+Maybe it make sense to concat data from fields that you search in
+fewer fields (preferably ONE).
+So basically your document will have 1000+1 field and search is
+performed on that additional field, instead of 1000 fields.
+
+But it depends on your usecase, adding title, author and book abstract
+may make sense together..for the search usecase
+On the other hand if you store number of pages, and release year it
+doesn't make sense to mix something like "349", "1997" with title and
+author.
+It depends on how you are searching and what results do you
+expect...but I hope you get the idea...
+
+
+On Mon, Sep 27, 2010 at 18:41, Pawlak Michel (DCTI)
+<michel.pawlak@etat.ge.ch> wrote:
+> Hello,
+>
+> Thank you for your quick reply, I'll do my best to answer your remarks and questions
+(I numbered them to make my mail more readable.) Unfortunately, as I wrote, I have no access
+to the source code, and the company is not really willing to answer my questions (that's why
+we investigate)... so I cannot be sure of what is really done.
+>
+> 1) yes 2.1.0 is really old that's why I'm wondering why the company providing the application
+didn't upgrade to a newer version, especially if it's "almost jar drop-in"
+> 2) I mean that the application creates an index based on data stored in a db and not
+in files (then the index is being used for the searches)
+> 3) only documents being changed are reindexed, not the entire document base. Around 100-150
+"documents" per day need to be reindexed.
+> 4) no specific sorting is done by default (as far as I know...)
+> 5+6) each "document" is small (each "document" is a technical description of a book (not
+the book's content itself), made of ~1000 database fields, each of which weight a few Kbyte),
+no highlighting is done
+> 7) IMHO the way lucene is being used is the bottleneck, not lucene itself. However I
+have no proof, as I do not have access to the code. What I know is that as we have awfull
+performance issues and could not wait for a better solution, we've put the application on
+a high performance server, with a USPV SAN, and the performance improved dramatically (dropped
+from 2.5 minutes per search to around 10 seconds before optimization.) But we cannot afford
+such a solution in the long run (using such an high end server for such a small application
+is a kind of joke). Currently, we observe read access peaks to the index file (up to 280 Mbyte/second)
+and performance improvements when optimizing the index (see below)
+> 8) We use no NFS, we're on a USPV SAN, but we were using physical HDD before (slower
+than the SAN, but it's only part of the problem IMHO)
+> 9-10) Thank you for the information
+> 11) On the high end server, after we optimized the index the average search time dropped
+from 10s to below 2s, now (after 2.5 weeks) the average search time is 7s. Optimization seems
+required :-/
+> 12) ok
+>
+> Regards,
+>
+> Michel
+>
+> -----Message d'origine-----
+> De : Danil ŢORIN [mailto:torindan@gmail.com]
+> Envoyé : lundi, 27. septembre 2010 14:53
+> À : java-user@lucene.apache.org
+> Objet : Re: Questions about Lucene usage recommendations
+>
+> 1) Lucene 2.1 is really old...you should be able to migrate to lucene 2.9
+> without changing your code (almost jar drop-in, but be careful on
+> analyzers), and there could be huge improvements if you use lucene
+> properly.
+>
+> Few questions:
+> 2) - what does "all data to be indexed is stored in DB fields" mean? you
+> should store in lucene everything you need, so on search time you
+> shouldn't need to hit DB
+> 3) - what does "indexing is done right after every modification" mean? do
+> you index just the changed document? or reindex all 1.4 M docs?
+> 4) do you sort on some field, or just basic relevance?
+> 5) - how big is each document and what do you do with it? maybe
+> highlighting on large documents causes this?
+> 6) - what's in the document? if it's like a book...and almost every word
+> matches every document...there could be some issues
+> 7) - is the lucene the bottleneck? maybe you are calling from remote
+> server and marshaling+network+unmarshaling is slow?
+>
+> Usual lucene patterns are (assuming that you moved to lucene 2.9):
+> 8) - avoid using NFS (not necessary a performance bottleneck, and
+> definitely not something to cause 2 minutes query, but just to be on
+> the safe side)
+> 9) - keep writer open and add documents to the index (no need to rebuild
+> everything)
+> 10) - keep your readers open and use reopen() once in a while (you may
+> even go for realtime search if you want to)
+> 11) - in your case, I don't think optimize will do any good, segments look
+> good to me, don't worry about cfs file size
+> 12) - there are ways to limit cfs files and play with setMaxXXX, but i
+> don't think it's the cause of your 2 minute query.
+>
+> On Mon, Sep 27, 2010 at 14:35, Pawlak Michel (DCTI)
+> <michel.pawlak@etat.ge.ch> wrote:
+>> Hello,
+>>
+>> We have an application which is using lucene and we have strong
+>> performance issues (on bad days, some searches take more than 2
+>> minutes). I'm new to the Lucene component, thus I'm not sure Lucene is
+>> correctly used and thus would like to have some information on lucene
+>> usage recommendations. This would help locate the problem (application
+>> code / lucene configuration / hardware / all) It would be great if a
+>> project committer / specialist could answer those questions.
+>>
+>> First some facts about the application :
+>> - Lucene version being used : 2.1.0 (february 2007...)
+>> - around 1.4M "documents" to be indexed.
+>> - Db size (all data to be indexed is stored in DB fields) : 3.5 GB
+>> - Index file size on disk : 1.6 GB (note that one cfs file is 780M,
+>> another one is 600M, the rest consists of smaller files)
+>> - single indexer, multiple readers (6 readers)
+>> - around 150 documents are modified per day
+>> - indexing is done right after every modification
+>> - simple searches can take ages (for instance searching for "chocolate"
+>> could take for more than 2 minutes)
+>> - I do not have access to source code (yes that's the funny part)
+>>
+>> My questions :
+>> - Is this version of Lucene still supported ?
+>> - What are the main reasons, if any, one should use the latest version
+>> of lucene instead of 2.1.0 ? (for instance : performance, stability,
+>> critical fixes, support, etc.) (the answer may sound obvious, but I
+>> would like to have an official answer)
+>> - Is there any recommendation concerning storage any Lucene user should
+>> know (not benchmarks, but recommendations such as "better use physical
+>> HDD", "do not use NFS if possible", "if your cfs files are greater than
+>> XYZ, better use this kind of storage", "if you have more than XYZ
+>> searches per second, better..." etc)
+>> - Is there any recommandation concerning cfs file size ?
+>> - Is there a way to limit the size of cfs files ?
+>> - What is the impact on search performance if cfs file size is limited ?
+>> - How often should optimization occur ? (every day, week, month ?)
+>> - I saw that IndexWriter has methods such as setMaxFieldLength()
+>> setMergeFactor() setMaxBufferedDocs() setMaxMergeDocs() Can you briefly
+>> explain how these can affect performance ?
+>> - Is there any other recommandation "dummies" should be informed of, and
+>> every expert has to know ? For instance as a list of lucene patterns /
+>> anti patterns which may affect performance.
+>>
+>> If my questions are not precise enough, do not hesitate to ask for
+>> details. If you see an obvious problem do not hesitate to tell me.
+>>
+>> A big thank you in advance for your help,
+>>
+>> Best regards,
+>>
+>> Michel
+>>
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+

@@ -1,0 +1,76 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IOException: Access is denied from  IndexWriter.Optimize
+DATE: 5 Dec 2006
+
+trond.lindanger@dkdigital.no wrote:
+> Thank you for quick and detailed answer.
+> In this system multiple threads will, occasionally, try to write and/ or 
+> read the same index, hence the pause waiting for the lock. This is not a 
+> good way to implement it and was done as a temp solution for debug 
+> purposes only. Multiple processes may still reach the init of IndexWriter/ 
+> IndexReader for the same index at almost the same time. I guess 
+> synchronizing some object, giving exclusive access for one IndexReader or 
+> IndexWriter to some common index, is a better way to do it.
+
+It's fine if there are multiple readers, but there can only be one
+writer.
+
+So I think for your case what's important is that you synchronize your
+writers.  One simple way to do this is just always try to instantiate
+your IndexWriter, catch an IOException, and if the IOException is the
+"Lock obtained timed out" with the write lock, assume this means
+another writer is writing to the index so loop & try again.
+
+If the IndexWriter is instantiated with no IOException then it got the
+write lock and you can proceed to do your indexinging and then close
+the writer in a finally clause.
+
+This would mean your current check for whether index is locked is not
+needed.
+
+> May this be a 
+> work around for the parallel writer/ reader problem you describe?
+
+Just to be clear: the specific problem here is if you try to create
+(create=true) a new index while readers are reading from that same
+index.  You will get IOExceptions in this case with Lucene 2.0 on
+Windows, but it will (should!) work with the current trunk.
+
+Note that if you try the trunk, because the index format has changed,
+you can't use the resulting index from Lucene 2.0 (you would have to
+re-create the index in 2.0).
+
+>  Anyway, I guess I should give the trunc a try first.
+> java.io.IOException: Access is denied has only been reported once. I have 
+> not been able to reproduce it. I have some anti virus app running on my 
+> machine (Trend Micro Office Scan). This includes a scan of the index dir. 
+> Do you think that may cause the problem. Or perhaps some other windows 
+> services/ tools accessing the file for some reason (windows indexer)?
+
+This one makes me nervous.  There have been known issues about Access
+Denied IOExceptions, some involving other services (indexing service,
+google desktop, virus checkers, shell extensions, etc.).  We have been
+trying lately (in the trunk) to reduce, when possible, what
+functionality Lucene requires of the filesystem, to make sure we play
+well with such services.
+
+As far as I know, in the trunk version of Lucene we've addressed all
+such known cases.  But your exception doesn't look quite like any of
+these.  This is why I'd really like to get to the root cause of your
+case, so we can fix it if indeed Lucene is interacting badly with such
+software.
+
+It is remotely possible you are hitting this issue (fixed on trunk):
+
+     http://issues.apache.org/jira/browse/LUCENE-669
+
+If you upgrade to trunk, and this exception happens again, please
+reply back with as much detail as possible!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

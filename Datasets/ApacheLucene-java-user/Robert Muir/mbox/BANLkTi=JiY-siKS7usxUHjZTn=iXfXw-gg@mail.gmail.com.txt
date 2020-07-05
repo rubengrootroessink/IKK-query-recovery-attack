@@ -1,0 +1,66 @@
+FROM: Robert Muir <rcm...@gmail.com>
+SUBJECT: Re: New codecs keep Freq skip/omit Pos
+DATE: 22 Apr 2011
+
+On Thu, Apr 21, 2011 at 9:52 PM, Alex vB <mail@avomberg.de> wrote:
+> Hello everybody,
+>
+> I am currently testing several new Lucene 4.0 codec implementations to
+> compare with an own solution.
+> The difference is that I am only indexing frequencies and not positions. I
+> would like to have this for the other codecs. I know there was already a
+> post for this topic
+> http://lucene.472066.n3.nabble.com/Omit-positions-but-not-TF-td599710.html.
+>
+> I just wanted to ask if there has something changed especially for the new
+> codecs.
+> I had a look at the FixedPostingWriterImpl and PostingsConsumer. Are those
+> they right places for adapting Pos/Freq handling? What would happen if I
+> just skip writing postions/payloads? Would it mess up the index?
+
+Unless lots of things are changed about the code :)
+
+All of the code here currently assumes omitTF means omitTFAP (freqs
+and positions are omitted). So for it to work it would be good to have
+an omitP, and if omitTF=true then omitP is also set to true, but omitP
+can be true and omitTF = false. Every place that currently checks if
+(omitTF) would need to be evaluated, to determine if it should really
+be "if (omitP)" instead. For example, when setting up blockreaders for
+a bulkpostingsenum with positions, we would set the positions block
+reader to null when omitP = true instead of when omitTF=true.
+
+The Fixed layout is very experimental and messy at the moment, it
+might be easier to ignore it and start with Sep (when creating a
+FixedIntBlock codec, you can easily choose which layout, just choose
+SepPostingsWriter etc instead of FixedPostingsWriter).
+
+The reason I say its probably easier, is that Sep makes much less
+assumptions/optimizations and would be easier to modify: it creates
+separate .doc, .frq, and .pos files which can all be different block
+sizes or even different compression algorithms.
+
+On the other hand, the whole point of the Fixed layout is to take
+advantage of the fact that block size is the same across doc, freq,
+and pos (it interleaves doc and freq into .doc), and to work the
+postings somewhat in "parallel" using skipBlock() when possible. So
+this one would be more difficult at the moment due to its nature.
+
+>
+> The written files have different endings like pyl, skp, pos, doc etc. Gives
+> me "not counting" the pos file a correct index size estimation for W Freqs
+> W/O Pos? Or where exactly are term positions written?
+>
+
+Well its not totally just subtracting the .pos file, for example there
+are pointers to the .pos file in the terms dictionary, skipdata for
+the .pos file, etc etc that will be smaller if there is no pos file
+(as they dont need to exist)... but these are more things that have to
+also be modified to support omitting positions without omitting
+frequencies, and I havent even thought about all the other places (i
+am sure there are many!).
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

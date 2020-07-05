@@ -1,0 +1,52 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Searching while optimizing
+DATE: 24 Nov 2009
+
+On Tue, Nov 24, 2009 at 9:08 AM, vsevel <v.sevel@lombardodier.com> wrote:
+
+> Hi, just to make sure I understand correctly... After an optimize, without
+> any reader, my index takes 30Gb on the disk. Are you saying that if I can
+> ensure there is only one reader at a time, it could take up to 120Gb on the
+> disk if searching while an optimize is going on?
+>
+> I did not get your 3X when there is no reader. In that situation isn't that
+> the nominal size?
+
+If before optimizing your index takes 30 GB, then you open a writer,
+and start the optimize and wait for it to finish, it can take up to 90
+GB.  Once the optimize is done, but before you commit, 60 GB will be
+in use.  Once you commit/close this will drop to 30 GB.
+
+(These are all worst-case numbers -- in practice, an optimized index
+is smaller, sometimes by alot eg if there are many pending deletions,
+than the original).
+
+If the reader was already opened before you opened the writer, then
+there's no change to disk space requirements (because the reader has
+opened a commit (the starting commit) that the writer will not delete,
+anyway).
+
+But if you open a new reader while the optimize is underway, it's
+possible to require total 120 GB of space (30 GB for your index, 90 GB
+transient), because the reader is holding open temporary segments that
+the writer wants to delete.  If you open more than one reader, and
+don't close the old ones, you can tie up even more disk space.
+
+> different subject: I saw in 3.0.0RC1 that interrupting a merging thread was
+> being discussed. couldn't you do something similar for searches. I let my
+> users do full text searches on documents with over 50 fields. if using too
+> many wildcards, the search could take a long time. and rather than
+> restricting what they can do, I would rather let them cancel the search
+> gracefully. would that be something feasible?
+
+IndexWriter is interruptible via Thread.interrupt(), but searching
+currently is not.  However, TimeLimitingCollector can be used to set a
+timeout for searches.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

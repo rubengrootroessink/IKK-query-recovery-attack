@@ -1,0 +1,47 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: Parallelising a query...
+DATE: 29 Nov 2001
+
+> From: Winton Davies [mailto:wdavies@overture.com]
+> 
+>    I have 4 million documents... I could:
+>  
+>    Split these into 4 x 1 million document indexes  and then send a 
+> query to 4 Lucene processes ? At the end I would have to sort the 
+> results by relevance.
+> 
+>    Question for Doug or any other Search Engine guru -- would this 
+> reduce the time to find these results by 75% ?
+
+It could, if you have four processors and four disk drives and things work
+out optimally.
+
+If you have a single machine with multiple processors and/or a disk array,
+and your CPU or i/o are not already maxed out, then multi-threading is a
+good way to make searches faster.  To implement this I would write something
+like MultiSearcher, but that runs each sub-search in a separate thread, a
+ThreadedMultiSearcher.
+
+If you instead have several machines that you would like to spread search
+load over, then you could use RMI to send queries to these machines.  I
+would first implement the single-machine version, ThreadedMultiSearcher,
+then implement a RemoteSearcher class, that forwards Searcher methods via
+RMI to a Searcher object on another machine.  Then to spread load across
+machines, construct a ThreadedMultiSearcher and populate it with
+RemoteSearcher instances pointing at the different machines.
+
+The Searcher API was designed with this sort of thing in mind.  Note though
+that HitCollector-based searching is not a good candidate for RMI, since it
+does a callback for every document.  Stick to the TopDocs-based search
+method.  You'll also need to forward docFreq(Term) and maxDoc(), used to
+weight the query before searching, and doc(int), used to fetch hit
+documents.  Probably these should be abstracted into a separate interface,
+Searchable.
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

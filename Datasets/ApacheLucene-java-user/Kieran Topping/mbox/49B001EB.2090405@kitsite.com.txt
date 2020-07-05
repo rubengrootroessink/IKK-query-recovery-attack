@@ -1,0 +1,65 @@
+FROM: Kieran Topping <kie...@kitsite.com>
+SUBJECT: Instantiating a RAMDirectory from a mutating directory
+DATE: 5 Mar 2009
+
+Hello,
+
+I would like to be able to instantiate a RAMDirectory from a directory 
+that an IndexWriter in another process might currently be modifying.
+
+Ideally, I would like to do this without any synchronizing or locking. 
+Kind-of like the way in which an IndexReader can open an index in a 
+directory, even if it's currently being modified by an IndexWriter.
+
+However, simply calling:
+  RAMDirectory rd = new RAMDirectory("/path/to/index");
+Will not work. It will periodically fail with a FileNotFoundException. 
+It's fairly obvious why this happens: Directory.copy() gets a list of 
+the files it needs to copy, and then copies them into the RAMDirectory 
+instance one-by-one. If, in the meantime, the IndexWriter deletes one of 
+these files, a FileNotFoundException occurs.
+
+One thought that I had was that I would take advantage of the fact that 
+it's possible to open an IndexReader on the mutating directory, and then 
+use the "addIndexes()" method, as follows:
+
+   // 1. create RAMDirectory.
+   RAMDirectory ramDirectory = new RAMDirectory();
+   // 2. create an index in the RAMDirectory.
+   IndexWriter writer = new IndexWriter(ramDirectory, null/*analyzer*/, 
+true /*create*/) ;
+   // 3. open the (possibly mutating) source index.
+   IndexReader reader = IndexReader.open("/path/to/index");
+   // 4. copy the source index into the RAMDirectory index.
+   writer.addIndexes(new IndexReader [] {reader});
+
+However ... there is a fairly unambiguous warning in 
+IndexWriter.addIndexes()'s documentation:
+
+ >>   NOTE: the index in each Directory must not be changed (opened by a 
+writer) while this method is running. This method does not acquire a 
+write lock in each input Directory, so it is up to the caller to enforce 
+this.
+
+I'm slightly confused by this warning though, as IndexReader's 
+documentation implies that it is OK to open an IndexReader in this fashion.
+
+I'm wondering whether anyone knows the internals of 
+IndexWriter.addIndexes() well enough to know whether my proposed 
+solution will work reliably?
+
+Or, indeed, whether there might be another way of instantiating a 
+RAMDirectory from a directory which might currently be being modified by 
+an IndexWriter?
+
+Many thanks in advance,
+
+Kieran Topping
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

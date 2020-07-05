@@ -1,0 +1,117 @@
+FROM: "Chuck Williams" <ch...@manawiz.com>
+SUBJECT: RE: Lucene - index fields design question
+DATE: 16 Nov 2004
+
+I do most of these same things and made these relevant design decisions:
+
+1.  Use a combination of query expansion to search across multiple
+fields and field concatenation to create document fields that combine
+separate object fields.  I use multiple fields only when it is important
+to weight them differently.  E.g., in my case the separate fields are
+combined into just title and body document fields for general term
+searching.  I expand queries (with my own expander after parsing) by
+rewriting queries against the "default" field into an OR across title
+and body with title boosted higher than body.
+2.  One problem with the above concerns scoring (and this is also one of
+the reasons to use concatenation rather than query expansion as much as
+possible).  Lucene's BooleanQuery use sum-based scoring for OR's that is
+further factored with the coord() adjustment (settable in the
+Similarity).  This causes OR's to behave very poorly for the
+field-expansion case.  E.g., if the query is foo bar, and  you expand
+each term into title and body in the simplest way to produce title:foo^4
+body:foo title:bar^4 body:bar, then a document with foo in title and bar
+in body will get the same score as one with foo in title and foo in
+body, clearly not desired.  There are at least 3 different solutions to
+this problem discussed on this list.  I wrote my own MaxDisjunctionQuery
+just to handle this case:  it uses max instead of sum for this kind of
+OR query, and it does not use coord() (so use MaxDisjunctionQuery for
+the OR's of the same term or other query across multiple fields, and
+regular BooleanQuery to OR together the different terms or other
+queries).  Paul Elschot wrote a more general DisjunctionQuery that can
+be configured to do the same thing.  Doug Cutting came up with a
+solution that does not require a new Query class; his solution expands
+the query in a certain way and specializes certain existing methods.
+You should be able to find these solutions by searching the archive
+(e.g., search for MaxDisjunctionQuery and DisjunctionQuery and read the
+threads).  Code is posted in one way or other.
+3.  RangeQuery's are the way to do your date ranges, or any other
+ranges.  The encodings need to be lexicographic, not integer.  E.g., 10
+precedes 2, so pad with leading 0's (02 precedes 10).  If you need
+negatives or floats, you need additional considerations to ensure
+consistency with lexicographic order (invert the order of negatives and
+use a sign representation such that the positive sign indicator follows
+the negative sign indicator; floats require nothing special so long as
+the integer portion is fixed length).  Dates encode naturally.  I add
+additional fields like those used to search Ranges onto the Lucene
+documents in addition to title and body.  There are numerous messages on
+the list that discuss details of this, and there is a link to the web
+site that goes through a complete example, including showing how to
+specialize the query parser if you want users entering RangeQuery's in
+Lucene syntax (either way you have to lexicographically encode both
+queries and the document fields you index).
+
+If you have more specific questions or cannot find the references,
+please just ask.
+
+Good luck,
+
+Chuck
+
+
+  > -----Original Message-----
+  > From: Venkatraju [mailto:venkatraju@gmail.com]
+  > Sent: Tuesday, November 16, 2004 9:51 AM
+  > To: lucene-user
+  > Subject: Lucene - index fields design question
+  > 
+  > Hi,
+  > 
+  > I am a new user of Lucene. so please point me to
+  > documentation/archives if these issues have been covered before.
+  > 
+  > I plan to use Lucene in a application with the following (fairly
+  > standard) requirements:
+  > - Index documents that contain a title, author, date and content
+  > - It is fairly common to search for some text across all the fields
+  > - Matches in the title field should be given more weightage over
+  > matches in the content field
+  > - Provide an option to restrict search to documents within a date
+range
+  > 
+  > Give these requirements, what is a good index design with search
+speed
+  > in mind?
+  > Documents will have fields "title", "author", "date" and "content".
+  > Should I make title and author part of the "content" as well so that
+  > "search across all fields" will just become a search in "content"
+  > field? If so, how do I give more weightage to matches in "title"
+  > field?
+  > 
+  > The other option would be to expand a simple query to include
+searches
+  > across all fields.
+  > Ex.: Expand "abcd" to "title:abcd^4 OR content:abcd". Also, should
+the
+  > boost for title field be applied in the query or is it better to
+  > provide a boost to the title field during indexing (is that
+possible)?
+  > Which of these options will work and be more effecient?
+  > 
+  > For date range limited search, can field values be integers? If not,
+  > encoding the date as "YYYYMMDDHHMM" and then use a filter or a
+  > RangeQuery - is that the way to do this?
+  > 
+  > Thanks,
+  > Venkat
+  > 
+  >
+---------------------------------------------------------------------
+  > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+  > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,208 @@
+FROM: Yonik Seeley <yo...@lucidimagination.com>
+SUBJECT: Re: IndexWriter.close() performance issue
+DATE: 3 Nov 2010
+
+> It turns out that the prepareCommit() is the slow call here, taking several seconds to
+complete.
+>
+> I've done some reading about it, but have not found anything that might be helpful here.
+The fact that it is slow
+> every single time, even when I'm adding exactly one document to the index, is perplexing
+and leads to me to
+> think something must be corrupt with the index.
+
+prepareCommit() syncs the index files, making sure they are one stable storage.
+Some filesystems have issues with syncing individual files and
+essentially sync all files with unflushed data, leading to poor
+performance.
+
+-Yonik
+http://www.lucidimagination.com
+
+
+
+On Wed, Nov 3, 2010 at 2:53 PM, Mark Kristensson
+<mark.kristensson@smartsheet.com> wrote:
+> I've successfully reproduced the issue in our lab with a copy from production and have
+broken the close() call into parts, as suggested, with one addition.
+>
+> Previously, the call was simply
+>
+>        ...
+>        } finally {
+>                // Close
+>                if (indexWriter != null) {
+>                        try {
+>                                indexWriter.close();
+>        ...
+>
+>
+> Now, that is broken into the various parts, including a prepareCommit();
+>
+>        ...
+>        } finally {
+>                // Close
+>                if (indexWriter != null) {
+>                        try {
+>                                indexWriter.prepareCommit();
+>                                Logger.debug("prepareCommit() complete");
+>                                indexWriter.commit();
+>                                Logger.debug("commit() complete");
+>                                indexWriter.maybeMerge();
+>                                Logger.debug("maybeMerge() complete");
+>                                indexWriter.waitForMerges();
+>                                Logger.debug("waitForMerges() complete");
+>                                indexWriter.close();
+>        ...
+>
+>
+> It turns out that the prepareCommit() is the slow call here, taking several seconds to
+complete.
+>
+> I've done some reading about it, but have not found anything that might be helpful here.
+The fact that it is slow every single time, even when I'm adding exactly one document to the
+index, is perplexing and leads to me to think something must be corrupt with the index.
+>
+> Furthermore, I tried optimizing the index to see if that would have any impact (I wasn't
+expecting much) and it did not.
+>
+> I'm stumped at this point and am thinking I may have to rebuild the index, though I would
+definitely prefer to avoid doing that and would like to know why this is happening.
+>
+> Thanks for your help,
+> Mark
+>
+>
+> On Nov 2, 2010, at 9:26 AM, Mark Kristensson wrote:
+>
+>>
+>> Wonderful information on what happens during indexWriter.close(), thank you very
+much! I've got some testing to do as a result.
+>>
+>> We are on Lucene 3.0.0 right now.
+>>
+>> One other detail that I neglected to mention is that the batch size does not seem
+to have any relation to the time it takes to close on the index where we are having issues.
+We've had batches add as few as 3 documents and batches add as many as 2500 documents in the
+last hour and every single close() call for that index takes 6 to 8 seconds. While I won't
+know until I am able to individually test the different pieces of the close() operation, I'd
+be very surprised if a batch that adds just 3 new documents results in very much merge work
+being done. It seems as if there is some task happening during merge that the indexWriter
+is never able to successfully complete and so it tries to complete that task every single
+time close() is called.
+>>
+>> So, my working theory until I can dig deeper is that something is mildly corrupt
+with the index (though not serious enough to affect most operations on the index). Are there
+any good utilities for examining the health of an index?
+>>
+>> I've dabbled with the experimental checkIndex object in the past (before we upgraded
+to 3.0), but have found it to be incredibly slow and of marginal value. Does anyone have any
+experience using CheckIndex to track down an issue with a production index?
+>>
+>> Thanks again!
+>> Mark
+>>
+>> On Nov 2, 2010, at 2:20 AM, Shai Erera wrote:
+>>
+>>> When you close IndexWriter, it performs several operations that might have a
+>>> connection to the problem you describe:
+>>>
+>>> * Commit all the pending updates -- if your update batch size is more or
+>>> less the same (i.e., comparable # of docs and total # bytes indexed), then
+>>> you should not see a performance difference between closes.
+>>>
+>>> * Consults the MergePolicy and runs any merges it returns as candidates.
+>>>
+>>> * Waits for the merges to finish.
+>>>
+>>> Roughly, IndexWriter.close() can be substituted w/:
+>>> writer.commit(false); // commits the changes, but does not run merges.
+>>> writer.maybeMerge(); // runs merges returned by MergePolicy.
+>>> writer.waitForMerges(); // if you use ConcurrentMergeScheduler, the above
+>>> call returns immediately, not waiting for the merges to finish.
+>>> writer.close(); // at this point, commit + merging has finished, so it does
+>>> very little.
+>>>
+>>> As your index grows in size, so does its # of segments, and the segments
+>>> size as well. So tweaking some parameters on the MergePolicy (such as
+>>> mergeFactor, maxMergeMB etc.) can result in not attempting to merge too
+>>> large segments.
+>>>
+>>> Alternatively, you can try the following:
+>>>
+>>> 1) Replace the call to writer.close() w/ the above sequence. Then, measure
+>>> each call and report back which of them takes the suspicious amount of time.
+>>>
+>>> 2) Not running optimize() on a regular basis doesn't mean merges don't
+>>> happen in the background. So if you want close() to return as fast as
+>>> possible, you should call close(false). Note though that from time to time
+>>> you should allow merges to finish, in order to reduce the # of segments.
+>>>
+>>> 3) If you want to control when the merges are run, you can open IndexWriter
+>>> with NoMergePolicy, which always returns 0 merges to perform, or
+>>> NoMergeScheduler which never executes merges. But be aware that this is
+>>> dangerous as the # of segments in the index will continue to grow and search
+>>> performance will degrade.
+>>>
+>>> The answers above is relevant for 3x, but most of them are also relevant for
+>>> 2.9. If you have an older version of Lucene, then some of the solutions
+>>> might still apply (such as close(false)).
+>>>
+>>> Hope this helps,
+>>> Shai
+>>>
+>>> On Tue, Nov 2, 2010 at 12:55 AM, Mark Kristensson <
+>>> mark.kristensson@smartsheet.com> wrote:
+>>>
+>>>> Hello,
+>>>>
+>>>> One of our  Lucene indexes has started misbehaving on indexWriter.close
+and
+>>>> I'm searching for ideas about what may have happened and how to fix it.
+>>>>
+>>>> Here's our scenario:
+>>>> - We have seven Lucene indexes that contain different sets of data from a
+>>>> web application are indexed for searching by end users
+>>>> - A java service runs twice a minute to pull changes from SQL DB queue
+>>>> tables and update the relevant Lucene index(es)
+>>>> - The two largest indexes (3.4GB and 3.8GB in size with 8 million and 6
+>>>> million records, respectively) contain similar sets of data, but are
+>>>> structured differently for different consumption (e.g. one has an All field
+>>>> for general purpose searching, the other does not; one has numeric fields
+>>>> for ranges, the other does not, etc.)
+>>>> - We expunge deletes from our indexes twice per day
+>>>> - A  couple of weeks ago, one of the two large indexes became very slow
+to
+>>>> close after each round of changes is applied by our indexing service.
+>>>> Specifically, all of our indexes usually close in no more than 200
+>>>> milliseconds, but this one index is now taking 6 to 8 seconds to close with
+>>>> every single pass (and is leading to delays which are affecting end users).
+>>>>
+>>>> Questions from my attempts to troubleshoot the problem:
+>>>> - Has anyone else seen behavior similar to this? What did you do to resolve
+>>>> it?
+>>>> - Does the size of an index or its documents (record count, disk size, avg
+>>>> document size, max document size, etc.) have any correlation to the length
+>>>> of time it takes to close an index?
+>>>> - We are not currently optimizing any of our indexes on a regular basis,
+>>>> could that have any impact upon indexing operations (e.g.
+>>>> indexWriter.close())? My understanding is that optimization only affects
+>>>> search performance, not indexing performance and to date we have not seen
+>>>> any need to optimize based upon the performance of the search queries.
+>>>>
+>>>> Thanks,
+>>>> Mark
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

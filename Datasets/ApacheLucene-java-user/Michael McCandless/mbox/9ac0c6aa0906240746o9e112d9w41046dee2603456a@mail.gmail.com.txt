@@ -1,0 +1,101 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Setting swappiness
+DATE: 24 Jun 2009
+
+My opinion is swappiness should generally be set to zero, thus turning
+off "swap core out in favor of IO cache".
+
+I don't think the OS's simplistic LRU policy is smart enough to know
+which RAM (that Lucene had allocated & filled) are OK to move to
+disk.  EG you see the OS evict stuff because Lucene does a big segment
+merge (because from Java we can't inform the OS *not* to cache those
+bytes).
+
+Lucene loads the terms index, deleted docs bit vector, norms and
+FieldCache's into RAM.  Just because my search app hasn't been used in
+a while doesn't mean the OS should up and swap stuff out, because then
+when a query finally does come along, that query pays a massive
+swapfest price.
+
+So highish swappiness (the default in many linux distros) can really
+kill a search app that has 1) a big index, and 2) relatively slow
+query rate.  If the query rate is fast, it should keep the pages hot
+and the OS shouldn't swap them out too badly.
+
+I don't like swappiness in a desktop setting either: I hate coming
+back to a unix desktop to discover say my web browser and mail program
+were 100% swapped out because say my mencoder was reading & writing
+lots of bytes (OK, so mencoder should have called
+madvise/posix_fadvise so that the OS wouldn't put those bytes into the
+IO cache in the first place, but it doesn't seem to... and other IO
+intensive programs seem not to as well).  You then wait for a looong
+time while a swapfest ensues, to get those pages back in RAM, just to
+check your email.  I don't like waiting ;) I've disabled swapping
+entirely on my desktop for this reason.
+
+Windows (at least Server 2003) has an "Adjust for best performance of
+Programs vs System Cache" as well, which I'm guessing is the same
+thing as swappiness.
+
+Even as we all switch to SSDs, which'll make swapping back in alot
+faster, it's still far slower than had things not been swapped out in
+the first place.
+
+I'll add "check your swappiness" to the ImproveSearchPerformance page!
+
+Mike
+
+
+On Wed, Jun 24, 2009 at 10:02 AM, Otis
+Gospodnetic<otis_gospodnetic@yahoo.com> wrote:
+>
+> Stealing this thread/idea, but changing subject, so we can branch and I don't look like
+a thread thief.
+>
+>
+> I never played with /proc/sys/vm/swappiness, but I wonder if there are points in the
+lifetime of an index where this number should be changed.  For example, does it make sense
+to in/decrease that number once we know the index is going to be read-only for a while?  Does
+it make sense to in/decrease it during merges or optimizations?
+>
+> Thanks,
+> Otis
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+>
+>
+> ----- Original Message ----
+>> From: Michael McCandless <lucene@mikemccandless.com>
+>> To: java-user@lucene.apache.org
+>> Sent: Wednesday, June 24, 2009 5:06:25 AM
+>> Subject: Re: Analyzing performance and memory consumption for boolean queries
+>>
+>> Is it possible the occasional large merge is clearing out the IO cache
+>> (thus "unwarming" your searcher)?  (Though since you're rsync'ing your
+>> updates in, it sounds like a separate machine is building the index).
+>>
+>> Or... linux will happily swap out a process's core in favor of IO
+>> cache (though I'd expect this effect to be much less spikey).  You can
+>> tune "swappiness" to have it not do that:
+>>
+>>     http://kerneltrap.org/node/3000
+>>
+>> Maybe Lucene's norms/deleted docs/field cache were getting swapped out?
+>>
+>> Lucene's postings reside entirely on disk (ie, Lucene doesn't cache
+>> those in RAM; we rely on the OS's IO cache).  Lucene does a linear
+>> scan through the terms in the query... Linux will readahead, though,
+>> if things are fragmented this could mean lots of seeking.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

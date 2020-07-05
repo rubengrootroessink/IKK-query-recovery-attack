@@ -1,0 +1,80 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Efficient optimization of large indexes?
+DATE: 7 Aug 2009
+
+On Thu, Aug 6, 2009 at 5:30 PM, Nigel<nigelspleen@gmail.com> wrote:
+>> Actually IndexWriter must periodically flush, which will always
+>> create new segments, which will then always require merging.  Ie
+>> there's no way to just add everything to only one segment in one
+>> shot.
+>>
+>
+> Hmm, that makes sense now that you mention it.  And if you have to merge in
+> the end anyway, there's no point to my idea of adding docs to a new index.
+
+Well it's worth a shot at least ;)
+
+> But addIndexes(IndexReader[]) as you suggest would solve that problem.
+
+Right.  You could also set a massive mergeFactor to achieve the same thing.
+
+>> Merge performance does seem rather slow... I recently profiled it and
+>> was suprised to find that the merging of terms dict & postings was cpu
+>> bound, even on a modern CPU (core i7 920) and with 3 merges running
+>> concurrently.  I think most of the CPU cost comes from the pqueue
+>> that's used to do the merge sort, plus read/writeVInt.  When Lucene
+>> [eventually] switches to PForDelta, that should be more CPU friendly.
+>
+> That's interesting.  I recently did one of our big merges on a different
+> server that has the same disks as the one I was using before, but a faster
+> processor.  It seemed like the merge was quite a bit faster than usual
+> (though it's possible I was fooled by other factors).
+
+OK... so that supports the "merging is cpu bound" hypothesis.
+
+> Also, it's tons of IO because for each merge it must read every single
+>> byte and write nearly every single byte, so that's ~2X bytes moved.
+>> Then, if you have more segments in your index than your mergeFactor,
+>> multiple such merges are needed and you're looking at, at least, 4X
+>> your index size in net bytes moved.  If you have CFS enabled, it's 8X
+>> the index size.
+>
+> Not to get too sidetracked, but this reminds me of another question I meant
+> to ask.  We use the compound format right now.  Our merge factor is
+> relatively low, so switching to the non-compound format would certainly be
+> possible without running into problems with too many open files.  Is there
+> any significant speed different between compound and non-compound for
+> indexing, searching, or merging?  (Searching for us would be the most
+> important by far.)
+
+Both indexing and searching should be faster if you don't use CFS.
+For indexing it'll be a small impact... I'm less sure about searching
+but I'd also expect the impact to be smallish.  If you test it, please
+post back!
+
+>>   * If possible, make sure you always add the same fields to your
+>>    docs, in the same order (this results in consistent numbering of
+>>    field name -> number).  This is very much an unexpected
+>>    gotchya... the merging of stored fields and term vectors is much,
+>>    much faster if the field numbers are identical.  LUCENE-1737 is
+>>    open to fix Lucene so it consistently numbers automatically, but
+>>    it's somewhat tricky because many places in Lucene assume the
+>>    field names are densely packed.
+>
+> We generally do this already, but some of our fields are nullable and so for
+> some documents the number-to-name mapping will be different.  Is there any
+> value in adding dummy values like "NULL" in these cases?  That presumably
+> adds overhead of its own, though.
+
+If you store fields and term vectors then adding null fields should
+speed up merging substantially and likely won't have much impact on
+indexing time, time to retrieve docs, searching time or index size, I
+think.  Post back :)
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

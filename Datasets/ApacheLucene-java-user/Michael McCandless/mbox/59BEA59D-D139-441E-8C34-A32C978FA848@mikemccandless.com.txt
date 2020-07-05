@@ -1,0 +1,83 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Document ID shuffling under 2.3.x (on merge?)
+DATE: 13 Mar 2008
+
+
+Daniel Noll wrote:
+
+> On Wednesday 12 March 2008 19:36:57 Michael McCandless wrote:
+>> OK, I think very likely this is the issue: when IndexWriter hits an
+>> exception while processing a document, the portion of the document
+>> already indexed is left in the index, and then its docID is marked
+>> for deletion.  You can see these deletions in your infoStream:
+>>
+>>    flush 0 buffered deleted terms and 30 deleted docIDs on 20  
+>> segments
+>>
+>> This means you have deletions in your index, by docID, and so when
+>> you optimize the docIDs are then compacted.
+>
+> Aha.  Under 2.2, a failure would result in nothing being added to  
+> the text
+> index so this would explain the problem.  It would also explain why  
+> smaller
+> data sets are less likely to cause the problem (it's less likely  
+> for there to
+> be an error in it.)
+
+Yes.
+
+> Workarounds?
+>   - flush() after any IOException from addDocument()  (overhead?)
+
+What exceptions are you actually hitting (is it really an  
+IOException)?  I thought something was going wrong in retrieving or  
+tokenizing  the document.
+
+I don't think flush() helps because it just flushes the pending  
+deletes as well?
+
+>   - use ++ to determine the next document ID instead of
+>     index.getWriter().docCount()  (out of sync after an error but  
+> fixes itself
+>     on optimize().
+
+I think this would work, but you're definitely still in the realm of  
+"guessing how Lucene assigns docIDs under the hood" so it's risky  
+over time.  Likely this is the highest performance option.
+
+But, when a normal merge of segments with deletions completes, your  
+docIDs will shift.  In trunk we now explicitly compute the docID  
+shifting that happens after a merge, because we don't always flush  
+pending deletes when flushing added docs, but this is all done  
+privately to IndexWriter.
+
+I'm a little confused: you said optimize() introduces the problem,  
+but, it sounds like optimize() should be fixing the problem because  
+it compacts all docIDs to match what you were "guessing" outside of  
+Lucene?  Can you post the full stack trace of the exceptions you're  
+hitting?
+
+>   - Use a field for a separate ID (slower later when reading the  
+> index)
+
+Looks too slow based on your results.
+
+Can you pre-load the UID into the FieldCache?  There were also  
+discussions recently about adding "column-stride" fields to Lucene,  
+basically a faster FieldCache (to load initially), which would apply  
+here I think.
+
+>   - ???
+
+
+Trunk has a new expungeDeletes method which should be lower cost than  
+optimize, but not necessarily that much lower cost.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

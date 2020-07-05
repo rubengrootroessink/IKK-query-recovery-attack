@@ -1,0 +1,61 @@
+FROM: Nigel <nigelspl...@gmail.com>
+SUBJECT: Re: Efficiently reopening remotely-distributed indexes in 2.9?
+DATE: 6 Oct 2009
+
+Anyone have any ideas here?  I imagine a lot of other people will have a
+similar question when trying to take advantage of the reopen improvements in
+2.9.
+
+Thanks,
+Chris
+
+On Thu, Oct 1, 2009 at 5:15 PM, Nigel <nigelspleen@gmail.com> wrote:
+
+> I have a question about the reopen functionality in Lucene 2.9.  As I
+> understand it, since FieldCaches are now per-segment, it can avoid reloading
+> everything when the index is reopened, and instead just load the new
+> segments.
+>
+> For background, like many people we have a distributed architecture where
+> indexes are created on one server and copied to multiple other servers.  The
+> way that copying works now is something like the following:
+>
+>    1. Let's say the current index is in /indexes/a and is open
+>    2. An empty directory for the updated index is created, let's say
+>    /indexes/b
+>    3. Hard links for the files in /indexes/a are created in /indexes/b
+>    4. We rsync the current index on the server with /indexes/b, thus
+>    copying over new cfs files and deleting hard links to files no longer in use
+>    5. A new IndexReader is opened for /indexes/b and warmed up
+>    6. The application starts using the new reader instead of the old one
+>    7. The old IndexReader is closed and /indexes/a is deleted
+>
+> I'm simplifying a few steps, but I think this is familiar to many people,
+> and it's my impression that Solr implements something similar.
+>
+> The point is, the updated index lives in a new directory in this scheme,
+> and so we don't actually reopen the existing IndexReader; we open a new one
+> with a different FSDirectory.
+>
+> Before Lucene 2.9, I don't think this made any difference, as (I think) the
+> only advantage to calling reopen vs. just creating another IndexReader was
+> having reopen figure out whether the index had actually changed.  (And whave
+> a different way to figure that out, so it was a non-issue.)
+>
+> With Lucene 2.9, there's now a big difference, namely the per-segment
+> caching mentioned above.  So the question is how to make use of reopen with
+> our distribution scheme.  Is there an informal best practice for handling
+> this case?  For example, should step #5 above rename /indexes/b to
+> /indexes/a so the index can be reopened in the same physical location?  Or
+> should rsync operate on the existing directory in-place, updating the
+> segments* files last and relying on the fact that deleted files will not
+> really be deleted (on Linux, at least) as long as the app is still holding
+> them open?
+>
+> I guess the answer may depend on how exactly reopen knows which files are
+> the "same" (e.g. does it look at filenames, or file descriptors, etc.).
+>
+> Thanks,
+> Chris
+>
+

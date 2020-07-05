@@ -1,0 +1,212 @@
+FROM: Regan Heath <regan.he...@BridgeHeadSoftware.com>
+SUBJECT: indexWriter.addIndexes, Disk space, and open files
+DATE: 25 May 2010
+
+
+Hi,
+
+Appologies if this the wrong place to post this, or if it has been answered
+somewhere (I have searched and failed to find anything matching my case
+exactly).
+
+We're using Lucene 2.3.2 (an old version, I know).
+
+We have a system where we use a number of master indexes and a number of
+temp indexes.  At some point we will decide to perform a merge, where we
+select a single master index and all (or as many temp indexes as will fit -
+based on a given max size) temp indexes, opening IndexReaders for each.
+
+<code condensed for clarity>
+
+for(String tempIndexPath: tempIndexPaths)
+{
+  reader = IndexReader.open(tempIndexPath);
+  readers.add(reader);
+}
+
+IndexReader[] result = new IndexReader[readers.size()];        
+return readers.toArray(result);
+
+We then create a new index with IndexWriter and call addIndexes passing the
+array of IndexReaders.
+
+<code condensed for clarity>
+
+  File mergeMasterIndex = ...
+  ...
+  indexWriter = new IndexWriter(mergeMasterIndex, new StandardAnalyzer(),
+true);
+  indexWriter.setMaxBufferedDocs(-1);
+  indexWriter.setMaxMergeDocs(2147483647);
+  indexWriter.setMergeFactor(10);
+  indexWriter.setMaxFieldLength(10000);
+  indexWriter.addIndexes(indexReaders);
+  indexWriter.optimize();  
+
+This throws an IOException, due to lack of disk space (testing with small
+indexes and a virtual 10mb disk..
+http://www.ltr-data.se/opencode.html#ImDisk)
+
+At this point we close all the readers, and the writer and attempt to
+cleanup/delete the 'failed' new index directory and files.  The problem is
+that there are some files being held open, specifically; _0.prx, _0.tii,
+_o.tis.
+
+There are no other readers or searchers open to this 'new' index, as it has
+just been created.  There are no readers/searchers open to the temp indexes
+being merged (we never search temp indexes), there may be a searcher open to
+the master index selected for the merge.
+
+So.. I am hoping someone can give me a clue as to why there are files being
+held open, whether this is a known bug and fixed in a specific version of
+lucene or if there is something I can do to force these files closed.
+
+I have tried the writer.close();  IndexReader.isLocked(directory);
+IndexReader.unlock(directory); trick, isLocked returns false, even ignoring
+that and calling unlock anyway made no difference (I think it threw an
+AlreadyClosedException or similar).
+
+The exception stack trace...
+
+java.io.IOException: There is not enough space on the disk
+	at java.io.RandomAccessFile.writeBytes(Native Method)
+	at java.io.RandomAccessFile.write(Unknown Source)
+	at
+org.apache.lucene.store.FSDirectory$FSIndexOutput.flushBuffer(FSDirectory.java:599)
+	at
+org.apache.lucene.store.BufferedIndexOutput.flushBuffer(BufferedIndexOutput.java:96)
+	at
+org.apache.lucene.store.BufferedIndexOutput.flush(BufferedIndexOutput.java:85)
+	at
+org.apache.lucene.store.BufferedIndexOutput.close(BufferedIndexOutput.java:109)
+	at
+org.apache.lucene.store.FSDirectory$FSIndexOutput.close(FSDirectory.java:606)
+	at org.apache.lucene.index.SegmentMerger.mergeTerms(SegmentMerger.java:398)
+	at org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:134)
+	at org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:110)
+	at org.apache.lucene.index.IndexWriter.addIndexes(IndexWriter.java:2428)
+	at com.bridgehead.index.ApplicationIndex.merge(ApplicationIndex.java:506)
+	at
+com.bridgehead.index.ServerThread.serviceMergeIndex(ServerThread.java:918)
+	at com.bridgehead.index.ServerThread.run(ServerThread.java:266)
+
+Info stream..
+
+IFD [ServerThread:/10.193.221.75:3821]: setInfoStream
+deletionPolicy=org.apache.lucene.index.KeepOnlyLastCommitDeletionPolicy@133796
+IW 0 [ServerThread:/10.193.221.75:3821]: setInfoStream:
+dir=org.apache.lucene.store.FSDirectory@F:\Master\14.merge autoCommit=true
+mergePolicy=org.apache.lucene.index.LogByteSizeMergePolicy@1a679b7
+mergeScheduler=org.apache.lucene.index.ConcurrentMergeScheduler@80f4cb
+ramBufferSizeMB=16.0 maxBuffereDocs=-1 maxBuffereDeleteTerms=-1
+maxFieldLength=10000 index=
+IW 0 [ServerThread:/10.193.221.75:3821]: optimize: index now 
+IW 0 [ServerThread:/10.193.221.75:3821]:   flush: segment=null
+docStoreSegment=null docStoreOffset=0 flushDocs=false flushDeletes=false
+flushDocStores=false numDocs=0 numBufDelTerms=0
+IW 0 [ServerThread:/10.193.221.75:3821]:   index before flush 
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS: now merge
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS:   index: 
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS:   no more merges pending; now
+return
+IW 0 [ServerThread:/10.193.221.75:3821]: now start transaction
+IW 0 [ServerThread:/10.193.221.75:3821]: flush at startTransaction
+IW 0 [ServerThread:/10.193.221.75:3821]:   flush: segment=null
+docStoreSegment=null docStoreOffset=0 flushDocs=false flushDeletes=false
+flushDocStores=false numDocs=0 numBufDelTerms=0
+IW 0 [ServerThread:/10.193.221.75:3821]:   index before flush 
+IW 0 [ServerThread:/10.193.221.75:3821]: hit exception in addIndexes during
+merge
+IW 0 [ServerThread:/10.193.221.75:3821]: now rollback transaction
+IFD [ServerThread:/10.193.221.75:3821]: now checkpoint "segments_1" [0
+segments ; isCommit = false]
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.fdt"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.fdt"
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.fdx"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.fdx"
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.fnm"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.fnm"
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.frq"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.frq"
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.prx"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.prx"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.prx": java.io.IOException: Cannot delete F:\Master\14.merge\_0.prx;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.tii"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tii"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tii": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tii;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: refresh [prefix=null]: removing
+newly created unreferenced file "_0.tis"
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tis"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tis": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tis;
+Will re-try later.
+IW 0 [ServerThread:/10.193.221.75:3821]: all running merges have aborted
+IW 0 [ServerThread:/10.193.221.75:3821]: now flush at close
+IW 0 [ServerThread:/10.193.221.75:3821]:   flush: segment=null
+docStoreSegment=null docStoreOffset=0 flushDocs=false flushDeletes=false
+flushDocStores=false numDocs=0 numBufDelTerms=0
+IW 0 [ServerThread:/10.193.221.75:3821]:   index before flush 
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS: now merge
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS:   index: 
+IW 0 [ServerThread:/10.193.221.75:3821]: CMS:   no more merges pending; now
+return
+IW 0 [ServerThread:/10.193.221.75:3821]: close: wrote segments file
+"segments_2"
+IFD [ServerThread:/10.193.221.75:3821]: now checkpoint "segments_2" [0
+segments ; isCommit = true]
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.prx
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.prx"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.prx": java.io.IOException: Cannot delete F:\Master\14.merge\_0.prx;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.tii
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tii"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tii": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tii;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.tis
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tis"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tis": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tis;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: deleteCommits: now remove commit
+"segments_1"
+IFD [ServerThread:/10.193.221.75:3821]: delete "segments_1"
+IW 0 [ServerThread:/10.193.221.75:3821]: at close: 
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.prx
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.prx"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.prx": java.io.IOException: Cannot delete F:\Master\14.merge\_0.prx;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.tii
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tii"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tii": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tii;
+Will re-try later.
+IFD [ServerThread:/10.193.221.75:3821]: delete pending file _0.tis
+IFD [ServerThread:/10.193.221.75:3821]: delete "_0.tis"
+IFD [ServerThread:/10.193.221.75:3821]: IndexFileDeleter: unable to remove
+file "_0.tis": java.io.IOException: Cannot delete F:\Master\14.merge\_0.tis;
+Will re-try later.
+
+
+
+-- 
+View this message in context: http://lucene.472066.n3.nabble.com/indexWriter-addIndexes-Disk-space-and-open-files-tp841735p841735.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

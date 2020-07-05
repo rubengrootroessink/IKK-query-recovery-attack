@@ -1,0 +1,210 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Term numbering and range filtering
+DATE: 11 Nov 2008
+
+The other part of your proposal was to somehow "number" term text such
+that term range comparisons can be implemented fast int comparison.
+
+I like the idea of building dynamic filters on top of a
+"column-stride" array of field values.  You could extend it to be a
+real Scorer, too.  EG I could imagine holding a "last changed"
+column-stride array, and then building a Scorer on top of that which
+returns a "recency score", and then using function query to multiply
+that with the actual relevance score.
+
+Maybe the right place for this to land is function queries, since they
+are already creating queries based on DocValues (= a column-stride
+store)?  But your change would extend function queries to also be able
+to do filtering based on the DocValues (today function queries can
+only alter the score, I think).
+
+However, this approach is still a linear O(maxDocID) search.  It
+should have a very low constant in front, since 1) it's all in RAM and
+2) if you number term-text then you're using much faster int
+comparison, not String comparison.  Also, once LUCENE-1231
+(column-stride fields) is in, loading your column-stride array should
+be much faster than it is today with FieldCache.
+
+Yet another option, which gives faster than linear performance for
+Term range searching, are the ideas in this paper for enabling
+efficient range searching:
+
+   http://fontoura.org/papers/paramsearch.pdf
+
+However that'd be quite a bit deeper change to Lucene.
+
+Mike
+
+Tim Sturge wrote:
+
+> Reading this I realize how unclear it is, so let me give a concrete  
+> example:
+>
+> I want to do a search restricting users by age range. So someone can  
+> ask for
+> the users 18-35, 40-60 etc.
+>
+> Here are the options I considered:
+>
+> 1) construct a RangeQuery. This is a 20-40 clause boolean subquery  
+> in an
+> otherwise 1 or 2 clause query and I'd like to avoid that. It also has
+> scoring artifacts I wish to avoid (I don't want users to rank higher  
+> just
+> because we have less users of that particular age).
+>
+> 2) construct a ConstantScoreRangeQuery. Then I'm forced to iterate  
+> all the
+> users in the age range for each query. This was cost-prohibitive.
+>
+> 3) cache filters for each age range. Problem is there are 50  
+> starting points
+> and 50 ending points and caching 2500 filters is unrealistic.
+>
+> 4) cache filters for each age, and or them together for each query  
+> (there's
+> stuff in contrib that does this.) This is best so far, but does  
+> require
+> caching 50 filters and doing 20 bitset ors per query on an 8MB bitset.
+>
+> So what I thought would be interesting is
+>
+> 5) build an array of bytes where the n-th byte contains the age of  
+> user n.
+> Given the range it's fairly trivial to make this behave like a  
+> filter (ie
+> it's relatively easy to implement next() and skipTo() efficiently and
+> trivial to decide if a document is in the range or not.)
+>
+> Then I realized this approach would make sense not just for ages,  
+> but also
+> for countries, date ranges and zip code sets, so I thought I'd ask  
+> if anyone
+> had tried it before.
+>
+> Part of me assumes that someone must have done this already; so either
+> there's an implementation out there already or there's a good reason  
+> I don't
+> see that this is entirely impractical. So I'm interested to get  
+> feedback.
+>
+> Tim
+>
+>
+>
+>
+> On 11/10/08 2:26 PM, "Tim Sturge" <tsturge@hi5.com> wrote:
+>
+>> I think we've gone around in a loop here. It's exactly due to the  
+>> inadequacy
+>> of cached filters that I'm considering what I'm doing.
+>>
+>> Here's the section from my first email that is most illuminating:
+>> "
+>> The reason I have this question is that I am writing a multi-filter  
+>> for single
+>> term fields. My index contains many fields for which each document  
+>> contains a
+>> single term (e.g. date, zipcode, country) and I need to perform  
+>> range queries
+>> or set matches over these fields, many of which are very inclusive  
+>> (they match
+>>> 10% of the total documents)
+>>
+>> A cached RangeFilter works well when there are a small number of  
+>> potential
+>> options (e.g. for countries) but when there are many options  
+>> (consider a date
+>> range or a set of zipcodes) there are too many potential choices to  
+>> cache each
+>> possibility and it is too inefficient to build a filter on the fly  
+>> for each
+>> query (as you have to visit 10% of documents to build the filter  
+>> despite the
+>> query itself matching 0.1%)
+>>
+>> Therefore I was considering building a int[reader.maxDocs()] array  
+>> for each
+>> field and putting into it the term number for each document. This  
+>> relies on
+>> the fact that each document contains only a single term for this  
+>> field, but
+>> with it I should be able to quickly construct a “multi- 
+>> filter” (that is,
+>> something that iterates the array and checks that the term is in  
+>> the range or
+>> set).
+>> "
+>>
+>> Does this help explain my rationale? The reason I'm posting here is  
+>> that I
+>> imagine there are lots of people with this issue. In particular  
+>> date ranges
+>> seem to be something that lots of people use but Lucene implements  
+>> fairly
+>> poorly.
+>>
+>> Tim
+>>
+>> On 11/10/08 1:58 PM, "Paul Elschot" <paul.elschot@xs4all.nl> wrote:
+>>
+>>> Op Monday 10 November 2008 22:21:20 schreef Tim Sturge:
+>>>> Hmmm -- I hadn't thought about that so I took a quick look at the
+>>>> term vector support.
+>>>>
+>>>> What I'm really looking for is a compact but performant
+>>>> representation of a set of filters on the same (one term field).
+>>>> Using term vectors would mean an algorithm similar to:
+>>>>
+>>>> String myfield;
+>>>> String myterm;
+>>>> TermVector tv;
+>>>> for (int i = 0 ;  i < maxDoc ; i++) {
+>>>>    tv = reader.getTermFreqVector(i,country)
+>>>>    if (tv.indexOf(myterm) != -1) {
+>>>>          // include this doc...
+>>>>        }
+>>>> }
+>>>>
+>>>> The key thing I am looking to achieve here is performance  
+>>>> comparable
+>>>> to filters. I suspect getTermFremVector() is not efficient enough  
+>>>> but
+>>>> I'll give it a try.
+>>>>
+>>>
+>>> Better use a TermDocs on myterm for this, have a look at the code of
+>>> RangeFilter.
+>>>
+>>> Filters are normally created from a slower query by setting a bit  
+>>> in an
+>>> OpenBitSet at "include this doc". Then they are reused for their  
+>>> speed.
+>>>
+>>> Filter caching could help. In case memory becomes a problem
+>>> and the filters are sparse enough, try and use SortedVIntList
+>>> as the underlying data structure in the cache. (Sparse enough means
+>>> less than 1 in 8 of all docs available the index reader.)
+>>> See also LUCENE-1296 for caching another data structure than the
+>>> one used to collect the filtered docs.
+>>>
+>>> Regards,
+>>> Paul Elschot
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

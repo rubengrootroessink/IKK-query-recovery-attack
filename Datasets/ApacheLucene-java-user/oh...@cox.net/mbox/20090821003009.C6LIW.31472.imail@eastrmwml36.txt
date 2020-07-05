@@ -1,0 +1,134 @@
+FROM: <oh...@cox.net>
+SUBJECT: Re: Possible to invoke same Lucene query on a String?
+DATE: 1 Jan 1970
+
+
+---- Paul Cowan <cowan@aconex.com> wrote: 
+> ohaya@cox.net wrote:
+> > - I'd have to create a (very small) index, for each sub-document, where I do the
+Document.add() with just the (for example) two terms, then
+> > - Run a query against the 1-entry index, which
+> > - Would either give me a "yes" or "no" (for that sub-document)
+> > 
+> > As I said, I'm concerned about overhead.  Some of the documents are quite large,
+containing >20K sub-documents.  That means that, for such a document, I'd have to create
+>20K indexes.
+> 
+> No, I'm talking about a separate document in the same index.
+> 
+> There are a few approaches here:
+> 
+> 1) Index each sub-document separately. So if you have fields 'doc#', 
+> 'docname', 'subdoc#', and 'subdocterms', you might do:
+> 
+>     for (Doc parent : Docs) {
+>       for (SubDoc child : parent.subDocs()) {
+>         Document luceneDoc = new Document();
+>         doc.add(new Field("doc#", parent.number()));
+>         doc.add(new Field("docname", parent.name()));
+>         doc.add(new Field("subdoc#", child.number()));
+>         doc.add(new Field("subdocterms", child.data()));
+>       }
+>     }
+> 
+> This means that in your index after indexing 2 docs with 2 subdocs each, 
+> you'll have
+>     (Lucene #)   doc#   docname   subdoc#   subdocterms
+>     ----------------------------------------------------
+>     0            100    Foo       101       subdoc1 terms here
+>     1            100    Foo       102       subdoc2 terms
+>     2            200    Bar       201       subdoc1 terms from doc2
+>     3            200    Bar       202       some more subdoc text
+> 
+> So the search you're doing is actually on the subdoc level. This can get 
+> complicated, especially as subdocs from the same parent doc may come 
+> back out of order, etc, depending on scoring/sorting.
+> 
+> Also, if there is a lot of data at the parent level, you're obviously 
+> duplicating it. This can get nasty.
+> 
+> 2) Maintain a (logically) separate subdoc index. You could have 
+> something like:
+>     doc#   docname  bigblobofdocdata
+>     ---------------------------------
+>     100    Foo      lots of data here...
+>     200    Bar      and lots more here..
+> in one index, and
+>     doc#   subdoc#  subdocterms
+>     ---------------------------------
+>     100    101       subdoc1 terms here
+>     100    102       subdoc2 terms
+>     200    201       subdoc1 terms from doc2
+>     200    202       some more subdoc text
+> 
+> Then you can FIRST search on the doc index to do any matches on 
+> 'docname' etc, then use the IDs you find to filter the subdoc index -- 
+> so if the user searches for 'docname=foo' and 'subdocterms=text', you 
+> first do the docname search to get the docname-matching doc (100), then 
+> do a search on the second index for 'subdocterms', but also filter where 
+> doc#=100.
+> 
+> Note they don't HAVE to be separate indexes -- you can actually keep 
+> these in the same physical index, with some sort of discriminator (all 
+> docs in an index don't have to have the same fields).
+> 
+> 3) Do some really hardcore tricks with spanqueries. This is what I'm 
+> working on at the moment, so it's near and dear to my heart. It's not 
+> for the faint-hearted, though, and if you're new to Lucene may scare you 
+> off, sorry! Basically Lucene has the concept of 'positions' for terms -- 
+> metadata about where in the document the term can be found. This lets 
+> you do 'near' queries, etc.
+> 
+> We're taking advantage of that to do some many-to-one stuff like your 
+> problem. Using the first example, with term positions indicated in [], 
+> we position terms from different subdocs with a large gap between them, 
+> like so:
+> 
+>     (Lucene #)   doc#   docname   subdoc#   subdocterms
+>     ----------------------------------------------------
+>     0            100    Foo       101[0]    subdoc1[0] terms[1] here[2]
+>                                   102[100]  subdoc2[100] terms[101]
+> 
+>     1            200    Bar       201[0]    subdoc1[0] terms[1] from[2]
+>                                   202[100]  doc2[3] some[100] more[101]
+>                                             subdoc[102] text[103]
+> 
+> So in each doc, subdoc #1's terms start at 0, #2's at 100, #3s at 200, 
+> etc. Then when we search we can say 'the terms you're looking for must 
+> be in the same 100-position block' to find only subdocs that match all 
+> subdoc-related subqueries. This is pretty hairy but is working well for 
+> us -- massively reduces our indexing and search times compared to the 
+> duplicated document way I mentioned above.
+> 
+> Cheers,
+> 
+> Paul
+
+
+Paul,
+
+Oh boy, you've given me a LOT to chew on :)!!
+
+At first read, I like your #1 approach, maybe because it's easiest for me to understand. 
+I have to think about it, but my first thought is that we might not need/want the sub-doc
+index to persist after they're used (maybe!), so create the sub-doc index "on-the-fly" for
+each Document, maybe using that example I linked as the template, do the query, then move
+on to the next Document...
+
+I'll have to think about it.  Like I said, lots of ideas in your message :)...
+
+Having said that, I keep thinking wouldn't it be much easier if, as I originally posted, there
+was a way to invoke a "Lucene query" on just a String object :(??
+
+Of course, if, after some more thought, it makes more sense to persist the sub-doc index(es),
+then I guess not...
+
+Again, thanks.  Now, I'll have to re-read what you wrote, a couple of times.  
+
+Jim
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,263 @@
+FROM: David Spencer <dave-lucene-u...@tropo.com>
+SUBJECT: Re: TFIDF Implementation
+DATE: 15 Dec 2004
+
+Christoph Kiefer wrote:
+
+> David, Bruce, Otis,
+> Thank you all for the quick replies. I looked through the BooksLikeThis
+> example. I also agree, it's a very good and effective way to find
+> similar docs in the index. Nevertheless, what I need is really a
+> similarity matrix holding all TF*IDF values. For illustration I quick
+> and dirty wrote a class to perform that task. It uses the Jama.Matrix
+> class to represent the similarity matrix at the moment. For show and
+> tell I attached it to this email.
+> Unfortunately it doesn't perform very well. My index stores about 25000
+> docs with a total of 75000 terms. The similarity matrix is very sparse
+> but nevertheless needs about 1'875'000'000 entries!!! I think this
+> current implementation will not be useable in this way. I also think I
+> switch to JMP (http://www.math.uib.no/~bjornoh/mtj/) for that reason.
+> 
+> What do you think?
+
+I don't have any deep thoughts, just a few questions/ideas...
+
+[1] TFIDFMatrix, FeatureVectorSimilarityMeasure, and CosineMeasure are 
+your classes right, which are not in the mail, but presumably the source 
+isn't needed.
+
+[2] Does the problem boil down to this line and the memory usage?
+
+double [][] TFIDFMatrix = new double[numberOfTerms][numberOfDocuments];
+
+Thus using a sparse matrix would be a win, and so would using floats 
+instead of doubles?
+
+[3] Prob minor, but in getTFIDFMatrix() you might be able to ignore stop 
+words, as you do so later in getSimilarity().
+
+[4] You can also consider using Colt possibly even JUNG:
+
+http://www-itg.lbl.gov/~hoschek/colt/api/cern/colt/matrix/impl/SparseDoubleMatrix2D.html
+
+http://jung.sourceforge.net/doc/api/index.html
+
+[5]
+
+Related to #2, can you precalc the matrix and store it on disk, or is 
+your index too dynamic?
+
+[6] Also, in similar kinds of calculations I've seen code that filters 
+out low frequency terms e.g. ignore all terms that don't occur in at 
+least 5 docs.
+
+-- Dave
+
+
+
+> 
+> Best,
+> Christoph
+> 
+> 
+> 
+> ------------------------------------------------------------------------
+> 
+> /*
+>  * Created on Dec 14, 2004
+>  */
+> package ch.unizh.ifi.ddis.simpack.measure.featurevectors;
+> 
+> import java.io.File;
+> import java.io.FileReader;
+> import java.io.IOException;
+> 
+> import org.apache.lucene.analysis.Analyzer;
+> import org.apache.lucene.analysis.StopAnalyzer;
+> import org.apache.lucene.analysis.snowball.SnowballAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.index.TermDocs;
+> import org.apache.lucene.index.TermEnum;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.FSDirectory;
+> 
+> import Jama.Matrix;
+> 
+> /**
+>  * @author Christoph Kiefer
+>  */
+> public class TFIDF_Lucene extends FeatureVectorSimilarityMeasure {
+> 	
+> 	private File indexDir = null;
+> 	private File dataDir = null;
+> 	private String target = "";
+> 	private String query = "";
+> 	private int targetDocumentNumber = -1;
+> 	private final String ME = this.getClass().getName();
+> 	private int fileCounter = 0;
+> 	
+> 	public TFIDF_Lucene( String indexDir, String dataDir, String target, String query )
+{
+> 		this.indexDir = new File(indexDir);
+> 		this.dataDir = new File(dataDir);
+> 		this.target = target;
+> 		this.query = query;
+> 	}
+> 	
+> 	public String getName() {
+> 		return "TFIDF_Lucene_Similarity_Measure";
+> 	}
+> 	
+> 	private void makeIndex() {
+> 		try {
+> 			IndexWriter writer = new IndexWriter(indexDir, new SnowballAnalyzer( "English", StopAnalyzer.ENGLISH_STOP_WORDS
+), false);
+> 			indexDirectory(writer, dataDir);
+> 			writer.optimize();
+> 			writer.close();
+> 		} catch (Exception ex) {
+> 			ex.printStackTrace();
+> 		}
+> 	}
+> 	
+> 	private void indexDirectory(IndexWriter writer, File dir) {
+> 		File[] files = dir.listFiles();
+> 		for (int i=0; i < files.length; i++) {
+> 			File f = files[i];
+> 			if (f.isDirectory()) {
+> 				indexDirectory(writer, f);  // recurse
+> 			} else if (f.getName().endsWith(".txt")) {
+> 				indexFile(writer, f);
+> 			}
+> 		}
+> 	}
+> 	
+> 	private void indexFile(IndexWriter writer, File f) {
+> 		try {
+> 			System.out.println( "Indexing " + f.getName() + ", " + (fileCounter++) );
+> 			String name = f.getCanonicalPath();
+> 			//System.out.println(name);
+> 			Document doc = new Document();
+> 			doc.add( Field.Text( "contents", new FileReader(f), true ) );
+> 			writer.addDocument( doc );
+> 			
+> 			if ( name.matches( dataDir + "/" + target + ".txt" ) ) {
+> 				targetDocumentNumber = writer.docCount();
+> 			}
+> 			
+> 		} catch (Exception ex) {
+> 			ex.printStackTrace();
+> 		}
+> 	}
+> 	
+> 	public Matrix getTFIDFMatrix(File indexDir) throws IOException {
+> 		Directory fsDir = FSDirectory.getDirectory( indexDir, false );
+> 		IndexReader reader = IndexReader.open( fsDir );
+> 		
+> 		int numberOfTerms = 0;
+> 		int numberOfDocuments = reader.numDocs();
+> 		
+> 		TermEnum allTerms = reader.terms();
+> 		for ( ; allTerms.next(); ) {
+> 			allTerms.term();
+> 			numberOfTerms++;
+> 		}
+> 		
+> 		System.out.println( "Total number of terms in index is " + numberOfTerms );
+> 		System.out.println( "Total number of documents in index is " + numberOfDocuments );
+> 		
+> 		double [][] TFIDFMatrix = new double[numberOfTerms][numberOfDocuments];
+> 		
+> 		for ( int i = 0; i < numberOfTerms; i++ ) {
+> 			for ( int j = 0; j < numberOfDocuments; j++ ) {
+> 				TFIDFMatrix[i][j] = 0.0;
+> 			}
+> 		}
+> 		
+> 		allTerms = reader.terms();
+> 		for ( int i = 0 ; allTerms.next(); i++ ) {
+> 			
+> 			Term term = allTerms.term();
+> 			TermDocs td = reader.termDocs(term);
+> 			for ( ; td.next(); ) {
+> 				TFIDFMatrix[i][td.doc()] = td.freq();
+> 			}
+> 			
+> 		}
+> 		
+> 		allTerms = reader.terms();
+> 		for ( int i = 0 ; allTerms.next(); i++ ) {
+> 			for ( int j = 0; j < numberOfDocuments; j++ ) {
+> 				double tf = TFIDFMatrix[i][j];
+> 				double docFreq = (double)allTerms.docFreq();
+> 				double idf = ( Math.log( (double)numberOfDocuments / docFreq ) ) / 2.30258509299405;
+> 				//System.out.println( "Term: " + i + " Document " + j + " TF/DocFreq/IDF: " + tf
++ " " + docFreq + " " + idf);
+> 				TFIDFMatrix[i][j] = tf * idf;
+> 			}
+> 		}
+> 		
+> 		reader.close();
+> 		return new Matrix(TFIDFMatrix);
+> 	}
+> 	
+> 	public double getSimilarity( FeatureVectorSimilarityMeasure m ) {
+> 		
+> 		double sim = -1.0;
+> 		try {
+> 			makeIndex();
+> 			
+> 			Analyzer analyzer = new SnowballAnalyzer( "English", StopAnalyzer.ENGLISH_STOP_WORDS
+);
+> 			Document queryDoc = new Document();
+> 			File f = new File( dataDir + "/" + query + ".txt" );
+> 			queryDoc.add( Field.Text( "contents", new FileReader( f ), true) );
+> 			
+> 			IndexWriter writer = new IndexWriter( indexDir, analyzer, false );
+> 			writer.addDocument( queryDoc );
+> 			writer.optimize();
+> 			writer.close();
+> 			
+> 			Matrix TFIDFMatrix = getTFIDFMatrix(indexDir);
+> 			double[] queryWeights = TFIDFMatrix.getMatrix( 0, TFIDFMatrix.getRowDimension()-1,
+TFIDFMatrix.getColumnDimension()-1, TFIDFMatrix.getColumnDimension()-1 ).getColumnPackedCopy();
+> 			
+> 			if ( targetDocumentNumber != -1 ) {
+> 				double[] documentWeights = TFIDFMatrix.getMatrix( 0, TFIDFMatrix.getRowDimension()-1,
+targetDocumentNumber, targetDocumentNumber).getColumnPackedCopy();
+> 				m = new CosineMeasure( documentWeights, queryWeights );
+> 				System.out.println( "Similarity between query and document " + targetDocumentNumber
++ " is " + m.getSimilarity() );
+> 				sim = m.getSimilarity();
+> 			} else {
+> 				System.out.println( "ERROR in " + ME + ": Target document number still invalid."
+);
+> 			}
+> 			
+> 			return sim;
+> 			
+> 		} catch (Exception ex) {
+> 			ex.printStackTrace();
+> 		}
+> 		
+> 		return sim;
+> 	}
+> }
+> 
+> 
+> ------------------------------------------------------------------------
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

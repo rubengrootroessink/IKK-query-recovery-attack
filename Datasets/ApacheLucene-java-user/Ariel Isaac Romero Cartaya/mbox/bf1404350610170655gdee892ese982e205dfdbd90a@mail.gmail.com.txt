@@ -1,0 +1,143 @@
+FROM: "Ariel Isaac Romero Cartaya" <isaacr...@gmail.com>
+SUBJECT: Re: Big problem with big indexes
+DATE: 17 Oct 2006
+
+Here are pieces of my source code:
+
+First of all, I search in all the indexes given a query String with a
+parallel searcher. As you can see I make a multi field query. Then you can
+see the index format I use, I store in the index all the fields. My index is
+optimized.
+
+          public  Hits search(String query) throws IOException  {
+
+        AnalyzerHandler analizer = new AnalyzerHandler();
+        Query pquery = null;
+
+        try {
+            pquery = MultiFieldQueryParser.parse(query, new String[]
+{"title", "sumary", "filename", "content", "author"}, analizer.getAnalyzer
+());
+        } catch (ParseException e1) {
+            e1.printStackTrace();
+        }
+
+        Searchable[] searchables = new Searchable[IndexCount];
+
+        for (int i = 0; i < IndexCount; i++) {
+            searchables[i] = new IndexSearcher(RAMIndexsManager.getInstance
+().getDirectoryAt(i));
+        }
+
+        Searcher parallelSearcher = new ParallelMultiSearcher(searchables);
+
+        return parallelSearcher.search(pquery);
+
+
+      }
+
+Then in another method I obtain the fragment where the term occur, As you
+can see I use an EnglisAnalyzer that filter stopwords, stemming, synonims
+detection ... :
+
+    public Vector getResults(Hits h, String string) throws IOException{
+
+        Vector ResultItems = new Vector();
+        int cantHits = h.length();
+        if (cantHits!=0){
+
+            QueryParser qparser = new QueryParser("content", new
+AnalyzerHandler().getAnalyzer());
+            Query query1 = null;
+            try {
+                query1 = qparser.parse(string);
+            } catch (ParseException e1) {
+                e1.printStackTrace();
+            }
+
+            QueryScorer scorer = new QueryScorer(query1);
+
+            Highlighter highlighter = new Highlighter(scorer);
+
+            Fragmenter fragmenter = new SimpleFragmenter(150);
+
+            highlighter.setTextFragmenter(fragmenter);
+
+
+            for (int i = 0; i < cantHits; i++) {
+
+                org.apache.lucene.document.Document doc = h.doc(i);
+
+                String filename = doc.get("filename");
+
+                filename = filename.substring(filename.indexOf("/") + 1);
+
+                String filepath  = doc.get("filepath");
+
+                Integer id = new Integer(h.id(i));
+
+                String score = (h.score(i))+ "";
+
+                int fileSize = Integer.parseInt(doc.get("filesize"));
+
+                String title = doc.get("title");
+                String summary = doc.get("sumary");
+
+                //fragment
+                String body = h.doc(i).get("content");
+
+                TokenStream stream =  new
+EnglishAnalyzer().tokenStream("content",new StringReader(body));
+
+                String[] fragment = highlighter.getBestFragments(stream,
+body, 4);
+                //fragment
+
+
+
+                if (fragment.length == 0)  {
+                    fragment = new String[1];
+                    fragment[0] = "";
+                }
+
+
+
+                StringBuilder buffer = new StringBuilder();
+
+                for (int I = 0; I < fragment.length; I++){
+                    buffer.append(validateCad(fragment[I]) + "...\n");
+                }
+
+                String stringFragment = buffer.toString();
+
+                ResultItem result = new ResultItem();
+                        result.setFilename(fileName);
+                        result.setFilepath(filePath);
+                        result.setFilesize(filesize);
+                        result.setScore(Double.parseDouble(score));
+                        result.setFragment(fragment);
+                        result.setId(new Integer(id));
+                        result.setSummary(summary);
+                        result.setTitle(title);
+                        ResultItems.add(result);
+
+
+                }
+        }
+
+
+
+        return ResultItems;
+    }
+
+
+So these are the principals methods that make search. Could you tell me if I
+do something wrong or inefficient ?
+As you can see I make a parallel search, I have a dual xeon machine with two
+CPU hyperthreading 2,4 Ghz 512 RAM but when I make the parallel searcher I
+can see in my command prompt on Linux that the 3 og my 4 cpu are always idle
+while only one is working, why occur that if the parallel searcher must
+saturate all the CPU of work.
+
+I hope you can help me.
+

@@ -1,0 +1,90 @@
+FROM: Koji Sekiguchi <k...@r.email.ne.jp>
+SUBJECT: Re: Filter before tokenize ?
+DATE: 13 Sep 2009
+
+Hi Paul,
+
+CharFilter should work for this case. How about this?
+
+public class MappingAnd {
+ 
+  static final String[] DOCS = {
+    "R&B", "H&M", "Hennes & Mauritz", "cheeseburger and french fries"
+  };
+  static final String F = "f";
+  static Directory dir = new RAMDirectory();
+  static Analyzer analyzer = new MyStandardAnalyzer();
+
+  public static void main(String[] args) throws Exception {
+    makeIndex();
+    searchIndex( "&" );
+    searchIndex( "and" );
+  }
+ 
+  static void makeIndex() throws IOException {
+    IndexWriter writer = new IndexWriter( dir, analyzer, true, 
+MaxFieldLength.LIMITED );
+    for( String value : DOCS ){
+      Document doc = new Document();
+      doc.add( new Field( F, value, Store.YES, Index.ANALYZED ) );
+      writer.addDocument( doc );
+    }
+    writer.close();
+  }
+ 
+  static void searchIndex( String q ) throws Exception {
+    System.out.println( "\n\n*** Searching \"" + q + "\" ..." );
+    IndexSearcher searcher = new IndexSearcher( dir );
+    QueryParser parser = new QueryParser( F, analyzer );
+    Query query = parser.parse( q );
+    TopDocs docs = searcher.search( query, 10 );
+    for( ScoreDoc scoreDoc : docs.scoreDocs ){
+      Document doc = searcher.doc( scoreDoc.doc );
+      System.out.println( scoreDoc.score + " : " + doc.get( F ) );
+    }
+    searcher.close();
+  }
+ 
+  static class MyStandardAnalyzer extends Analyzer {
+    public TokenStream tokenStream(String field, Reader in) {
+      StandardTokenizer tokenStream = new StandardTokenizer( 
+getCharFilter( in ) );
+      tokenStream.setMaxTokenLength( 255 );
+      TokenStream result = new StandardFilter(tokenStream);
+      result = new LowerCaseFilter(result);
+      return result;
+    }
+   
+  }
+
+  static CharFilter getCharFilter( Reader in ){
+    NormalizeCharMap map = new NormalizeCharMap();
+    map.add( "&", " and " );
+    return new MappingCharFilter( map, CharReader.get( in ) );
+  }
+}
+
+Koji
+
+
+Paul Taylor wrote:
+> Is it possible to filter before tokenize, or is that not a good idea.
+> I want to convert '&' to 'and' , so they are dealt with the same way, 
+> but the StandardTokenizer I am using removes the &, I could change the 
+> tokenizer but  because I'm not too clear on jflex syntax it would seem 
+> easier to just apply a CharFilter before tokenizing, but is that possible
+>
+> Paul
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,81 @@
+FROM: "J.J. Larrea" <...@panix.com>
+SUBJECT: Re: Storing a Lucene Index on a SAN Storage: good idea?
+DATE: 27 Sep 2009
+
+Hello Matthias Hess.
+
+I agree with Mark's comments re: SANs having some advantages, and the need for benchmarking.
+
+My client has for several years been running Solr/Lucene on virtual Linux hosts with no local
+storage other than the boot and swap partitions; all other storage is on a pair of Fibre Channel-connected
+SANs. The public deployment site runs on 4 load-balanced application hosts hitting on 2 load-balanced
+search servers, sharing the same SAN-resident indexes which are also referenced by pre-deployment
+testing vHosts. 
+
+One of the indexes has ~40M small simple documents and is ~30Gb, the other has ~3M large complex
+documents and is ~15Gb.  No write operations are done on these indexes: They are constructed,
+optimized, tested, on an offline production site, then moved to the public deployment site
+SAN.
+
+I was initially incredulous that it could be possible a virtualized/SANized configuration
+could not introduce significant performance problems.  When an outside consultancy also recommended
+we "physicalize" our configuration, I was able to obtain the resources to have a dedicated
+search server with local storage configured and load-tested against the virtual search servers.
+
+While there was indeed a measurable performance hit, which as one might expect took the form
+of a broader distribution of request latencies, the mean time was if I recall only 15%-20%
+worse for the virtualized/SAN configuration.  This was adjudged to be a reasonable price to
+pay for the savings in rack-space, server hardware purchase and maintenance costs, and simplicity
+in managing the server farm.  It was also surpassed by other performance bottlenecks which
+had an even greater impact, which we have been addressing over time.  So we stuck with the
+virtualized configuration and not looked back.  Had we seen a 50% speed difference, it would
+have been a different story.  If we had 10M hits a day on the search server, it might have
+been a different story.  If SAN reliability had unfavorably impacted our uptime average, it
+would have been different.
+
+I should note that our particular application does not use hit-scoring, but does use field-value
+sorting and extensive faceting, which to a certain extent reduces the impact of index disk
+latency as a performance factor in overall request latency, since sort/facet data is one-time
+loaded into virtual memory and so becomes localized, and the time for these operations can
+exceed the actual index search time especially when scoring is not involved.
+
+My overall conclusion that there is no universal formula for whether the performance impact
+is sufficient to rule it out for a specific application with specific performance requirements
+in a specific business environment.  The best approach may be to prototype the system using
+SAN-based shared indexes, benchmark it to see if performance is acceptable, borderline, or
+unacceptable, then benchmark against local disk as one component of the optimization process.
+
+- J.J. Larrea
+
+At 9:21 AM +0000 9/26/09, Mark Harwood wrote:
+>I have a client with 700 million doc index running on a SAN. The performance is v good
+but this obviously depends on your choice of  SAN config. In this environment I have multiple
+search servers happily hitting the same physical lucene index on the SAN. The servers negotiate
+with each other via zookeeper to elect a server with write responsibilities. One advantage
+of this approach over local disks is that index replication is relatively easy (replication
+is effectively being handled by SAN's internal striping mechanisms). Index replica synching
+as seen in Solr relies on careful shuffling of (hopefully) small segments of lucene indexes
+between servers across the network with mechanisms for dealing with server/network failures.
+Alternative local index synching approaches rely on replica servers independently building
+their own indexes from source data. Both of these replication strategies are arguably more
+fallible than a hardware-based striping mechanism in a sophisticated S
+ AN.    However the disadvantage with a SAN is the potential for the SAN to become a bottleneck
+or single point of failure (hardware or app-level index corruption). I'm sure high-end SAN
+vendors can talk up their ability to hot deploy extra disks to boost performance if needed
+and sophisticated failover mechanisms but these get expensive. If your client has invested
+significantly in a SAN and is pushing you to use it my experience is that this can work but
+benchmarking vs local disk is key.  Cheers Mark On 26 Sep 2009, at 08:36, Matthias Hess <mat.hess@bluewin.ch>
+wrote: Hello We are currently implementing our first Lucene project. We are building an application
+which will index public Records on the internet, about 200'000 documents, each document is
+about 150 k in size. Our customer would like to store the Lucene index on a SAN disk. We recommended
+the use of high speed local disks, but our customer would prefer SAN for their better managability.
+Does anybody have good or b
+ ad experiences with SAN disks? Are there parameters like #read operations, data read rate
+or whatever, which must be met to have a performance which rivals a good "local disk"? Thanks
+for sharing your ideas and opinions! Kind Regards Matthias Hess
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

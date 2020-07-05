@@ -1,0 +1,185 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Deeper Ranking Issues in Lucene
+DATE: 2 Apr 2007
+
+
+Xiangyu Jin, a better place to ask is the java-user list.  You'll want to subscribe to that.
+ You didn't mention Similarity/DefaultSimilarity classes.  Maybe that's what you missed.
+
+Otis
+ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+Simpy -- http://www.simpy.com/  -  Tag  -  Search  -  Share
+
+----- Original Message ----
+From: "xj3a@cs.virginia.edu" <xj3a@cs.virginia.edu>
+To: general@lucene.apache.org
+Sent: Monday, April 2, 2007 3:35:30 PM
+Subject: Deeper Ranking Issues in Lucene
+
+I’ve been working on ranking/scoring issues for full text search for
+years. When I try to implement different ranking inside the Lucene engine,
+I face some problems. I list some of my experience and questions here.
+
+The major task I want to implement inside Lucene is different
+ranking/scoring algorithms. I may not find the correct source of
+information, but I really cannot find a detailed document describing the
+relations among ranking/scoring related classes in Lucene on web. “Lucene
+in Action” concerns mostly about applications level usage but not these
+lower-level APIs.
+
+(1) The first thing I tried is the abstract class Scorer. The description
+for this class is:
+/** Expert: Implements scoring for a class of queries. */
+
+If you looked IndexSearcher class, one possible search process is
+implemented inside
+public TopDocs search(Query query, Filter filter, final int nDocs). If you
+look in detail how it is implemented, you will find out it first acquires
+such a scorer instance by:
+Scorer scorer = query.weight(this).scorer(reader);
+
+The magic happens inside the method call scorer.score(new HitCollector());
+What the score method does is something similar to an Iterator. The
+scorer.score continuously call scorer.next() to acquire next qualified
+document (I guess the qualified documents inside this iterator is from
+BitSet operations from the given query. I did not looked into the detail
+implementation of that), and calls scorer.score() to get the score for the
+current document that the iterator pointed at.
+
+What the HitCollector does is merely simple. It only implement a method
+called collect(int doc, float score). This method is called every time
+when a new document’s score are calculated. In the IndexSearcher.search
+method, the documents and their scores are sent to a PriorityQueue and
+ranked according to the scores.
+
+(2) My first plan is to modify the scorer.score()method. Unfortunately, I
+found this is extremely complex. score() is an abstract method which is
+implemented inside its subclasses like Boolean Scorer, Conjunction Scorer,
+Phrase Score, … Since I do not need to consider the complex Boolean query
+syntax (in my experiments, query is defined as a list of terms connected
+by disjunctions), I implement the score method inside Scorer rather inside
+sub classes.
+
+What I did is every time when Scorer.score are called, I pass the current
+document number via doc(), and read out the term frequencies from
+IndexReader. getTermFreqVector(int docNumber, String field)  method. I
+found this operation is super slow. The major cost is spent on the method
+getTermFreqVector.
+
+(3) Later I notice in the implementation in TermScorer, there is a
+function call
+IndexReader.termDocs.read(docs, freqs);    // refill buffer
+And I read the comments for this function in IndexReader, it says
+
+/** Attempts to read multiple entries from the enumeration, up to length of
+   * <i>docs</i>.  Document numbers are stored in <i>docs</i>, and
+term
+   * frequencies are stored in <i>freqs</i>.  The <i>freqs</i> array
+must
+be as
+   * long as the <i>docs</i> array.
+   *
+   * <p>Returns the number of entries read.  Zero is only returned when the
+   * stream has been exhausted.  */
+
+So different from IndexReader.getTermFreqVector, which read out term-freq
+vectors for a document, this function read doc-freq vectors for a term. I
+find this method call is extremely faster. At least two magnitudes faster
+than getTermFreqVector, if I want to get all term-freqs for given terms
+for all docs. I do not know the reason why there is such difference, I
+cannot find a document describing the implementation difference and
+purpose among these two.
+
+(4) About extending Lucene’s scoring function.
+If we want to implement any arbitrary ranking/scoring for term-frequency
+based algorithms, we need the scoring fits the following framework
+
+Any term-frequency scoring can be expressed in the following ways (let’s
+simplify that there is only one field so that we can ignore boost factor
+at this time):
+
+Sigma (t in q) [TermWeight(t in d)*TermWeight(t in q) / lengthNorm(d) /
+lengthNorm(q)]
+
+Since lengthNorm(q) is the same for each document, it will not affect
+ranking, we just ignore it. We further separate term weight into three
+parts, term weight related to document, term weight related to query, term
+weight related to corpus (not related to document or query) and document
+length norm.
+
+Sigma (t in q) [TW(t in d)*TW(t in q) * TW (t) / lengthNorm(d)]
+
+We can notice this matches Lucene’ ranking function
+
+Sigma (t in q) [tf(t in d)*1*idf (t) / lengthNorm(d)]. To save
+computational cost, lengthNorm(d) is pre-calculated when indexing the
+corpus. So Lucene’ lengthNorm(d) does not involve any corpus statistics
+into calculation, it is merely the # of terms inside this document. On the
+other hand, it treats the term weight in query is the same as 1. That is
+Lucene does not differentiate terms important inside query. If we want to
+emphasis a term twice we need to put two terms inside the query. For
+example, instead of search “boat” we put “boat boat”, do I understand
+correctly?
+
+So, generally, if we can update the lengthNorm(d) inside the indexing code
+or via post-processing after all documents are indexed, Lucene can
+implement any arbitrary ranking function such as BM25. A pity is that it
+does not directly support query term weight in the query language.
+
+(5) My final big question would be how Lucene really implement
+ranking/scoring. We could notice there are two possible strategies. Each
+of them will result in different flexibility if we need modify current
+ranking algorithms.
+
+The first strategy is Lucene generate document scores in a document by
+document manner. In Scorer.score, we notice the framework is each time the
+scorer meet a new document, Lucene will generate a score for this
+document. This framework is simple and intuitive. And all we discussed in
+(4) will fit this framework. When you processing the current document,
+lengthNorm(d) can be read, even if TW(t in d) has relation to
+lengthNorm(d) we can calculate that accordingly. Unfortunately, I cannot
+find any low-level code could be thinked related to this implementation
+strategy. This makes me think the Scorer.score method is not the real
+place Lucene implement its ranking. I am pretty confused about this part.
+Who can help me with this?
+
+The second strategy is Lucene generate document scores in a term by term
+manner. For each term inside the query, Lucene calls termDocs.read(docs,
+freqs) to accumulate scores over the specific term dimension over all the
+documents.  Under this framework (which I feel is current Lucene’s
+implementation), what we discussed in (4) is not held. We need extend
+current Lucene’s tf(float freq) function to tf(float freq, float norm), so
+that arbitrary ranking could be implemented.
+
+(6) I have implemented a search module outside Lucene IndexSearcher which
+could implement any arbitrary ranking over vector query (a list of
+disjunctive terms). The term-by-term implementation is much faster than my
+previous document-by-document implementation. But I currently still cannot
+encode the ranking module under Lucene’ Boolean engines, that is only rank
+the documents retrieved (only rank the documents satisfy the condition
+specified by the query).
+
+__________________________________________________________________
+
+I do not know whether I described my points clear, it is complex and hard
+to write in a short plain text message. Maybe I should post a PDF version
+tech-report online so that the problem is stated clearer. I am not sure my
+understanding is correct. Thanks for any help and comments.
+
+
+Xiangyu Jin
+Department of Computer Science
+University of Virginia
+Charlottesville, VA 22903
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

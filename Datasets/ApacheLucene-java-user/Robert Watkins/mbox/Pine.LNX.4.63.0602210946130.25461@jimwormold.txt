@@ -1,0 +1,93 @@
+FROM: Robert Watkins <rwatk...@foo-bar.org>
+SUBJECT: Re: exact match ..
+DATE: 21 Feb 2006
+
+The way I have solved the problem of allowing exact matches is, for each
+field in which it is possible for an exact match to be requested, a
+parallel field is created at index time that is unstemmed and has a
+specific prefix:
+
+ 	if (fieldData.isSearched() && tokenize && usingStemmingAnalyzer) {
+ 		doc.add(new Field(UNSTEMMED_FIELD_PREFIX + fieldName,
+ 			fieldValueStr, false, true, true));
+ 	}
+
+Also, I use a custom Analyzer for both indexing and searching that
+understands this:
+
+ 	public TokenStream tokenStream(String fieldName, Reader reader)
+ 	{
+ 		TokenStream result = new WISTokenizer(reader);
+ 		result = new StandardFilter(result);
+ 		result = new LowerCaseFilter(result);
+ 		if (stoptable != null) {
+ 			result = new StopFilter(result, stoptable);
+ 		}
+ 		if (!fieldName.startsWith(UNSTEMMED_FIELD_PREFIX)) {
+ 			result = new SpellFilter(result);
+ 			result = new PorterStemFilter(result);
+ 		}
+ 		return result;
+ 	}
+
+For searching, I've written a custom parser using JavaCC (I need to
+support more operators than Lucene does OOTB), as well as a
+QueryBuilder class that constructs the queries "manually" for each node
+type. For a quoted string (i.e. requiring an exact match):
+
+ 	case JJTQUOTED:
+ 		if (node.hasWildcard()) {
+ 			Node phraseNode = SimpleNode.getPhraseNode(node.getName());
+ 			query = getSpanQuery(new Node[]{phraseNode}, currentField, 0);
+ 		}
+ 		else {
+ 			// match quoted strings "exactly", i.e. without stemming
+ 			// NB: matches are case insensitive
+ 			String fieldToSearch = usingStemmingAnalyzer ?
+ 				UNSTEMMED_FIELD_PREFIX + currentField : currentField;
+ 			query = getTerminalQuery(node.getName(), fieldToSearch);
+ 		}
+ 		break;
+
+and:
+
+ 	protected Query getTerminalQuery(String term, String currentField)
+ 		throws QueryBuildingException
+ 	{
+ 		Query q;
+ 		try {
+ 			q = org.apache.lucene.queryParser.QueryParser.parse(term,
+ 				currentField, analyzer);
+ 		}
+ 		catch (org.apache.lucene.queryParser.ParseException e) {
+ 			throw new QueryBuildingException(e);
+ 		}
+ 		return q;
+ 	}
+
+There is, obviously, a fair amount of work involved, but the level of
+control is the payoff.
+
+-- Robert
+
+--------------------
+Robert Watkins
+rwatkins@foo-bar.org
+--------------------
+
+On Mon, 20 Feb 2006, Erik Hatcher wrote:
+
+>
+> Yes, this is what PerFieldAnalyzerWrapper provides for you, as described in 
+> detail in several sections of Lucene in Action:
+>
+> 	http://www.lucenebook.com/search?query=PerFieldAnalyzerWrapper
+>
+> Erik
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

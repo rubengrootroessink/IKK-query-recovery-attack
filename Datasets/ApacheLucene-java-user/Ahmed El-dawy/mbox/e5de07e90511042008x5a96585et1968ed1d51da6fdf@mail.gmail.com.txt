@@ -1,0 +1,194 @@
+FROM: Ahmed El-dawy <aseld...@gmail.com>
+SUBJECT: Re: Multiple terms with the same position in PhraseQuery
+DATE: 5 Nov 2005
+
+Thanks for your reply.
+Yes, the problem is not with the QueryParser, I build the query with
+code. Of course the analyzer is involved in building the query, but I
+didn't mention it in the code for simplicity.
+I saw the MultiPhraseQuery. Its name in my version is
+PhrasePrefixQuery. Why don't we use the PhrasePrefixQuery all the
+time? Is it slower or something?
+BTW, I think there's a newer version of Lucene that I can't get, my
+version is 1.4.3 and I didn't find any newer version at the site. For
+example, the QueryParser in my version doesn't care with term position
+and I had to override it by myself to support this.
+You may be referring to the CVS version, but I want to release my app.
+with a stable version.
+
+and thanks again
+
+On 11/5/05, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+>
+> I must admit, I have not tried running your test, but based on reading it,
+> I think you are missunderstanding what's happening here.  (or perhaps I
+> am.)
+>
+> You initialy stated that you were having a problem because your Analyzer
+> outputs multiple tokens at the same position, and your phrase queries were
+> only working if it matched all terms (instead of any terms)
+>
+> I (and i suspect most people) assumed you were refering to the phrase
+> queries you got back from a QueryParser that was using your analyzer --
+> because that's the only time an analyzer will be involved in a phrase
+> query.
+>
+> In your test below, the analyzer is used only at index time; the
+> PhraseQuery knows nothing about it.  when you say...
+>
+>                PhraseQuery query = new PhraseQuery();
+>                query.add(new Term("line","hello"),1);
+>                query.add(new Term("line","all"),1);
+>                query.add(new Term("line","huullo"),1);
+>
+> ...you are constructing a Phrase query that *MUST* match all three of
+> those Terms -- since your index doesn't contain the word "huullo", that
+> query will never match anything, regardless of what positionIncriments you
+> use in your analyzer, or what positionIncriments you use in your
+> PhraseQuery, or how much slop you use.
+>
+> I believe what you want is a "MultiPhraseQuery" which as Pierrick
+> pointed out, is what QueryParser will use when it's analyzer tells it
+> there are multiple tokens at the same position inside of a phrase.
+>
+>
+> BTW: when posting test code, it's a good idea to have the code generate
+> an explanation of what you expect the output to be ... the ideal way to do
+> this of course, is to write the code as a JUNit test that uses assertions
+> to demonstrate how your expected outcome differes from outcome you
+> observe.
+> This has the added bonus of serving as a easy to commit test case if there
+> truely is a bug that needs fixed.
+>
+>
+> : Date: Fri, 4 Nov 2005 23:35:55 +0200
+> : From: Ahmed El-dawy <aseldawy@gmail.com>
+> : Reply-To: java-user@lucene.apache.org, aseldawy@yahoo.com
+> : To: java-user@lucene.apache.org
+> : Subject: Re: Multiple terms with the same position in PhraseQuery
+> :
+> : This is a source code that shows the problem I am talking about.
+> : In this example a new analyzer is made that outputs all words to the
+> : same position (all but the first one are positionIncrement=0).
+> : To get the problem I am talking about uncomment the only commented line.
+> : //----------------------------------------------------------------
+> : public class TestPhraseQuery {
+> :
+> :       public static void main(String[] args) {
+> :               try {
+> :                       Directory ramDirectory = new RAMDirectory();
+> :                       IndexWriter indexWriter = new IndexWriter(ramDirectory, new
+> : TestAnalyzer(),true);
+> :                       Document testDocument = new Document();
+> :                       testDocument.add(Field.Text("line","hello all of you"));
+> :                       indexWriter.addDocument(testDocument);
+> :                       indexWriter.close();
+> :
+> :                       IndexSearcher indexSearcher = new IndexSearcher(ramDirectory);
+> :                       PhraseQuery query = new PhraseQuery();
+> :                       query.add(new Term("line","hello"),1);
+> :                       query.add(new Term("line","all"),1);
+> : //                    query.add(new Term("line","huullo"),1);
+> :
+> :                       Hits hits = indexSearcher.search(query);
+> :                       System.out.println(hits.length());
+> :               } catch (IOException e) {
+> :                       e.printStackTrace();
+> :               }
+> :
+> :       }
+> :
+> : }
+> :
+> : class TestAnalyzer extends StandardAnalyzer {
+> :       @Override
+> :       public TokenStream tokenStream(String fieldName, Reader reader) {
+> :               TokenStream result = super.tokenStream(fieldName, reader);
+> :               result = new TestFilter(result);
+> :               return result;
+> :       }
+> : }
+> :
+> : class TestFilter extends TokenFilter {
+> :       boolean first = true;
+> :       public TestFilter(TokenStream input) {
+> :               super(input);
+> :       }
+> :       @Override
+> :       public Token next() throws IOException {
+> :               Token token = input.next();
+> :               if (token == null)
+> :                       return null;
+> :               if (!first) {
+> :                       token.setPositionIncrement(0);
+> :               }
+> :               first = false;
+> :               return token;
+> :       }
+> : }
+> : //--------------------------------------------------------------------------
+> :
+> : On 11/4/05, Erik Hatcher <erik@ehatchersolutions.com> wrote:
+> : >
+> : > On 4 Nov 2005, at 13:45, Daniel Naber wrote:
+> : >
+> : > > On Freitag 04 November 2005 11:33, Erik Hatcher wrote:
+> : > >
+> : > >
+> : > >>> This should have been fixed one year ago with Daniel and myself.
+> : > >>>
+> : > >>
+> : > >> Really?  It works in this OR kind of fashion with tokens in 0-
+> : > >> incremented positions?
+> : > >>
+> : > >
+> : > > Yes, this test case shows it (multi will be turned into multi and
+> : > > multi2,
+> : > > both at the same position by the analyzer used here):
+> : > >
+> : > > assertEquals("+(multi multi2) +foo", qp.parse("multi foo").toString
+> : > > ());
+> : >
+> : > Thanks.  Sorry, I meant to send an immediate follow-up to my own
+> : > silly question.  I knew better as soon as I hit send.
+> : >
+> : >     Erik
+> : >
+> : >
+> : > ---------------------------------------------------------------------
+> : > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : > For additional commands, e-mail: java-user-help@lucene.apache.org
+> : >
+> : >
+> :
+> :
+> : --
+> : regards,
+> : Ahmed Saad
+> :
+> : ---------------------------------------------------------------------
+> : To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : For additional commands, e-mail: java-user-help@lucene.apache.org
+> :
+>
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+--
+regards,
+Ahmed Saad
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

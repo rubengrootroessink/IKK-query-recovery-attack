@@ -1,0 +1,253 @@
+FROM: Peter Becker <pbec...@dstc.edu.au>
+SUBJECT: Re: Similar Document Search
+DATE: 21 Aug 2003
+
+Hi Terry,
+
+exactly these two features of (a) having a unique identifier and (b) 
+easily finding the term frequencies for the document is what we (i.e. 
+our working group and seemingly others) are missing.
+
+(a) As far as I understand Lucene, there is no such notion as value 
+identity on Document instances. This is a problem if you want to do 
+things like applying set-theory as we did. The workaround is easy: store 
+a unique id in the index and wrap the documents in an object using this 
+field as base for equals/hashCode. But it still has to be done, you need 
+the unique id in the index and it is not really elegant since you have 
+to go through the wrapper all the time.
+
+(b) Lucene allows you to find term frequencies in the index, but not for 
+subsets or single items. Many information retrieval approaches define 
+document similarity using metrics on the term frequencies. The more 
+similar the term frequencies, the more similar the documents are 
+considered. You get different details and levels of complexity (esp. if 
+you try to mix in background knowledge like knowing synonyms and 
+generalizations of the terms), but the basic idea is that documents are 
+similar if they contain the same terms (and maybe even in the same 
+amounts). I failed to find a way to get Lucene to give me this 
+information without hacking this or that. Considering the attention IR 
+techniques like latent semantic analysis (LSA) and others get nowadays 
+(and rightfully so I think), not finding these features in Lucene was a 
+bit of a surprise. I still haven't looked at Mark's code, but I would be 
+surprised if he had to do much. But you still have to do something.
+
+After the more abstract talk a bit of a more concrete answer for your 
+question: one simple way of defining similarity of documents is just 
+treating the term frequencies of some (or all) terms as a vector space 
+and then use a metric in the vector space to define distance. If you 
+have two frequency maps, you can for example go through all keys in 
+them, create all differences of the values attached (assuming null if a 
+term is not in a map) and sum them up (giving you the manhattan metric 
+in R^n), then you divide by the numbers of terms to normalize (the 
+frequency maps are probably of different lengths) and that might give 
+you a reasonable first try. If the result is zero, you consider the 
+documents to be extremely similar, the higher the value, the more 
+different they are suppossed to be.
+
+The approach I described is a bit too naive to be really good -- for 
+example I'd expect some bias towards more similarity on documents with 
+less terms. And there are so many other enhancements you could do. 
+Actually the whole idea is a field of research. And one I am not really 
+expert in, I just sometimes work with people who are. This might help:
+
+  
+http://citeseer.nj.nec.com/cs?q=latent+semantic+analysis&submit=Search+Documents&cs=1
+
+Maybe someone else on the list has better pointers.
+
+  Peter
+
+
+
+
+Terry Steichen wrote:
+
+>Hi Peter,
+>
+>I took a look at Mark's thesis and briefly at some of his code.  It appears
+>to me that what he's done with the so-called forward indexing is to (a)
+>include a unique id with each document (allowing retrieval by id rather than
+>by a standard query), and to (b) include a frequency map class with each
+>document (allowing easier retrieval of term frequency information).
+>
+>Now I may be missing something very obvious, but it seems to me that both of
+>these functions can be done rather easily with the standard (unmodified)
+>version of Lucene.  Moreover, I don't understand how use of these functions
+>will facilitate retrieval of documents that are "similar" to a selected
+>document, as outlined in my original question on this topic.
+>
+>Could you (or anyone else, of course) perhaps elaborate just a bit on how
+>using this approach will help achieve that end?
+>
+>Regards,
+>
+>Terry
+>
+>----- Original Message -----
+>From: "Peter Becker" <pbecker@dstc.edu.au>
+>To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>Sent: Thursday, August 21, 2003 1:37 AM
+>Subject: Re: Similar Document Search
+>
+>
+>  
+>
+>>Hi all,
+>>
+>>it seems there are quite a few people looking for similar features, i.e.
+>>(a) document identity and (b) forward indexing. So far we hacked (a) by
+>>using a wrapper implementing equals/hashcode based on a unique field,
+>>but of course that assumes maintaining a unique field in the index. (b)
+>>is something we haven't tackled yet, but plan to.
+>>
+>>The source code for Mark's thesis seems to be part of the Haystack
+>>distribution. The comments in the files put it under Apche-license. This
+>>seems to make it a good candidate to be included at least in the Lucene
+>>sandbox -- although I haven't tried it myself yet. But it sounds like a
+>>good candidate for us to use.
+>>
+>>Since the haystack source is a bit larger and I actually couldn't get
+>>the download at the moment, here is a copy of the relevant bit grabbed
+>>from one of my colleague's machines:
+>>
+>>  http://www.itee.uq.edu.au/~pbecker/luceneHaystack.tar.gz (22kb)
+>>
+>>Note that this is just a tarball of src/org/apache/lucene out of some
+>>Haystack source. Untested, unmodified.
+>>
+>>I'd love to see something like this supported in the Lucene context were
+>>people might actually find it :-)
+>>
+>>  Peter
+>>
+>>
+>>Gregor Heinrich wrote:
+>>
+>>    
+>>
+>>>Hello Terry,
+>>>
+>>>Lucene can do forward indexing, as Mark Rosen outlines in his Master's
+>>>thesis: http://citeseer.nj.nec.com/rosen03email.html.
+>>>
+>>>We use a similar approach for (probabilistic) latent semantic analysis
+>>>      
+>>>
+>and
+>  
+>
+>>>vector space searches. However, the solution is not really completely
+>>>      
+>>>
+>fixed
+>  
+>
+>>>yet, therefore no code at this time...
+>>>
+>>>Best regards,
+>>>
+>>>Gregor
+>>>
+>>>
+>>>
+>>>
+>>>-----Original Message-----
+>>>From: Peter Becker [mailto:pbecker@dstc.edu.au]
+>>>Sent: Tuesday, August 19, 2003 3:06 AM
+>>>To: Lucene Users List
+>>>Subject: Re: Similar Document Search
+>>>
+>>>
+>>>Hi Terry,
+>>>
+>>>we have been thinking about the same problem and in the end we decided
+>>>that most likely the only good solution to this is to keep a
+>>>non-inverted index, i.e. a map from the documents to the terms. Then you
+>>>can query the most terms for the documents and query other documents
+>>>matching parts of this (where you get the usual question of what is
+>>>actually interesting: high frequency, low frequency or the mid range).
+>>>
+>>>Indexing would probably be quite expensive since Lucene doesn't seem to
+>>>support changes in the index, and the index for the terms would change
+>>>all the time. We haven't implemented it yet, but it shouldn't be hard to
+>>>code. I just wouldn't expect good performance when indexing large
+>>>collections.
+>>>
+>>> Peter
+>>>
+>>>
+>>>Terry Steichen wrote:
+>>>
+>>>
+>>>
+>>>      
+>>>
+>>>>Is it possible without extensive additional coding to use Lucene to
+>>>>        
+>>>>
+>conduct
+>  
+>
+>>>>        
+>>>>
+>>>a search based on a document rather than a query?  (One use of this would
+>>>      
+>>>
+>be
+>  
+>
+>>>to refine a search by selecting one of the hits returned from the initial
+>>>      
+>>>
+>
+>  
+>
+>>>query and subsequently retrieving other documents "like" the selected
+>>>      
+>>>
+>one.)
+>  
+>
+>>>      
+>>>
+>>>>Regards,
+>>>>
+>>>>Terry
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>        
+>>>>
+>>>
+>>>---------------------------------------------------------------------
+>>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>
+>>>
+>>>
+>>>---------------------------------------------------------------------
+>>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>
+>>>
+>>>      
+>>>
+>>
+>>---------------------------------------------------------------------
+>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+>>    
+>>
+>
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>  
+>
+
+
+

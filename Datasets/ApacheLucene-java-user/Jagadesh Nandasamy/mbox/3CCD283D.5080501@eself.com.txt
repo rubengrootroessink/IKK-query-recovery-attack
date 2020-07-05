@@ -1,0 +1,649 @@
+FROM: Jagadesh Nandasamy <ja...@eself.com>
+SUBJECT: Re: FileNotFoundException: code example
+DATE: 29 Apr 2002
+
+Hi petite,
+        I will try to be brief...
+        In lucene the number of files created depends on the number of 
+fields the document has....
+        so lets take an example you want to index 100 files
+        if each file contains 10 fields
+             document.add(Field.Text(UNIQUE_ID, "12345678"))
+             ...
+             ...
+             ...
+             document.add(new Field(UNIQUE_TYPE, "xxxxxxxxxxxxx", true, 
+true, false));
+             document.add(new Field(PATH, "c:\xxx\yyy\zzz.doc", true, 
+true, false));
+
+        if in all the 100 documents, if all the 10 fields created have 
+their field's key or name
+        (ie UNIQUE_ID, UNIQUE_TYPE, PATH)the same then the number of 
+files created by lucene
+        remains under control. (MIND YOU the values of the fields can be 
+different)
+        Say for the above scenerio if the number of index files created 
+are about 80(for 100 documents
+        with 10 field's each), If you add another million documents with 
+same 10 fields the number
+        of index files would remain the same it would not create any 
+more _f12 , _xxx files.
+       
+        In contrast say for the same number of documents if you create 
+10 fields that are different
+        for different documents like for the first document if you 
+create a field like
+           
+            document.add(new Field("Doc_PATH_1", "c:\xxx\yyy\zzz.doc", 
+true, true, false));
+           
+        and
+            document.add(new Field("Doc_PATH_2", "c:\xxx\yyy\zzz.doc", 
+true, true, false));
+        for second document.   
+           
+        I think for each new field that is created about 3 files are 
+created in index directory
+        so you would end up having 1000's of files in index directory 
+which would cause the
+        "Too many files opened problem".
+       
+        And i think you dont have to be bothered about which OS you are 
+using.
+       
+       
+        Hope this helps...
+       
+-Jaggi
+           
+
+
+petite_abeille wrote:
+
+> Hello again,
+>
+> attached is the source code of the only class interacting directly 
+> with Lucene in my app. Sorry for not providing a complete test case as 
+> it's hard for me to come up with something self contained. Maybe there 
+> is something that's obviously wrong in what I'm doing.
+>
+> Thanks for any help.
+>
+> PA
+>
+>
+>------------------------------------------------------------------------
+>
+>//
+>//	===========================================================================
+>//
+>//	Title:		SZIndex.java
+>//	Description:	[Description]
+>//	Author:		Raphael Szwarc <raphael_szwarc@hotmail.com>
+>//	Creation Date:	Wed Sep 12 2001
+>//	Legal:		Copyright (C) 2001 Raphael Szwarc. All Rights Reserved.
+>//
+>//	---------------------------------------------------------------------------
+>//
+>
+>package alt.dev.szobject;
+>
+>import com.lucene.store.Directory;
+>import com.lucene.store.FSDirectory;
+>import com.lucene.store.RAMDirectory;
+>import com.lucene.document.Field;
+>import com.lucene.document.DateField;
+>import com.lucene.document.Document;
+>import com.lucene.analysis.Analyzer;
+>import com.lucene.analysis.standard.StandardAnalyzer;
+>import com.lucene.index.IndexWriter;
+>import com.lucene.index.IndexReader;
+>import com.lucene.index.Term;
+>import com.lucene.search.IndexSearcher;
+>import com.lucene.search.MultiSearcher;
+>import com.lucene.search.Searcher;
+>import com.lucene.search.Query;
+>import com.lucene.search.Hits;
+>
+>import java.io.FilenameFilter;
+>import java.io.File;
+>import java.io.IOException;
+>
+>import java.util.Map;
+>import java.util.Collection;
+>import java.util.Date;
+>import java.util.Iterator;
+>
+>import alt.dev.szfoundation.SZHexCoder;
+>import alt.dev.szfoundation.SZDate;
+>import alt.dev.szfoundation.SZSystem;
+>import alt.dev.szfoundation.SZLog;
+>
+>final class SZIndex extends Object
+>{
+>
+>//	===========================================================================
+>//	Constant(s)
+>//	---------------------------------------------------------------------------
+>
+>	private static final String	Extension = ".index";
+>
+>//	===========================================================================
+>//	Class variable(s)
+>//	---------------------------------------------------------------------------
+>
+>	private static final Filter	_filter = new Filter();
+>
+>//	===========================================================================
+>//	Instance variable(s)
+>//	---------------------------------------------------------------------------
+>
+>	private String			_path = null;
+>	private transient File		_directory = null;
+>	private transient Directory	_indexDirectory = null;
+>	private transient IndexWriter	_writer = null;
+>	
+>	private transient IndexReader	_reader = null;
+>	private transient Searcher	_searcher = null;
+>
+>	private transient Directory	_ramDirectory = null;
+>	private transient IndexWriter	_ramWriter = null;
+>	private transient int		_counter = 0;
+>
+>//	===========================================================================
+>//	Constructor method(s)
+>//	---------------------------------------------------------------------------
+>
+>	private SZIndex()
+>	{
+>		super();
+>	}
+>
+>//	===========================================================================
+>//	Class method(s)
+>//	---------------------------------------------------------------------------
+>
+>	static FilenameFilter filter()
+>	{
+>		return _filter;
+>	}
+>	
+>	static String stringByDeletingPathExtension(String aPath)
+>	{
+>		if ( aPath != null )
+>		{
+>			int	anIndex = aPath.lastIndexOf( SZIndex.Extension );
+>			
+>			if ( anIndex > 0 )
+>			{
+>				aPath = aPath.substring( 0, anIndex );
+>			}
+>			
+>			return aPath;
+>		}
+>		
+>		throw new IllegalArgumentException( "SZIndex.stringByDeletingPathExtension: null path."
+);
+>	}
+>
+>	static SZIndex indexWithNameInDirectory(String aName, File aDirectory)
+>	{
+>		if ( aName != null )
+>		{
+>			if ( aDirectory != null )
+>			{
+>				String	anEncodedName = SZHexCoder.encode( aName.getBytes() );
+>				//String	aPath = aDirectory.getPath() + File.separator + anEncodedName + SZIndex.Extension
++ File.separator;
+>				String	aPath = aDirectory.getPath() + File.separator + aName + SZIndex.Extension +
+File.separator;
+>				SZIndex	anIndex = new SZIndex();
+>			
+>				anIndex.setPath( aPath );
+>				
+>				return anIndex;
+>			}
+>
+>			throw new IllegalArgumentException( "SZIndex.indexWithNameInDirectory: null directory."
+);
+>		}
+>		
+>		throw new IllegalArgumentException( "SZIndex.indexWithNameInDirectory: null name." );
+>	}
+>
+>	static String stringForValue(Object aValue )
+>	{
+>		if ( aValue != null )
+>		{
+>			String	aStringValue = null;
+>						
+>			if ( ( aValue instanceof SZDate ) == true )
+>			{
+>				aValue = ( (SZDate) aValue ).internalDate();
+>			}
+>			else
+>			if ( ( aValue instanceof SZPersistent ) == true )
+>			{
+>				aValue = ( (SZPersistent) aValue ).id();
+>			}
+>						
+>			if ( ( aValue instanceof Date ) == true )
+>			{
+>				aStringValue = DateField.dateToString( (Date) aValue );
+>			}
+>			else
+>			if ( ( aValue instanceof SZID ) == true )
+>			{
+>				aStringValue = ( (SZID) aValue ).uuidString();
+>			}
+>			else
+>			{
+>				aStringValue = aValue.toString();
+>			}
+>			
+>			return aStringValue;
+>		}
+>
+>		throw new IllegalArgumentException( "SZIndex.stringForValue: null value." );
+>	}
+>	
+>//	===========================================================================
+>//	Instance method(s)
+>//	---------------------------------------------------------------------------
+>
+>	private String path()
+>	{
+>		return _path;
+>	}
+>	
+>	private void setPath(String aValue)
+>	{
+>		_path = aValue;
+>	}
+>	
+>	private File directory()
+>	{
+>		if ( _directory == null )
+>		{
+>			String	aPath = this.path();
+>			
+>			if ( aPath != null )
+>			{
+>				_directory = new File( aPath );
+>			
+>				if ( _directory.exists() == false )
+>				{
+>					_directory.mkdirs();
+>				}
+>			}
+>			else
+>			{
+>				throw new IllegalStateException( "SZIndex.directory: null path." );
+>			}
+>		}
+>		
+>		return _directory;
+>	}
+>	
+>	private boolean shouldCreate()
+>	{
+>		File		aDirectory = this.directory();
+>		String[]	aList = aDirectory.list();
+>		
+>		if ( ( aList == null ) || ( aList.length == 0 ) )
+>		{
+>			return true;
+>		}
+>		
+>		return false;
+>	}
+>	
+>	boolean exists()
+>	{
+>		File	aFile = this.directory();
+>		
+>		if ( aFile != null )
+>		{
+>			return aFile.exists();
+>		}
+>		
+>		return false;
+>	}
+>	
+>	private SZDate lastModifiedDate()
+>	{
+>		if ( this.exists() == true )
+>		{
+>			File	aDirectory = this.directory();
+>			Date	aDate = new Date( aDirectory.lastModified() );
+>			SZDate	aCalendarDate = SZDate.dateWithDate( aDate );
+>			
+>			return aCalendarDate;
+>		}
+>		
+>		return null;
+>	}
+>	
+>	public int hashCode()
+>	{
+>		return this.path().hashCode();
+>	}
+>	
+>	public boolean equals(Object anObject)
+>	{
+>		if ( this == anObject )
+>		{
+>			return true;
+>		}
+>		
+>		return this.path().equals( ( (SZIndex) anObject ).path() );
+>	}
+>
+>	protected void finalize() throws Throwable
+>	{
+>		if ( _writer != null )
+>		{
+>			this.optimize();
+>		}
+>					
+>		super.finalize();
+>	}
+>	
+>//	===========================================================================
+>//	Index method(s)
+>//	---------------------------------------------------------------------------
+>
+>	synchronized void optimize()
+>	{
+>		try
+>		{
+>			this.flush();
+>			
+>			if ( _writer != null )
+>			{
+>				_writer.optimize();
+>				_writer.close();
+>			
+>			}
+>			
+>			_writer = null;
+>			_indexDirectory = null;
+>		}
+>		catch(Exception anException)
+>		{
+>			anException.printStackTrace();
+>		
+>			SZLog.warning( anException );
+>			
+>			_writer = null;
+>			_indexDirectory = null;
+>
+>			SZSystem.gc();
+>		}
+>	}
+>	
+>				
+>	private Directory indexDirectory() throws IOException
+>	{
+>		if ( _indexDirectory == null )
+>		{
+>			File	aFile = this.directory();
+>			boolean	shouldCreate = this.shouldCreate();
+>			
+>			//_indexDirectory = FSDirectory.getDirectory( aFile, shouldCreate );
+>			_indexDirectory = new FSDirectory( aFile, shouldCreate );
+>		}
+>		
+>		return _indexDirectory;
+>	}
+>
+>	private IndexWriter writer() throws IOException
+>	{
+>		if ( _writer == null )
+>		{
+>			Directory	aDirectory = this.indexDirectory();
+>			Analyzer	anAnalyzer = new StandardAnalyzer();
+>			boolean		shouldCreate = this.shouldCreate();
+>			
+>			_writer = new IndexWriter( aDirectory, anAnalyzer, shouldCreate );
+>			_writer.mergeFactor = 2;
+>		}
+>
+>		return _writer;
+>	}
+>	
+>	private IndexReader reader() throws IOException
+>	{
+>		if ( _reader == null )
+>		{
+>			System.gc();
+>			
+>			_reader = IndexReader.open( this.indexDirectory() );
+>		}
+>		
+>		return _reader;
+>	}
+>	
+>	private Searcher searcher() throws IOException
+>	{
+>		if ( _searcher == null )
+>		{
+>			System.gc();
+>
+>			_searcher = new IndexSearcher( this.reader() );
+>		}
+>		
+>		if ( _ramDirectory != null )
+>		{
+>			Searcher	aRamSearcher = new IndexSearcher( IndexReader.open( _ramDirectory ) );
+>
+>			return new MultiSearcher( new Searcher[] { aRamSearcher, _searcher } );
+>		}
+>	
+>		return _searcher;
+>	}
+>
+>//	===========================================================================
+>//	RAM method(s)
+>//	---------------------------------------------------------------------------
+>
+>	private Directory ramDirectory() throws IOException
+>	{
+>		if ( _ramDirectory == null )
+>		{
+>			_ramDirectory = new RAMDirectory();
+>		}
+>		
+>		return _ramDirectory;
+>	}
+>
+>	private IndexWriter ramWriter() throws IOException
+>	{
+>		if ( _ramWriter == null )
+>		{
+>			Directory	aDirectory = this.ramDirectory();
+>			Analyzer	anAnalyzer = new StandardAnalyzer();
+>			
+>			_ramWriter = new IndexWriter( aDirectory, anAnalyzer, true );
+>		}
+>
+>		return _ramWriter;
+>	}
+>	
+>	private void flush() throws IOException
+>	{
+>		if ( ( _ramDirectory != null ) && 
+>			( _ramDirectory.list() != null ) && 
+>			( _ramDirectory.list().length > 0 ) && 
+>			( _ramWriter != null ) )
+>		{
+>			_ramWriter.optimize();
+>			_ramWriter.close();
+>		
+>			this.writer().addIndexes( new Directory[] { _ramDirectory } );
+>			
+>			_ramWriter = null;
+>			_ramDirectory = null;
+>			
+>			_reader = null;
+>			_searcher = null;
+>		}
+>	}
+>
+>//	===========================================================================
+>//	Indexing method(s)
+>//	---------------------------------------------------------------------------
+>
+>	synchronized Hits search(Query aQuery) throws IOException
+>	{
+>		if ( aQuery != null )
+>		{
+>			if ( this.shouldCreate() == false )
+>			{
+>				return this.searcher().search( aQuery );
+>			}
+>			
+>			return null;
+>		}
+>		
+>		throw new IllegalArgumentException( "SZIndex.search: null query." );
+>	}
+>
+>	synchronized void deleteIndexWithID(SZID anID) throws IOException
+>	{
+>		if ( anID != null )
+>		{
+>			if ( this.shouldCreate() == false )
+>			{
+>				String		aValue = SZIndex.stringForValue( anID );
+>				Term		aTerm = new Term( SZDescription.IDKey, aValue );
+>				IndexReader	aReader = this.reader();
+>					
+>				aReader.delete( aTerm );
+>			}
+>
+>			return;
+>		}
+>		
+>		throw new IllegalArgumentException( "SZIndex.deleteIndexWithID: null id." );
+>	}
+>
+>	synchronized void indexValuesWithID(Map someValues, SZID anID) throws IOException
+>	{
+>		if ( someValues != null )
+>		{
+>			if ( anID != null )
+>			{
+>				Class		aClass = anID.entity();
+>				SZDescription	aDescription = SZDescription.descriptionForClass( aClass );
+>				Collection	someUniqueKeys = aDescription.uniqueKeys();
+>				String		anIdentifier = SZIndex.stringForValue( anID );
+>				Field		anIdentifierField = Field.Keyword( SZDescription.IDKey, anIdentifier );
+>				String		aClassName = anID.entity().getName();
+>				Field		aClassField = Field.Keyword( SZDescription.ClassKey, aClassName );
+>				Document	aDocument = new Document();
+>				IndexWriter	aWriter = this.ramWriter();
+>				
+>				aDocument.add( anIdentifierField );
+>				aDocument.add( aClassField );
+>				
+>				for( Iterator anIterator = someValues.keySet().iterator(); anIterator.hasNext(); )
+>				{
+>					Object	aKey = anIterator.next();
+>					Object	aValue = someValues.get( aKey );
+>					String	aKeyName = aKey.toString();
+>					String	aStringValue = SZIndex.stringForValue( aValue );
+>					Field	aField = null;
+>
+>					if ( ( ( aValue instanceof SZPersistent ) == true ) ||
+>						( ( someUniqueKeys != null ) && ( someUniqueKeys.contains( aKeyName ) ==
+true ) ) )
+>					{
+>						aField = new Field( aKeyName, aStringValue, false, true, false) ;
+>					}
+>					else
+>					{
+>						aField = Field.UnStored( aKeyName, aStringValue );
+>					}
+>
+>					aDocument.add( aField );
+>				}
+>				
+>				aWriter.addDocument( aDocument );
+>				aWriter.optimize();
+>				
+>				_counter += 1;
+>				
+>				if ( _counter > 100 )
+>				{
+>					this.flush();
+>					_counter = 0;
+>				}
+>				
+>				return;
+>			}
+>
+>			throw new IllegalArgumentException( "SZIndex.indexValues: null id." );
+>		}
+>		
+>		throw new IllegalArgumentException( "SZIndex.indexValues: null values." );
+>	}
+>	
+>//	===========================================================================
+>//	FilenameFilter method(s)
+>//	---------------------------------------------------------------------------
+>
+>	private static final class Filter extends Object implements FilenameFilter
+>	{
+>	
+>		private Filter()
+>		{
+>			super();
+>		}
+>
+>		public boolean accept(File aDirectory, String aName)
+>		{
+>			if ( aName.endsWith( SZIndex.Extension ) == true )
+>			{
+>				File	aFile = new File( aDirectory, aName );
+>										
+>				if ( aFile.isDirectory() == true )
+>				{
+>					return true;
+>				}
+>			}
+>			
+>			return false;
+>		}
+>	}
+>	
+>}
+>
+>
+>------------------------------------------------------------------------
+>
+>--
+>To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+>For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+>
+> SZIndex.java
+>
+> Content-Type:
+>
+> text/plain
+> Content-Encoding:
+>
+> 7bit
+>
+>
+> ------------------------------------------------------------------------
+> Part 1.3
+>
+> Content-Type:
+>
+> text/plain
+>
+>
+
+

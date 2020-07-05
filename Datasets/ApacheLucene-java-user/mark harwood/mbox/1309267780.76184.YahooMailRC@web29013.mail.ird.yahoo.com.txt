@@ -1,0 +1,100 @@
+FROM: mark harwood <markharw...@yahoo.co.uk>
+SUBJECT: Re: Corrupt segments file full of zeros
+DATE: 28 Jun 2011
+
+Hi Mike. 
+>>Hmmm -- what code are you running here, to print the number of docs?
+
+SegmentInfos.setInfoStream(System.out);
+FSDirectory dir = FSDirectory.open(new File("j:/indexes/myindex"));
+IndexReader r = IndexReader.open(dir, true);
+System.out.println("index has "+r.maxDoc()+" docs");  
+
+From my own tests outside of Greg's environment I've found Lucene to be doing 
+all the right things and IndexReader falls back gracefully to the previous 
+commit e.g. here is the output from when I deliberately killed an update after 
+prepareToCommit, leaving segment_2 and segment_3 and  then vandalised segment_3 
+with all zero bytes:
+   SIS [main]: directory listing genA=3
+   SIS [main]: fallback check: 2; 2
+   SIS [main]: segments.gen check: genB=2
+   SIS [main]: primary Exception on 'segments_3': java.io.IOException: read past 
+EOF'; will retry: retry=false; gen = 3
+   SIS [main]: fallback to prior segment file 'segments_2'
+   SIS [main]: success on fallback segments_2
+
+Lucene does the right thing going back to _2. I can't yet see why in Greg's 
+environment (NFS based) it fails to see _4vc as corrupt in the same way the 
+above test correctly sees _3 as corrupt.
+
+Cheers
+Mark
+
+
+----- Original Message ----
+From: Michael McCandless <lucene@mikemccandless.com>
+To: java-user@lucene.apache.org
+Sent: Tue, 28 June, 2011 14:04:40
+Subject: Re: Corrupt segments file full of zeros
+
+On Tue, Jun 28, 2011 at 8:53 AM, Tarr, Gregory <Gregory.tarr@detica.com> wrote:
+> Michael
+>
+> We are not using commit points unfortunately.
+
+That's fine -- even if you don't keep multiple commit points in your
+index, when a commit() op fails, then you can end up with two
+segments_N files.  The older one is "good" (last successful commit)
+and the new one is broken.
+
+> This was a scheduled update to our index, and on observation the index 
+>directory had two segments_N files:
+>
+> segments_4vb (modified 24 June 2011 02:05:38 size 7.61KB)
+> segments_4vc (modified 24 June 2011 02:20:42 size 5.91KB)
+
+OK, so you have 2 segments_N files because something went wrong during
+commit of the 2nd one.
+
+> We were not sure which one of these was the real one, so we deleted 4vb and got 
+>the following from SegmentInfos:
+
+It will always be the "older" one that was the last successful commit,
+unless you keep multiple commit points in the index.
+
+> Directory listing genA=6312
+> Fallback check: 6311; 6311
+> Segments.gen check: genB=6311
+> Index has 0 docs
+
+Hmmm -- what code are you running here, to print the number of docs?
+new IndexWriter(), with create=true?  I would have expected IR.open to
+throw an exc here.
+
+> We then deleted 4vc and got the following:
+>
+> Directory listing genA=6311
+> Fallback check: 6311; 6311
+> Segments.gen check: genB=6311
+> Index has 40022898 docs
+>
+> Opening 4vc in an octal editor yields only ASCII zeros (0000000 nul nul nul nul 
+>nul nul nul....etc). It may be that Windows is responsible for this, as our 
+>indexes are accessed through a fileserver and we know that a delayed write 
+>occurred.
+>
+> My question is: why does an index with 4vc open?
+
+I'm not sure, unless you are opening with IW and create=true.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

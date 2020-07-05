@@ -1,0 +1,97 @@
+FROM: Daryl Thachuk <da...@montagetech.com>
+SUBJECT: Re: Indexing problem
+DATE: 2 Nov 2001
+
+That makes sense. Thanks for the explanation Dave. I'll make the 
+appropriate changes to my code.
+
+Thanks again for your help
+
+-daryl
+
+On Friday, November 2, 2001, at 09:49  AM, Doug Cutting wrote:
+
+> Sigh.
+>
+> IndexReader now keeps all files that are not read entirely into memory 
+> open
+> as long as the IndexReader is open.  This was to fix the bug where 
+> another
+> thread or process, while updating the index, would delete files that an 
+> open
+> index reader might need.  So there are now a few more files kept open 
+> per
+> segment, making it easier to run out of file handles.  IndexWriter uses
+> IndexReader internally, so the number of open files while indexing has 
+> also
+> increased.
+>
+> In particular, there are five files, plus one per field, kept open per
+> segment.  While indexing, a maximum of IndexWriter.MergeFactor+1 
+> segments
+> are ever open at once.  So a million document, three field index with
+> IndexWriter.MergeFactor=10, would have a maximum of 88 files open at a 
+> time
+> while indexing.
+>
+> Note however, that an IndexReader must keep all segments open.  The 
+> maximum
+> number of segments in an index is (k - 1) * ( log_k(N) - 1), where k is 
+> the
+> IndexWriter.mergeFactor and N is the number of documents.  So an index 
+> with
+> a million documents could have up to 45 segments (on average it will 
+> have
+> 22.5).  With three fields, an unoptimized IndexReader would require a
+> maximum of 360 open files.  Once optimized to a single segment, it would
+> require only 8 open files.
+>
+> In practice, this should not be a problem.  Have you raised
+> IndexWriter.mergeFactor?  If so, try lowering it to the default, 10.  
+> Are
+> you also opening IndexReaders in the same process?  If so, keep just 
+> one per
+> index, shared by all search threads, and, if possible, only open a new 
+> one
+> when the index has just been optimized.  Ideally, document additions 
+> should
+> be batched, and finished by a call to optimize().  Not only do optimized
+> indexes have fewer files open, but they're must faster to search.
+>
+> Strictly speaking, since there is only supposed to be a single writer 
+> for an
+> index at a time, IndexWriter does not need to keep files open except 
+> when it
+> is using them.  So the number of file handles used while indexing could 
+> be
+> reduced if IndexWriter were permitted to open IndexReaders in a special
+> private mode, where files are opened on demand and closed prompty.  That
+> said, this might permit you to more easily create an index that you 
+> cannot
+> read!
+>
+> On the upside, at search time, each query used to open a file per term 
+> (two
+> files per phrase term) per segment.  So big queries, or lots of 
+> concurrent
+> small ones, used to run out of file handles.  This is no longer the 
+> case.
+> IndexReader now opens every file once and only once.  Now it just keeps 
+> most
+> of them open...
+>
+> Doug
+>
+>
+>
+------
+Daryl Thachuk		daryl@montagetech.com
+Montage Technologies Inc.
+http://www.montagetech.com
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

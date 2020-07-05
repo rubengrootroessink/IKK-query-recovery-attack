@@ -1,0 +1,266 @@
+FROM: "Luke Shannon" <lshan...@futurebrand.com>
+SUBJECT: Re: Parsing The Query: Every document that doesn't have a field containing x
+DATE: 4 Feb 2005
+
+Thanks for everyone who has been posting possible solutions. I am making
+great progress and learning a lot.
+
+This works, but the results include files that don't even contain a
+"kcfileupload" field (not good):
+
+query1 = QueryParser.parse("jpg", "kcfileupload", new StandardAnalyzer());
+query2 = QueryParser.parse("stillhere", "olfaithfull", new
+StandardAnalyzer());
+BooleanQuery typeNegativeSearch = new BooleanQuery();
+typeNegativeSearch.add(query1, false, true);
+typeNegativeSearch.add(query2, true, false);
+
+Someone meantioned a filter. So I have been playing with the test below.
+
+The problem I have is this line:
+
+Query query2 = QueryParser.parse("*", "kcfileupload", new
+StandardAnalyzer());
+
+Results in the following error:
+
+org.apache.lucene.queryParser.ParseException: Lexical error at line 1,
+column 2.  Encountered: <EOF> after : ""
+
+I was hoping it would create a wild card search on kcfileupload. I feel like
+I am getting close to a good solution. Any tips would help.
+
+Thanks,
+
+Luke
+
+import junit.framework.TestCase;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryFilter;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.store.RAMDirectory;
+
+public class IsNotTypeTest extends TestCase {
+
+    private RAMDirectory directory;
+
+    protected void setUp() throws Exception {
+        directory = new RAMDirectory();
+        IndexWriter writer = new IndexWriter(directory,
+            new StandardAnalyzer(), true);
+
+        //jpg should show up in first query
+        Document document = new Document();
+        document.add(Field.Text("kcfileupload", "picture.jpg"));
+        document.add(Field.Text("name", "pic one"));
+        writer.addDocument(document);
+
+        //jpg should show up in first query
+        document = new Document();
+        document.add(Field.Text("kcfileupload", "picture2.jpg"));
+        document.add(Field.Text("name", "pic two"));
+        writer.addDocument(document);
+
+        //pdf should show up in second query
+        document = new Document();
+        document.add(Field.Text("kcfileupload", "file.pdf"));
+        document.add(Field.Text("name", "pdf one"));
+        writer.addDocument(document);
+
+        //ppt should show up in second query
+        document = new Document();
+        document.add(Field.Text("kcfileupload", "file.ppt"));
+        document.add(Field.Text("name", "power point one"));
+        writer.addDocument(document);
+
+        //ppt should show up in second query
+        document = new Document();
+        document.add(Field.Text("kcfileupload", "file2.ppt"));
+        document.add(Field.Text("name", "power point two"));
+        writer.addDocument(document);
+
+        //other should not show in this test
+        document = new Document();
+        document.add(Field.Text("name", "link"));
+        document.add(Field.Text("address", "www.cbc.ca"));
+        writer.addDocument(document);
+
+        writer.close();
+
+    }
+
+    public void testIsNotType() throws Exception {
+        IndexSearcher searcher = new IndexSearcher(directory);
+        Query query1 = QueryParser.parse("jpg", "kcfileupload", new
+StandardAnalyzer());
+        Query query2 = QueryParser.parse("*", "kcfileupload", new
+StandardAnalyzer());
+        QueryFilter jpgFilter = new QueryFilter(new TermQuery(new
+Term("kcfileupload", "jpg")));
+        Hits hits = searcher.search(query1);
+        assertEquals(2, hits.length());
+        int totalHits = hits.length();
+        int count = 0;
+        while (count < totalHits) {
+            Document current = (Document)hits.doc(count);
+            System.out.println("The upload is " + count + " is " +
+current.getField("kcfileupload"));
+            count++;
+        }
+        hits = searcher.search(query2, jpgFilter);
+        assertEquals(3, hits.length());
+        totalHits = hits.length();
+        count = 0;
+        while (count < totalHits) {
+            Document current = (Document)hits.doc(count);
+            System.out.println("The upload is " + count + " is " +
+current.getField("kcfileupload"));
+            count++;
+        }
+    }
+
+}
+
+
+----- Original Message ----- 
+From: "张瑾" <prettykely@gmail.com>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Friday, February 04, 2005 2:12 AM
+Subject: Re: Parsing The Query: Every document that doesn't have a field
+containing x
+
+
+I  think you may can use a filter to get right result!
+See examlples below
+package lia.advsearching;
+
+import junit.framework.TestCase;
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.QueryFilter;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.store.RAMDirectory;
+
+public class SecurityFilterTest extends TestCase {
+  private RAMDirectory directory;
+
+  protected void setUp() throws Exception {
+    directory = new RAMDirectory();
+    IndexWriter writer = new IndexWriter(directory,
+        new WhitespaceAnalyzer(), true);
+
+    // Elwood
+    Document document = new Document();
+    document.add(Field.Keyword("owner", "elwood"));
+    document.add(Field.Text("keywords", "elwoods sensitive info"));
+    writer.addDocument(document);
+
+    // Jake
+    document = new Document();
+    document.add(Field.Keyword("owner", "jake"));
+    document.add(Field.Text("keywords", "jakes sensitive info"));
+    writer.addDocument(document);
+
+    writer.close();
+  }
+
+  public void testSecurityFilter() throws Exception {
+    TermQuery query = new TermQuery(new Term("keywords", "info"));
+
+    IndexSearcher searcher = new IndexSearcher(directory);
+    Hits hits = searcher.search(query);
+    assertEquals("Both documents match", 2, hits.length());
+
+    QueryFilter jakeFilter = new QueryFilter(
+        new TermQuery(new Term("owner", "jake")));
+
+    hits = searcher.search(query, jakeFilter);
+    assertEquals(1, hits.length());
+    assertEquals("elwood is safe",
+        "jakes sensitive info", hits.doc(0).get("keywords"));
+  }
+
+}
+
+
+On Thu, 3 Feb 2005 13:04:50 -0500, Luke Shannon
+<lshannon@futurebrand.com> wrote:
+> Hello;
+>
+> I have a query that finds document that contain fields with a specific
+> value.
+>
+> query1 = QueryParser.parse("jpg", "kcfileupload", new StandardAnalyzer());
+>
+> This works well.
+>
+> I would like a query that find documents containing all kcfileupload
+fields
+> that don't contain jpg.
+>
+> The example I found in the book that seems to relate shows me how to find
+> documents without a specific term:
+>
+> QueryParser parser = new QueryParser("contents", analyzer);
+> parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+>
+> But than it says:
+>
+> Negating a term must be combined with at least one nonnegated term to
+return
+> documents; in other words, it isn't possible to use a query like NOT term
+to
+> find all documents that don't contain a term.
+>
+> So does that mean the above example wouldn't work?
+>
+> The API says:
+>
+>  a plus (+) or a minus (-) sign, indicating that the clause is required or
+> prohibited respectively;
+>
+> I have been playing around with using the minus character without much
+luck.
+>
+> Can someone give point me in the right direction to figure this out?
+>
+> Thanks,
+>
+> Luke
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+
+
+-- 
+愿你快乐每一天
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

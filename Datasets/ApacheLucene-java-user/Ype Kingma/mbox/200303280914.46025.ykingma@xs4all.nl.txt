@@ -1,0 +1,148 @@
+FROM: Ype Kingma <ykin...@xs4all.nl>
+SUBJECT: Re: Very large queries?
+DATE: 28 Mar 2003
+
+Gary,
+
+On Thursday 27 March 2003 15:34, gary.h.merrill@gsk.com wrote:
+> Let me describe what the goal is and how I could use Verity to accompish
+> this -- provided that Verity did not impose the limits it does.
+>
+> The documents being indexed are small, completely unstructured, textual
+> descriptions of adverse events involving one or more drugs, one or more
+> medical conditions, and potentially other relevant and irrelevant
+> information.  By "small" I mean that they are typically on the order of
+> several sentences in length.
+>
+> Assume that the initial goal is to identify pairwise associations of drugs
+> and conditions in such documents.  Moreover, we would want not only to
+> identify drug/condition pairs, but more broadly to identify
+> type-of-drug/type-of-condition pairs.  For example, the set of adverse
+> event reports might not contain a significant number of reports about a
+> *specific* drug and a *specific* condition -- such as (just as an example)
+> 'aspirin' and 'blood pressure' -- but it might contain a significant number
+> of reports about a particular *class* of drugs (therapeutic class or
+> pharmacological class) and a particular *class* of conditions -- such as
+> 'beta-blockers' and 'cardiac events'.
+>
+> Viewed as an information retrieval problem (not the best way to view it,
+> but this is just an initial approach), one could then (1) create a taxonomy
+> of drugs and a taxonomy of conditions, and (2) implement a concept-oriented
+> (taxonomy-oriented) search of the corpus for something like:
+>                     {beta_blocker} AND {cardiac_condition}
+> where '{beat_blocker}' expands via the taxonomy to the set of terms (words,
+> sequences of words, etc.) that "fall under" that "concept" in the drug
+> taxonomy and similarly for '{cardiac_condition}' under the condition
+> taxonomy.
+>
+> A good search engine would then return (for any document in which the query
+> is matched), the exact string(s) matching the query (e.g., 'thrombosis' or
+> 'infarction' in the case of '{cardiac_condition}').  That is, from a very
+> general query (phrased in terms of 'concepts' or 'categories'), you would
+> get returned associations of specific terms and phrases.  Actually, Verity
+> does this pretty nicely once you transform your taxonomy into a Verity
+> topic set.
+
+Lucene has no direct support for returning actually matched terms.
+The closest thing is the term highlighting, which is being worked on
+in the Lucene contributions. Iirc they do it by retrieval of each hit
+and string searching the query terms in the original text.
+In case you only need the actually matched terms in a search you'll
+probably need to extend the search engine to visit the actually
+matched terms.
+
+> You can then take these specific associations you have identified
+> (retrieved) and see what generalizations they fall under from the point of
+> view of the taxonomy -- hoping to identify associations between classes of
+> drugs and classes of conditions.  (How you do this, I omit here.)
+>
+> Ideally, your initial search should then simply be the most general one
+> possible -- say of the form:
+>
+>                     {drug} AND {condition}
+>
+> (actually, probably not quite this simple; but you get the idea).  The
+> problem is that '{drug}' will expand into (logically) a disjunctive term of
+> 60,000 subterms, and '{condition}' will likewise expand into a disjunctive
+> term of multiple thousands of terms.  Something logically equivalent to:
+>
+>                   (drug_1 OR drug_2 ... OR drug_60000) AND (condition_1 OR
+> condition_2 OR ... condition_5000)
+>
+> Verity's implementation of their query constructor (it generates a machine
+> to do the matching) imposes a limit of 1,024 child nodes of any single
+> disjunctive node (roughly speaking) and a collective limit of (16,000/3)
+> nodes for a topic.  Prior to hitting the limit, Verity does just swell.
+
+AFAIK Lucene has no builtin limitations on query size. I used queries
+of several hundreds of terms (no AND operator) on an intermediate size 
+collection of documents (about 1GB index size including stored text, about 
+100,000 docs, ie. 10kB/doc including index size) and Lucene just did it, 
+although quite a bit slower than for smaller queries.
+The algorithms used in Lucene are geared towards smaller queries, however.
+
+> So, with that much more context, the question can now be rephrased as to
+> whether there is any problem with Lucene handling queries such as the one
+> above where there are disjunctive sub-queries with that many terms.
+>
+> You can see, I think, that this has nothing to do with categorization (at
+> least in the usual sense).  It is, in fact, an attempt to use a search
+> engine to accomplish information extraction.  I was hoping to do this in
+> order to get some quick and relatively easy results -- and I could if
+> Verity didn't have these scaleability problems.  The one suggestion I have
+> seen so far in the responses that seems relevant to the problem is the
+> suggestion to transform the taxonomy (taxonomies) into an Analyzer.
+> Without looking at the implementation of Lucene I can't say how easy or
+> successful that would be.  Certainly it would be possible to transform any
+
+Basically, this approach add the taxonomy of each term to the document and
+then indexes the document.
+You can eg. add the the taxonomy terms in separate fields of each document.
+(Any change to a document requires that the document is reindexed completely.)
+
+> such taxonomy into a FSA representation that could serve as what I
+> understand an Analyzer to be.  But I was hoping that perhaps that was what
+
+Analyzers are normally used for stemming and stop words.
+
+> Lucene already did in building a query!!  If I have to generate my own FSAs
+
+One normally uses the same analyzer for the query and the index builder.
+
+> from my own queries, and have to implement such features as stemming and
+> the like as part of the process, it's not obvious that I shouldn't just do
+> it from scratch -- in which case I would most likely do it in C (or
+> Python+C) rather than Java,  with an eye towards increased performance.
+
+In case you like Python, I can wholeheartedly recommend to use Jython with 
+Lucene. Jython allows you to write some exploring software quickly.
+Normally most of the time will spent in the Lucene engine anyway, so you
+don't even get a performance penalty. A bit of Jython profiling will
+show you the bottlenecks, and when they are in Jython code, you can
+directly reimplement that code in Java.
+For explorations you can even extend the search engine with jython code,
+and later move this to Java, once you determined the right algorithm.
+
+In my normal case (somewhat more complex queries than expected on a search
+page of a site) the bottleneck is not the search, but the retrieval of stored 
+fields.
+
+> Any additional insight will be appreciated.
+
+In case your taxonomy is relatively stable, I'd recommend to add taxonomy
+related terms to your documents, index this in Lucene, and evt. extend the 
+search engine to visit the actually matching terms for each document.
+Alternatively, the information you get from queries, (eg. total document 
+score) might be good enough for your retrieval purposes.
+I don't know whether Verity allows it, but Lucene also allows to scan its 
+index to obtain the terms with the most interesting document frequencies.
+
+Kind regards,
+Ype Kingma
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

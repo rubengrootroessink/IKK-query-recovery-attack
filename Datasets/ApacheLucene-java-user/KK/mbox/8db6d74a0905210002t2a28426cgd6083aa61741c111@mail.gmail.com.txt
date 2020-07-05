@@ -1,0 +1,224 @@
+FROM: KK <dioxide.softw...@gmail.com>
+SUBJECT: Re: Posting unicode data to lucene not working during	searching/retreival!
+DATE: 21 May 2009
+
+Thanks for your quick response. Let me explain the whole thing.
+I'm downloading the pages for give urls and then extracting text and
+converting that to unicode utf-8 this way,
+
+byte [] utfEncodeByteArray = textOnly.getBytes();
+String utfString = new String(utfEncodeByteArray, Charset.forName("UTF-8"));
+
+here textonly is the text extracted from the downloaded page, and this is
+the way i'm donwloading the pages,
+private String downloadPage(URL pageUrl) {
+        try {
+            // Open connection to URL for reading.
+            BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(
+                    pageUrl.openStream()));
+
+            // Read page into buffer.
+            String line;
+            StringBuffer pageBuffer = new StringBuffer();
+            while ((line = reader.readLine()) != null) {
+                pageBuffer.append(line);
+            }
+
+            return pageBuffer.toString();
+        } catch (Exception e) {
+        }
+
+        return null;
+}
+
+I'm I going wrong anywhere, do I've to specify the charset when opening hte
+bufferedReader?
+And yes for indexing I'm using ,
+package solrSearch;
+
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+
+public class SimpleIndexer {
+
+  // Base Path to the index directory
+  private static final String baseIndexPath = "/opt/lucene/index/";
+
+
+  public void createIndex(String pageContent, String pageId, String coreId)
+throws Exception {
+    String trueIndexPath = baseIndexPath + "core" + coreId ;
+    String contentField = "content";
+    String idField    = "id";
+
+    // Create a writer
+    IndexWriter writer = new IndexWriter(trueIndexPath, new
+StandardAnalyzer());
+
+    System.out.println("Adding page to lucene " + pageId);
+    Document doc = new Document();
+    doc.add(new Field(contentField, pageContent, Field.Store.YES,
+Field.Index.TOKENIZED));
+    doc.add(new Field(idField, pageId, Field.Store.YES,
+Field.Index.TOKENIZED));
+
+    // Add documents to the index
+    writer.addDocument(doc);
+
+    // Lucene recommends calling optimize upon completion of indexing
+    writer.optimize();
+
+    // clean up
+    writer.close();
+  }
+
+  public static void main(String args[]) throws Exception{
+       SimpleIndexer empIndex = new SimpleIndexer();
+    empIndex.createIndex("this is sample test content", "test0", "core0");
+    System.out.println("Data indexed by lucene");
+  }
+
+}
+
+and for searcher this is the code
+package solrSearch;
+
+import java.io.FileReader;
+import org.stringtree.json.JSONWriter;
+import java.util.*;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.FilterIndexReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.HitCollector;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.TopDocCollector;
+
+/** Simple searcher  */
+public class SimpleSearcher {
+    private static final String baseIndexPath = "/opt/lucene/index/" ;
+    private Map resultMap = new HashMap();
+
+    public String searchIndex(String queryString, String coreId) throws
+Exception{
+        String result = "@#";
+        String trueIndexPath = baseIndexPath + "core" + coreId;
+        String searchField = "content";
+         IndexSearcher searcher = new IndexSearcher(trueIndexPath);
+        QueryParser queryParser = null;
+        try {
+            queryParser = new QueryParser(searchField, new
+StandardAnalyzer());
+        } catch (Exception ex) {
+             ex.printStackTrace();
+        }
+
+        Query query = queryParser.parse(queryString);
+
+        Hits hits = null;
+        try {
+             hits = searcher.search(query);
+        } catch (Exception ex) {
+             ex.printStackTrace();
+        }
+
+        int hitCount = hits.length();
+        System.out.println("Results found :" + hitCount);
+
+        for (int ix=0; (ix<hitCount && ix<10); ix++) {
+             Document doc = hits.doc(ix);
+            System.out.println(doc.get("id"));
+            System.out.println(doc.get("content"));
+            result = result + doc.get("id") + "," + doc.get("content");
+            resultMap.put(doc.get("id"), doc.get("content"));
+        }
+        JSONWriter writer = new JSONWriter();
+        return writer.write(resultMap);
+        //return result;
+    }
+
+    public static void main(String args[]) throws Exception{
+         SimpleSearcher searcher = new SimpleSearcher();
+        String queryString = args[0];
+        System.out.println("Quering for :" + queryString);
+        searcher.searchIndex(queryString, "0");
+    }
+
+}
+NB: Please ignore improper naming conventions. indentations etc.
+Can some one point me whats going wrong. And one more thing when I tried to
+see the indexed docs using the LUKE, I found that the doc content contains
+one regional char and then &#2367 like this but when I clicked "show " for
+that page it showed me the true regional content wihtout any of "?" or the
+above &#... things. It seems the indexing is fine but I've to modify my
+searcher . How to do that, any hints? Thank you very much. One more thing
+when searching throuh luke I'm able to see many results but through my
+SimpleSearcher class I'm not able to see all these results for the same
+query. What could be the reason?
+
+Thanks,
+KK.
+
+
+
+On Thu, May T21, 2009 at 12:03 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+
+> Indexed data is coming out in the same way as put in. Lucene works with
+> Java
+> Strings, so encoding is irrelevant. When you index your values, you must be
+> sure, to construct your index string/char arrays correctly using the UTF-8
+> encoding (e.g. by using a standard Java Reader, new String byte[], charset)
+> and so on. When you then print stored fields you must do the same in the
+> other direction. So the general rule: Always specify the correct charset
+> when converting to/from strings to bytes.
+> For searching: It roughly also depends also on the Analyzer used during
+> indexing and searching. Often analyzers written for specific languages
+> cannot correctly handle characters from foreign languages. But e.g.
+> StandardAnalyzer or WhitespaceAnalyzer does not modify the tokens in any
+> way
+> (if making them lowercase is not a problem).
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+> > -----Original Message-----
+> > From: KK [mailto:dioxide.software@gmail.com]
+> > Sent: Thursday, May 21, 2009 3:25 PM
+> > To: java-user@lucene.apache.org
+> > Subject: Posting unicode data to lucene not working during
+> > searching/retreival!
+> >
+> > How to post utf-8 unicoded data to lucene index. Do we have to specify
+> > something special, any sort of flag saying that we're posting unicoded
+> > data?
+> > I tried to post some utf-8 encoded data, during retrieval I'm not able to
+> > see those data , there are just "?" marks in all those places. Earlier I
+> > was
+> > using Solr and I was posting using the same method and retreival was also
+> > working fine, but I dont' know what is the issue with lucene, may be I'm
+> > missing something. Can someone tell me what could be the issue? Thank
+> you.
+> >
+> > KK,
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

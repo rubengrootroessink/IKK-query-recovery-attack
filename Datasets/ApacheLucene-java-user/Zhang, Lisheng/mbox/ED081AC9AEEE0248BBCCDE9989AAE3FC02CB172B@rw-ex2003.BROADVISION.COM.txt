@@ -1,0 +1,186 @@
+FROM: "Zhang, Lisheng" <Lisheng.Zh...@BroadVision.com>
+SUBJECT: RE: Need Help: Lucene with PHP/Java Bridge
+DATE: 23 Oct 2010
+
+Hi,
+
+Have you compared your java version in these two boxes? Also PHP version?
+Did you run indexer from command line or from browser?
+
+I used Zend java bridge before and found java version too low may cause 
+problem?
+
+Best regards, Lisheng
+
+
+-----Original Message-----
+From: dian puma [mailto:dianpuma@gmail.com]
+Sent: Saturday, October 23, 2010 9:01 AM
+To: java-user@lucene.apache.org
+Subject: Need Help: Lucene with PHP/Java Bridge
+
+
+Dear All,
+
+Currently, I'm using PHP/Java Bridge to have Lucene in my PHP web
+application, and also using the java extension for PHP.
+
+FYI, I'd setup lucene on my PC several months ago and my code below worked well.
+
+But, Today I try to setup lucene on another PC, and I get an error message:
+
+==========================================
+indexing ... Exception occured: [[o:Exception]:"java.lang.Exception:
+CreateInstance failed: new
+org.apache.lucene.index.IndexWriter((o:Directory)[o:String],
+(o:Analyzer)[c:StandardAnalyzer],
+(o:IndexWriter$MaxFieldLength)[o:Boolean]). Cause:
+java.lang.IllegalArgumentException:
+java.lang.ClassCastException@18a992f Responsible VM:
+1.6.0_20@http://java.sun.com/" at: #-8
+sun.reflect.GeneratedConstructorAccessor2.newInstance(Unknown Source)
+#-7 sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:27)
+#-6 java.lang.reflect.Constructor.newInstance(Constructor.java:513) #0
+Java.inc(161): java_ThrowExceptionProxyFactory->getProxy(6, false) #1
+Java.inc(314): java_Arg->getResult(false) #2 Java.inc(317):
+java_Client->getWrappedResult(false) #3 Java.inc(481):
+java_Client->getInternalResult() #4 Java.inc(703):
+java_Client->createObject('org.apache.luce...', Array, true) #5
+Java.inc(702): java_create(Array, true) #6 Java.inc(834):
+java_create(Array, true) #7
+/usr/share/pear/lucene/org_apache_lucene_index_IndexWriter.php(29):
+Java->Java(Array) #8 /var/www/html/DLL/lucene/lucene_search.php(14):
+org_apache_lucene_index_IndexWriter->__construct('/tmp/idxHSQALS....',
+Object(org_apache_lucene_analysis_standard_StandardAnalyzer), true) #9
+{main}]
+==========================================
+
+Here is the code:
+<?php
+require_once('rt/java_io_File.php');
+require_once('rt/java_lang_System.php');
+require_once('rt/java_util_LinkedList.php');
+require_once('lucene/All.php');
+
+try {
+  echo "indexing ... ";
+  /* Create an index */
+  $cwd=getcwd();
+  /* create the index files in the tmp dir */
+  $tmp = create_index_dir();
+  $analyzer = new org_apache_lucene_analysis_standard_StandardAnalyzer();
+  $writer = new org_apache_lucene_index_IndexWriter($tmp, $analyzer, true);
+  $file = new java_io_File($cwd);
+  $files = $file->listFiles();
+  if(is_null($files)) {
+    $user = java_lang_System()->getProperty("user.name");
+    echo("$cwd does not exist or is not readable.\n");
+    echo("The directory must be readable by the user $user and it must not\n");
+    echo("be protected by a SEL rule.\n");
+    exit(1);
+  }
+  foreach($files as $f) {
+    $doc = new org_apache_lucene_document_Document();
+    $doc->add(new org_apache_lucene_document_Field(
+	       "name",
+	       $f->getName(),
+	       org_apache_lucene_document_Field__Store()->YES,
+	       org_apache_lucene_document_Field__Index()->UN_TOKENIZED));
+    $writer->addDocument($doc);
+  }
+  $writer->optimize();
+  $writer->close();
+  echo "done\n";
+
+  echo "searching... ";
+  /* Search */
+  $searcher = new org_apache_lucene_search_IndexSearcher($tmp);
+  $phrase = new org_apache_lucene_search_MatchAllDocsQuery();
+  $hits = $searcher->search($phrase);
+
+  /* Print result */
+  $iter = $hits->iterator();
+  $n = $hits->length();
+  echo "done\n";
+  echo "Hits: $n\n";
+
+  /* Instead of retrieving the values one-by-one, we store them into a
+   * LinkedList on the server side and then retrieve the list in one
+   * query:
+   */
+  $resultList = new java_util_LinkedList();
+
+// create an XML document from the
+// following PHP code, ...
+  java_lang_System::javaBeginDocument();
+  while($n--) {
+    $next = $iter->next();
+    $name = $next->get("name");
+    $resultList->add($name);
+  }
+//  ... execute the XML document on
+//  the server side, ...
+  java_lang_System::javaEndDocument();
+
+// .. retrieve the result, ...
+  $result = java_lang_System::javaValues($resultList);
+// ... print the result array
+  print_r($result);
+
+  delete_index_dir();
+} catch (JavaException $e) {
+  echo "Exception occured: {$e->__toString()}<br>\n";
+}
+
+/** helper functions */
+$tmp_file=null;
+$tmp_dir=null;
+/** create a temporary directory for the lucene index files. Make sure
+ * to create the tmpdir from Java so that the directory has
+ * javabridge_tmp_t Security Enhanced Linux permission. Note that PHP
+ * does not have access to tempfiles with java_bridge_tmp_t: PHP
+ * inherits the rights from the HTTPD, usually httpd_tmp_t.
+ */
+function create_index_dir() {
+  global $tmp_file, $tmp_dir;
+  $javaTmpdir = java_lang_System()->getProperty("java.io.tmpdir");
+  $tmpdir = java_values($javaTmpdir);
+  $tmp_file=tempnam($tmpdir, "idx");
+  $tmp_dir=new java_io_File("${tmp_file}.d");
+  $tmp_dir->mkdir();
+  return java_values($tmp_dir->toString());
+}
+
+/** delete the lucene index files */
+function delete_index_dir() {
+  global $tmp_file, $tmp_dir;
+  $files = $tmp_dir->listFiles();
+  foreach($files as $f) {
+    $f->delete();
+  }
+  $tmp_dir->delete();
+  unlink($tmp_file);
+  $tmp_file=$tmp_dir=null;
+}
+
+?>
+
+
+If my code above works well on the 1st PC, why it doesn't work on my
+other PC? Maybe I got wrong on its setting, but I have no idea where
+it is.
+
+
+Thanks in advance
+Dian
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

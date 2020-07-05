@@ -1,0 +1,610 @@
+FROM: "Hohwiller, Joerg" <j.hohwil...@t-online.net>
+SUBJECT: RE: Lock obtain timed out
+DATE: 16 Dec 2003
+
+Hi there,
+
+thanks for your resonse guys!
+
+For the answers I got the info that I must not have an IndexWriter
+and an IndexReader open at the same time that both want to modify
+the index - even sequentially.
+
+What I have is the following:
+
+1 Thread is working out events such as resource (file or folder)
+  was added/removed/deleted/etc. All index modifications are
+  synchronized against a write-lock object.
+
+1 Thread does "index switching" what means that he synchronizes on
+  the write lock and then closes modifying index-reader and index-writer.
+  Next it copies that index completely and reopens the index-reader and
+  -writer on the copied index.
+  Then he syncs on the read lock and closes the index searcher and
+  reopens it on the index that was previously copied.
+
+N Threads that perform search requestes but sync against the read-lock.
+
+Since I can garantee that there is only one thread working out the
+change events sequentially, the index-writer and index-reader will never
+do any concurrent modifications.
+
+This time I will attatch my source as text in this mail to get sure.
+For those who do not know avalon/exalibur: It is a framework that
+will be the only one calling the configure/start/stop methods.
+No one can access the instance until it is properly created, configured
+and started so synchronization is not neccessary in the start method.
+
+Thanks again
+  Jörg
+----
+/**
+ * This is the implementation of the ISearchManager using lucene as underlying
+ * search engine.<br/>
+ * Everything would be so simple if lucene was thread-safe for concurrently
+ * modifying and searching on the same index, but it is not. <br/>
+ * My first idea was to have a single index that is continiusly modified and a
+ * background thread that continuosly closes and reopens the index searcher.
+ * This should bring most recent search results but it did not work proberly
+ * with lucene.<br/>  
+ * My strategy now is to have multiple indexes and to cycle over all of them
+ * in a backround thread copying the most recent one to the next (least recent)
+ * one. Index modifications are always performed on the most recent index, 
+ * while searching is always performed on the second recent (copy of the) index.
+ * This stategy results in less acutal (but still very acceptable) actuality
+ * of search results. Further it produces a lot more disk space overhead but
+ * with the advantage of having backups of the index.<br/>
+ * Because the search must filter the search results the user does not have 
+ * read access on, it can also filter the results that do not exist anymore
+ * without further costs.  
+ * 
+ * @author Joerg Hohwiller (jhohwill)
+ */
+public class SearchManager
+    extends AbstractManager
+    implements
+        ISearchManager,
+        IDataEventListener,
+        Startable,
+        Serviceable,
+        Disposable,
+        Configurable,
+        Runnable,
+        ThreadSafe {
+
+    /** 
+     * A background thread is switching/updating the index used for indexing
+     * and/or searching. The thread sleeps an amount of this constant in 
+     * milliseconds until the next switch is done.<br/>
+     * The shorter the delay, the more actual the search results but also the
+     * more preformance overhead is produced.<br/>
+     * Be aware that the delay does not determine the index switching frequency
+     * because after a sleep of the delay, the index is copied and the switched.
+     * This required time for this operation does depend on the size of the
+     * index. This also means that the bigger the index, the less acutal are
+     * the search results.<br/> 
+     * A value of 60 seconds (60 * 1000L) should be OK. 
+     */
+    private static final long INDEX_SWITCH_DELAY = 30 * 1000L;
+
+    /** the URI field name */
+    public static final String FIELD_URI = "uri";
+
+    /** the title field name */
+    public static final String FIELD_TITLE = "dc_title";
+
+    /** the text field name */
+    public static final String FIELD_TEXT = "text";
+
+    /** the read action */
+    private static final String READ_ACTION_URI = "/actions/read";
+
+    /** the name of the configuration tag for the index settings */
+    private static final String CONFIGURATION_TAG_INDEXER = "indexer";
+
+    /** the name of the configuration attribute for the index path */
+    private static final String CONFIGURATION_ATTRIBUTE_INDEX_PATH = "index-path";
+
+    /** the user used to access resources for indexing (global read access) */
+    private static final String SEARCH_INDEX_USER = "indexer";
+
+    /** the maximum number of search hits */
+    private static final int MAX_SEARCH_HITS = 100;
+
+    /** the default analyzer used for the search index */
+    private static final Analyzer ANALYZER = new StandardAnalyzer();
+
+    /** 
+     * the number of indexes used, must be at least 3:
+     * <ul>
+     *   <li>one for writing/updating</li>
+     *   <li>one for read/search</li>
+     *   <li>one temporary where the index is copied to</li>
+     * </ul>
+     * All further indexes will act as extra backups of the index but will
+     * also waste more disk space. 
+     */
+    private static final int INDEX_COUNT = 3;
+
+    /** the descriptor manager used for searching, restricted to query method!!! */
+    private IDescriptorManager searchDescriptorManager;
+
+    /** the descriptor manager used for indexing */
+    private IDescriptorManager indexDescriptorManager;
+
+    /** the read lock object used to synchronize read access (search queries) */
+    private Object readLock;
+
+    /** the write lock object used to synchronize write access (index modification) */
+    private Object writeLock;
+
+    /** the event manager */
+    private IDataEventManager eventManager;
+
+    /** the writer used to add documents to the index */
+    private IndexWriter indexWriter;
+
+    /** the reader used to remove documents from the index */
+    private IndexReader indexReader;
+
+    /** the index searcher */
+    private Searcher searcher;
+
+    /** the path where the indexes is stored */
+    private String indexPath;
+
+    /** the index directories */
+    private File[] indexDirectories;
+
+    /** the array-index in the indexDir for the currently used write index */
+    private int indexPosition;
+
+    /** this flag is set to <code>true</code> if the background thread should
+stop */
+    private boolean done;
+
+    /** the background thread that updates the indexes for search */
+    private Thread backgroundThread;
+
+    /** the factory to gets search parsers by mimetype */
+    private SearchParserFactory parserFactory;
+
+    /**
+     * The constructor.
+     */
+    public SearchManager() {
+        super();
+        this.indexWriter = null;
+        this.indexReader = null;
+        this.indexPath = null;
+        this.done = false;
+        this.backgroundThread = null;
+        this.parserFactory = new SearchParserFactory();
+        this.readLock = new Object();
+        this.writeLock = new Object();
+    }
+    
+    /**
+     * This method adds a resource to the search index.
+     * 
+     * @param resourceUri is the URI of the resource to be added to the index.
+     * @param htmlPath is the path to the rendered html version of the 
+     *         resource or <code>null</code> if the document has not (maybe only
+     *         yet) been rendered to html.
+     */
+    public void addResource(String resourceUri, String htmlPath) {
+        try {
+            //create a lucene document...
+            Document document = new Document();
+
+            //add the URI as field to that document (used as ID of the document)
+            document.add(Field.Keyword(FIELD_URI, resourceUri));
+
+            //set the default title
+            String title = FileUtil.basename(resourceUri);
+
+            //determine the mimetype by extension
+            String mimetype = null;
+            if (htmlPath == null) {
+                mimetype = DmsUtil.getMimetype(resourceUri);
+            } else {
+                mimetype = DmsUtil.MIMETYPE_HTML;
+            }
+
+            ISearchParser parser = this.parserFactory.getParser(mimetype);
+            if (parser != null) {
+                InputStream contentStream = null;
+                try {
+                    if (htmlPath == null) {
+                        contentStream =
+                            this.indexDescriptorManager.getResourceContent(resourceUri);
+                    } else {
+                        contentStream = new FileInputStream(htmlPath);
+                    }
+                    String newTitle = parser.parse(document, contentStream);
+                    if (newTitle != null) {
+                        title = newTitle;
+                    }
+                } catch (SearchParserException e1) {
+                    getLogger().debug(e1.getMessage());
+                } catch (Throwable t) {
+                    getLogger().debug(t.getMessage());
+                } finally {
+                    if (contentStream != null) {
+                        contentStream.close();
+                    }
+                }
+            }
+
+            Enumeration metaDataList = this.indexDescriptorManager.getMetaData(resourceUri);
+            while (metaDataList.hasMoreElements()) {
+                IMetaData metaData = (IMetaData) metaDataList.nextElement();
+                Object value = metaData.getValue();
+                String text = null;
+                String key = (metaData.getNamespace() + "_" + metaData.getName()).toLowerCase();
+                //do not add empty meta fields...
+                if (value != null) {
+                    text = String.valueOf(value);
+                    if (text.length() == 0) {
+                        text = null;
+                    }
+                }
+                if (text != null) {
+                    if (FIELD_TITLE.equals(key)) {
+                        title = text;
+                    } else {
+                        document.add(Field.Text(key, text));
+                    }
+                }
+            }
+            document.add(Field.Text(FIELD_TITLE, title));
+
+            synchronized (this.writeLock) {
+                this.indexWriter.addDocument(document);
+            }
+        } catch (IOException e) {
+            throw new DmsServiceException("Search index error!", e);
+        } catch (ResourceNotExistsException e) {
+            throw new DmsServiceException("Search index error!", e);
+        } catch (AccessException e) {
+            throw new DmsServiceException("Search index error!", e);
+        }
+    }
+
+    /**
+     * This method removes a resource from the search index.
+     * 
+     * @param resourceUri is the URI of the resource to delete from the index.
+     */
+    public void removeResource(String resourceUri) {
+        try {
+            synchronized (this.writeLock) {
+                this.indexReader.delete(new Term(FIELD_URI, resourceUri));
+            }
+        } catch (IOException e) {
+            throw new DmsServiceException("Search index error!", e);
+        }
+    }
+
+    /**
+     * This method updates (reindexes) a resource in the search index.
+     * 
+     * @param resourceUri is the resource to update in the index.
+     */
+    public void updateResource(String resourceUri) {
+        //keep it simple so far...
+        removeResource(resourceUri);
+        addResource(resourceUri, null);
+    }
+
+    /**
+     * This method moves/renames a resource in the index.
+     * 
+     * @param sourceUri is the old URI of the resource that has moved.
+     * @param targetUri is the new URI of the resource that has moved.
+     */
+    public void moveResource(String sourceUri, String targetUri) {
+        removeResource(sourceUri);
+        addResource(targetUri, null);
+    }
+
+    /**
+     * This method moves/renames a resource in the index.
+     * 
+     * @param sourceUri is the old URI of the resource that has moved.
+     * @param targetUri is the new URI of the resource that has moved.
+     */
+    public void copyResource(String sourceUri, String targetUri) {
+        addResource(targetUri, null);
+    }
+
+    /**
+     * @see org.apache.avalon.framework.activity.Startable#start()
+     */
+    public void start() throws Exception {
+        boolean createFreshIndex = true;
+
+        //create all index directories and determine the most recent one if
+        //one exists...
+        this.indexPosition = 0;
+        long latestModified = 0;
+        this.indexDirectories = new File[INDEX_COUNT];
+        for (int i = 0; i < INDEX_COUNT; i++) {
+            this.indexDirectories[i] = new File(this.indexPath, "index" + i);
+            if (this.indexDirectories[i].isDirectory()) {
+                long lastModified = this.indexDirectories[i].lastModified();
+                if (lastModified > latestModified) {
+                    //this is currently the most recent index.
+                    this.indexPosition = i;
+                    latestModified = lastModified;
+                }
+                createFreshIndex = false;
+            } else {
+                this.indexDirectories[i].mkdirs();
+            }
+        }
+
+        //TODO: this is only for testing!!!
+        createFreshIndex = true;
+
+        int startIndexPosition = this.indexPosition;
+        boolean recoverWriteIndex = !createFreshIndex;
+        while (recoverWriteIndex) {
+            try {
+                this.indexWriter =
+                    new IndexWriter(this.indexDirectories[this.indexPosition], ANALYZER, false);
+                this.indexWriter.maxFieldLength = 1000000;
+                this.indexWriter.optimize();
+                this.indexReader = IndexReader.open(this.indexDirectories[this.indexPosition]);
+                recoverWriteIndex = false;
+            } catch (Throwable t) {
+                //the index could not be recovered...
+                getLogger().warn(
+                    "The index ("
+                        + this.indexDirectories[this.indexPosition].getName()
+                        + ") is broken!");
+                //now we cycle backwards, because we want to have the most recent 
+                //index that is valid.
+                this.indexPosition--;
+                if (this.indexPosition < 0) {
+                    this.indexPosition = INDEX_COUNT - 1;
+                }
+                if (startIndexPosition == this.indexPosition) {
+                    //oh,oh all indexes are broken
+                    getLogger().fatalError(
+                        "All indexes are borken, search engine is in big trouble!");
+                    break;
+                }
+            }
+        }
+        if (!createFreshIndex) {
+            if (recoverWriteIndex) {
+                //all indexes are broken, we actually have to rebuild the index 
+                //from scratch!
+                //There is only one problem - this is not implemented
+                createFreshIndex = true;
+                //TODO implement fallback index rebuild                
+
+                //} else {
+                //okay this is the regular case: the write index is recovered, 
+                //now we have to build a read index...
+
+            }
+        }
+        if (createFreshIndex) {
+            //maybe this is the first start of the DMS, we create a fresh index.
+            try {
+                this.indexWriter =
+                    new IndexWriter(this.indexDirectories[this.indexPosition], ANALYZER, true);
+                this.indexWriter.maxFieldLength = 1000000;
+                this.indexReader = IndexReader.open(this.indexDirectories[this.indexPosition]);
+            } catch (Throwable t) {
+                getLogger().fatalError("No (fresh) search index could be created!", t);
+                throw new DmsServiceException("Search engine could not startup!", t);
+            }
+        }
+        //now we have a working write index, next we have to create a copy to
+        //use as read index...
+        int readIndexPosition = this.indexPosition - 1;
+        if (readIndexPosition < 0) {
+            readIndexPosition = INDEX_COUNT - 1;
+        }
+        FileUtil.copy(
+            this.indexDirectories[this.indexPosition],
+            this.indexDirectories[readIndexPosition],
+            true);
+        //since we just copied the index, we assume that everyting goes right here...
+        this.searcher =
+            new IndexSearcher(IndexReader.open(this.indexDirectories[readIndexPosition]));
+
+        //now lets go...
+        this.eventManager.addChangeListener(this);
+        this.backgroundThread = new Thread(this, "Index Switcher");
+        this.backgroundThread.start();
+    }
+
+    /**
+     * @see org.apache.avalon.framework.activity.Startable#stop()
+     */
+    public void stop() throws Exception {
+        this.eventManager.removeChangeListener(this);
+        this.done = true;
+        this.backgroundThread.interrupt();
+        this.backgroundThread = null;
+        synchronized (this.writeLock) {
+            this.indexReader.close();
+            this.indexWriter.optimize();
+            this.indexWriter.close();
+        }
+        synchronized (this.readLock) {
+            this.searcher.close();
+        }
+    }
+
+    /**
+     * @see org.apache.avalon.framework.configuration.Configurable#configure(org.apache.avalon.framework.configuration.Configuration)
+     */
+    public void configure(Configuration configuration) throws ConfigurationException {
+        Configuration settings = configuration.getChild(CONFIGURATION_TAG_INDEXER);
+        this.indexPath = settings.getAttribute(CONFIGURATION_ATTRIBUTE_INDEX_PATH);
+    }
+
+    public Enumeration query(DmsSession session, String query) throws IllegalQueryException
+{
+        try {
+            query = query.toLowerCase();
+            Query parsedQuery = QueryParser.parse(query, FIELD_TEXT, ANALYZER);
+
+            Hits hitList = null;
+            synchronized (this.readLock) {
+                hitList = this.searcher.search(parsedQuery);
+            }
+            //maybe the rest has to be synchronized, too...
+
+            int len = Math.min(MAX_SEARCH_HITS, hitList.length());
+            if (len == 0) {
+                return EmptyEnumeration.getInstance();
+            }
+            this.searchDescriptorManager.setSession(session);
+            Vector result = new Vector(len);
+
+            //necessary to expand search terms:
+            //parsedQuery = parsedQuery.rewrite(getIndexReader());
+            QueryHighlightExtractor highlighter =
+                new QueryHighlightExtractor(parsedQuery, ANALYZER, "<b>", "</b>");
+            for (int i = 0; i < len; i++) {
+                String uri = "unknown";
+                try {
+                    Document doc = hitList.doc(i);
+                    uri = doc.get(FIELD_URI);
+                    if (uri == null) {
+                        getLogger().debug("found document with uri=null!");
+                    } else {
+                        String title = doc.get(FIELD_TITLE);
+                        if (this.searchDescriptorManager.checkPermission(uri, READ_ACTION_URI))
+{
+                            String text = doc.get(FIELD_TEXT);
+                            String highlightedText = "";
+                                //highlighter.getBestFragments(text, 80, 3, "...") + "...";
+                            ISearchResult hit =
+                                new SearchResult(uri, hitList.score(i), title, highlightedText);
+                            result.add(hit);
+                        }
+                    }
+                } catch (ResourceNotExistsException e1) {
+                    getLogger().info("Search found illegal uri (" + uri + ")!");
+                } catch (DmsServiceException e) {
+                    getLogger().warn("Problems with uri (" + uri + ")!", e);
+                } catch (IOException e) {
+                    getLogger().warn("Problems with index", e);
+                }
+            }
+            return result.elements();
+        } catch (ParseException e) {
+            throw new IllegalQueryException("Illegal query (" + query + ")!", e);
+        } catch (IOException e) {
+            throw new DmsServiceException("Search index error!", e);
+        }
+    }
+
+    public void dataChanged(DataEvent event) {
+        if (event.getDataType() == IResource.DATA_TYPE) {
+            if (event.isAddEvent()) {
+                addResource(event.getSourceUri(), null);
+            } else if (event.isRenderEvent()) {
+                String mimetype = (String) event.getParameter(DataEvent.KEY_RENDER_MIMETYPE);
+                if (DmsUtil.MIMETYPE_HTML.equals(mimetype)) {
+                    String filepath = (String) event.getParameter(DataEvent.KEY_RENDER_FILEPATH);
+                    addResource(event.getSourceUri(), filepath);
+                }
+            } else if (event.isModifyEvent() || event.isMetadataModifyEvent()) {
+                updateResource(event.getSourceUri());
+            } else if (event.isRemoveEvent()) {
+                removeResource(event.getSourceUri());
+            } else if (event.isRenameEvent()) {
+                moveResource(event.getSourceUri(), event.getTargetUri());
+            } else if (event.isCopyEvent()) {
+                copyResource(event.getSourceUri(), event.getTargetUri());
+            }
+        }
+    }
+
+    /**
+     * @see org.apache.avalon.framework.service.Serviceable#service(org.apache.avalon.framework.service.ServiceManager)
+     */
+    public void service(ServiceManager manager) throws ServiceException {
+        super.service(manager);
+        //the descriptor manager must only be used in the query method,
+        //because its session is concurrently modified.
+        this.searchDescriptorManager =
+            (IDescriptorManager) getServiceManager().lookup(IDescriptorManager.ROLE);
+        //for the indexing this descriptor manager is used that holds a fixed
+        //session with an index-specific user that has appropriate rights.
+        this.indexDescriptorManager =
+            (IDescriptorManager) getServiceManager().lookup(IDescriptorManager.ROLE);
+        this.indexDescriptorManager.setSession(DmsSession.createSession(SEARCH_INDEX_USER));
+
+        //register ourself as event listener...
+        this.eventManager = (IDataEventManager) getServiceManager().lookup(IDataEventManager.ROLE);
+    }
+
+    /**
+     * @see org.apache.avalon.framework.activity.Disposable#dispose()
+     */
+    public void dispose() {
+        //this.eventManager.removeChangeListener(this);
+        getServiceManager().release(this.eventManager);
+        getServiceManager().release(this.searchDescriptorManager);
+        this.searchDescriptorManager = null;
+        getServiceManager().release(this.indexDescriptorManager);
+        this.searchDescriptorManager = null;
+    }
+
+    /**
+     * @see java.lang.Runnable#run()
+     */
+    public void run() {
+        while (!this.done) {
+            DmsUtil.doSleep(INDEX_SWITCH_DELAY);
+            try {
+                int oldIndexPosition = this.indexPosition;
+                synchronized (this.writeLock) {
+                    this.indexWriter.optimize();
+                    this.indexWriter.close();
+                    this.indexReader.close();
+                    this.indexPosition++;
+                    if (this.indexPosition >= INDEX_COUNT) {
+                        this.indexPosition = 0;
+                    }
+                    FileUtil.delete(this.indexDirectories[this.indexPosition]);
+                    FileUtil.copy(
+                        this.indexDirectories[oldIndexPosition],
+                        this.indexDirectories[this.indexPosition],
+                        true);
+                    this.indexWriter =
+                        new IndexWriter(
+                            this.indexDirectories[this.indexPosition],
+                            ANALYZER,
+                            false);
+                    this.indexReader = IndexReader.open(this.indexDirectories[this.indexPosition]);
+                }
+                synchronized (this.readLock) {
+                    this.searcher.close();
+                    this.searcher =
+                        new IndexSearcher(
+                            IndexReader.open(this.indexDirectories[oldIndexPosition]));
+                }
+            } catch (IOException e) {
+                getLogger().fatalError("Index Switching failed - search engine in trouble!",
+e);
+            }
+        }
+    }
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

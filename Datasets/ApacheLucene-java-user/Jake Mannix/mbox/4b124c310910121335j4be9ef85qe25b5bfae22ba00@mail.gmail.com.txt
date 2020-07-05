@@ -1,0 +1,174 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: Realtime search best practices
+DATE: 12 Oct 2009
+
+Thanks Yonik,
+
+  It may be surprising, but in fact I have read that
+javadoc.  It talks about not needing to close the
+writer, but doesn't specifically talk about the what
+the relationship between commit() calls and
+getReader() calls is.  I suppose I should have
+interpreted:
+
+"@returns a new reader which contains all
+changes..."
+
+to mean "all uncommitted changes", but why
+is it so obvious that what could be happening
+is that it only "returns all changes since the last
+commit, but without touching disk because it
+has docs in memory as well"?
+
+  -jake
+
+On Mon, Oct 12, 2009 at 1:26 PM, Yonik Seeley <yonik@lucidimagination.com>wrote:
+
+> Guys, please - you're not new at this... this is what JavaDoc is for:
+>
+>  /**
+>   * Returns a readonly reader containing all
+>   * current updates.  Flush is called automatically.  This
+>   * provides "near real-time" searching, in that changes
+>   * made during an IndexWriter session can be made
+>   * available for searching without closing the writer.
+>   *
+>   * <p>It's near real-time because there is no hard
+>   * guarantee on how quickly you can get a new reader after
+>   * making changes with IndexWriter.  You'll have to
+>   * experiment in your situation to determine if it's
+>   * fast enough.  As this is a new and experimental
+>   * feature, please report back on your findings so we can
+>   * learn, improve and iterate.</p>
+>   *
+>   * <p>The resulting reader supports {@link
+>   * IndexReader#reopen}, but that call will simply forward
+>   * back to this method (though this may change in the
+>   * future).</p>
+>   *
+>   * <p>The very first time this method is called, this
+>   * writer instance will make every effort to pool the
+>   * readers that it opens for doing merges, applying
+>   * deletes, etc.  This means additional resources (RAM,
+>   * file descriptors, CPU time) will be consumed.</p>
+>   *
+>   * <p>For lower latency on reopening a reader, you should
+>   * call {@link #setMergedSegmentWarmer} to
+>   * pre-warm a newly merged segment before it's committed
+>   * to the index.  This is important for minimizing
+>   * index-to-search delay after a large merge.  </p>
+>   *
+>   * <p>If an addIndexes* call is running in another thread,
+>   * then this reader will only search those segments from
+>   * the foreign index that have been successfully copied
+>   * over, so far</p>.
+>   *
+>   * <p><b>NOTE</b>: Once the writer is closed, any
+>   * outstanding readers may continue to be used.  However,
+>   * if you attempt to reopen any of those readers, you'll
+>   * hit an {@link AlreadyClosedException}.</p>
+>   *
+>   * <p><b>NOTE:</b> This API is experimental and might
+>   * change in incompatible ways in the next release.</p>
+>   *
+>   * @return IndexReader that covers entire index plus all
+>   * changes made so far by this IndexWriter instance
+>   *
+>   * @throws IOException
+>   */
+>  public IndexReader getReader() throws IOException {
+>
+>
+> -Yonik
+> http://www.lucidimagination.com
+>
+>
+> On Mon, Oct 12, 2009 at 4:18 PM, John Wang <john.wang@gmail.com> wrote:
+> > Oh, that is really good to know!
+> > Is this deterministic? e.g. as long as writer.addDocument() is called,
+> next
+> > getReader reflects the change? Does it work with deletes? e.g.
+> > writer.deleteDocuments()?
+> > Thanks Mike for clarifying!
+> >
+> > -John
+> >
+> > On Mon, Oct 12, 2009 at 12:11 PM, Michael McCandless <
+> > lucene@mikemccandless.com> wrote:
+> >
+> >> Just to clarify: IndexWriter.newReader returns a reader that searches
+> >> uncommitted changes as well.  Ie, you need not call IndexWriter.commit
+> >> to make the changes visible.
+> >>
+> >> However, if you're opening a reader the "normal" way
+> >> (IndexReader.open) then it is necessary to first call
+> >> IndexWriter.commit.
+> >>
+> >> Mike
+> >>
+> >> On Mon, Oct 12, 2009 at 5:24 AM, melix <cedric.champeau@lingway.com>
+> >> wrote:
+> >> >
+> >> > Hi,
+> >> >
+> >> > I'm going to replace an old reader/writer synchronization mechanism we
+> >> had
+> >> > implemented with the new near realtime search facilities in Lucene
+> 2.9.
+> >> > However, it's still a bit unclear on how to efficiently do it.
+> >> >
+> >> > Is the following implementation the good way to do achieve it ? The
+> >> context
+> >> > is concurrent read/writes on an index :
+> >> >
+> >> > 1. create a Directory instance
+> >> > 2. create a writer on this directory
+> >> > 3. on each write request, add document to the writer
+> >> > 4. on each read request,
+> >> >  a. use writer.getReader() to obtain an up-to-date reader
+> >> >  b. create an IndexSearcher with that reader
+> >> >  c. perform Query
+> >> >  d. close IndexSearcher
+> >> > 5. on application close
+> >> >  a. close writer
+> >> >  b. close directory
+> >> >
+> >> > While this seems to be ok, I'm really wondering about the performance
+> of
+> >> > opening a searcher for each request. I could introduce some kind of
+> delay
+> >> > and cache a searcher for some seconds, but I'm not sure it's the best
+> >> thing
+> >> > to do.
+> >> >
+> >> > Thanks,
+> >> >
+> >> > Cedric
+> >> >
+> >> >
+> >> > --
+> >> > View this message in context:
+> >>
+> http://www.nabble.com/Realtime-search-best-practices-tp25852756p25852756.html
+> >> > Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> >> >
+> >> >
+> >> > ---------------------------------------------------------------------
+> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,114 @@
+FROM: "David Seltzer" <dselt...@TVEyes.com>
+SUBJECT: RE: Faceting, Sort and DocIDSet
+DATE: 21 Apr 2009
+
+Karsten,
+
+You're right, 300 facets would be a lot. Hehe. I have one facet with
+about three hundred potential values. What I've done is create an
+FacetManager who, in another thread, sets up an map of ~300 OpenBitSets.
+One bitset for each possible value of the facet.
+
+Then, rather than using an iterative cardinality comparison, I use a
+HitCollector to create an set of counters. 
+
+public void collect(int doc, float score) {
+   //we don't care about score, all we care about is docID;
+   //we need to find out if this document is in any of our facets... if
+it is, increment a counter
+   for(SearchFacet sfTemp : arrayOfSearchFacetsValues) {
+      if(sfTemp.getBitSet().fastGet(doc)) {
+         //this is a hit!
+         long lCount = htFacetResults.get(sfTemp.getTerm().text());
+         htFacetResults.put(sfTemp.getTerm().text(), lCount+1);
+				
+         //this code is designed for mutually exclusive 
+         //facet values... in that scenario, a hit here means
+         //that we can't have a hit anywhere else, so we should
+         //break.
+         break;
+      }
+   }
+}
+
+Here I seem to be running into a performance issue. It seems that when a
+resultset is small (~10,000) this method greatly outperforms the
+iterating cardinality check. However, when the resultset is large
+(300,000) the HitCollector takes twice as long to process the resultset
+as the other solution.
+
+Our total index typically contains about 100M documents. This is broken
+up into four monthly indexes each containing 250K documents. And a
+typical search returns < 120,000 results. Lousy searches return more
+results (IE "obama" returns nearly 800,000 documents).
+
+At the moment we're using ParalellMultiSearcher. When I do a search,
+across four montly indexes, ordered by INDEXORDER what I get is all of
+the hits that happened on the first of any month, then all the hits that
+happened on the second of any month. Does 'starts' behave the same way
+in ParallelMultiSearcher?
+
+Thanks for all your input!
+
+-Dave
+
+-----Original Message-----
+From: Karsten F. [mailto:karsten-lucene@fiz-technik.de] 
+Sent: Monday, April 20, 2009 4:00 PM
+To: java-user@lucene.apache.org
+Subject: RE: Faceting, Sort and DocIDSet
+
+
+Hi David,
+
+correct: you should avoid reading the content of a document inside a
+hitcollector.
+Normaly that means to cache all you need in main memory. Very simple and
+fast is a facet with only 255 possible values and exactly one value per
+document. In this case you need only an byte[IndexReader.maxDoc()] array
+in
+cache and an int[256] array for collecting the results
+(we have 5 GByte to run lucene with a couple of facets).
+
+About "facet". For me a facet corresponds to a field in lucene. So 300
+facets are quite a lot.
+Or did you mean two facets with 150 values each?
+
+To find a good solution for your 100M Document, I have three questions:
+ - How many hits per search?
+ - More then one value of the facet per document/how many in average?
+
+INDEXORDER means document number. 
+MultiSearcher works also fine:
+If you have one index for each year and for each of this indices the
+indexorder in order of date, also the MultiSearcher will have correct
+INDEXORDER:
+Take a look to the variable "int[] starts" in MultiSearcher.
+
+
+David Seltzer wrote:
+> 
+> 
+> Is INDEXORDER based on the DocumentID within each individual index? If
+so
+> then the results could be interleaved. Anyone know how this behaves?
+> 
+> 
+
+-- 
+View this message in context:
+http://www.nabble.com/Faceting%2C-Sort-and-DocIDSet-tp23099854p23143797.
+html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

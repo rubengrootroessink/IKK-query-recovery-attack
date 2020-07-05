@@ -1,0 +1,53 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Sorting: string vs int
+DATE: 11 Nov 2005
+
+
+: I guess it would be nice to have some way of telling the searcher (and
+: the fieldcache) whether the actual string values are needed or not...
+: it could save a lot of memory when there are a lot of unique terms.
+
+you're talking about something like LUCENE-457 right? ... but make it
+optional so clients who aren't using MultiSearcher can ignore the physical
+strings, and clients who are still have them.
+
+three thoughts have occured to me on this...
+
+1) there might be a way to write a FieldCache.IntParser thta could work
+... but i can't think of any good way to do it that wouldn't be a total
+kludge (given the limited visibility IntParser has to hte rest of hte
+world)
+
+2) users could write a new sub class of FiledCacheImpl which consisted
+of...
+
+class FieldCacheNoMultiSearcher extends FieldCacheImpl {
+  public StringIndex getStringIndex (IndexReader reader, String field)
+  throws IOException {
+    Object ret = lookup (reader, field, STRING_INDEX);
+    if (ret == null) {
+      StringIndex all = super.getStringIndex(reader,field);
+      StringIndex part = new StringIndex(all.order, null);
+      store(reader, field, STRING_INDEX, part);
+      return part;
+    }
+    return (StringIndex) ret;
+  }
+}
+
+...but that's also kludgy ... applications might use a class like this to
+improve the memory footprint, but then they might add functionality latter
+that acctually needs the strings (something in the contrib section for
+example, or function query that look at the length of the word, etc...)
+and they'll get a really ugly null pointer exception.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

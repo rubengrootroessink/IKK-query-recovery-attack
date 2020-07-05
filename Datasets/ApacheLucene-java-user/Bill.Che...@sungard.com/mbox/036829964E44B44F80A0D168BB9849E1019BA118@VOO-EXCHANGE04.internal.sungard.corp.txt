@@ -1,0 +1,100 @@
+FROM: <Bill.Che...@sungard.com>
+SUBJECT: IndexSearcher and out of memory error
+DATE: 30 Apr 2009
+
+Hello,
+
+I'm using Lucene 2.2.0.  I've got a query class that wraps an
+IndexSearcher object.  Right now, we create a new IndexSearcher each
+time my query class gets instantiated and then it gets used throughout
+the life of the query class.  Multiple queries get made against the
+IndexSearcher object during this time.  Typically, the query class gets
+instantiated many times, queries are made against it and then it gets
+garbage collected.  Over time, however, what we are seeing is that
+performance degredation occurs and then eventually queries that once
+worked end up throwing OutOfMemory exceptions.  
+
+I have read in the forums that the recommended practice is to only
+create one IndexSearcher and keep it open for the life of the app.  In
+fact, we used to have it this way, where the query class kept a static
+reference to the IndexSearcher that only got initialized once (the first
+time the query class got instantiated).  However, a colleague found (I
+have not actually tested this myself) that when the index got updated
+(from an outside process kicked off by a scheduler) that the new Docs
+added to the index were not visible to the IndexSearcher.  This is why
+we went to creating a new IndexSearcher for each query class.
+
+My questions are:
+1) Does it make sense that we'd be having memory issues the way we are
+doing it?  If so, why?
+2) Or is this a memory leak bug in 2.2.0?  Note: I am calling
+IndexSearcher.close() when I'm done with the query class and I'm still
+seeing the OutOfMemoryException.
+3) Given that we need to update the index periodically, is there a
+recommended solution for this?
+
+FWIW, the code looks something like:
+
+private IndexSearcher searcher = null;
+
+public MyQueryClass
+{
+...
+	String indexPath = ... // initialize index path
+	searcher = new IndexSearcher(FSDirectory.getDirectory(new
+File(indexPath)));
+...
+}
+
+private Hits evaluateLucene(org.apache.lucene.search.Query query, Sort
+sort)
+{
+	Hits result = null;
+        
+	try
+	{
+		if (sort == null)
+		{
+			result = searcher.search(query);
+		}
+		else
+		{
+			result = searcher.search(query, sort);
+		}
+	} 
+	catch (IOException e)
+	{
+		throw new RuntimeException(e);
+	}
+
+	return result;
+}
+
+public void close()
+{
+	try
+	{
+		seriesIndexSearcher.close();
+	} 
+	catch (IOException e)
+	{
+		throw new RuntimeException(e);
+	}
+}
+
+Note: all callers to 'evaluateLucene' just have a local Hits object that
+presumably gets garbage collected when they go out of scope.
+
+I am calling the MyQueryClass.close() method from the instaniator of the
+MyQueryClass instance in a finally clause.
+
+regards,
+
+Bill 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

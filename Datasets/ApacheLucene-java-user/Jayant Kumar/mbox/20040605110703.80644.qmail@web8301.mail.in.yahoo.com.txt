@@ -1,0 +1,258 @@
+FROM: Jayant Kumar <jayantli...@yahoo.co.in>
+SUBJECT: Re: problems with lucene in multithreaded environment
+DATE: 5 Jun 2004
+
+Thanks for the patch. It helped in increasing the
+search speed to a good extent. But when we tried to
+give about 100 queries in 10 seconds, then again we
+found that after about 15 seconds, the response time
+per query increased. Enclosed is the dump which we
+took after about 30 seconds of starting the search.
+The maximum query time has reduced from 200-300
+seconds to about 50 seconds.
+
+We were able to simplify the searches further by
+consolidating the fields in the index but that
+resulted in increasing the index size to 2.5 GB as we
+required fields 2-5 and fields 1-7 in different
+searches. Our indexes are on the local disk therefor
+there is no network i/o involved.
+
+Thanks
+Jayant
+
+ --- Doug Cutting <cutting@apache.org> wrote: > Doug
+Cutting wrote:
+> > Please tell me if you are able to simplify your
+> queries and if that 
+> > speeds things.  I'll look into a ThreadLocal-based
+> solution too.
+> 
+> I've attached a patch that should help with the
+> thread contention, 
+> although I've not tested it extensively.
+> 
+> I still don't fully understand why your searches are
+> so slow, though. 
+> Are the indexes stored on the local disk of the
+> machine?  Indexes 
+> accessed over the network can be very slow.
+> 
+> Anyway, give this patch a try.  Also, if anyone else
+> can try this and 
+> report back whether it makes multi-threaded
+> searching faster, or 
+> anything else slower, or is buggy, that would be
+> great.
+> 
+> Thanks,
+> 
+> Doug
+> > Index:
+>
+src/java/org/apache/lucene/index/TermInfosReader.java
+>
+===================================================================
+> RCS file:
+>
+/home/cvs/jakarta-lucene/src/java/org/apache/lucene/index/TermInfosReader.java,v
+> retrieving revision 1.6
+> diff -u -u -r1.6 TermInfosReader.java
+> ---
+>
+src/java/org/apache/lucene/index/TermInfosReader.java
+> 20 May 2004 11:23:53 -0000	1.6
+> +++
+>
+src/java/org/apache/lucene/index/TermInfosReader.java
+> 4 Jun 2004 21:45:15 -0000
+> @@ -29,7 +29,8 @@
+>    private String segment;
+>    private FieldInfos fieldInfos;
+>  
+> -  private SegmentTermEnum enumerator;
+> +  private ThreadLocal enumerators = new
+> ThreadLocal();
+> +  private SegmentTermEnum origEnum;
+>    private long size;
+>  
+>    TermInfosReader(Directory dir, String seg,
+> FieldInfos fis)
+> @@ -38,19 +39,19 @@
+>      segment = seg;
+>      fieldInfos = fis;
+>  
+> -    enumerator = new
+> SegmentTermEnum(directory.openFile(segment +
+> ".tis"),
+> -			       fieldInfos, false);
+> -    size = enumerator.size;
+> +    origEnum = new
+> SegmentTermEnum(directory.openFile(segment +
+> ".tis"),
+> +                                   fieldInfos,
+> false);
+> +    size = origEnum.size;
+>      readIndex();
+>    }
+>  
+>    public int getSkipInterval() {
+> -    return enumerator.skipInterval;
+> +    return origEnum.skipInterval;
+>    }
+>  
+>    final void close() throws IOException {
+> -    if (enumerator != null)
+> -      enumerator.close();
+> +    if (origEnum != null)
+> +      origEnum.close();
+>    }
+>  
+>    /** Returns the number of term/value pairs in the
+> set. */
+> @@ -58,6 +59,15 @@
+>      return size;
+>    }
+>  
+> +  private SegmentTermEnum getEnum() {
+> +    SegmentTermEnum enum =
+> (SegmentTermEnum)enumerators.get();
+> +    if (enum == null) {
+> +      enum = terms();
+> +      enumerators.set(enum);
+> +    }
+> +    return enum;
+> +  }
+> +
+>    Term[] indexTerms = null;
+>    TermInfo[] indexInfos;
+>    long[] indexPointers;
+> @@ -102,16 +112,17 @@
+>    }
+>  
+>    private final void seekEnum(int indexOffset)
+> throws IOException {
+> -    enumerator.seek(indexPointers[indexOffset],
+> -	      (indexOffset * enumerator.indexInterval) -
+> 1,
+> +    getEnum().seek(indexPointers[indexOffset],
+> +	      (indexOffset * getEnum().indexInterval) - 1,
+>  	      indexTerms[indexOffset],
+> indexInfos[indexOffset]);
+>    }
+>  
+>    /** Returns the TermInfo for a Term in the set,
+> or null. */
+> -  final synchronized TermInfo get(Term term) throws
+> IOException {
+> +  TermInfo get(Term term) throws IOException {
+>      if (size == 0) return null;
+>  
+> -    // optimize sequential access: first try
+> scanning cached enumerator w/o seeking
+> +    // optimize sequential access: first try
+> scanning cached enum w/o seeking
+> +    SegmentTermEnum enumerator = getEnum();
+>      if (enumerator.term() != null                
+> // term is at or past current
+>  	&& ((enumerator.prev != null &&
+> term.compareTo(enumerator.prev) > 0)
+>  	    || term.compareTo(enumerator.term()) >= 0)) {
+> @@ -128,6 +139,7 @@
+>  
+>    /** Scans within block for matching term. */
+>    private final TermInfo scanEnum(Term term) throws
+> IOException {
+> +    SegmentTermEnum enumerator = getEnum();
+>      while (term.compareTo(enumerator.term()) > 0 &&
+> enumerator.next()) {}
+>      if (enumerator.term() != null &&
+> term.compareTo(enumerator.term()) == 0)
+>        return enumerator.termInfo();
+> @@ -136,10 +148,12 @@
+>    }
+>  
+>    /** Returns the nth term in the set. */
+> -  final synchronized Term get(int position) throws
+> IOException {
+> +  final Term get(int position) throws IOException {
+>      if (size == 0) return null;
+>  
+> -    if (enumerator != null && enumerator.term() !=
+> null && position >= enumerator.position &&
+> +    SegmentTermEnum enumerator = getEnum();
+> +    if (enumerator != null && enumerator.term() !=
+> null &&
+> +        position >= enumerator.position &&
+>  	position < (enumerator.position +
+> enumerator.indexInterval))
+>        return scanEnum(position);		  // can avoid
+> seek
+>  
+> @@ -148,6 +162,7 @@
+>    }
+>  
+>    private final Term scanEnum(int position) throws
+> IOException {
+> +    SegmentTermEnum enumerator = getEnum();
+>      while(enumerator.position < position)
+>        if (!enumerator.next())
+>  	return null;
+> @@ -156,12 +171,13 @@
+>    }
+>  
+>    /** Returns the position of a Term in the set or
+> -1. */
+> -  final synchronized long getPosition(Term term)
+> throws IOException {
+> +  final long getPosition(Term term) throws
+> IOException {
+>      if (size == 0) return -1;
+>  
+>      int indexOffset = getIndexOffset(term);
+>      seekEnum(indexOffset);
+>  
+> +    SegmentTermEnum enumerator = getEnum();
+>      while(term.compareTo(enumerator.term()) > 0 &&
+> enumerator.next()) {}
+>  
+>      if (term.compareTo(enumerator.term()) == 0)
+> @@ -171,17 +187,13 @@
+>    }
+>  
+>    /** Returns an enumeration of all the Terms and
+> TermInfos in the set. */
+> -  final synchronized SegmentTermEnum terms() throws
+> IOException {
+> -    if (enumerator.position != -1)			  // if not at
+> start
+> -      seekEnum(0);				  // reset to start
+> -    return (SegmentTermEnum)enumerator.clone();
+> +  public SegmentTermEnum terms() {
+> +    return (SegmentTermEnum)origEnum.clone();
+>    }
+>  
+>    /** Returns an enumeration of terms starting at
+> or after the named term. */
+> -  final synchronized SegmentTermEnum terms(Term
+> term) throws IOException {
+> -    get(term);					  // seek enumerator to term
+> -    return (SegmentTermEnum)enumerator.clone();
+> +  public SegmentTermEnum terms(Term term) throws
+> IOException {
+> +    get(term);
+> +    return (SegmentTermEnum)getEnum().clone();
+>    }
+> -
+> -
+>  }
+> 
+> >
+---------------------------------------------------------------------
+> To unsubscribe, e-mail:
+> lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail:
+lucene-user-help@jakarta.apache.org 
+
+________________________________________________________________________
+Yahoo! India Matrimony: Find your partner online. http://yahoo.shaadi.com/india-matrimony/

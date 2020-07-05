@@ -1,0 +1,109 @@
+FROM: markharw...@yahoo.co.uk
+SUBJECT: Re: Possible to fetch a document without all fields for performance?
+DATE: 22 May 2004
+
+I've put together some code to do this based on this API:
+
+    Document document(int docNum, String [] fieldNames);
+
+You can now be selective about which fields you want to read off disk.
+It does offer some speed-ups but it is not as fast as it could be due to a limitation in the
+index 
+file format.
+Basically the field values are held in sequence on the disk and you ideally want to "seek"
+past the 
+ones you are not interested in - unfortunately the lengths held on file are for the UTF-8
+decoded value, 
+not the length they occupy on disk so you need to decode the bytes to determine the true length
+and therefore 
+next field position on disk.
+
+Having said that my implementation will avoid reading large fields entirely IF they are positioned
+
+after the other fields you are interested in retrieving.  This implementation would also avoid
+
+allocating large chunks of memory to hold unnecessary field values - another plus.
+
+
+The code below is the core functionlity you need to add  to FieldsReader.java - you would
+need to 
+add delegating calls in the SegmentReader IndexReader classes etc to expose this functionality.
+
+Cheers
+Mark 
+========code follows ===========
+  final Document doc(int n, String []fieldNames) throws IOException {
+  HashSet requiredFields=new HashSet(fieldNames.length);
+  int numRequiredFields=fieldNames.length;
+  for (int i = 0; i < fieldNames.length; i++)
+{
+requiredFields.add(fieldNames[i]);
+}
+indexStream.seek(n * 8L);
+long position = indexStream.readLong();
+fieldsStream.seek(position);
+
+Document doc = new Document();
+int numFields = fieldsStream.readVInt();
+for (int i = 0; i < numFields; i++) {
+  int fieldNumber = fieldsStream.readVInt();
+  FieldInfo fi = fieldInfos.fieldInfo(fieldNumber);
+  byte bits = fieldsStream.readByte();
+
+
+
+  if(requiredFields.contains(fi.name))
+  {
+  //add field contents to doc
+doc.add(new Field(fi.name,  // name
+  fieldsStream.readString(), // read value
+  true,  // stored
+  fi.isIndexed,  // indexed
+  (bits & 1) != 0, fi.storeTermVector)); // vector
+
+if(--numRequiredFields ==0)
+{
+//found all the field values we need, - lets go
+break;
+}
+  }
+  else
+  {
+  //Not a required field - skip this field's contents to next field
+  long length=fieldsStream.readVInt();
+  
+//long nextPosition=fieldsStream.getFilePointer()+length;
+//fieldsStream.seek(nextPosition);
+
+  //ideally we could just seek to next field based on code above BUT length on disk 
+  //can be longer than "length" field because of UTF-8 encoding - you currently have 
+  //to read each byte and examine content to determine the next position :
+     
+for(long j=0;j<length;j++)
+{
+byte b = fieldsStream.readByte();
+if ((b & 0x80) == 0)
+continue;
+else if ((b & 0xE0) != 0xE0) 
+{
+   fieldsStream.readByte();
+} 
+else
+{
+fieldsStream.readByte();
+fieldsStream.readByte();
+}
+}
+  
+  }
+}
+
+return doc;
+  }
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

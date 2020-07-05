@@ -1,0 +1,78 @@
+FROM: "Sindri Traustason" <sind...@vyre.com>
+SUBJECT: Should I reindex with remove then add or can I add then remove?
+DATE: 29 Mar 2006
+
+Hi!
+
+I have a question about how I should go about reindexing an existing
+record in an index.
+
+Currently my method that reindexes items is like this:
+
+	public void updateInIndex( Item item ) throws IOException{
+		Document doc = ItemDocumentFactory.createDocument(item);
+		// Remove the document from search index
+		Term term = new Term(ItemDocumentFactory.ITEM,
+item.getId());
+		getIndexReader();
+		indexReader.delete(term);
+		// Remove the document from search index
+		getIndexWriter();
+		indexWriter.addDocument(doc);
+	}
+
+getIndexReader closes the field variable indexWriter and opens
+indexReader and vice versa for get Index writer.  The problem with this
+is that it leaves the index in a state where the given item is not in
+the index (this can be seconds for large items).
+
+The suggested solution is like this:
+
+	public void updateInIndex( Item item ) throws IOException{
+		Document doc = ItemDocumentFactory.createDocument(item);
+		Term term = new Term(ItemDocumentFactory.ITEM,
+item.getId());
+		getIndexReader();
+		// Find the old document
+		TermDocs termDocs = indexReader.termDocs(term);
+		int docNum = -1;
+		if(termDocs.next()){
+			docNum = termDocs.doc();
+		}
+		getIndexWriter();
+		indexWriter.addDocument(doc);
+		getIndexReader();
+		// Remove the document from search index
+		if(docNum!=-1){
+			indexReader.delete(docNum);
+		}
+	}
+
+But what is frightening me here is the sentence "Clients should thus not
+rely on a given document having the same number between sessions." in
+http://lucene.apache.org/java/docs/api/org/apache/lucene/index/IndexRead
+er.html
+
+My index is only accessed from this class and this class is private to a
+singleton thread that queues up index tasks (add, remove, update,
+optimize).  
+
+So the question is: Since I can guarantee nothing else is updating the
+index can the second index reader be considered to be the same session
+and therefore the docNum for the old document still valid?
+
+I have done considerable tests on this and this seems to always work as
+intended.
+
+Cheers! And thanks in advance.
+
+Sindri Traustason
+Senior Software Engineer
+VYRE
+http://www.vyre.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

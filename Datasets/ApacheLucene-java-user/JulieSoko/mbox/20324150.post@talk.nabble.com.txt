@@ -1,0 +1,237 @@
+FROM: JulieSoko <julie.sokolow...@saic.com>
+SUBJECT: Re: No segment files found/ Searcher error
+DATE: 4 Nov 2008
+
+
+I have seen the error all along... I've tried several different designs...
+This problem has always occurred on the current day where the index is
+constantly being merged.   I am opening one searcher for up to 59 days and
+leaving them open but for the current day only, each user get's their own
+new searcher.  It is not shared.  Orginally, I was sharing the searcher for
+the current day but when the I/O error occurred, the searcher was not usable
+again.  i.e. the I/O error returned for every search.  I did not close the
+searcher in that design.  So as a fix for the moment, I open a new searcher
+for each user/query, for the current day only, and then close it once it is
+done.  I do this so that when the I/O error occurs, I let the user know that
+there was a "internal processor error" and they need to resubmit the
+query... i.e. getting another searcher. 
+  Now, when the i/o error occurs, I run a CheckIndex.check on the current
+directory/index and then this error is thrown - the "no segments found
+error".   
+
+
+Michael McCandless-2 wrote:
+> 
+> 
+> So it sounds like the Input/Output error was in fact because you were  
+> closing the IndexSearcher while an in-flight query was still using it?
+> 
+> Or... are you still seeing that error now that you've switched to  
+> opening a new IndexSearcher for the current day for every query?
+> 
+> It's very costly, in general, to open a new IndexSearcher per query.   
+> It's better to share a single searcher, and then reopen it  
+> periodically, taking care to leave the old one open until all queries  
+> have finished with it.  But it's possible in your app that this added  
+> cost isn't important.
+> 
+> Mike
+> 
+> JulieSoko wrote:
+> 
+>>
+>> Yes, I am leaving the searchers open for all indexes except for the  
+>> current
+>> day.  The index for the current day is constantly being updated and  
+>> if I
+>> happen to have the Input/Output error/no segment files found error  
+>> while
+>> searching the current day then that searcher will continue to return  
+>> the i/o
+>> error from the point on i.e. is not usable again.  So, I am now  
+>> recreating
+>> and closing the searcher for the current day only.... Each  
+>> individual user
+>> will have a new searcher for the current day for each query.
+>>
+>>
+>>
+>> Michael McCandless-2 wrote:
+>>>
+>>>
+>>> Did you resolve the issue where you were closing the IndexSearcher
+>>> while searches were still running?
+>>>
+>>> That's where we got to on the last thread:
+>>>
+>>>     http://www.nabble.com/Lucene-Input-Output-error-to20156805.html
+>>>
+>>> Mike
+>>>
+>>> JulieSoko wrote:
+>>>
+>>>>
+>>>> I am narrowing down this problem that I have had for a week now...
+>>>> I am
+>>>> using lucene version 2.3.1 and 64 bit java versio 1.5.0-12-b04
+>>>> running on
+>>>> Linux box.  We are merging indexes every 60 seconds and there are  
+>>>> 1..*
+>>>> searches occuring at anytime on the indexes.  The problem is that we
+>>>> will
+>>>> get an Input /Output error trying to read the index for a search
+>>>> randomly...
+>>>> say every 5th search.  I have posted the error before, but have
+>>>> narrowed it
+>>>> down, I believe, to a merge issue.
+>>>>
+>>>> This is the error that a searcher will output at random times:
+>>>> java.io.IOException: Input/output error
+>>>> java.io.RandomAccessFile.readBytes(Native Method)
+>>>> java.io.RandomAccessFile.read(RandomAccessFile.java:315)
+>>>> at
+>>>> org.apache.lucene.store.FSDirecotry
+>>>> $FSIndexInput.readInternal(FSDirectory.java:550)
+>>>> at
+>>>> org
+>>>> .apache
+>>>> .lucene.store.BufferedIndexInput.readBytes(BufferedInputInput.java:
+>>>> 131)
+>>>> at
+>>>> org.apache.lucene.index.CompoundFileReader
+>>>> $CSIndexInput.readInternal(CompoundFileReader.java:240)
+>>>> at
+>>>> org
+>>>> .apache
+>>>> .lucene.instoreBufferedIndexInput.refill(BufferedIndexInput.java:
+>>>> 152)
+>>>> at
+>>>> org
+>>>> .apache
+>>>> .lucene.instoreBufferedIndexInput.readByte(BufferedIndexInput.java:
+>>>> 152)
+>>>> at org.lucene.store.IndexInput.readVInt(IndexInput.java:76)
+>>>> at org.apache.lucene.index.TermBuffer.read(TermBuffer.java:63)
+>>>> at  
+>>>> org.apache.lucene.index.SegmentTermEnum.next(SegmentTermEnum.java:
+>>>> 123)
+>>>> at
+>>>> org.apache.lucene.index.SegmentTermEnum.scanTo(SegmentTermEnum.java:
+>>>> 154)
+>>>> at
+>>>> org
+>>>> .apache.lucene.index.TermInfosReader.scanEnum(TermInfosReader.java:
+>>>> 223)
+>>>> at org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:
+>>>> 217)
+>>>> at org.apache.lucene.index.SegmentReader.docFreq(SegmentReader.java:
+>>>> 678)
+>>>> at  
+>>>> org.apache.lucene.search.IndexSearcher.docFreq(IndexSearcher.java:
+>>>> 87)
+>>>> at org.apache.lucene.search.Searcher.docFreqs(searcher.java:118)
+>>>> at
+>>>> org
+>>>> .apache.lucene.search.MultiSearcher.createWeight(MultiSearcher.java:
+>>>> 311)
+>>>> at org.apache.lucene.search.Searcher.search(Searcher.java:178)
+>>>>
+>>>>
+>>>> ******************************************************************************
+>>>> NOW, when I get the above Exception, I check the index using the
+>>>> CheckIndex.check method... As part of the check , this exception is
+>>>> thrown:
+>>>>
+>>>>
+>>>> Error: could not read any segments file in directory
+>>>> java.io.FileNotFoundException: no segments* file found in
+>>>> org.apache.lucen.store.FSDirectory@appfs/rt10/jetty/20081103
+>>>>   at
+>>>> org.apache.lucene.index.SegmentInfos
+>>>> $findSegmentsFile.run(SegementInfos.java:587)
+>>>> .....
+>>>>
+>>>> Is there any point in the merging of indexes that the segment files
+>>>> are
+>>>> removed?   If I rerun the search, right after this error occurs, the
+>>>> search
+>>>> is ok... I do open a new IndexSearcher...
+>>>>
+>>>> The IndexWriter code is this:
+>>>>  IndexWriter combinedWriter = new IndexWriter(currentMergeDir, new
+>>>> StandardAnalyzer());
+>>>>  combinedWriter.addIndexes(dirToMerge);
+>>>>  combinedWriter.flush();
+>>>>  combinedWriter.close();
+>>>>
+>>>>
+>>>> As you can see above, each time there is a merge a new IndexWriter  
+>>>> is
+>>>> created, indexes added, flushed and closed.
+>>>> I know you are not supposed to have synchronization issues between
+>>>> writing
+>>>> and flushing , but could there be an issue when you are creating a  
+>>>> new
+>>>> searcher at the instant where the files are merged and there are no
+>>>> segments
+>>>> in a dir???
+>>>>
+>>>> Thanks,
+>>>> Julie
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>> -- 
+>>>> View this message in context:
+>>>> http://www.nabble.com/No-segment-files-found--Searcher-error-tp20305354p20305354.html
+>>>> Sent from the Lucene - Java Users mailing list archive at  
+>>>> Nabble.com.
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>
+>> -- 
+>> View this message in context:
+>> http://www.nabble.com/No-segment-files-found--Searcher-error-tp20305354p20321842.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/No-segment-files-found--Searcher-error-tp20305354p20324150.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,243 @@
+FROM: Alex Winston <a...@christianity.com>
+SUBJECT: Re: Searching Ranges
+DATE: 9 Nov 2002
+
+otis,
+
+i was able to fix the junit build problems, with the newest versions of
+ant in regards to lucene unit tests.  it appears that the junit.jar must
+appear in the $ANT_HOME/lib dir in order to run such optional taskdefs
+as JUnitTask.
+
+the following link was very helpful.
+http://barracuda.enhydra.org/project/mailingLists/barracuda/msg04810.html
+
+additionally i was able to unit test lucene with the one line change
+that i suggested with success, although i have not looked into how
+thorough the unit tests are for cases like this.
+
+the diff follows from a cvs snapshot from yesterday (note the added
+break;):
+*** RangeQuery.java     Sat Nov  9 09:54:05 2002
+--- RangeQuery.java.old Sat Nov  9 09:53:37 2002
+***************
+*** 164,170 ****
+                              TermQuery tq = new
+TermQuery(term);         // found a match
+                              tq.setBoost(boost);               // set
+the boost
+                              q.add(tq, false, false);            // add
+to q
+-                             break; //ADDED!
+                          }
+                      } 
+                      else
+--- 164,169 ----
+
+
+i also pondered the ramifications of such a change, and have a few
+thoughts.  it appears that this is successful because it eliminates the
+massive overhead of the byte[] built by the TermScorer when there are
+thousands of terms, but a side-effect may be that it will not accurately
+return a valid score.  i have yet to test this, and my understanding of
+the code is still very limited.  although i do not have a firm grasp of
+what is involved in scoring, is there not a possibility to score based
+on the number of results matched for this particular field as opposed to
+the current implementation.
+
+any thoughts?
+
+as i look through the code some more i will offer my thoughts on a
+possible reimplementation of RangeQuery to alleviate the overhead when
+there are thousands of terms as opposed to this simple one line change
+which may have hidden side-effects.
+
+i can also send a copy of some simple tests to show how to create this
+situation with profiling results if that would be helpful.
+
+
+thanks
+alex
+
+
+
+On Fri, 2002-11-08 at 17:40, Alex Winston wrote:
+> actually i was mistaken, i thought the tests ran successfully but after
+> looking again i merely got a BUILD SUCCESSFUL, apparently lucenes build
+> cannot find JUnitTask out of the box with ant1.5.1.  i have not had any
+> time to work through the problem.  i will look into it tomorrow, if you
+> have any thoughts in the meantime let me know.
+> 
+> thanks
+> alex
+> 
+> 
+> 
+> On Fri, 2002-11-08 at 16:46, Otis Gospodnetic wrote:
+> > Hello,
+> > 
+> > Did you say that you run 'ant test-unit' and that all tests still pass?
+> > If so, could you attach a cvs diff -ucN RangeQuery.java?
+> > 
+> > Thanks,
+> > Otis
+> > 
+> > 
+> > --- Alex Winston <alex@christianity.com> wrote:
+> > > apologizes for replying to myself, but another nice side-effect of
+> > > this
+> > > fix is that it virtually eliminates the potential for an
+> > > OutOfMemoryError, which was a problem i encountered on extremely
+> > > large
+> > > fields, over 10000 terms, while i was profiling the RangeQuery class.
+> > > 
+> > > i can get into specifics if need be, any thoughts?
+> > > 
+> > > alex
+> > > 
+> > > 
+> > >  On Fri, 2002-11-08 at 15:54, Alex Winston wrote:
+> > > > thanks for the reply, my apologizes for not explaining myself very
+> > > > clearly, it has been a long day.
+> > > > 
+> > > > you expressed exactly our situation, unfortunately this is not an
+> > > option
+> > > > because we want to have multiple ranges for each document as well, 
+> > > > there is a possible extension of what you suggested but that is a
+> > > last
+> > > > resort.  kinda crazy i know, but you have to meet requirements :).
+> > > > 
+> > > > but i also had a thought while i was looking through the lucene
+> > > code,
+> > > > and any comments are welcome.  
+> > > > 
+> > > > i may be very mistaken because it has been a long day but if you
+> > > look at
+> > > > the current cvs version of RangeQuery it appears that even if a
+> > > match is
+> > > > found it will continue to iterate over terms within a field, and in
+> > > my
+> > > > case it is on the order of thousands.  if i add a break after a
+> > > match
+> > > > has been found it appears as though the search is improved on avg
+> > > an
+> > > > order of magnitude, my math has left me so i cannot be theoretical
+> > > at
+> > > > the moment.  i have unit tested the change on my side and on the
+> > > lucene
+> > > > side and it works.  note: one hard example is that a query went
+> > > from 20
+> > > > seconds to .5 seconds.  any initial thoughts to if there is a case
+> > > where
+> > > > this would not work?
+> > > > 
+> > > > beginning line 164:
+> > > > TermQuery tq = new TermQuery(term);	  // found a match
+> > > > tq.setBoost(boost);			   // set the boost
+> > > > q.add(tq, false, false);		  // add to q
+> > > > break;  // ADDED!
+> > > > 
+> > > > 
+> > > > On Fri, 2002-11-08 at 15:09, Mike Barry wrote:
+> > > > > Alex,
+> > > > > 
+> > > > > It is rather confusing. It sounds like you've indexed
+> > > > > a field that that can be between two values (let's say
+> > > > > E-J) and then when you have a search term such as G
+> > > > > you want the docs containing E-J (or A-H or F-K but not A-H
+> > > > > nor A-C nor J-Z)
+> > > > > 
+> > > > > Just of the top of my head but could you index the upper and
+> > > > > lower bounds as separate fields then when you search do a
+> > > > > compound query:
+> > > > > 
+> > > > >      lower_bound:{ - search_term } AND upper_bound:{ search_term
+> > > - }
+> > > > > 
+> > > > > just a thought.
+> > > > > > -MikeB.
+> > > > > 
+> > > > > 
+> > > > > Alex Winston wrote:
+> > > > > 
+> > > > > > i was hoping that someone could briefly review my current
+> > > solution to a
+> > > > > > problem that we have encountered to see if anyone could suggest
+> > > a
+> > > > > > possible alternative, because as it stands we have pushed
+> > > lucene past
+> > > > > > its current limits.
+> > > > > >
+> > > > > > PROBLEM:
+> > > > > >
+> > > > > > we were wanting to represent a range of values for a particular
+> > > field
+> > > > > > that is searchable over a particular range.
+> > > > > >
+> > > > > > an example follows for clarification:
+> > > > > > we were wanting to store a range of chapters and verses of a
+> > > book for a
+> > > > > > particular document, and in turn search to see if a query range
+> > > includes
+> > > > > > the range that is represented in the index.
+> > > > > >
+> > > > > > if this is unclear please ask for clarification
+> > > > > >
+> > > > > > IMPRACTICAL SOLUTION:
+> > > > > >
+> > > > > > although this solution seems somewhat impractical it is all
+we
+> > > could
+> > > > > > come up with.
+> > > > > >
+> > > > > > our solution involved storing each possible range value within
+> > > the term
+> > > > > > which would allow for RangeQuerys to be performed on this
+> > > particular
+> > > > > > field.  for very small ranges this seems somewhat practical
+> > > after
+> > > > > > profiling.  although once the field ranges began to span
+> > > multiple
+> > > > > > chapters and verses, the search times became unreasonable
+> > > because we
+> > > > > > were storing thousands of entries for each representative
+> > > range.
+> > > > > >
+> > > > > > i can elaborate on anything that is unclear,
+> > > > > > but any thoughts on a possible alternative solution within
+> > > lucene that
+> > > > > > we overlooked would be extremely helpful.
+> > > > > > 	
+> > > > > >
+> > > > > > alex
+> > > > > 
+> > > > > 
+> > > > > 
+> > > > > --
+> > > > > To unsubscribe, e-mail:  
+> > > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > > > > For additional commands, e-mail:
+> > > <mailto:lucene-user-help@jakarta.apache.org>
+> > > > > 
+> > > > > 
+> > > > 
+> > > 
+> > > 
+> > 
+> > > ATTACHMENT part 2 application/pgp-signature name=signature.asc
+> > 
+> > 
+> > 
+> > __________________________________________________
+> > Do you Yahoo!?
+> > U2 on LAUNCH - Exclusive greatest hits videos
+> > http://launch.yahoo.com/u2
+> > 
+> > --
+> > To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+> > 
+> > 
+> 
+
+

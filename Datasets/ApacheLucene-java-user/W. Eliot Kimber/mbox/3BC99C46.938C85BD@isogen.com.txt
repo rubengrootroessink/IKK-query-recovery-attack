@@ -1,0 +1,88 @@
+FROM: "W. Eliot Kimber" <el...@isogen.com>
+SUBJECT: Indexing XML With Lucene: Some Initial Results
+DATE: 14 Oct 2001
+
+We have continued to test our experiment of indexing XML docs by making
+one Lucene doc for each element. It seems to be working pretty well,
+although we haven't tried any really large-scale tests yet (will try to
+do that this coming week).
+
+I did do some informal testing with the World Religions document set
+provided by Jon Bosak of Sun Microsystems. Using the Xerces DOM
+implementation, it took about 75 seconds on a 900mhz PIII laptop to
+index the Book of Mormon (which is the biggest of the four works at 1.5
+Meg of XML data). Searches across it were essentially instantaneous (but
+the index size was small in terms of the scales Lucene can support). I
+have not yet profiled the cost of things like collating hit lists by XML
+document (that is, all hits with the same docid field), but that should
+be purely a function of Java's speed at list iteration, not anything
+Lucene does. 
+
+I also wrote client code that takes the treeloc in a given hit and looks
+up the corresponding node in the source document's DOM. This code was
+very fast too (again, using the Xerces DOM implementation). I had to do
+this because we aren't storing any of the XML data in the index itself
+(which you could do, but seemed redundant given that the original
+documents are still accessible). Given the ability to store pretty much
+anything in fields, you could actually capture all of the original XML
+data in the Lucene index such that the original document could be
+reconsitituted with sufficient fidelity. We are not currently taking
+that approach because we don't to add that complexity to the Lucene
+index. But it does imply that Lucene could be used as an XML store where
+the original input documents are not subsequently kept. (Of course, I
+don't know if this approach would preform well enough, but it almost
+certainly wouldn't perform worse than existing XML-specific storage
+systems that decompose docs at the element level.) [I personally don't
+like storage systems that store XML documents only as decomposed bits,
+which is why we're not taking that approach in this project--we're
+treating the Lucene indexes as purely transient indexes over a
+separately-managed authoritative datastore. This protects us, for
+example, from changes to the index rules, such as changing fields from
+indexed to non-indexed or changing the rules for particular fields. It's
+much easier and faster to simply re-index existing docs than to do some
+sort of export/re-import process.]
+
+I'm also starting to think about additional contextual information that
+could be captured in the index to make it possible to do even more
+contextual qualification at the Lucene query level. Will require more
+experimentation and thought.
+
+Again, the basic approach is very simple: for a given XML document, walk
+the DOM tree, creating one Lucene doc for each element node, where each
+Lucene doc has a "docid" field whose value is the same for all docs
+created from the same XML document, a "tagname" field, an "ancestors"
+field (the ordered list of ancestor element types for the element), a
+"treeloc" field, which is the DOM tree location of the element (e.g., 0
+1 0 3" for the 4th child of the first child of the second child of the
+document element), and a "nodetype" field that indicates the DOM node
+type that has been indexed (we also index processing instructions and
+comments and could do more). We also capture any attributes as fields as
+well, enabling searching on attribute values.
+
+For the text content of the document, we are capturing only the
+directly-contained content of each element and indexing that as the
+"content" field. We also capture all the PCDATA content for the whole
+document and index it on a separate Lucene doc with a distinct node type
+(e.g., "ALL_CONTENT"). This enables phrase searching that ignores
+element boundaries and can also allow for faster queries if all you care
+about is whether or not a given doc has some text and not which elements
+have it.
+
+We then have a front-end that both handles preparing the queries that go
+to Lucene and collating the results that come back (for example,
+organizing the hits by XML document or doing additional context-based
+filtering that can't be done at the Lucene level). 
+
+Cheers,
+
+Eliot
+-- 
+. . . . . . . . . . . . . . . . . . . . . . . .
+
+W. Eliot Kimber | Lead Brain
+
+1016 La Posada Dr. | Suite 240 | Austin TX  78752
+    T 512.656.4139 |  F 512.419.1860 | eliot@isogen.com
+
+w w w . d a t a c h a n n e l . c o m
+

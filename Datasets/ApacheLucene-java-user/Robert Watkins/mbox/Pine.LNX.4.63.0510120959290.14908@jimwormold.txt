@@ -1,0 +1,83 @@
+FROM: Robert Watkins <rwatk...@foo-bar.org>
+SUBJECT: Re: wildcards within a phrase query
+DATE: 12 Oct 2005
+
+Having now looked at the test cases in SVN (specifically,
+TestMultiPhraseQuery.java), I cannot see any tests using simple
+wildcards, only terms ending with *, and thus suitable for a
+PrefixQuery. The examples do reveal how it could be done for wildcards,
+but my concern turns to scalability.
+
+I am only in the beginning stages of creating a prototype, so I don't
+have a suitable test environment for this sort of thing yet, but when
+it comes to fruition there will be 11 indexes, with anywhere from
+5,000 to 600,000 documents in each index. Based on a test index with 90
+short documents in it, I can easily expect upwards of 1,000 terms per
+document. While there would likely be more repetition of terms as the
+number of documents in an index increases, that's still a lot of terms.
+
+Also, any given query will need to be able to search across any number
+of those indexes. As such, to create a query for, say "bl?nd ambition"
+it looks as if one would have to do something like:
+
+   // search for "bl?nd ambition":
+   MultiPhraseQuery query = new MultiPhraseQuery();
+   String prefix, regex;
+   LinkedList termsWithPrefix = new LinkedList();
+   TermEnum te;
+   while (queryTermEnum.hasNext()) {
+       String queryTerm = (String)queryTermEnum.next();
+       if (hasWildcard(queryTerm)) {
+           // get "bl" from "bl?nd"
+           prefix = getWildcardPrefix(queryTerm);
+           // get "bl.nd" from "bl?nd"
+           regex  = getWildcardRegex(queryTerm);
+           termsWithPrefix.clear();
+           for (int i = 0; i< openIndexReaders.length; i++) {
+               te = openIndexReaders[i].terms(new Term("body", prefix));
+               do {
+                   if (te.term().text().matches(regex)) {
+                       termsWithPrefix.add(te.term());
+                   }
+               } while (te.next());
+           }
+           query.add((Term[])termsWithPrefix.toArray(new Term[0]));
+       }
+       else {
+           query.add(new Term("body", queryTerm));
+       }
+   }
+
+Does that sound reasonable -- and scalable -- to you?
+-- Robert
+
+PS -- Would it be possible to avoid going through _all_ the terms in the
+TermEnum (that are greater than prefix, of course) by doing something
+like:
+
+   } while (te.next() && te.term().text().startsWith(prefix));
+
+or would analysis possibly make that unwise?
+
+
+On Wed, 12 Oct 2005, Daniel Naber wrote:
+
+> On Mittwoch 12 Oktober 2005 00:15, Robert Watkins wrote:
+>
+>> Wonderful! But what about wildcards? I realised after I had sent the
+>> last message that my pattern should have been written:
+>>
+>>   ( term | term as prefix | wildcard term )+
+>
+> Have a look at the test cases: you need to expand the terms yourself, i.e.
+> it doesn't matter if there's a prefix or wildcard term. There's no support
+> for *direct* input of something like (a phrase query) "foo* bar".
+>
+> Regards
+> Daniel
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

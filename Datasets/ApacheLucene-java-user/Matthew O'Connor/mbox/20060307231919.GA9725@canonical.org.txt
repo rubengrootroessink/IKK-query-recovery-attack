@@ -1,0 +1,112 @@
+FROM: Matthew O'Connor <matt...@canonical.org>
+SUBJECT: Weighted Terms Per Document
+DATE: 7 Mar 2006
+
+Hello,
+
+I'm using Lucene 1.9 to replace an in-house search engine where all of the
+documents to be searched are also created in-house.  One of the features of the
+search engine is something called 'xtras' which are associated with the
+documents.  I am wondering how best to model this feature using Lucene.  I have
+one solution (offered below for critique) but I'm not sure it's the best way,
+being a Lucene newbie.
+
+First let me better explain 'xtras' and how they work in the *old* search
+engine.  A document can have zero or more 'xtras'.  'xtras' consist of a token
+and a weight.  At index time  this weight is taken into account when computing
+a score which is saved in the index.  
+
+The index is a database table with three columns and PK of (token, docid):
+
+    token => document id => score
+
+The search algorithm is pretty obvious from here.  A user enters in a query,
+it's parsed into tokens, and we gather up all the unique document ids and add
+their scores together.  In SQL the logic is something like this:
+
+    SELECT docid, SUM(score) AS score
+    FROM SearchIndex 
+    WHERE token IN (...constructed from user query...)
+    GROUP BY docid
+    ORDER BY score DESC
+
+The 'xtras' come into play when saving the score to the index.  Each row in the
+index is a triple: (token, docid, score).  The base score is calculated somehow
+and then the 'xtra' weight is merely tacked on to the final value saved.
+
+For example, here is a document with an id of 'foo' and two 'xtras':  
+
+    Document: 
+        id: foo
+        xtra: 
+            token: breed
+            weight: 2
+        xtra: 
+            token: dog
+            weight: 10
+
+When this document gets indexed the tokens 'breed' and 'dog' will have some
+base score calculated some how.  This base score could be 0 if the token isn't
+even in the document.  Then the weight is added onto this base score and the
+results saved to the index.  So assume 'breed' has a base score of 1.2 and
+'dog' has a base score of 0.4 then the rows saved to the index are:
+
+    (breed, foo, 3.2)
+    (dog, foo, 10.4)
+
+There are some 12,000 in-house created documents that I am searching and nearly
+all of them have these associated 'xtras'.  I feel like this is a huge hint to
+any search engine and that it should be taken advantage of.  The information is
+already there and new documents are created every day with these little hints.
+In more popular terminology 'xtras' are kind of like tags with weights.
+
+So, I want to use Lucene as the basis for a new search engine and I want to
+take this already out there information into account.  I have developed one
+approach which works okay, no complaints or problems really, but I feel like
+it's wrong some how.  My solution is as follows:
+
+I noticed that 99.9% of the 'xtras' had weights less than 10.  So in my Lucene
+index I create 11 fields:
+
+    xtra_1, xtra_2, xtra_3, ..., xtra_10, xtra_max
+
+In field 'xtra_1' I stick all of the tokens (joined by spaces) which have a
+weight of 1, in field 'xtra_2' I stick all the tokens that have a weight of 2,
+and so on.  In 'xtra_max' I stick all the tokens with a weight of more than 10.
+
+I give field xtra_1 a boost of 20, field xtra_2 a boost of 40, and so, with
+field xtra_10 a boost of 200.  Field xtra_max gets a gigantic boost of 10000.
+I picked the scaling value of 20 for the first 10 fields out of thin air, same
+with the boost for xtra_max.
+
+I'm a QueryParser fan, so that's what I've been using.  Our current search
+language is very primitive so QueryParser is a huge bonus and probably good
+enough for us.  However, now that I've created all these new fields I need to
+search them all.  So, obviously, MultiFieldQueryParser is what I moved to.
+
+When I search a document I have 13 fields that get passed to
+MultiFieldQueryParser.  'body', 'title', and the 11 'xtra' fields above.  So
+far this has worked well enough.  I can clearly see that the 'xtras' and their
+weights influence the final rankings.  
+
+In all honestly, I don't have any complaints quite yet.  However, I am left
+with a feeling that the above is kind of "dirty" and that there is a better
+way.  For example, had the values of the 'xtras' ranged more wildly I don't
+think my approach would've scaled.  Also, it feels like this should be a 
+common problem and perhaps I just lack the vocabulary to find the right 
+approach.
+
+So, is what I am doing problematic or is it an okay approach?  Am I going to
+run into some kind of wall eventually?  Is there some library or API methods I
+missed which do exactly what I want which I somehow blindly missed (if so,
+sorry!)? 
+
+Thanks for any input!
+
+-matthew
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

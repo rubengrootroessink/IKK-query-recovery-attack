@@ -1,0 +1,81 @@
+FROM: trond.lindan...@dkdigital.no
+SUBJECT: IOException: Access is denied from IndexWriter.Optimize
+DATE: 5 Dec 2006
+
+Hi, 
+In my test case, four Quartz jobs are starting each third minute storing 
+records in a database followed by an index update.
+After doing a test run over a period of 16 hours, I got this exception 
+after 10 hours:
+
+java.io.IOException: Access is denied
+        at java.io.RandomAccessFile.writeBytes(Native Method)
+        at java.io.RandomAccessFile.write(RandomAccessFile.java:456)
+        at 
+org.apache.lucene.store.FSIndexOutput.flushBuffer(FSDirectory.java:575)
+        at 
+org.apache.lucene.store.BufferedIndexOutput.flush(BufferedIndexOutput.java:85)
+        at 
+org.apache.lucene.store.BufferedIndexOutput.writeBytes(BufferedIndexOutput.java:75)
+        at 
+org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java:212)
+        at 
+org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java:169)
+        at 
+org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java:148)
+        at 
+org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:962)
+        at 
+org.apache.lucene.index.IndexWriter.flushRamSegments(IndexWriter.java:833)
+        at 
+org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:569)
+ 
+Here is the relevant method:
+
+  public void indexItems(boolean createNewIndex, Collection items)
+    throws java.io.IOException {
+        if (IndexReader.indexExists(indexDir)) {
+                while (IndexReader.isLocked(indexDir)) {
+                        try {
+                                logger.info(indexDir+" is locked, 
+waiting...");
+                                Thread.sleep(1000); 
+                        } catch (InterruptedException e) {
+                                e.printStackTrace();
+                        }
+                }
+        }
+        logger.info(indexDir+" lock is open."); 
+    logger.info("Start writing index located at "+indexDir);
+    IndexWriter writer = new IndexWriter(indexDir, analyzer, 
+createNewIndex);
+    writer.setWriteLockTimeout(10000);
+    writer.setUseCompoundFile(true);
+ 
+    Iterator itI = items.iterator();
+    while (itI.hasNext()) {
+      ItemIF item = (ItemIF) itI.next();
+      logger.info("Add item " + item + " to index.");
+      writer.addDocument(ItemDocument.makeDocument(item));
+    }
+    writer.optimize(); // This is where the exception is thrown
+    nrOfIndexedItems = writer.docCount();
+    writer.close();
+    logger.info("Finished writing index.");
+  } 
+
+
+The following environment is used:
+WinXP
+JDK 1.5
+Tomcat 5.5
+Lucene 2.0.0
+HSQLdb 1.8.0
+Quartz 1.6.0
+Hibernate 2.1.8
+ 
+- Tomcat/ JDK has read/write access to c:\windows\temp and directory for 
+indexing.
+
+Anybody?
+

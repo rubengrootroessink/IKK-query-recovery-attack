@@ -1,0 +1,71 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IndexWriter.flush performance
+DATE: 8 Dec 2008
+
+
+Flushing is still done "synchronously" with an addDocument call.  The  
+time spent is in proportion to how large the RAM buffer is, and, how  
+fast your IO system accepts writes.
+
+So, you'll be happily adding documents, until IW decides a flush is  
+needed, and then it will flush (blocking) using your current thread.
+
+But, as you noted, previously that flush would also synchronously  
+merge when needed, but with ConcurrentMergeScheduler that merging is  
+now done in the background.
+
+The new commit() method is quite a bit more costly than a flush  
+because it must sync the files (ensure they are persisted to stable  
+storage) before continuing.
+
+There is a nice analogy to mountain climbing: every so often, you must  
+hammer a new anchor into the rock, which is your safety in case you  
+fall.  You spend alot of time finding a safe spot, and hammering  
+thoroughly, so that anchor will hold you if you fall, just as Lucene's  
+commit spends alot of time waiting for all the "anchors" to be on  
+stable storage in case the machine crashes.  In between hammering  
+anchors you can climb fairly quickly simply using hands & feet to  
+"temporarily" hold on, just like Lucene writes new segment files as  
+"temporary" files (in that they won't survive crash), during flush.   
+So you should use commit sparingly, and, open your IndexWriter with  
+autoCommit=false.
+
+Mike
+
+mimounl wrote:
+
+>
+>
+>
+> Jokin Cuadrado wrote:
+>>
+>> Avery time you flush the index, you are writing a small index to the
+>> disk. Theres a  defined value (mergefactor) that decides when it have
+>> to merge all of those small index in a bigger one, so as the index
+>> grown the merges are bigger.
+>>
+> Don't you thing I have to migrate my lucene version to 1.4 because  
+> in this
+> version, it sounds like the writings of document in the index files  
+> are
+> independant from the merge operation ?
+> I mean, in last version, the merge is performed by default by a
+> ConcurrentMergeScheduler that will make the commit operation  
+> approximatly
+> constant whatever the size of the index. Is that true ?
+> -- 
+> View this message in context: http://www.nabble.com/IndexWriter.flush-performance-tp20880541p20887656.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

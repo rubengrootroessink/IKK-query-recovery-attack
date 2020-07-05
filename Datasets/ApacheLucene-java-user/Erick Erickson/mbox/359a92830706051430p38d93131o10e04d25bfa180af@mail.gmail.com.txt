@@ -1,0 +1,189 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Whats the best way to filter based on a function of an indexed term or field value
+DATE: 5 Jun 2007
+
+I'd think about the filter option first, see below
+
+
+On 6/5/07, lucene user <luz290@gmail.com> wrote:
+>
+> We have a large and growing number of articles (< 60k but growing) and we
+> want to divide
+> articles from some sources into groups so that we can do queries against
+> just members of
+> one or two groups and not find articles from publications that are outside
+> these publication
+> groups.
+>
+> We would like to be able to move things from one group to another but this
+> is far less
+> important than blinding speed.
+>
+> What are the best ways of doing this? What experience do others have doing
+> this sort of thing?
+> Below please find all of my ideas/suspicions - but dont assume I am
+> correct
+> about any of this.
+> If I knew the answer, I would not be asking! Feel free to ignore the below
+> and just tell me how
+> you handle this sort of issue.
+>
+> Query based on the source name
+>
+> Each article is tagged which the name of its publication.
+> We use a big OR query listing all the allowed publications.
+>
+> Advantages
+> Which sources belong to which packages can be maintained in our database,
+> and eaisily changed.
+>
+> Disadvantages
+> With hundreds on sources in each package the queries will be very long.
+> Slow performance, possible "Too Many Clauses" Error.
+
+
+
+I was surprised by how quickly Lucene handles this. You can always bump
+the TooManyClauses limit. That said, I'm not too keen on this solution...
+
+
+Query based on the package name
+> Instead of Taging the documents with source names, use the package names.
+>
+> Advantages
+> Should be very fast at search time.
+> Can search on any boolean combination of packages
+> Very easy to implement.
+>
+> Disadvantages
+> Documents would have to be assigned to packages at the time they are added
+> to the index.
+> This assignment could not be changed without deleting and re-adding the
+> document to the index.
+> This is not practical because a huge number of documents would have to be
+> re-indexed just
+> because one source was moved to a different package.
+
+
+Pretty much sums it up for me.
+
+
+Use a Filtered Query
+> A Filtered Query combines any Query with a Filter object which
+> independently
+> restricts
+> which documents will appear in the output. A Filter takes an IndexReader
+> as
+> input and
+> produces a BitSet as output. The output has one bit for each document in
+> the
+> index,
+> those bits which are 'on' represent documents that are allowed in the
+> output
+>
+> (provided they are also selected by the query).
+>
+> Advantages
+> This is likely to work. It is the preferred method of doing such things.
+>
+> Disadvantages
+> It requires you to make a full pass through the entire index to set all
+> the
+> bits,
+> rather than operating on documents as they are encountered.
+> With a large archive, that bitset will take up quite a bit of memory.
+
+
+
+
+First, I don't think the space requirement is as large as you suspect.
+It's roughly (# docs / 8) bytes. So 60K is a paltry number of bytes.
+1M docs isn't prohibitive either, do you expect the size to get huge?
+Plus, these could be singletons to conserve space amongst many
+threads (Does CachingWrapperFilter do this already???).
+
+Second, you can build up your filters beforehand and store them, say
+at searcher startup time. See CachingWrapperFilter (?) or roll your own.
+
+Third, assembling filters surprised me with how fast it runs, I don't think
+the penalty is as great as you fear.
+
+Fourth, since it's supported, you can do it quickly and then
+you'd be able to get some performance numbers and only if
+performance is unsatisfactory do you need to go to a more
+complex solution....
+
+
+
+Use FilterIndexReader
+> A Class FilterIndexReader is provided in Lucene to make it easy to
+> override
+> the
+> index reader. One would think that this would allow you to simply skip
+> documents
+> you don't want whenever they are encountered in the index.
+>
+> For my purposes the FilterIndexReader will contain a HashSet of source
+> names
+> that
+> will be permitted in the query. As each document is encountered, we will
+> extract its
+> source name from the index and see if it is present in the HashSet, if not
+> we will go
+> on to the next document.
+>
+> An index reader has 3 nested classes that one can override within the
+> FilterIndexReader.
+>
+> termEnum - lists distinct terms in the index, with the number of documents
+> each appears in.
+> termDocs - lists the terms in the index, with the id number of each
+> document
+> they appear in.
+> termPositions - lists the terms, with there document numbers and word
+> position of each occurance.
+>
+> I modified termDocs and termPositions to skip to the next document
+> whenever
+> they would
+> otherwise settle on a document whos source name is not in the hash set.
+>
+> But I did not modify termEnum and its document Frequency.
+> The only way to get the correct document frequency would be to iterate
+> through all the
+> documents and see which ones will be included. This would be just almost
+> bad
+> as using a Filter.
+>
+> Advantages
+> This method provides a way to include only documents from a query time
+> selection of sources.
+> It is efficent because an in-memory hashtable is used for the look up.
+> It skips documents as they are encountered, rather than having to iterate
+> through the
+> whole index at once.
+
+
+Without a clue why it didn't work <G>, this may not be as efficient as
+you think, since extracting the string you hash can be expensive. See
+the caution about calling IndexReader.document()(?) in inner loops. And
+wouldn't a hash table be more space-wasting than a filter?
+
+
+
+Disadvantages
+> It didn't work - although my termDocs and termPositions objects ran, and
+> skiped the
+> unwanted documents, those documents still appeared in the result set.
+>
+
+
+ Kudos for doing as much homework as you did before
+posting, it's nice to see.
+
+Perhaps others will chime in with other responses..
+
+
+Best
+Erick
+

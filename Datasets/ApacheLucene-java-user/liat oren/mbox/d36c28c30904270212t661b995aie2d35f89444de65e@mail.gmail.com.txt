@@ -1,0 +1,546 @@
+FROM: liat oren <oren.l...@gmail.com>
+SUBJECT: Re: Using Payloads
+DATE: 27 Apr 2009
+
+Yes, I agree with you - I also tried this approach in the past and it was
+terribely slow - looping on the term vectors.
+
+What I have done - is dividing indexes into steps - which of course, if can
+be avoided, it will be more than great!!
+
+As for my problem -  it was a code problems, I sloved it, thanks.
+Is it recommended to use multi-thread in order to index?
+
+Best,
+Liat
+2009/4/26 Murat Yakici <Murat.Yakici@cis.strath.ac.uk>
+
+>
+>
+> See my comments:
+>
+> > Yes, for this specific part, I have this prior knowledge which is based
+> on
+> > a
+> > training set.
+> > About the things you raise here, there are two things you might mean, I
+> am
+> > not sure:
+> >
+> > 1. If you don't have that "prior" knowledge, then all it means you need
+> to
+> > modify the formula of the score, no? to give more weight to factors you
+> > think to be more significant.
+> > The TermFreqVector will have the term frequencies and you will be able to
+> > edit the score formula so it will fit your needs.
+> >
+> Although I like the TermFreqVector approach, the API and everything, it is
+> slower than using TermEnum and TermDocs. I don't have solid statistics,
+> but I confirmed the fact during my development work on a 80+ core SG
+> server. I wish TermFreqVector approach could load abit faster.
+>
+>
+>
+> > Or
+> >
+> > 2. Enable us to add statistics factors while indexing
+>
+> This is what I am talking about, *Indexing time*.
+>
+> >
+> > Question - why do you want to edit these while indexing and not using
+> them
+> > at "search" time in the way you desire? At this stage you already have
+> all
+> > the statistics - frequencies of all terms within and outside documents
+>
+> First of all you don't have all the statistics. Because, there are some
+> statistics that you simple can't calculate (or more correctly you
+> shouldn't be due to performance) during the query scoring time. It will be
+> an overkill.
+>
+> >
+> >
+> > As for my solution:
+> > I tried to add documents to the index and for every document I have a
+> > differnt map of factors for every term.
+> > However, I get an exception: Exception in thread "main"
+> > java.util.ConcurrentModificationException
+> > It seems like two threads - one reads the map, one edits it (probably for
+> > the next document), bump into each other.
+> >
+>
+> Are you using a single Thread to do all the indexing or multiple threads
+> adding document to the index? You need to explain the situation a bit
+> more.
+>
+> Murat
+>
+> > I tried to put the read part and write part in two different synchronied
+> > methods, but it still shows the same exception.
+> >
+> > Any idea how can it be solved?
+> >
+> > Best,
+> > Liat
+> >
+> >
+> > 2009/4/26 Murat Yakici <Murat.Yakici@cis.strath.ac.uk>
+> >
+> >>
+> >> Yes, this is more or less what I had in mind. However, for this approach
+> >> one requires some *prior knowledge* of the vocabulary of the document
+> >> (or
+> >> the collection) to produce that score before even it gets analyzed,
+> >> isn't
+> >> it? And this is the paradox that I have been thinking. If you have that
+> >> knowledge, that's fine. In addition, for applications that only require
+> >> a
+> >> small term window to generate a score (such as term in context score)
+> >> this
+> >> can be implemented very easy.
+> >>
+> >> It is possible to inject the document dependent boost/score generation
+> >> *logic* (an interface would do) to the Tokenizer/TokenStream. However, I
+> >> am afraid this may have an indexing time penalty. If your window size is
+> >> the document itself, you will be doing the same job twice (calculating
+> >> the
+> >> num of times a term occurs in doc X, index time weights etc.).
+> >> IndexWriter
+> >> already does these somewhere down deep.
+> >>
+> >>
+> >> Simply put, I want to add some scores to documents/terms, but I can't
+> >> generate that score before I observe the document/terms. If I do that I
+> >> would replicate some of the work that is being already done by
+> >> IndexWriter.
+> >>
+> >> If I remember it correctly, there is also some intention to add document
+> >> payloads functionality. I have the same concerns on this. So I think we
+> >> need a clear view on the topic. Where is the payload work moving? How we
+> >> can generate a score without duplicating some of the work that
+> >> IndexWriter
+> >> is doing?   I guess Michael Busch is working on document payloads for
+> >> release 3.0. I would appreciate if someone can enlighten us on how that
+> >> would work and can be utilised, in particularly during the analysis
+> >> phase?
+> >>
+> >>
+> >> Cheers,
+> >> Murat
+> >>
+> >> > Thanks, Murat.
+> >> > It was very useful - I also tried to override IndexWriter and
+> >> > DocumentsWriter instead, but it didn't work well. DocumentsWriter
+> >> can't
+> >> > be
+> >> > overriden.
+> >> >
+> >> > So, I didn't find a better way to make the changes.
+> >> >
+> >> > My needs are having for every term in different documents different
+> >> > values.
+> >> > So, like you set the boost at the document level, I would like to set
+> >> the
+> >> > boost for different terms within differnt documents.
+> >> >
+> >> > For that matter, I made some changes in the code you sent - (I
+> >> coloured
+> >> > the
+> >> > changes in red):
+> >> >
+> >> > Below you can find an example for the use of it
+> >> >
+> >> > **********
+> >> >  private class PayloadAnalyzer extends Analyzer
+> >> >  {
+> >> >   private PayloadTokenStream payToken = null;
+> >> >   private int score;
+> >> >   *private Map<String, Integer> scoresMap = new HashMap<String,
+> >> > Integer>();*
+> >> >   public synchronized void setScore(int s)
+> >> >   {
+> >> >    score = s;
+> >> >   }
+> >> > *  public synchronized void setMapScores(Map<String, Integer>
+> >> scoresMap)
+> >> >   {
+> >> >    this.scoresMap = scoresMap;
+> >> >   }*
+> >> >   public final TokenStream tokenStream(String field, Reader reader)
+> >> >   {
+> >> >    payToken = new PayloadTokenStream(new WhitespaceTokenizer(reader));
+> >> > //new
+> >> > LowerCaseTokenizer(reader));
+> >> >    payToken.setScore(score);
+> >> >    payToken.setMapScores(scoresMap);
+> >> >    return payToken;
+> >> >   }
+> >> >  }
+> >> >  private class PayloadTokenStream extends TokenStream
+> >> >  {
+> >> >   private Tokenizer tok = null;
+> >> >   private int score;
+> >> >   *private Map<String, Integer> scoresMap = new HashMap<String,
+> >> > Integer>();*
+> >> >   public PayloadTokenStream(Tokenizer tokenizer)
+> >> >   {
+> >> >    tok = tokenizer;
+> >> >   }
+> >> >   public void setScore(int s)
+> >> >   {
+> >> >    score = s;
+> >> >   }
+> >> >  * public synchronized void setMapScores(Map<String, Integer>
+> >> scoresMap)
+> >> >   {
+> >> >    this.scoresMap = scoresMap;
+> >> >   }*
+> >> >   public Token next(Token t) throws IOException
+> >> >   {
+> >> >    t = tok.next(t);
+> >> >    if(t != null)
+> >> >    {
+> >> >     //t.setTermBuffer("can change");
+> >> >     //Do something with the data
+> >> >     byte[] bytes = ("score:" + score).getBytes();
+> >> >     //    t.setPayload(new Payload(bytes));
+> >> > *    String word = String.copyValueOf(t.termBuffer(), 0,
+> >> t.termLength());
+> >> >     int score = scoresMap.get(word);
+> >> >     byte payLoad = Byte.parseByte(String.valueOf(score));
+> >> >     t.setPayload(new Payload(new byte[] { Byte.valueOf(payLoad) }));*
+> >> >    }
+> >> >    return t;
+> >> >   }
+> >> >   public void reset(Reader input) throws IOException
+> >> >   {
+> >> >    tok.reset(input);
+> >> >   }
+> >> >   public void close() throws IOException
+> >> >   {
+> >> >    tok.close();
+> >> >   }
+> >> >  }
+> >> > **********************************
+> >> > *Example for the use of payloads:*
+> >> >
+> >> >   PayloadAnalyzer panalyzer = new PayloadAnalyzer();
+> >> >   File index = new File("" + "TestSearchIndex");
+> >> >   IndexWriter iwriter = new IndexWriter(index, panalyzer);
+> >> >   Document d = new Document();
+> >> >   d.add(new Field("text", "word1 word2 word3", Field.Store.YES,
+> >> > Field.Index.TOKENIZED, Field.TermVector.YES));
+> >> >   d.add(new Field("id", "1^3", Field.Store.YES,
+> >> Field.Index.UN_TOKENIZED,
+> >> > Field.TermVector.NO <http://field.termvector.no/> <
+> http://field.termvector.no/>));
+> >> >   Map<String, Integer> mapScores = new HashMap<String, Integer>();
+> >> >   mapScores.put("word1", 3);
+> >> >   mapScores.put("word2", 1);
+> >> >   mapScores.put("word3", 1);
+> >> >   panalyzer.setMapScores(mapScores);
+> >> >   iwriter.addDocument(d, panalyzer);
+> >> >   d = new Document();
+> >> >   d.add(new Field("text", "word1 word2 word3", Field.Store.YES,
+> >> > Field.Index.TOKENIZED, Field.TermVector.YES));
+> >> >   d.add(new Field("id", "2^3", Field.Store.YES,
+> >> Field.Index.UN_TOKENIZED,
+> >> > Field.TermVector.NO <http://field.termvector.no/> <
+> http://field.termvector.no/>));
+>  >> >   //We set the score for the term of the document that will be
+> >> > analyzed.
+> >> >   /*I was worried about this part - document dependent score
+> >> >   which may be utilized*/
+> >> >   mapScores = new HashMap<String, Integer>();
+> >> >   mapScores.put("word1", 1);
+> >> >   mapScores.put("word2", 3);
+> >> >   mapScores.put("word3", 1);
+> >> >   panalyzer.setMapScores(mapScores);
+> >> >   iwriter.addDocument(d, panalyzer);
+> >> >   /*-----------------*/
+> >> >   //  iwriter.commit();
+> >> >   iwriter.optimize();
+> >> >   iwriter.close();
+> >> >   BooleanQuery bq = new BooleanQuery();
+> >> >   BoostingTermQuery tq = new BoostingTermQuery(new Term("text",
+> >> "word1"));
+> >> >   tq.setBoost((float) 1.0);
+> >> >   bq.add(tq, BooleanClause.Occur.MUST);
+> >> >   tq = new BoostingTermQuery(new Term("text", "word2"));
+> >> >   tq.setBoost((float) 3);
+> >> >   bq.add(tq, BooleanClause.Occur.SHOULD);
+> >> >   tq = new BoostingTermQuery(new Term("text", "word3"));
+> >> >   tq.setBoost((float) 1);
+> >> >   bq.add(tq, BooleanClause.Occur.SHOULD);
+> >> >   IndexSearcher searcher1 = new IndexSearcher("TestSearchIndex");
+> >> >   searcher1.setSimilarity(new WordsSimilarity());
+> >> >   TopDocs topDocs = searcher1.search(bq, null, 3);
+> >> >   Hits hits1 = searcher1.search(bq);
+> >> >   for(int j = 0; j < hits1.length(); j++)
+> >> >   {
+> >> >    Explanation explanation = searcher1.explain(bq, j);
+> >> >    System.out.println("**** " + hits1.score(j) + " " +
+> >> > hits1.doc(j).getField("id").stringValue() + " *****");
+> >> >    System.out.println(explanation.toString());
+> >> >    explanation.getValue();
+> >> >
+> >>
+>  System.out.println("********************************************************");
+> >> >    System.out.println("Score " + topDocs.scoreDocs[j].score + " doc "
+> >> +
+> >> > searcher1.doc(topDocs.scoreDocs[j].doc).getField("id").stringValue());
+> >> >
+> >>
+>  System.out.println("********************************************************");
+> >> >   }
+> >> >
+> >> > If you try the same query with differnt boosting, you will get a
+> >> different
+> >> > order for the documents.
+> >> >
+> >> > Does it look ok?
+> >> >
+> >> > Thanks again!
+> >> > Liat
+> >> > 2009/4/25 Murat Yakici <Murat.Yakici@cis.strath.ac.uk>
+> >> >
+> >> >>
+> >> >>
+> >> >> Here is what I am doing, not so magical... There are two classes, an
+> >> >> analyzer and an a TokenStream in which I can inject my document
+> >> >> dependent
+> >> >> data to be stored as payload.
+> >> >>
+> >> >>
+> >> >> private PayloadAnalyzer panalyzer = new PayloadAnalyzer();
+> >> >>
+> >> >>    private class PayloadAnalyzer extends Analyzer {
+> >> >>
+> >> >>        private PayloadTokenStream payToken = null;
+> >> >>        private int score;
+> >> >>
+> >> >>        public synchronized void setScore(int s) {
+> >> >>            score=s;
+> >> >>        }
+> >> >>
+> >> >>      public final TokenStream tokenStream(String field, Reader
+> >> reader) {
+> >> >>         payToken = new PayloadTokenStream(new
+> >> >> LowerCaseTokenizer(reader));
+> >> >>         payToken.setScore(score);
+> >> >>         return payToken;
+> >> >>        }
+> >> >>    }
+> >> >>
+> >> >>    private class PayloadTokenStream extends TokenStream {
+> >> >>
+> >> >>        private Tokenizer tok = null;
+> >> >>        private int score;
+> >> >>
+> >> >>        public PayloadTokenStream(Tokenizer tokenizer) {
+> >> >>            tok = tokenizer;
+> >> >>        }
+> >> >>
+> >> >>        public void setScore(int s) {
+> >> >>            score = s;
+> >> >>        }
+> >> >>
+> >> >>        public Token next(Token t) throws IOException {
+> >> >>            t = tok.next(t);
+> >> >>            if (t != null) {
+> >> >>                //t.setTermBuffer("can change");
+> >> >>                //Do something with the data
+> >> >>                byte[] bytes = ("score:"+ score).getBytes();
+> >> >>                t.setPayload(new Payload(bytes));
+> >> >>            }
+> >> >>            return t;
+> >> >>        }
+> >> >>
+> >> >>        public void reset(Reader input) throws IOException {
+> >> >>            tok.reset(input);
+> >> >>        }
+> >> >>
+> >> >>        public void close() throws IOException {
+> >> >>            tok.close();
+> >> >>        }
+> >> >>    }
+> >> >>
+> >> >>
+> >> >>    public void doIndex() {
+> >> >>        try {
+> >> >>            File index = new File("./TestPayloadIndex");
+> >> >>            IndexWriter iwriter = new IndexWriter(index,
+> >> >>                     panalyzer,
+> >> >>                     IndexWriter.MaxFieldLength.UNLIMITED);
+> >> >>
+> >> >>            Document d = new Document();
+> >> >>            d.add(new Field("content",
+> >> >>               "Everyone, someone, myTerm, yourTerm", Field.Store.YES,
+> >> >>                Field.Index.ANALYZED, Field.TermVector.YES));
+> >> >>            //We set the score for the term of the document that will
+> >> be
+> >> >> analyzed.
+> >> >>            /*I was worried about this part - document dependent score
+> >> >> which may be utilized*/
+> >> >>            panalyzer.setScore(5);
+> >> >>            iwriter.addDocument(d, panalyzer);
+> >> >>            /*-----------------*/
+> >> >>            ...
+> >> >>            iwriter.commit();
+> >> >>            iwriter.optimize();
+> >> >>            iwriter.close();
+> >> >>
+> >> >>            //Now read the index
+> >> >>            IndexReader ireader = IndexReader.open(index);
+> >> >>            TermPositions tpos = ireader.termPositions(
+> >> >>                                  new Term("content","myterm"));//Note
+> >> >> LowercaseTokenizer
+> >> >>            while (tpos.next()) {
+> >> >>                int pos;
+> >> >>                for(int i=0;i<tpos.freq();i++){
+> >> >>                    pos=tpos.nextPosition();
+> >> >>                    if (tpos.isPayloadAvailable()) {
+> >> >>                        byte[] data = new
+> >> byte[tpos.getPayloadLength()];
+> >> >>                        tpos.getPayload(data, 0);
+> >> >>                       //Utilise payloads;
+> >> >>                    }
+> >> >>                }
+> >> >>            }
+> >> >>
+> >> >>            tpos.close();
+> >> >>        } catch (CorruptIndexException ex) {
+> >> >>           //
+> >> >>        } catch (LockObtainFailedException ex) {
+> >> >>            //
+> >> >>        } catch (IOException ex) {
+> >> >>            //
+> >> >>        }
+> >> >>    }
+> >> >>
+> >> >> I wish it was designed better... Please let me know if you guys have
+> >> a
+> >> >> better idea.
+> >> >>
+> >> >> Cheers,
+> >> >> Murat
+> >> >>
+> >> >> > Dear Murat,
+> >> >> >
+> >> >> > I saw your question and wondered how did you implement these
+> >> changes?
+> >> >> > The requirement below are the same ones as I am trying to code
+now.
+> >> >> > Did you modify the source code itself or only used Lucene's jar
+and
+> >> >> just
+> >> >> > override code?
+> >> >> >
+> >> >> > I would very much apprecicate if you could give me a short
+> >> explanation
+> >> >> on
+> >> >> > how was it done.
+> >> >> >
+> >> >> > Thanks a lot,
+> >> >> > Liat
+> >> >> >
+> >> >> > 2009/4/21 Murat Yakici <murat.yakici@cis.strath.ac.uk>
+> >> >> >
+> >> >> >> Hi,
+> >> >> >> I started playing with the experimental payload functionality.
+I
+> >> have
+> >> >> >> written an analyzer which adds a payload (some sort of a
+> >> score/boost)
+> >> >> >> for
+> >> >> >> each term occurance. The payload/score for each term is dependent
+> >> on
+> >> >> the
+> >> >> >> document that the term comes from (I guess this is the typoical
+> >> use
+> >> >> >> case).
+> >> >> >> So say term t1 may have a payload of 5 in doc1 and 34 in doc5.
+The
+> >> >> >> parameter
+> >> >> >> for calculating the payload changes after each
+> >> >> >> indexWriter.addDocument(..)
+> >> >> >> method call in a while loop. I am assuming that the
+> >> >> >> indexWriter.addDocument(..) methods are thread safe. Can I
+confirm
+> >> >> this?
+> >> >> >>
+> >> >> >> Cheers,
+> >> >> >>
+> >> >> >> --
+> >> >> >> Murat Yakici
+> >> >> >> Department of Computer & Information Sciences
+> >> >> >> University of Strathclyde
+> >> >> >> Glasgow, UK
+> >> >> >> -------------------------------------------
+> >> >> >> The University of Strathclyde is a charitable body, registered
+in
+> >> >> >> Scotland,
+> >> >> >> with registration number SC015263.
+> >> >> >>
+> >> >> >>
+> >> >> >>
+> ---------------------------------------------------------------------
+> >> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >> >>
+> >> >> >>
+> >> >> >
+> >> >>
+> >> >>
+> >> >> Murat Yakici
+> >> >> Department of Computer & Information Sciences
+> >> >> University of Strathclyde
+> >> >> Glasgow, UK
+> >> >> -------------------------------------------
+> >> >> The University of Strathclyde is a charitable body, registered in
+> >> >> Scotland,
+> >> >> with registration number SC015263.
+> >> >>
+> >> >>
+> >> >> ---------------------------------------------------------------------
+> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >>
+> >> >>
+> >> >
+> >>
+> >>
+> >> Murat Yakici
+> >> Department of Computer & Information Sciences
+> >> University of Strathclyde
+> >> Glasgow, UK
+> >> -------------------------------------------
+> >> The University of Strathclyde is a charitable body, registered in
+> >> Scotland,
+> >> with registration number SC015263.
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+>
+> Murat Yakici
+> Department of Computer & Information Sciences
+> University of Strathclyde
+> Glasgow, UK
+> -------------------------------------------
+> The University of Strathclyde is a charitable body, registered in Scotland,
+> with registration number SC015263.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

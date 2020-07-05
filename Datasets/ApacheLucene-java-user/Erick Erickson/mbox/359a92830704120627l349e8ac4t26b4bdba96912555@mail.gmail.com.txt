@@ -1,0 +1,202 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Turning PrefixQuery into a TermQuery
+DATE: 12 Apr 2007
+
+See below....
+
+On 4/12/07, Steffen Heinrich <lucene-users@atablis.com> wrote:
+>
+> On 11 Apr 2007 at 18:05, Erick Erickson wrote:
+> > Rather than using a search, have you thought about using a TermEnum?
+> > It's much, much, much faster than a query. What it allows you to do
+> > is enumerate the terms in the index on a per-field basis. Essentially,
+> this
+> > is what happens when you do a PrefixQuery as BooleanClauses are
+> > added, but you have very few options for restricting the returned list
+> when
+> > you use PrefixQuery.
+> >
+> As I'm still fresh with lucene I did not look into TermEnum yet.
+> And yes, you are right. I already wondered how to possibly cut down
+> on the returns of a prefix query.
+>
+> ...
+> > What I have in mind is something like returning the first N terms
+> > that match a particular prefix pattern. Even if you elect not to do
+> this,
+> > and return all the possibilities, this will be much faster than
+> > executing a query. And won't run afoul of the TooManyClauses
+> > exception, you'll only be restricted by available memory. Not to
+> > mention simplifying your index over the bigram/trigram option <G>.....
+> >
+> If I understand correctly, you are suggesting to look up documents
+> that match prefixes with TermDocs.seek(enum) separately, possibly
+> restricting them by evaluation of doc boosts, etc. and then merging
+> the remainders with the separate search results for the other tokens.
+> Is that right?
+
+
+Not quite. As I understand your problem, you want all the terms that
+match (or at least a subset) for a field. For this, WildcardTermEnum
+is really all you need. Think of it this way...
+(Wildcard)TermEnum gives you a list of all the terms for a particular field.
+      Each term will be mentioned exactly once regardless of how many
+      times it appears in your corpus.
+TermDocs will allow you to find documents with those terms.
+
+Since you're trying to do a set of suggestions, you really don't need
+to know anything about documents that the terms appear in, or even
+how many documents they appear in. All you need is a list of
+the unique terms. Thus you don't need TermDocs here at all.
+
+Here's part of a chunk of code I have lying around. It
+prints out all the terms that appear in a particular field and you
+should easily be able to make it use a WIldcardTermEnum...
+This is a hack I made for a one-off, so I don't have to be
+proud of it......
+
+    private void enumField(String field) throws Exception
+    {
+        long start = System.currentTimeMillis();
+        TermEnum termEnum = this.reader.getIndexReader().terms(new
+Term(field, ""));
+
+        this.writer.println("Values for term " + field);
+
+        Term term = termEnum.term();
+        int idx = 0;
+
+        while ((term != null) && term.field().equals(field)) {
+            System.out.println(term.text());
+
+            termEnum.next();
+
+            term = termEnum.term();
+            ++idx;
+        }
+
+        long interval = System.currentTimeMillis() - start;
+
+        System.out.println(
+                String.format(
+                        "%d terms took %d milliseconds (%d seconds) to
+enumerate term %s",
+                        idx,
+                        interval,
+                        interval / CaptureTerms.MILLIS_IN_SECOND,
+                        field));
+    }
+
+
+
+This isn't really very useful for displaying the *best*, say, 10 terms
+because it'll just start at the beginning of the list and enumerate
+the first N items.
+
+> BTW, you can alter the limit for returning the TooManyClauses option
+> > by BooleanQuery.setMaxClauseCount, but I'd really recommend the
+> > WildCardTermEnum approach first.
+> Yes, that was the point where I thought that turning to the group
+> would probably get me some better ideas ;-)
+>
+> >
+> > Finally, your question about copying an index... it may not be easy.
+> > Particularly if you have terms that are indexed but not stored, you
+> > won't be able to reconstruct your documents exactly from the index....
+> Antony Bowesman came up with the PerFieldAnalyzerWrapper which would
+> have prevented a need to copy.
+>
+> >
+> > Best
+> > Erick
+> >
+>
+> Do you also have an idea for how to improve a fault tolerant search
+> for the completed terms?
+> The shortcomings are somewhat similar.
+> Running each through a spell checker and adding results to a boolean
+> query does not help with the performance.
+> Besides, with lucene's standard spell checker I think that there is
+> no way to influence the sorting of suggestions (because there is no
+> criteria). And so the restriction to the first 4-10 suggestions is
+> entirely random and might just miss out on the most appropriate one.
+
+
+You'll have to elaborate what "fault tolerant search" means. If you're
+worried about misspellings, that's tough. You could try FuzzyQuery,
+or if that doesn't work you could think about working with soundex. But I
+can't stress strongly enough that you need to be absolutely sure this
+is a real problem *that your users will notice* before you invest time and
+energy in solving it. I'm continually amazed how much time and energy
+I spend solving non-existent problems <G>....
+
+And for your sanity's sake, don't ask the produce manager anything
+remotely like "would you like fault-tolearant searches?". The answer
+will be yes. Regardless of whether it makes a difference to the end
+user. And I'll only mention briefly that asking Sales if they'd like
+a feature is the road to madness.....
+
+And a spell checker isn't very useful with names anyway......
+
+I've tried the NGramTokenizer from the Action book (contributed by
+> alias-i, now appearently in the LingPipe distribution) and it gives
+> better results in that it returns suggestions based on the weight of
+> the documents, but at a much bigger cost. Of disk space as well as
+> memory as performance.
+>
+> BTW, my test data is ~ 1.5 million artist / song titles which I
+> extracted from a CDDB dump.
+> This data represents very well the typical applications that I have
+> in mind:
+> Lots of tiny documents with 2-3 indexed fields that allow for faceted
+> search. (Possibly associated with some meta data each.)
+>
+> Ideally the system should scale well with heavy user loads. -
+> Certainly not a simple task where every keystroke translates into a
+> query for suggestions, but the existing implementations show that it
+> can be done. Only that I start wondering if these are done with
+> lucene and written in java. :-/
+>
+> I presume that the need for scalability also forbids any sort of
+> result caching with the lucene filter wrappers. Even a bitmap for
+> millions of documents must add up to something substantial.
+> An optimization of the retrieval is probably worth more than the
+> additional overhead of a caching strategy can bring.
+
+
+
+well, a million documents is a bitmap of 125K. You can fit a LOT
+of these into, say, 256M of memory <G>..... But Filters work
+at the Document level, not the term level. So I'm not sure they do
+what you want......
+
+I strongly suggest you run some timings on whatever process
+you decide to try first. Take out all the printing and just report the
+time taken on your corpus when enumerating the terms. I think
+you'll be very surprised at just how fast it all is and this will definitely
+
+inform your calculations about how it'll scale.... and remember
+that the first time you open a reader, you'll pay some extra
+overhead, so pay attention to the 2-N runs on an already
+open reader.....
+
+Best
+Erick
+
+
+More thoughts, anyone?
+>
+> Thank You.
+>
+> Cheers, Steffen
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

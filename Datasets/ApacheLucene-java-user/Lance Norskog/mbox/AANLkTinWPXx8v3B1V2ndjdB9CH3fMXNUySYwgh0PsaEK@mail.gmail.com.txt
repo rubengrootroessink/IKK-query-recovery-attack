@@ -1,0 +1,144 @@
+FROM: Lance Norskog <goks...@gmail.com>
+SUBJECT: Re: Migrating from Lucene 2.9.1 to Solr 1.4.0 - Performance issues	under heavy load
+DATE: 3 Aug 2010
+
+Is this an "apples to apples" comparison? That is, are you measuring
+the same complete flow on both apps? Does the Lucene app return fields
+via HTTP?
+
+On Tue, Aug 3, 2010 at 11:28 AM, Ophir Adiv <firtzel@gmail.com> wrote:
+> Hi,
+>
+>
+>
+> I’m currently involved in a project of migrating from Lucene 2.9.1 to Solr
+> 1.4.0.
+>
+> During stress testing, I encountered this performance problem:
+>
+> While actual search times in our shards (which are now running Solr) have
+> not changed, the total time it takes for a query has increased dramatically.
+>
+> During this performance test, we of course do not modify the indexes.
+>
+> Our application is sending Solr select queries concurrently to the 8 shards,
+> using CommonsHttpSolrServer.
+>
+> I added some timing debug messages, and found that
+> CommonsHttpSolrServer.java, line 416 takes about 95% of the application’s
+> total search time:
+>
+> int statusCode = _httpClient.executeMethod(method);
+>
+>
+>
+> Just to clarify: looking at access logs of the Solr shards, TTLB for a query
+> might be around 5 ms. (on all shards), but httpClient.executeMethod() for
+> this query can be much higher – say, 50 ms.
+>
+> On average, if under light load queries take 12 ms. on average, under heavy
+> load the take around 22 ms.
+>
+>
+>
+> Another route we tried to pursue is add the “shards=shard1,shard2,…”
+> parameter to the query instead of doing this ourselves, but this doesn’t
+> seem to work due to an NPE caused by QueryComponent.returnFields(), line
+> 553:
+>
+> if (returnScores && sdoc.score != null) {
+>
+>
+>
+> where sdoc is null. I saw there is a null check on trunk, but since we’re
+> currently using Solr 1.4.0’s ready-made WAR file, I didn’t see an easy way
+> around this.
+>
+> Note: we’re using a custom query component which extends QueryComponent, but
+> debugging this, I saw nothing wrong with the results at this point in the
+> code.
+>
+>
+>
+> Our previous code used HTTP in a different manner:
+>
+> For each request, we created a new
+> sun.net.www.protocol.http.HttpURLConnection, and called its getInputStream()
+> method.
+>
+> Under the same load as the new application, the old application does not
+> encounter the delays mentioned above.
+>
+>
+>
+> Our current code is initializing CommonsHttpSolrServer for each shard this
+> way:
+>
+>
+>
+>                                MultiThreadedHttpConnectionManager
+> httpConnectionManager = new MultiThreadedHttpConnectionManager();
+>
+>
+> httpConnectionManager.getParams().setTcpNoDelay(true);
+>
+>
+> httpConnectionManager.getParams().setMaxTotalConnections(1024);
+>
+>
+> httpConnectionManager.getParams().setStaleCheckingEnabled(false);
+>
+>                                HttpClient httpClient = new HttpClient();
+>
+>                                HttpClientParams params = new
+> HttpClientParams();
+>
+>
+> params.setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+>
+>                                params.setAuthenticationPreemptive(false);
+>
+>
+> params.setContentCharset(StringConstants.UTF8);
+>
+>                                httpClient.setParams(params);
+>
+>
+> httpClient.setHttpConnectionManager(httpConnectionManager);
+>
+>
+>
+> and passing the new HttpClient to the Solr Server:
+>
+> solrServer = new CommonsHttpSolrServer(coreUrl, httpClient);
+>
+>
+>
+> We tried two different ways – one with a single
+> MultiThreadedHttpConnectionManager and HttpClient for all the SolrServer’s,
+> and the other with a new MultiThreadedHttpConnectionManager and HttpClient
+> for each SolrServer.
+>
+> Both tries yielded similar performance results.
+>
+> Also tried to give setMaxTotalConnections() a much higher connections number
+> (1,000,000) – didn’t have an effect.
+>
+>
+>
+> Would love to hear what you think about this. TIA,
+>
+> Ophir
+>
+
+
+
+-- 
+Lance Norskog
+goksron@gmail.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

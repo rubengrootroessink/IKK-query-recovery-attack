@@ -1,0 +1,113 @@
+FROM: zzzzz shalev <zzzzz_sha...@yahoo.com>
+SUBJECT: Re: Aggregating category hits
+DATE: 10 Jun 2006
+
+hi yonik,
+   
+  thanks for the thurough reply,,
+   
+  a few more quick questions...
+   
+  "the number of facets to check per request
+average somewhere between 100 and 200 (the total number of unique
+facets is much larger though). "
+   
+  you mean 100 - 200 different catagories to facet?
+   
+  i ran the test on a 600,000 doc index, however the cool thing about my solution, is that
+the total doc count is not too relavant , i will be checking this with much larger indexes
+probably 10x the size of my initial testing, and algorithmically i dont expect too much of
+a performance dropoff, due to the fact that response time is effected by the result set size
+and not the docs in the index size (since i cache all faceted values on startup),
+   
+  as for the 500 milli, this is basically what i do in that time:
+   
+  1. in each search instance: initally send a query and return the top 100 docs. start a seprate
+thread to collect full facet values (i do this by resending the same query with maxDoc as
+the number of results to return.... can i save this requerying somehow?)
+   
+  2. then merge all instances' docs using a custom parallel m searcher
+   
+  3. for the top 100 docs i calculate which doc came from which instance
+   
+  4. and send the doc id's back to each instance and have each instance create facets on its
+docs from the top 100
+   
+  5. each instance returns this info, i then go back to the instance and pass to them the
+top 20 terms of each facet for the actual facet counts...
+   
+  i do this so that the facet counts i display are from good docs, i am trying to avoid a
+situation where i recieve 5,000 results and that 4,500 of them with awful rankings have the
+same facet values and therefore the facets displayed in the UI are of bad ranked docs
+   
+  confusing!!!!
+   
+  however , i will look into your impl, it sounds solid, i am curretly on lucene 1.4.3 (which
+classes should i look into in solr?)
+   
+  comments welcomed
+   
+  thanks in advance!
+  
+
+Yonik Seeley <yseeley@gmail.com> wrote:
+  On 6/10/06, zzzzz shalev wrote:
+> 1. could you let me know what kind of response time you were getting with solr (as well
+as the size of data and result sizes)
+
+A can tell you a little bit about ours... on one CNET faceted browsing
+implementation using Solr, the number of facets to check per request
+average somewhere between 100 and 200 (the total number of unique
+facets is much larger though). The median request time is 3ms (and I
+don't think the majority of that time is calculating set
+intersections).
+
+We actually don't have the LRUCaches set large enough to achieve a
+100% hit rate, but performance is still fine.
+
+> 2. i took a really really quick look at DocSetHitCollector and saw the dreaded
+>
+> if (bits==null) bits = new BitSet(maxDoc);
+
+Yes, DocSets can be memory intensive. A BitSet is only used when the
+number of results gets larger than a threshold... below that, a
+HashDocSet is used that is O(n) rather than O(maxDoc). So the memory
+footprint also depends on the cardinality of the sets.
+
+> since i rewrote some lucene code to support 64-bit search instances i have indexes that
+may reach quite a few GB's ,
+
+GBs of index size, or actually billions of documents. It's the number
+of documents that matters in this case.
+
+> allocating bitset's (arrays of long's is quite expensive memory wise and i am still a
+little
+> skeptical about performance with large result sets)
+
+I just checked in a replacement for BitSet that takes intersection
+counts much faster.
+
+> i did some testing of my facet impl and after an overnight webload session received about
+a 500 milli response time average for full faceting (with result sets from a few thousand
+to over 100,000)
+
+How many documents was that with, and how many facets per document?
+
+I certainly am interested in more memory efficient faceted browsing,
+and have been meaning to try some alternatives. So far, we've had
+good results using cached DocSets though.
+
+
+-Yonik
+http://incubator.apache.org/solr Solr, the open-source Lucene search server
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+ __________________________________________________
+Do You Yahoo!?
+Tired of spam?  Yahoo! Mail has the best spam protection around 
+http://mail.yahoo.com 

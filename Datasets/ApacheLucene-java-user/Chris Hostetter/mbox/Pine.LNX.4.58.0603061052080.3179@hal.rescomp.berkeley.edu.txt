@@ -1,0 +1,73 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Using NOT queries inside parentheses
+DATE: 6 Mar 2006
+
+
+: The following query does not work as expected for me:
+: "alwaysTrueField:true (-name:john)"
+: neither does this:
+: "alwaysTrueField:true +(-name:john)"
+
+: Does lucene run a sub-query for each part of the query inside
+: parentheses, which is why the NOT query that is alone doesn't work? I am
+
+Basically yes, the parens force the creation of a BooleanQuery, which is
+invalid since it only contains prohited clauses.
+
+: Any suggestions on how to work around this (buggy?) behaviour?
+
+I use the following (1.4.3) method to deal with situations like this...
+
+    /**
+     * tests a BooleanQuery to see if it is directly usable, meaning it
+     * has at least one clause that is not prohibited.
+     *
+     * @param bq a BooleanQuery to test
+     * @returns false if bq null or contains all prohibited items, else true
+     */
+    public static boolean usableBooleanQuery(BooleanQuery bq) {
+        if (null == bq) {
+            return false;
+        }
+
+        /* if we find *1* clause that's not prohibited, return true */
+        BooleanClause[] clauses = bq.getClauses();
+        for (int c = 0; clauses != null && c < clauses.length; c++) {
+            if (! clauses[c].prohibited) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+It can be used something like this...
+
+   Query at = new TermQuery(new Term("alwaysTrueField","true));
+   Query user = queryParser.parse(userInput);
+   if (user instanceof BooleanQuery) {
+      BooleanQuery bq = (BooleanQuery)user;
+      if (! usableBooleanQuery(bq)) {
+         bq.add(at, true, false); /* add 'always true' clause directly */
+         return bq;
+      }
+   }
+   /* if we made it here, wrape both clauses.
+   BooleanQuery q = new BooleanQuery();
+   q.add(at, true, false);
+   q.add(user, true, false);
+   return q;
+
+
+(i think that's right, the specific cases where i use it are more
+complicated so i can't cut/paste ... but i'm pretty sure the logic is
+correct in that example, you should write some unit tests to be sure
+before you do something like this.)
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

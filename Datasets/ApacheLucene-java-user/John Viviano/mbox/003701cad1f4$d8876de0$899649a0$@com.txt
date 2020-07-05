@@ -1,0 +1,377 @@
+FROM: "John Viviano" <j...@intercorpinc.com>
+SUBJECT: Memory use and Lucene
+DATE: 1 Apr 2010
+
+All -
+
+ 
+
+I have a question is about memory use and Lucene.  I'm not sure if I'm
+dealing with a leak, or if I'm seeing expected behavior.  I'll preface this
+by acknowledging that the "error" could be in my understanding of things.
+
+ 
+
+I've included a lot of information below.  There is a demo program that
+follows a pattern pretty close to what one segment of my application does.
+There's output from 'top' as well as some info about my os and jvm.
+
+ 
+
+My primary concern:  according to 'top' at startup, the application is
+taking about 22MB.  After indexing, closing the indexWriter and running
+garbage collection, 'top' reports that the program is about 170MB.  So is
+this a leak?  Is this expected behavior?  Is it something where an allocator
+doesn't return memory to the OS, perhaps for efficiency?  Something else?
+
+ 
+
+-----------------  STARTING VALUES IN TOP --------------------
+
+Mem:   1048576k total,   305252k used,   743324k free,        0k buffers
+
+Swap:        0k total,        0k used,        0k free,        0k cached
+
+ 
+
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+
+5422 jviviano  17   0  332m  21m 8320 S    0  2.1   0:00.28 java
+
+ 
+
+-----------------  ENDING VALUES IN TOP --------------------
+
+Mem:   1048576k total,   443572k used,   605004k free,        0k buffers
+
+Swap:        0k total,        0k used,        0k free,        0k cached
+
+ 
+
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+
+5422 jviviano  16   0  463m 166m 8568 S    0 16.2   0:03.97 java
+
+ 
+
+I also use the java runtime values to report what java knows about memory
+inside my program, as follows:
+
+ 
+
+Starting free memory:   84,882,328 bytes
+
+      Released by GC:    3,849,488 bytes
+
+  Ending free memory:   84,562,360 bytes
+
+  Unexplained losses:      319,968 bytes
+
+ 
+
+By the way, if anyone has a better approach to understanding what's going on
+with memory, I'm all ears.
+
+ 
+
+Here's my sample code, followed by my environment:
+
+----------------------------------------------------------------------------
+-----------------
+
+ 
+
+import java.io.IOException;
+
+import java.util.*;
+
+import java.io.File;
+
+ 
+
+// Developed for Lucene-3.0.1
+
+import org.apache.lucene.store.Directory;
+
+import org.apache.lucene.store.FSDirectory;
+
+import org.apache.lucene.index.IndexWriter;
+
+import org.apache.lucene.analysis.Analyzer;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+
+import org.apache.lucene.document.Document;
+
+import org.apache.lucene.document.Field;
+
+import org.apache.lucene.util.Version;
+
+// No querying going on in this sample code
+
+//import org.apache.lucene.search.Query;
+
+//import org.apache.lucene.queryParser.QueryParser;
+
+//import org.apache.lucene.queryParser.ParseException;
+
+ 
+
+class MemoryQuestion
+
+{
+
+     static final int MAX_REPS = 1000; 
+
+     static final String TEST_INDEX = "./testIndex/";
+
+ 
+
+     private static void forceGarbageCollection(Runtime r)
+
+     {
+
+           r.gc();
+
+     }
+
+ 
+
+    private static long checkAvailableMemory(Runtime r)
+
+     {
+
+           long availableMemory = r.maxMemory() - (r.totalMemory() -
+r.freeMemory());
+
+           return availableMemory;
+
+     }
+
+ 
+
+     public static void main(String[] args) throws IOException 
+
+     {
+
+        // Get a Runtime object to help manage garbage collection
+
+        Runtime r = Runtime.getRuntime();
+
+           
+
+           String[] testData = new String[] {  
+
+                           "Lorem ipsum dolor sit amet, consectetur
+adipiscing elit.",
+
+                           "Praesent blandit lacinia sem vel pulvinar.",
+
+                           "Ut pellentesque tellus sit amet felis mollis
+semper.",
+
+                           "Sed eleifend, nisi ac placerat aliquam, elit
+ligula fermentum purus, ut placerat mauris tortor vitae nisl.",
+
+                           "Curabitur nec urna sed sem dapibus rutrum.",
+
+                           "Curabitur sodales venenatis tellus.",
+
+                           "Donec lacus metus, euismod eget dictum quis,
+feugiat ut magna.",
+
+                           "Ut eget faucibus lorem.",
+
+                           "Pellentesque habitant morbi tristique senectus
+et netus et malesuada fames ac turpis egestas.",
+
+                           "Nulla urna nisi, eleifend id consectetur at,
+ornare id metus.",
+
+                           "Phasellus dictum sodales augue, vitae auctor
+tortor ultricies ut.",
+
+                           "Nam ullamcorper varius est, vel ultrices turpis
+laoreet eu. Nunc id leo vitae felis faucibus ornare."
+
+                     };
+
+ 
+
+ 
+
+           // create a directory called testIndex in the working directory
+
+           // and an IndexWriter
+
+           Directory dir = FSDirectory.open(new File(TEST_INDEX));
+
+           IndexWriter indexWriter  = new IndexWriter(dir,
+
+                                                            new
+StandardAnalyzer(Version.LUCENE_CURRENT),
+
+ 
+IndexWriter.MaxFieldLength.LIMITED);
+
+           // if you want to experiment with different buffer sizes
+
+           // indexWriter.setRAMBufferSizeMB(8.0);
+
+ 
+
+           // start as clean as you can
+
+           forceGarbageCollection(r);
+
+           long startingMemory = checkAvailableMemory(r);
+
+                
+
+           // loop through the array of testData strings MAX_REP times
+
+           //     create a new document for each string and add it to the
+index
+
+           //     commit the index at the end of each loop
+
+           // close the index
+
+           for (int i=0; i< MAX_REPS ; i++ )
+
+           {
+
+                System.out.print('.');
+
+ 
+
+                for (String text : testData) {
+
+                     Document doc = new Document();
+
+                     doc.add(new Field("text",text,
+
+                                     Field.Store.YES,Field.Index.ANALYZED));
+
+                     indexWriter.addDocument(doc);
+
+                     doc = null;
+
+                }
+
+                indexWriter.commit();
+
+           }
+
+           indexWriter.close();
+
+           indexWriter = null;
+
+ 
+
+           // get memory stats before and after forcing garbage collection
+
+           long pre_gcMemory = checkAvailableMemory(r);
+
+           forceGarbageCollection(r);
+
+           long endingMemory = checkAvailableMemory(r);
+
+ 
+
+           Formatter f = new Formatter();
+
+           System.out.println("");
+
+           System.out.printf("Starting free memory: %,12d bytes %n",
+startingMemory);
+
+           System.out.printf("      Released by GC: %,12d bytes %n",
+endingMemory - pre_gcMemory);
+
+           System.out.printf("  Ending free memory: %,12d bytes %n",
+endingMemory);
+
+           System.out.printf("  Unexplained losses: %,12d bytes %n",
+startingMemory - endingMemory);
+
+           System.out.println("Ctrl-C to exit -- you may want to check
+memory use as reported by 'top'");
+
+           while (true)
+
+           {
+
+                try {
+
+                     Thread.sleep(100);
+
+                } catch(Exception e)
+
+                {
+
+                     System.out.println(e);
+
+                }    
+
+           }
+
+ 
+
+     }
+
+}
+
+ 
+
+----------------------------------------------------------------------------
+-----------------
+
+My OS and JVM versions are as follows:
+
+ 
+
+Linux version 2.6.18-028stab066.10 (root@rhel5-64-build) (gcc version 4.1.2
+20070626 (Red Hat 4.1.2-14)) #1 SMP Fri Dec 4 15:49:04 MSK 2009
+
+ 
+
+java version "1.6.0_17"
+
+Java(TM) SE Runtime Environment (build 1.6.0_17-b04)
+
+Java HotSpot(TM) 64-Bit Server VM (build 14.3-b01, mixed mode)
+
+ 
+
+ 
+
+Thanks,
+
+John Viviano
+
+ <mailto:john@intercorpinc.com> john@intercorpinc.com
+
+ 
+
+ 
+
+InterCorp, Inc.
+
+11469 Olive Blvd, Ste. 225
+
+St. Louis, MO 63141
+
+314.610.5276
+
+ 
+
+ <http://www.intercorpinc.com/> www.intercorpinc.com
+
+"The problems that exist in the world today cannot
+be solved by the level of thinking that created them."
+- Albert Einstein
+
+ 
+
+

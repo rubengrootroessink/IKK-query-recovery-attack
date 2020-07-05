@@ -1,0 +1,130 @@
+FROM: "Lukas Vlcek" <lukas.vl...@gmail.com>
+SUBJECT: Re: multi-field and wildcard query highlighter questions
+DATE: 26 Jul 2007
+
+Hi!
+
+On 7/20/07, Mark Miller <markrmiller@gmail.com> wrote:
+>
+> 1) Perhaps the the query you tried does not match anything in your
+> index? What release are you using? [prefix*] works fine for me.
+
+
+I realized that this was caused by Compass' own implementation of
+Queryparser (i.e.: CompassQueryParser). I will investigate this issue later
+but this does not fall into Lucene user-list.
+
+2) The Highlighter should not care if you have more than one field with
+> the same name in a document. The Highlighter does not deal with
+> documents. It takes a TokenStream of field:value pairs and then compares
+> those to the field:value pairs in the query. If you pass a field name,
+> only field matches are scored over 0, if you pass null for the field
+> name, fields are ignored and only values are compared. This is all very
+> separate from storing fields in a document. Are you doing something
+> weird with your TokenStream?
+
+
+Mark, this is important point. I found that this issue is related to
+TokenStream. I am not sure if this is Lucene or Compass issue but what
+happens is the following:
+
+I have [all] filed in documents and I do search against this filed. Then
+when iterating Hits I try to get highlighted [id] fileds (Stored, indexed,
+tokenized, TermVector: offset, positions). There are more [id] fields in
+every document. For each Hit the TokenStream is created like this:
+
+TermFreqVector tfv = indexReader.getTermFreqVector(docId, "id");
+    if (tfv instanceof TermPositionVector) {
+        return TokenSources.getTokenStream((TermPositionVector) tfv);
+    }
+
+And then when using this TokenStream in highlighter:
+
+String result = highlighter.getBestFragment(tokenStream,my_text);
+
+...I get that Exception.
+
+I haven't investigated all the Lucene source yet but to me it seems that the
+problem is that my_text contains just part of the TokenStream's information.
+
+For example if I have three [id] fileds in document:
+<id>111</id>
+<id>222</id>
+<id>333</id>
+
+Then my_text can be one of the <id> elements (e.g.: 111) but the TokenStream
+is {id: 111/1, 222/1, 333/1}. Can this be the problem?
+
+My goal is the get all the ids from document which match to Query. For
+example if user provides query like:[111 333] then I would like to get
+[<b>111</b> <b>333</b>]. I don't want to get anything like [<b>111</b>
+222
+<b>333</b>].
+
+Any idea how to do that?
+
+- Mark
+>
+> Lukas Vlcek wrote:
+> > Hi,
+> >
+> > I have two questions:
+> >
+> > 1) Is it possible to get some highlighted text when using wildcard
+> > query? (I
+> > am using query rewrite)
+> > I found that it works for queries like [prefix*suffix] or
+> [prefix?suffix]
+> > but I was not able to get results for queries like [prefix*]
+> >
+> > 2) What kind of problems I should expect when trying to get highlighted
+> > fragment(s) from multi-filed document? (I mean when the document has
+> more
+> > fields of the same name).
+> > So far I am often experiencing StringIndexOutOfBoundsException (see
+> > example
+> > below):
+> >
+> > SEVERE: String index out of range: 17
+> > java.lang.StringIndexOutOfBoundsException: String index out of range: 17
+> >        at java.lang.String.substring(String.java:1765)
+> >        at
+> > org.apache.lucene.search.highlight.Highlighter.getBestTextFragments(
+> > Highlighter.java:235)
+> >        at
+> > org.apache.lucene.search.highlight.Highlighter.getBestFragments(
+> > Highlighter.java:175)
+> >        at org.apache.lucene.search.highlight.Highlighter.getBestFragment
+> (
+> > Highlighter.java:101)
+> >        at
+> >
+> org.compass.core.lucene.engine.LuceneSearchEngineHighlighter.collectionFragment
+> >
+> > (LuceneSearchEngineHighlighter.java:204)
+> >        at
+> >
+> org.compass.core.lucene.engine.LuceneSearchEngineHighlighter.collectionFragment
+> >
+> > (LuceneSearchEngineHighlighter.java:189)
+> >        at
+> > org.compass.core.impl.DefaultCompassHighlighter.collectionFragment(
+> > DefaultCompassHighlighter.java:127)
+> > ... [truncated]
+> > ... [also you can notice that I am using Compass above Lucene but to
+> > me this
+> > seems like Lucene related problem because index seems to be OK (via
+> > Luke)]
+> >
+> > I am using Lucene-2.2.0.
+> >
+> > Regards,
+> > Lukas
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

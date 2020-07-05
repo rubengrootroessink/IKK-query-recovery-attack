@@ -1,0 +1,147 @@
+FROM: sergiu gordea <gser...@ifit.uni-klu.ac.at>
+SUBJECT: Re: MultiFieldQueryParser seems broken...  Fix attached.
+DATE: 10 Sep 2004
+
+
+>.
+>
+>I reckon there has been a discussion (and solution :-) on how to achieve the
+>functionality you've been
+>after:
+>
+>http://issues.apache.org/eyebrowse/ReadMsg?listName=lucene-user@jakarta.apache.org&msgId=1798116
+>
+>I'm not sure if this would be the same though.
+>
+>Best regards,
+>René
+>
+>  
+>
+
+Hi all,
+
+ I took the code indicated by Rene but I've seen that it's not completly 
+feeting my requirements, because my application should
+provide the facility to check queries as beeing Fuzzy queries. so I 
+modified the code to the following one, and I added a test main method.
+Hope it helps someone.
+ 
+ 
+
+package org.apache.lucene;
+/* @(#) CWK 1.5 10.09.2004
+ *
+ * Copyright 2003-2005 ConfigWorks Informationssysteme & Consulting GmbH
+ * Universitätsstr. 94/7 9020 Klagenfurt Austria
+ * www.configworks.com
+ * All rights reserved.
+ */
+
+import java.util.Vector;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.queryParser.ParseException;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.Query;
+
+/**
+ * @author sergiu
+ * this class is a patch for MultifieldQueryParser
+ * it's behaviour can be tested by running the main method
+ *
+ * 
+Now:
+
+String[] fields = new String[] { "title", "abstract", "content" };
+QueryParser parser = new CustomQueryParser(fields, new SimpleAnalyzer());
+parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+Query query = parser.parse("foo -bar (baz OR title:bla)");
+System.out.println("? " + query);
+
+Produces:
+
+? +(title:foo abstract:foo content:foo) -(title:bar abstract:bar
+content:bar) +((title:baz abstract:baz content:baz) title:bla)
+
+Perfect!
+
+ * @version 1.0
+ * @since CWK 1.5
+ */
+public class CustomQueryParser extends QueryParser{
+   private String[] fields;
+   private boolean fuzzySearch = false;
+
+   public CustomQueryParser(String[] fields, Analyzer analyzer){
+     super(null, analyzer);
+     this.fields = fields;
+   }
+
+   public CustomQueryParser(String[] fields, Analyzer analyzer, int 
+defaultOperator){
+       super(null, analyzer);
+       this.fields = fields;
+       setOperator(defaultOperator);
+   }
+
+   protected Query getFieldQuery(String field, Analyzer analyzer, String 
+queryText)
+     throws ParseException{
+    
+     Query query = null;
+    
+     if (field == null){
+       Vector clauses = new Vector();
+       for (int i = 0; i < fields.length; i++){
+           if(isFuzzySearch())
+               clauses.add(new 
+BooleanClause(super.getFuzzyQuery(fields[i], queryText), false, false));
+           else
+               clauses.add(new 
+BooleanClause(super.getFieldQuery(fields[i], analyzer, queryText), 
+false, false));
+              
+       }
+       query = getBooleanQuery(clauses); 
+     }else{
+         if (isFuzzySearch())
+             query = super.getFuzzyQuery(field, queryText);
+         else
+             query = super.getFieldQuery(field, analyzer, 
+queryText);        
+     
+     }
+     return query;
+   }
+  
+   public boolean isFuzzySearch() {
+       return fuzzySearch;
+   }
+  
+   public void setFuzzySearch(boolean fuzzySearch) {
+       this.fuzzySearch = fuzzySearch;
+   }
+
+   public static void main(String[] args) throws Exception{
+       String[] fields = new String[] { "title", "abstract", "content" };
+       CustomQueryParser parser = new CustomQueryParser(fields, new 
+StandardAnalyzer());
+       parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+       parser.setFuzzySearch(true);
+      
+       String queryString = "foo -bar (baz OR title:bla)";
+       System.out.println(queryString);
+       Query query = parser.parse(queryString);
+       System.out.println("? " + query);   
+ 
+   }
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

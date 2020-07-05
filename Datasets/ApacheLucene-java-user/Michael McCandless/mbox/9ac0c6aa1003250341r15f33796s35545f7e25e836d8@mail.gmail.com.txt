@@ -1,0 +1,62 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Filters and multiple, per-segment calls to getDocIdSet
+DATE: 25 Mar 2010
+
+On Thu, Mar 25, 2010 at 12:55 AM, Daniel Noll <daniel@nuix.com> wrote:
+> Hi all.
+>
+> I notice that Filter.getDocIdSet() is now documented as follows:
+>
+>    Note: This method will be called once per segment in
+>    the index during searching.  The returned {@link DocIdSet}
+>    must refer to document IDs for that segment, not for
+>    the top-level reader.
+
+Right, this is from the cutover to per-segment searching, as of 2.9.
+
+> If I look at Lucene's own DuplicateFilter, isn't it making the
+> assumption that it will only be called once?
+
+Hmm... yes it seems so.  Ie, as it now stands, it only eliminates
+duplicates within each segment, not across segments.  Can you open an
+issue?  Thanks.
+
+> And a related question: for those of us who want to implement
+> something *like* DuplicateFilter (as I have done before discovering
+> this new Javadoc), is there a good way to go about it?  It seems like
+> we now need to keep a hash of all terms previously seen so that when
+> we go over the new term enum we can check which ones have already been
+> seen.  This will dramatically increase memory usage compared to a
+> single BitSet/OpenBitSet.  Is there a better way?
+
+This depends on the particulars of filter... but in general you
+shouldn't have to consume more RAM, I think?  Ie you should be able to
+do your computation against the top-level reader, and then store the
+results of your computation per-sub-reader.
+
+EG, for DuplicatesFilter, probably it should up-front (or, 1st time
+its used -- lazily) iterate all terms/docs across all segments,
+building up a map of sub-reader -> bitset, and then when getDocIdSet
+is called for a given reader, just return what it had already computed
+for that reader.
+
+> Also, I presume this means that Filter is now explicitly not
+> threadsafe.  We weren't keeping any state in them anyway, but now we
+> will have to, so there is potential for a lot of new bugs if a filter
+> is somehow used by two queries running at the same time.
+
+This is dependent on the specific filter.  Many filters don't need the
+top-level reader in order to generate the bitset for a sub-reader, so
+they can remain "stateless".
+
+For those that do need top-level reader, like DuplicatesFilter, I
+agree you'll need some sync'ing so that only 1 thread does that lazy
+init, and its results are safely visible to other threads.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

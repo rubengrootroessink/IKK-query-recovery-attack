@@ -1,0 +1,178 @@
+FROM: henrib <hen...@apache.org>
+SUBJECT: Re: Designing a multilingual index
+DATE: 1 Apr 2010
+
+
+
+pagod wrote:
+> 
+> ... apply only in a particular situation:
+> 
+Very true, as often in the IR field :-) ; in our case, the "same" document
+existed in different locales; these were localized technical docs which also
+meant the dictionary (of important) terms was limited and used to influence
+scoring.
+
+
+pagod wrote:
+> 
+> 
+> henrib wrote:
+>> 
+>> This allowed to have the same index structure across locales but
+>> different settings for each (synonyms, stemmers, etc). Maintenance was
+>> easier this way; when refining/updating the settings (say adding synonyms
+>> or stemmers for instance), you may need to reindex and smaller indices
+>> allow faster deployments.
+>> 
+> If I understand this correctly, that is true if you're indexing distinct
+> collections of documents that are all in the same language, which you know
+> in advance. In that case, you would of course only need to reindex one of
+> these collections into the corresponding index to update it.
+> 
+Correct.
+
+pagod wrote:
+> 
+>  In my case though, there is no such separation and only upon processing a
+> document can I decide what language it is in. I therefore cannot decide to
+> update only documents in one language, it's a "all or nothing". 
+> 
+As you write later, you perform language detection on the document before
+you index. Thus you know - the virtue of one lang <=> one index - in which
+index a given document needs to be put and can maintain the list of
+documents that exist for a given language (intrinsically, those in the 'FR'
+index are all in French). Pending you still have access to the raw content,
+you can then reindex just those.
+
+
+pagod wrote:
+> 
+> 
+> henrib wrote:
+>> 
+>> It's also "dead-easy" to add a new language (esp. compared to the one
+>> index solution).
+>> 
+> I'm not really sure why adding new languages should be complicated in the
+> one-index solution: the languages I can process (i.e. languages for which
+> I have recognition data and the proper analyzer) are listed in a
+> configuration file. 
+> 
+Smart solution! With Solr, if you need to add a new field/language that was
+not in the original schema/list, you need to reindex the whole. In the
+multi-index solution, you just need to create a new index (Solr core).
+
+pagod wrote:
+>  
+> Upon recognizing one of these languages, the module stores it in the
+> internal data structure, which is then eventually passed to the indexing
+> module. The latter retrieves the language from the structure and uses it
+> to create the corresponding fields in the index dynamically (e.g.
+> "content-de", "title-en" etc). It's all really automatic. 
+> 
+Ok. I'm biased by Solr which needs a schema defining all fields before hand;
+you can't just decide to add a document which "declares" a new field. You
+need a new schema / index / core that declares the field, etc...
+
+
+pagod wrote:
+> 
+> 
+> henrib wrote:
+>> It also makes replication or partitioning easier.
+> Not sure what you mean by that... 
+> 
+Our solution was built on top Solr; all the query rewriting/expansion was
+occurring before Solr localized searches. Since our server was sending the
+queries and formatting the results, it was very easy to put indexes on
+different machines. Solr also comes with replication and sharding (if you
+need those); having multiple indexes makes things a tad easier to configure
+wrt number of speakers of a given language.  
+
+
+pagod wrote:
+> 
+> So if I understand correctly you'd always only search in one of the
+> indices? In that case, I can understand why the multi-index solution works
+> better for you. However, assuming most of my users speak at least English
+> *and* one, two or three of the other languages, all searches have to be
+> conducted in all languages.
+> 
+We were issuing one query per language the user selected as able to
+comprehend. So if you spoke English, German and French, 3 queries were
+performed. So, yes, all searches have to be conducted in all needed
+languages.
+
+
+pagod wrote:
+> 
+>  Besides, the various languages are not localized versions of the same
+> content, they may really be anything in any language, depending on the
+> person who wrote them and their mood at the time of writing. Some
+> documents also contains parts in English and parts in German... I'm
+> definitely thinking about making it possible to enable/disable some
+> languages, but parallel searching will definitely be required. 
+> 
+Mixed language documents is not something I had to cope with... But I
+suppose whatever solution you'll use to chunk which part of the doc is in
+which language can be used by both indexing solutions.
+
+pagod wrote:
+> 
+>> Besides, IMO, scoring / ordering documents in different
+>> languages is a bit like comparing apples and oranges.
+> ...Lucene's ranking algorithm is based on the number of tokens and the
+> number of occurrences in fields,...
+> 
+Scoring is indeed a complex issue; tf/idf is not the sole scoring method
+(BM25F comes to mind). The score being a ratio (/ best score), taking a
+practical stance over academic, you can still use it as an ordering norm for
+the sake of a better user experience even if it comes from different
+indexes. You might also want to bias results ordering with other factors
+like last-updated, ranking, etc.
+
+
+> Finally, query expansion can also be used in the multiple indices case and
+> might even use automated/guided translation.
+I do agree about that, and I guess query expansion is much easier when
+dealing with a single, consistent index structure. I'm thinking writing an
+algorithm to automatically expand a query to all languages might be ok, but
+I'm worried about the performance of performing such a query if the number
+of languages grows larger....
+</query>
+This algo would work for single & multiple indexes; at least in the multiple
+index case, you can partition easily and would the need arise, put localized
+indexes on different machines.
+
+
+pagod wrote:
+> 
+> One other problem I'm seeing with the multi-index solution is the ranking
+> of documents that are spanned across several indices (multilingual
+> documents). If say my search term matches a document in the English index
+> and the same document in the French index (which would quite often be the
+> case for e.g. proper names), then how do I get about mixing the two
+> rankings? (as I don't want to display the same result twice) I think using
+> a single index would solve that problem, since the ranking would already
+> take all fields (hence all languages into account).
+> 
+If we consider a unique id for the same doc in different indexes (another
+Solr recommended feature), nothing stops you from aggregating the scores
+coming from each index (a weighted average for instance).
+
+
+Anyway, my experience and its field might be too different for it to be
+applicable to your case.
+Cheers,
+Henrib
+
+-- 
+View this message in context: http://n3.nabble.com/Designing-a-multilingual-index-tp688766p691166.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

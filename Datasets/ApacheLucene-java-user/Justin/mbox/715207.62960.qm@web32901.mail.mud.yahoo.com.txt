@@ -1,0 +1,184 @@
+FROM: Justin <cry...@yahoo.com>
+SUBJECT: Re: Problems with homebrew ParallelWriter
+DATE: 24 Jun 2010
+
+Nevermind, it is blocking...
+
+
+  public void optimize()
+ throws CorruptIndexException, IOException {
+    optimize(true);
+  }
+
+
+
+
+----- Original Message ----
+From: Justin <crynax@yahoo.com>
+To: java-user@lucene.apache.org
+Sent: Thu, June 24, 2010 3:56:17 PM
+Subject: Re: Problems with homebrew ParallelWriter
+
+So is IndexWriter::optimize() non-blocking, even with SerialMergeScheduler?  That might explain
+our problem in trying to use optimize() to make maxDoc() match between the two indexes before
+adding readers to ParallelReader.  I see that we could call optimize(true).
+
+
+
+
+----- Original Message ----
+From: Justin <crynax@yahoo.com>
+To: java-user@lucene.apache.org
+Sent: Thu, June 24, 2010 12:12:57 PM
+Subject: Re: Problems with homebrew ParallelWriter
+
+Hi Shai,
+
+> Is it synchronized
+
+  public synchronized void addDocument(Document document)
+    throws CorruptIndexException, IOException {
+    Document document2 = new Document();
+    document2.add(...);
+    writer1.addDocument(document);
+    writer2.addDocument(document2);
+  }
+
+
+> did you encounter any exceptions
+
+I haven't seen the machines firsthand, but I assume my colleague looked for obvious exceptions
+that would lead to an imbalance.  All exceptions appear to be logged, so we would see something.
+
+> merges could happen on some slices not when you intended
+
+  public synchronized ParallelReader getParallelReader()
+    throws IOException, CorruptIndexException {
+    IndexReader reader1 = writer1.getReader();
+    IndexReader reader2 = writer2.getReader();
+    if (reader1.maxDoc() != reader2.maxDoc()) {
+      reader1.close();
+      reader2.close();
+      writer1.optimize(); // force merge for consistent maxDoc
+      writer2.optimize(); // force merge for consistent maxDoc
+      reader1 = writer1.getReader();
+      reader2 = writer2.getReader();
+    }
+    ParallelReader reader = new ParallelReader();
+    reader.add(reader1);
+    reader.add(reader2);
+    return reader;
+  }
+
+As you can see above, my colleague optimizes the indexes to account for merges that have occurred
+out-of-sync.
+
+
+> if you've made progress, upload another patch?
+
+If we make a revelation with regards to ParallelWriter, I'll be happy to share.
+
+Thanks for giving us some places to look.
+
+Justin
+
+
+
+----- Original Message ----
+From: Shai Erera <serera@gmail.com>
+To: java-user@lucene.apache.org
+Sent: Wed, June 23, 2010 10:48:22 PM
+Subject: Re: Problems with homebrew ParallelWriter
+
+How do you add documents to the index? Is it synchronized (such that
+basically only one thread can add documents at a time)?
+The same goes for removing documents as well.
+
+Also, did you encounter any exceptions during the run - if say an addDoc
+fails on one of the slices, then you need to revert that addDoc in all
+previous slices ...
+
+I remember running into such exception when working on the Parallel Index
+stuff, but I don't remember what caused it ...
+
+About merging, note that if you use LogDocMP, then you can guarantee that
+all slices will be in sync, but still some merges could happen on some
+slices not when you intended them to happen. For example, during a flush of
+one addDoc on one of the slices, before the others addDoc finished. But if
+you didn't see any exceptions and didn't terminate the process mid-action,
+then this should not happen ...
+
+I hope this helps. Unfortunately I had to shift focus from LUCENE-1879.
+Perhaps I'll get back to it one day. But if you advanced on PI somehow,
+perhaps you can diff the patch that's there and your code, and if you've
+made progress, upload another patch?
+
+Shai
+
+On Thu, Jun 24, 2010 at 1:44 AM, Justin <crynax@yahoo.com> wrote:
+
+> Hi all,
+>
+> We've been waiting for LUCENE-1879 and LUCENE-2425 and have written our own
+> ParallelWriter class in the meantime.  Apparently our indexes are falling
+> out of sync (I suspect my colleague is seeing error messages come from
+> ParallelReader stating the the number of documents must be the same).
+>
+> Here's a code snippet from our ParallelWriter which extends Object:
+>
+>    writer1 = new IndexWriter(dir, analyzer,
+> create,
+>
+> new IndexWriter.MaxFieldLength(MFL));
+>
+> writer1.setMergePolicy(new LogDocMergePolicy());
+>
+> writer1.setMergeScheduler(new SerialMergeScheduler());
+>
+> writer1.setMaxBufferedDocs(MBD);
+>
+> writer1.setRAMBufferSizeMB(IndexWriter.DISABLE_AUTO_FLUSH);
+>
+> My colleague suspects that merging or flushing is being triggered on
+> something other than the doc count which leads to the writers' different
+> behaviors.  I suspect our next step is to scatter breakpoints around Lucene
+> source (we've got trunk@926791 to take advantage of latest NRT readers).
+>
+> Does anyone have ideas on how the indexes would get out of sync?  Process
+> close, committing, optimizing,... they all should work okay?
+>
+> Thanks,
+> Justin
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

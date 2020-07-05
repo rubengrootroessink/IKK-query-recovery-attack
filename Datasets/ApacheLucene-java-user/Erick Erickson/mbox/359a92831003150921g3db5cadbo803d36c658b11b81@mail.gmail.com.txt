@@ -1,0 +1,105 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Increase number of available positions?
+DATE: 15 Mar 2010
+
+I was wondering about Steven's approach to, have you considered it?
+
+I don't know the internals of whether you could go to a 64 bit quantity for
+term positions, but I suspect it would be *very* involved, but perhaps
+people more familiar with the code could comment.....
+
+How big is your corpus? Assuming that, for some reason, you can't
+follow Steven's approach there are other possibilities. It really goes
+against the grain for all DB/computer geeks to de-normalize data,
+but Lucene handles really large amounts of text. What about indexing
+the triplets with a small increment gap between? That is:
+level1-1 - level2-1 - level3-1
+                         - level 3-2
+              level2-2 - level3-3
+                            level3-4
+
+
+gets indexed as:
+
+level1-1/level2-1/level3-1  +gap 100
+level1-1/level2-1/level3-2  +gap 100
+level1-1/level2-2/level3-3  +gap 100
+level1-1/level2-2/level3-4
+
+with a gap of 100 (or even 10) between? your index will NOT grow
+linearly with the tokens since there will be so many repeats
+of the first couple of levels. This also gives you an easier way to
+search for, say, all children of level1-1/level2-1 just by using
+a prefix query.
+
+Or you could think about *documents* being your level1, that is each
+document has one and only one level1 element but many documents
+may have the same level1 token. Combining this with your increment
+gap notion for level2-3 might work for you.
+
+Do note that Lucene has no requirement that all documents have
+the same fields, so you can think about part of your documents
+being your "level" documents with different fields than other
+documents in your index....
+
+You might also search the list for "Heirarchal" or "tree" indexing,
+this is a variant of such I think.
+
+HTH
+Erick
+
+On Mon, Mar 15, 2010 at 9:59 AM, Rene Hackl-Sommer <rene.a.hackl@gmx.de>wrote:
+
+>
+>  Is your entire corpus a single document? Because I'm having trouble
+>> imagining a single document where this would be a problem, unless
+>> your increment gap is huge. The term positions are relative to
+>> a single document...
+>>
+>>
+>
+> It is getting pretty huge, yes (see below). The term positions are also
+> relative to a single field, aren't they?
+>
+>
+>  <MyField>
+>>> <Level_1>
+>>> <Level_2>
+>>> <Level_3>
+>>>
+>>>
+>>>
+>> Let me plug in some figures to help clarify. On Level 3 there are hundreds
+> of tokens. So to be able to search two or more terms in MyField in the same
+> Level_3, I put a position gap of 1000 between all Level_3's. Per Level_2
+> there might be hundreds of Level_3 entries. As I want to restrict the search
+> to all Level_3 entries of a Level_2, I set the position increment gap for
+> Level_2 at 1000x1000 = 1,000,000 (1000 for the Tokens in Level_3 and 1000
+> for the Level_3 entries in Level_2).
+>
+> This done, Level_1 still needs to be accomodated. If you're looking at 500
+> Level_2 entries, a gap of 1,000,000x500 is needed per Level_1 entry, to be
+> able to search only within each of the Level_1 elements.That way only four
+> Level_1 entries can be included before the maximum value is reached.
+>
+> Queries I am looking to support might look like this in an easy case:
+>
+> Search in MyField: Terms T1 and T2 on Level_2 and T3, T4, and T5 on
+> Level_3, which should both be in the same Level_1.
+>
+> Sorry if this is confusing, what with all these levels going on. I think
+> what it comes down to is whether the integer based position counting might
+> be replaced by long. Can this be done at all? Are performance or other
+> implications conceivable? Or is the current implementation too deeply wired
+> to Lucene core workings to make this a reasonable endeavour?
+>
+> Cheers
+>
+> Rene
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

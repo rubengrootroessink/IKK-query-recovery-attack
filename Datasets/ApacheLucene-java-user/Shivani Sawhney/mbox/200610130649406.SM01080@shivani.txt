@@ -1,0 +1,394 @@
+FROM: "Shivani Sawhney" <shiv...@netedgecomputing.com>
+SUBJECT: Error while closing IndexWriter
+DATE: 13 Oct 2006
+
+Hi All,
+
+I am facing a peculiar problem. 
+
+I am trying to index a file and the indexing code executes without any error
+but when I try to close the indexer, I get the following error and the error
+comes very rarely but when it does, no code on document indexing works and I
+finally have to delete all indexes and run a re-indexing utility.
+
+Can anyone please suggest what might be the problem?
+
+ 
+
+Thanks a ton
+
+Shivani
+
+ 
+
+Stack Trace:
+
+java.lang.ArrayIndexOutOfBoundsException: 97 >= 17
+
+            at java.util.Vector.elementAt(Vector.java:432)
+
+            at
+org.apache.lucene.index.FieldInfos.fieldInfo(FieldInfos.java:135)
+
+            at
+org.apache.lucene.index.FieldsReader.doc(FieldsReader.java:103)
+
+            at
+org.apache.lucene.index.SegmentReader.document(SegmentReader.java:237)
+
+            at
+org.apache.lucene.index.SegmentMerger.mergeFields(SegmentMerger.java:169)
+
+            at
+org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:97)
+
+            at
+org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:425)
+
+            at
+org.apache.lucene.index.IndexWriter.flushRamSegments(IndexWriter.java:373)
+
+            at
+org.apache.lucene.index.IndexWriter.close(IndexWriter.java:193)
+
+            at rd.admin.Indexer.indexFile(Indexer.java:150)
+
+ 
+
+ 
+
+Code:
+
+    public void indexFile(File indexDirFile, File resumeFile) throws
+IOException, FileNotFoundException
+
+    {
+
+ 
+
+        IndexWriter indexwriter = null;
+
+            
+
+        File afile[] = indexDirFile.listFiles();
+
+        boolean flag = false;
+
+ 
+
+        if (afile.length <= 0)
+
+            flag = true;
+
+        
+
+        indexwriter = new IndexWriter(indexDirFile, new StandardAnalyzer(),
+flag);
+
+        
+
+        doIndexing(indexwriter, resumeFile);
+
+ 
+
+        closeIndexWriter(indexwriter);
+
+    }
+
+ 
+
+ 
+
+//--------------------------------------------------------------------------
+----------------------//
+
+    public void doIndexing(IndexWriter indexwriter, File resumeFile) throws
+FileNotFoundException
+
+    {
+
+ 
+
+        System.out.println("Indexing of File " + resumeFile.getName() +
+"Started...");
+
+        Document document = new Document();
+
+       
+
+        if (resumeFile.getName().endsWith(".pdf"))
+
+        {
+
+            FileInputStream fileinputstream;
+
+            try
+
+            {
+
+                fileinputstream = new FileInputStream(resumeFile);
+
+            }
+
+            catch (FileNotFoundException e1)
+
+            {
+
+                e1.printStackTrace();
+
+                throw new MyRuntimeException(e1.getMessage(), e1);
+
+            }
+
+            Object obj = null;
+
+            InputStreamReader inputstreamreader = null;
+
+            OutputStreamWriter outputstreamwriter = null;
+
+            PDDocument pddocument = null;
+
+            try
+
+            {
+
+                PDFParser pdfparser = new PDFParser(fileinputstream);
+
+                pdfparser.parse();
+
+                pddocument = pdfparser.getPDDocument();
+
+                ByteArrayOutputStream bytearrayoutputstream = new
+ByteArrayOutputStream();
+
+                outputstreamwriter = new
+OutputStreamWriter(bytearrayoutputstream);
+
+                PDFTextStripper pdftextstripper = new PDFTextStripper();
+
+                pdftextstripper.writeText(pddocument.getDocument(),
+outputstreamwriter);
+
+                byte abyte0[] = bytearrayoutputstream.toByteArray();
+
+                inputstreamreader = new InputStreamReader(new
+ByteArrayInputStream(abyte0));
+
+                document.add(Field.Text(IndexerColumns.contents,
+inputstreamreader));
+
+                abyte0 = bytearrayoutputstream.toByteArray();
+
+            }
+
+            catch (Exception e)
+
+            {
+
+                System.out.println("error in indexFile " + e.getMessage());
+
+                e.printStackTrace();
+
+            }
+
+            finally
+
+            {
+
+                if (inputstreamreader != null)
+
+                {
+
+                    inputstreamreader = null;
+
+                }
+
+ 
+
+                if (outputstreamwriter != null)
+
+                {
+
+                    try
+
+                    {
+
+                        outputstreamwriter.close();
+
+                    }
+
+                    catch (IOException e2)
+
+                    {
+
+                        e2.printStackTrace();
+
+                    }
+
+                }
+
+                if (pddocument != null)
+
+                {
+
+                    try
+
+                    {
+
+                        pddocument.close();
+
+                    }
+
+                    catch (IOException e2)
+
+                    {
+
+                        e2.printStackTrace();
+
+                    }
+
+                }
+
+                inputstreamreader = null;
+
+            }
+
+        }
+
+        else
+
+        {
+
+            document.add(Field.Text(IndexerColumns.contents, new
+FileReader(resumeFile)));
+
+        }
+
+        document.add(Field.Keyword(IndexerColumns.id,
+String.valueOf(mapLuceneParams.get(IndexerColumns.id))));
+
+        
+
+        for (int i = 0; i < this.columnInfos.length; i++)
+
+        {
+
+            ColumnInfo columnInfo = columnInfos[i];
+
+            String value =
+String.valueOf(mapLuceneParams.get(columnInfo.columnName));
+
+ 
+
+            if (value != null)
+
+            {
+
+                value = value.trim();
+
+                if (value.length() != 0)
+
+                {
+
+                    if (columnInfo.istokenized)
+
+                    {
+
+                        document.add(Field.Text(columnInfo.columnName,
+value));
+
+                    }
+
+                    else
+
+                    {
+
+                        document.add(Field.Keyword(columnInfo.columnName,
+value.toLowerCase()));
+
+ 
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        document.add(Field.Keyword(IndexerColumns.filePath, String
+
+                .valueOf(mapLuceneParams.get(IndexerColumns.filePath))));
+
+ 
+
+        try
+
+        {
+
+            indexwriter.addDocument(documentWithCustomFields);
+
+        }
+
+        catch (IOException e)
+
+        {            
+
+            closeIndexWriter(indexwriter);           
+
+            e.printStackTrace();
+
+            throw new MyRuntimeException(e.getMessage(), e);
+
+        }
+
+        
+
+    }
+
+ 
+
+//--------------------------------------------------------------------------
+----------------------//
+
+    private void closeIndexWriter(IndexWriter indexwriter)
+
+    {
+
+ 
+
+ 
+
+        if (indexwriter != null)
+
+        {
+
+            System.out.println("going to close index writer");
+
+            try
+
+            {
+
+                indexwriter.close();
+
+            }
+
+            catch (IOException e1)
+
+            {
+
+                e1.printStackTrace();
+
+            }
+
+        }
+
+ 
+
+    }
+
+ 
+
+ 
+
+

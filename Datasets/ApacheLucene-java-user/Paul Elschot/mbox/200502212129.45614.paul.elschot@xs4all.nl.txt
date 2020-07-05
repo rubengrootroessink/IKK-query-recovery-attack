@@ -1,0 +1,79 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Query Tuning
+DATE: 21 Feb 2005
+
+On Monday 21 February 2005 20:43, Todd VanderVeen wrote:
+> Runde, Kevin wrote:
+> 
+> >Hi All,
+> >
+> >How does Lucene handle multi term queries? Does it use short circuiting?
+> >So if a user entered:
+> >(a OR b) AND c
+> >But my program knew testing for "c" is cheaper than testing for "(a OR
+> >b)" and I rewrote the query as:
+> >c AND (a OR b)
+> >Would the query run faster?
+> >
+> >Sorry if this has already be answered, but for some reason the Archive
+> >search is not working for me today.
+> >
+> >Thanks,
+> >Kevin
+> >
+> >
+> >  
+> >
+> Not sure about what is in CVS, but look at BooleanQuery.scorer(). If all 
+
+It's in svn nowadays.
+
+> of the clauses of the BooleanQuery are required and none of the clauses 
+> are BooleanQueries a ConjunctionScorer is returned that offers the 
+> optimizations you seek. In the example you gave, there is a clause that 
+> is boolean ( a or b) that will have to be evaluated independently with a 
+> boolean scorer. This will be performed regardless of the ordering. 
+> (BooleanScorer doesn't preserve document order when it return results 
+> and hence it can't utilize the optimal algorithm provided by 
+> ConjuntionScorer). Others have been down this path as evidenced by the 
+> sigh in the javadoc.
+
+In the svn version a ConjunctionScorer is used for all top level AND queries.
+ 
+> If calculating (a or b) is expensive and the docFreq of a is much less 
+> than the union of a and b, you might consider rewriting it to (a and c) 
+> or (b and c) using DeMorgan's law. Expansion like this isn't always 
+> beneficial and can't be applied blindly. As far as I can tell there is 
+
+In the svn version the subquery (a or b) is only evaluated for documents
+matching c. In the current version the expansion to
+(a and c) or (b and c)
+might help: the tradeoff is between evaluating c twice and having
+less work for the OR operator.
+
+> no query planning/optimization aside from the merging of related clauses 
+> and attempts to rewrite to simpler queries.
+
+One optimization in the current version is the use of ConjunctionScorer
+for some cases. One such case, which happens a lot in practice, is a
+query that has a few required terms.
+
+Another optimization in the current version that some scoring is done ahead
+for each clause into an unordered buffer.
+This helps for top level OR queries, but loses for OR queries that are
+subqueries of AND.
+
+The svn version does not score ahead. It relies on the buffering done by
+TermScorer. Perhaps the buffering for a TermScorer should be made
+dependent on it's expected use: more buffering for top level OR, less 
+buffering when used under AND.
+
+Regards,
+Paul Elschot
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

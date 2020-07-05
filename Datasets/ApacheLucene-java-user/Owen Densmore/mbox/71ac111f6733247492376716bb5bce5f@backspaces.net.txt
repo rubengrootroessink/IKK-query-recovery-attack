@@ -1,0 +1,173 @@
+FROM: Owen Densmore <o...@backspaces.net>
+SUBJECT: php/lucene integration: SFI working papers visualization
+DATE: 6 Apr 2005
+
+Hi folks.  As promised, here is the first beta access to the php/lucene  
+work we were discussing earlier.
+
+The url to the php front-end to the SFI working papers Lucene search is:
+   http://webdev.santafe.edu/research/publications/redfish/wpSearch.php
+This provides a fairly simple search dialog, returning a list of  
+relevant documents.
+
+The paragraph style returned data has links for continued searching on  
+much of the data within the document's meta data: Authors, Keywords,  
+and a similarity search .. similar documents.  It also has a "Browse  
+paper in context" icon which launches a Flash graphical navigation  
+tool.  It also has links into the rest of the SFI site: pdf/postscript  
+for the papers, and an abstract page.
+
+The "similar documents" search is a generalization of the example in  
+the book by Erik and Otis: use a document's contents to form a  
+secondary search.  Our default is authors^2 & all text.  But we've  
+generalized it "inside" so that any primary search can be broken into  
+any secondary search.  Thus simply using authors is a "co-author"  
+similarity search.
+
+The servlet is available via:
+   http://webdev.santafe.edu:8080/redfish/servlet
+It provides only raw text, all formatting and adaption to other web  
+tools (Flash etc) is done via php.  Many capabilities of the servlet  
+are not available via php at this point.  We default everything so that  
+errors are minimized.  Thus beaming into the url w/o any parameters  
+returns a canned search.  Note that it returns more than one search --  
+a batch search of many searches is one of the servlets features.
+
+This should let folks play with the critter.  Let us know if you find  
+bugs or odd behaviors .. or find it useful even!  :)
+
+	-- Owen
+
+Owen Densmore - http://backspaces.net - http://redfish.com -  
+owen@backspaces.net
+
+Here are some details for those interested.
+
+The meta data fields available are:
+Number       Working paper number
+Title        Working paper title
+Author       Comma separated list of Authors
+Abstract     Working paper abstract.
+Keywords     Comma separated list of keyphrases
+Format       Specifies availability of pdf, ps, none
+
+We "manufacture" a few more fields from the above:
+Text         Fake field: Title+Keywords+Abstract
+All          Fake field: All .. "Text"+Number+Author+Format
+Date         Fake field: YYYY/MM from Number
+
+We typically just search All, augmenting with "Author:Crutchfield" if  
+we want a specific field included in the search.  We use the built-in  
+query parser.
+
+The php interface does not provide an abstract but that can be done  
+through the servlet "api".  For example, this search:
+    
+http://webdev.santafe.edu:8080/redfish/servlet?s=Author: 
+Crutchfield&p=Abstract
+..would return Jim Cruchfield's 55 abstracts, along with the rank and  
+paper number.  Boy, is it FAST!
+
+The URL api is:
+cmd=search   Perform a search using params below.  Results
+              have a search header with the query and number of hits,
+			 followed by the individual search results unless the "p"
+			 parameter is used.
+    =debug    Print diagnostic info
+    =like     Return documents that are like the document given in the
+              s=Number:xxx search string.  Note the search string must be
+			 fully specified, due to the default search field, f= being
+			 used to specify how the similarty search is performed.  I.e.
+			 the similarity search is done with a search string of
+			 <default field>:<contents of that field for the document>
+			 The parameters (l=,p=,M=,m=) can be used to control the return
+			 format and quanity.  See examples below.  This command is fine
+			 for now, but is "in beta" and could revert to use of document
+			 term vectors.
+s=Searches (| separated list)
+              A set of N searches to be made, separated by the |  
+character.
+s2=search|minRank2|maxResults2
+              The search to use for the "like" command.  It has three  
+parts,
+			 separated by "|".  The first is a search, formatted like a print
+			 field (p=) below, constructed from the parts of the first search.
+			 The second and third parts are a minRank, maxResults pair to
+			 be applied during the second search.  As an example:
+			     s2=Author([Author])^2 Text([Text])|0.01|100
+		     would use the Authors and Text fields of the first search (s=)
+			 to construct the second search, using a minRank, maxResults
+			 of 0.01 and 100.  The results are formatted according to the
+			 p= field below, generally "matrix".
+p=PrintField|PrintFormat with PrintTags|"matrix"
+              If a field name is provided, search results are printed as:
+			 [Rank]\t[Number]\t[<PrintField>]
+			 If the printField contains any []'s, the search results are
+			 custom formatted using tags.  Thus "[Number]" would return just
+			 the number for the search.
+    =matrix   Return matrix of hits for N searches.  Results have a  
+header
+	         with N queries/labels, tab separated, preceeded by an  
+additional
+			 "DocNo." label.  The search results have the doc number followed
+			 by N ranks, tab separated, corresponding to scores for
+			 each doc for each search.  A 0 means no hit.  Note each line has
+			 N+1 entries.  If a l=xx parameter is given with N entries, then
+			 "DocNo." is defaulted to the first label.  If the l=xx parameter
+			 has N+1 entries, then no defaulting is done.
+f=searchField|SearchFormat with SearchTags
+              Default search field if not specified in the s= searches
+			 parameter.  Used by Lucene's query parser for unspecified
+			 search fields.
+l=Search Labels
+              Replacements for actual search queries in the search  
+results
+			 header line.
+M=Max number of returned hits (integer)
+m=min rank for returned hits (float)
+
+PrintTags (used in p=xx commands)
+[<Field>]    Returns text of any named field, including manufactured  
+ones.
+[Rank]       Returns n.nn of the search rank
+
+SearchTags (used in l=xx commands)
+[Hits]       num hits returned by lucene w/o minRank, MaxNumber applied
+[Query]      The search query string
+
+- All API parameters are defaulted so that any request should work
+- All Lucene fields are indexed as free text.  This can cause subtle
+   problems, but generally is easily managed via ""s and similar search
+   semantics/markup.
+- The secondary search used by "like" adds quotes for Keywords and  
+Authors:
+   "Stuart A. Kauffman" "digital communities", for example.  It also  
+tokenizes
+   the All Text Abstract Title fields, creating a much smaller search  
+string.
+
+Example searches -- use  
+http://webdev.santafe.edu:8080/redfish/servlet?xxx
+Find Crutchfield's searches, printing rank, Number, Keywords.
+Note "cmd=search" can be left off, search is the default.
+	?cmd=search&s=Author:"James P. Crutchfield"&p=Keywords
+Return a matrix format for three searches
+	?p=matrix&s=ecology|networks|economics
+Perform a 3 search batch with custom formatting of results
+	? 
+s=ecology|networks|economics&p=|[Rank]|[Author]|[Title]|[Abstract]&l=[Qu 
+ery]/[Hits]
+Perform similarity search for documents similar to 1990001 based on  
+keywords
+	?cmd=like&s=Number:1990001&m=0.40&M=10&f=Keywords
+Dump everything!
+	?s=19*  
+20*&m=0.0001&f=Number&p=|[Number]|[Title]|[Author]|[Abstract]|[Keywords] 
+|[Format]
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,201 @@
+FROM: Tom Hill <lucene-l...@zvents.com>
+SUBJECT: discontinuous range query
+DATE: 5 Oct 2006
+
+Hi -
+
+Thanks, Yonik, Chris and Doron for the quick responses.
+
+Doron's comment about combining the queries was the key to what was 
+causing me problems. I had indeed been combining with other queries, 
+which results in 'extra' results being returned.
+
+I've attached a sample program below that illustrates this, as it may 
+save someone else some time. As you can see, if you don't group the 
+SHOULD queries for the range under a MUST, you get more results back 
+than I would expect.
+
+It's clear that my problem here comes from a lack of understanding of 
+the semantics of SHOULD, MUST, and MUST_NOT.
+
+I haven't found a clear description of this (except for a brief 
+comment here 
+http://mail-archives.apache.org/mod_mbox/lucene-java-dev/200408.mbox/%3C41267191.6060905@apache.org%3E).
+
+Most of the other descriptions I have found discuss it as if it they 
+were boolean operators, which they aren't, quite.
+
+Can someone explain to me what the semantics of SHOULD and MUST are, 
+to the point that I could see from the explanation that
+Query: +(name:[A TO C] name:[Q TO Z]) +PHB:NO
+would produce the results that I wanted, and
+Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+does not?
+
+Or why
+Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+returns different results than
+Query: (name:[A TO C] name:[Q TO Z])
+even though PHB is NO for all docs
+
+Obviously, nesting makes it much harder (for me) to understand. What 
+does it mean to nest a SHOULD nested in a MUST (nested in a ...).
+
+Thanks again,
+
+Tom
+
+
+
+
+-----------------------------------------------------------Sample
+import java.io.IOException;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
+
+public class Should
+{
+         public static final String NAME_FIELD = "name";
+
+         public static final String MANAGER_FIELD = "PHB";
+
+         public static Document createDoc(String name, String manager)
+         {
+                 Document d = new Document();
+                 d.add(new Field(NAME_FIELD, name, Field.Store.YES, 
+Field.Index.UN_TOKENIZED));
+                 d.add(new Field(MANAGER_FIELD, manager, 
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+                 return d;
+         }
+
+         static BooleanQuery buildQuery(BooleanClause.Occur occur)
+         {
+                 BooleanQuery bq = new BooleanQuery();
+                 Term lower;
+                 Term upper;
+                 lower = new Term(NAME_FIELD, "A");
+                 upper = new Term(NAME_FIELD, "C");
+                 bq.add(new RangeQuery(lower, upper, true), occur);
+                 lower = new Term(NAME_FIELD, "Q");
+                 upper = new Term(NAME_FIELD, "Z");
+                 bq.add(new RangeQuery(lower, upper, true), occur);
+                 return bq;
+         }
+
+         static BooleanQuery buildQuery2()
+         {
+                 BooleanQuery mainq = buildQuery(BooleanClause.Occur.SHOULD);
+                 mainq.add(new TermQuery(new Term(MANAGER_FIELD, 
+"NO")), BooleanClause.Occur.MUST);
+                 return mainq;
+         }
+
+         static BooleanQuery buildQuery3(BooleanClause.Occur occur)
+         {
+                 BooleanQuery mainq = new BooleanQuery();
+                 BooleanQuery subq = new BooleanQuery();
+                 Term lower;
+                 Term upper;
+                 lower = new Term(NAME_FIELD, "A");
+                 upper = new Term(NAME_FIELD, "C");
+                 subq.add(new RangeQuery(lower, upper, true), 
+BooleanClause.Occur.SHOULD);
+                 lower = new Term(NAME_FIELD, "Q");
+                 upper = new Term(NAME_FIELD, "Z");
+                 subq.add(new RangeQuery(lower, upper, true), 
+BooleanClause.Occur.SHOULD);
+                 mainq.add(subq, occur);
+                 mainq.add(new TermQuery(new Term(MANAGER_FIELD, 
+"NO")), BooleanClause.Occur.MUST);
+                 return mainq;
+         }
+
+         private static void runQuery(IndexSearcher is, Query q) 
+throws IOException
+         {
+                 Hits hits;
+                 System.out.println("Query: " + q);
+                 hits = is.search(q);
+                 System.out.println("Hits: " + hits.length());
+                 for (int docNo = 0; docNo < hits.length(); docNo++)
+                 {
+                         System.out.println("DOC: " + hits.doc(docNo));
+                 }
+                 System.out.println();
+         }
+
+         public static void main(String[] args) throws Exception
+         {
+                 Directory dir = new RAMDirectory();
+                 Analyzer analyzer = new StandardAnalyzer();
+                 IndexWriter iw = new IndexWriter(dir, analyzer, true);
+                 iw.addDocument(createDoc("Asok", "NO"));
+                 iw.addDocument(createDoc("Dogbert", "NO"));
+                 iw.addDocument(createDoc("Ratbert", "NO"));
+                 iw.close();
+
+                 IndexSearcher is = new IndexSearcher(dir);
+                 Query q;
+                 q = buildQuery(BooleanClause.Occur.SHOULD);
+                 runQuery(is, q);
+                 q = buildQuery(BooleanClause.Occur.MUST);
+                 runQuery(is, q);
+                 q = buildQuery2();
+                 runQuery(is, q);
+                 q = buildQuery3(BooleanClause.Occur.SHOULD);
+                 runQuery(is, q);
+                 q = buildQuery3(BooleanClause.Occur.MUST);
+                 runQuery(is, q);
+                 is.close();
+         }
+}
+----------------Output (I trying to get two results back)
+Query: name:[A TO C] name:[Q TO Z]
+Hits: 2
+DOC: Document<stored/uncompressed,indexed<name:Asok> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Ratbert> 
+stored/uncompressed,indexed<PHB:NO>>
+
+Query: +name:[A TO C] +name:[Q TO Z]
+Hits: 0
+
+Query: name:[A TO C] name:[Q TO Z] +PHB:NO
+Hits: 3
+DOC: Document<stored/uncompressed,indexed<name:Asok> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Ratbert> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Dogbert> 
+stored/uncompressed,indexed<PHB:NO>>
+
+Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+Hits: 3
+DOC: Document<stored/uncompressed,indexed<name:Asok> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Ratbert> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Dogbert> 
+stored/uncompressed,indexed<PHB:NO>>
+
+Query: +(name:[A TO C] name:[Q TO Z]) +PHB:NO
+Hits: 2
+DOC: Document<stored/uncompressed,indexed<name:Asok> 
+stored/uncompressed,indexed<PHB:NO>>
+DOC: Document<stored/uncompressed,indexed<name:Ratbert> 
+stored/uncompressed,indexed<PHB:NO>>
+
+------------------ 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

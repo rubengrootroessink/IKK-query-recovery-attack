@@ -1,0 +1,115 @@
+FROM: Bob Carpenter <c...@alias-i.com>
+SUBJECT: Re: Lucene and SIPs
+DATE: 22 Jun 2006
+
+Time to pull out the chalkboard. :-)
+
+SIPs, at least in the Amazon sense, are usually found
+by means of statistical independence testing.  You
+can find more info in Chris Manning's and Hinrich
+Schuetze's statistical NLP book (heads-up: they're
+now working on an IR book with more of a focus on
+search quality than index compression -- draft chapters
+are available at:
+
+  http://www-csli.stanford.edu/~schuetze/information-retrieval-book.html
+
+
+The simplest independence testing formula is:
+
+Z("t1 t2") = count("t1 t2") - expectedCount("t1 t2")
+              ---------------------------------------
+              sqrt(corpusSize * prob("t1 t2") * (1-prob("t1 t2"))
+
+expectedCount("t1 t2") = corpusSize * prob("t1 t2")
+prob("t1 t2") = P("t1") * P("t2")   [assumes independence]
+P("t") = count("t")/corpusSize
+corpusSize = total number of term instances in the corpus
+
+This basically gives you the number of standard deviations
+above the mean the actual count was compared to the expected
+count if they were independent.  (It assumes a binomial term
+distribution, which isn't quite right, but it's close enough.)
+
+If your corpus is fixed, you can ignore the corpus size
+for purposes of ranking.
+
+So all you need to do is iterate over term pairs, look
+at the count under a phrase search and compare to the
+expected count.  The only real trick is to make that
+search efficient.  The usual way to do that is to
+
+1.  only consider phrases that appear a minimum number of times
+2.  build a trie-structure to store the phrase counts
+
+Next, you can do something similar if you have two
+Lucene document collections, say a background and
+foreground collection:
+
+Z("t1 t2") = countFG("t1 t2") - fgCorpusSize * probBG("t1 t2")
+              --------------------------------------
+              sqrt(fgSize * pBG("t1 t2") * (1 - pBG("t1 t2"))
+
+where countFG is the count in the foreground corpus,
+fgCorpusSize is the size of the foreground corpus,
+and probBG is the probability in the background
+corpus.  Now what's nifty is that probBG("t1 t2") can
+either be done with the background phrase count, or by further
+factoring it into probBG("t1")*probBG("t2").  The former
+gives you a measure of newness and the second a measure
+of phrasalness.
+
+Note that the foreground corpus can be as small as
+a single document or a small cluster of documents.
+
+Matthew Hurst suggested blending the phrase
+probability probBG("t1 t2") with the foreground
+independence probability probFG("t1")*probFG("t2")
+to both find things that are new and that are
+phrase-like.
+
+I'm going to be writing this all up in a bit longer
+form in a case study for the revised Lucene in Action,
+with explanations of how to find the significant
+terms relative to a query, like Scirus.com does.
+
+- Bob Carpenter
+   Alias-i
+
+PS:  I also wrote a little longer blog entry with more math,
+references, and a comparison to what Matthew Hurst at Nielsen/Buzzemtrics
+is doing:
+
+      http://www.alias-i.com/blog/?p=14
+
+(But our blog server appears to be down, and the sysadmin's
+out to lunch...)
+
+
+Larry Ogrodnek wrote:
+> One thing that I played with was creating multiple phrase indexes, one
+> each for 2, 3, 4, and 5 words.  I wrote a tokenizer that would batch up
+> the words, so, for the input string:
+> 
+> The quick brown fox jumps over the slow lazy dog.
+> 
+> The tokenizer for 3 words would return:
+> 
+> The quick brown
+> Quick brown fox
+> Brown fox jumps
+> Fox jumps over
+> ...
+>
+> This seemed like a reasonably start... the problem is resolving the
+> overlap for display, and figuring out which words are the most
+> important, e.g. if the above sentence itself was pretty rare, and you're
+> looking at the phrase-index-3, each one of its sub-phrases would end up
+> being significant.... Which one do you show?  Or do you combine them
+> into a longer phrase?  If so, where do you stop?
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

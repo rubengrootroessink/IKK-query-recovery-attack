@@ -1,0 +1,106 @@
+FROM: Kay Roepke <kroe...@classdump.org>
+SUBJECT: Re: Re : lucene document id's
+DATE: 28 Jan 2007
+
+Hi!
+
+I promised karl that I'd share something on this topic, so here it  
+goes. It fits the subject, too ;)
+
+On Jan 27, 2007, at 6:14 PM, Erick Erickson wrote:
+
+> I believe you are correct about when document IDs change. That  
+> said, I'd
+> strongly recommend you spend some time trying think of a way to  
+> keep from
+> doing this, since it may lead to endless synchronization issues.
+
+Not only that, but it will make a performance hog, too. There's the  
+potential chance that all doc ids change after only one delete and a  
+subsequent merge! It could invalidate your entire mapping table in  
+one go, forcing you to rebuild it from scratch.
+
+And if you have IndexReaders that happen to have different versions  
+of the index open at the same time, it's not even doable in one  
+lookup table.
+
+> But if you must, you can retrieve a document with  
+> IndexReader.document(id);
+>
+> On 1/27/07, saikrishna venkata pendyala <pvsaikrishna@gmail.com>  
+> wrote:
+>>
+>> Hai ,
+>>       I was trying to store to document id's external.
+
+I've recently had the need to do this, too.
+
+Short story: Don't bother.
+
+Slightly longer story: Don't bother. If you have to have a primary  
+key to quickly get at your document (because you are running into  
+performance troubles, e.g. with filter bitsets) turn the problem  
+around. Don't try to store Lucene's doc ids externally but rather  
+store the external primary key internally in Lucene. Not only as a  
+field, but in a separate structure. Be aware that you have to change  
+Lucene to add support for this.
+
+>>       I have found that lucene generates document id's linearly  
+>> starting
+>> from 0 and are not changed until any document is deleted.
+>>        but it did work for me.
+
+As long as you don't delete anything, this should hold true, yes. The  
+"rearranging" happens implicitely when segment merges happen. Note  
+that the document id is actually a misnomer, and exposing it could be  
+considered a misfeature (IMHO). It actually is the offset into the  
+index file.
+
+>>       Was the above one correct ? if not who could I store  
+>> document id's
+>> externally.
+
+As I said, turn the problem around. Store the mapping information  
+alongside the index and write code that is able to map between your  
+primary key and Lucene document ids. You will have to augment the  
+SegmentMerger and a couple of other places to get to the information,  
+of course, but it's not that hard to do. If you have a huge number of  
+documents, you probably won't be able to hold the entire mapping  
+table in RAM, then it gets harder to do it efficiently. But if you  
+have enough RAM, use java.nio buffers! HashMaps and the like won't  
+scale a bit.
+
+In the end it all comes down to the question: Why do you need this?  
+If you need to create huge filter sets, you probably have a valid  
+reason, if you simply want to retrieve a certain document, you  
+probably don't. In the latter case, store your external id (primary  
+key) as a field of each document and use a TermEnum to do the lookup.  
+That's plenty fast for most applications, as I have found out, but it  
+won't scale to big filter sets, esp. when you have a large number of  
+updates per second on the index, thus invalidating any filter caches  
+you might have.
+If you have a rather static index and do not require subsecond  
+response times from Lucene, all of what I outlined earlier is  
+probably overkill.
+
+But it is a good opportunity to learn things about Lucene you never  
+wanted to know ;)
+
+Hope that helps a bit! I'm sorry that I can't share any code, but I'm  
+not allowed to do so :(
+
+cheers,
+-k
+-- 
+Kay Röpke
+http://classdump.org/
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

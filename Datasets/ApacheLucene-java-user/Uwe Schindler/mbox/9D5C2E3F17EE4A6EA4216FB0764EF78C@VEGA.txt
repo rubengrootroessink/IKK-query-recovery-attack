@@ -1,0 +1,266 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: NumericRangeQuery performance with 1/2 billion documents in the index
+DATE: 3 Jan 2010
+
+Hi Kumanan,
+
+Just for completeness:
+Have you tried out how long the NRQ takes without the BooleanQuery? If it is
+also fast, then there is indeed a problem with the BQ.
+
+You measure the time that the search method needs to e.g. return the n top
+matching docs? Or do you iterate over all results?
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: Kumanan [mailto:kumanan@gmail.com]
+> Sent: Sunday, January 03, 2010 4:24 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: NumericRangeQuery performance with 1/2 billion documents in
+> the index
+> 
+> Uwe,
+> 
+> Thank you for your response.
+> 
+> Here is some more information.
+> 
+> CPU - We use 2 processor Quad Core intel CPU. (not sure about the
+> particular
+> model. I will find out)
+> 
+> JVM - OpenJDK 64-Bit Server VM (build 1.6.0-b09, mixed mode)
+> 
+> OS - Linux
+> 
+> The index resides on a SAN.
+> 
+> You are right. The number of matches seems to affect the response time a
+> lot.
+> 
+> 10 million matches takes about 10 seconds
+> 
+> 3.7 million matches takes about 4 seconds
+> 
+> I do warm up the index by running around 100 different searches including
+> range queries.
+> 
+> I measure the query time in the following way
+> 
+> long start = System.currentTimeInMillis()
+> search();
+> System.out.println("search time " + (System.currentTimeInMillis() -
+> start));
+> 
+> and running the range query from our UI and monitoring the log. I ran the
+> same query several times (at least 20 times) from the UI and it
+> consistently
+> takes between 3-4 seconds for 3.7 million matches.
+> 
+> >>- Why do you index and query with precision step 1? I would first try 6
+> or
+> 4
+> >>with long fields. With too low precSteps, queries get slower because you
+> >>have a very, very large term index (64 terms per value!) and your query
+> has
+> >>to reposition the term index very often.
+> 
+> I didn't realize lower precision values might affect search speed for a
+> large index. I got the impression that lower value is always better if I
+> can
+> afford the extra hard disk space. I will change it to 6.
+> 
+> >>Why do you index NULL values as an integer (not long!) field with value
+> 0?
+> >>Those fiels are useless for your query and will never match any range on
+> >>LONG values. So why not simply remove them? They also produce lots of
+> terms
+> >>with precStep=1 (32 terms).
+> 
+> It is a bug which I didn't realize until now. For some reason, I thought I
+> had to provide exactly one value per document (even for null) for range
+> queries to work. I will change the code to not set the value in the field
+> for null.
+> 
+> I will make these changes and see if there is any improvement.
+> 
+> > - How many documents match the query? NRQ is very fast, but if your
+> range
+> > hits e.g. one third of all documents, the hit collection of 166 mill
+> docs
+> > also takes lots of time. 7 seconds is normal for this case. Even with 50
+> > mio
+> > docs in the result range, collection would take in the seconds area for
+> > most
+> > cpus.
+> 
+> This is interesting. I observed the following.
+> 
+> Searches on just the default field (TermQuery) is faster even if there are
+> millions of matches. However, if I do a boolean query involving another
+> field such as "pearl AND author:joe" the query is very slow for the same
+> number of matches.  Our range query is also part of a BooleanQuery such as
+> "pearl AND docdate:[<begin-val> TO <end-val>]".
+> 
+> Is there any way to address this performance issue with lots of matches in
+> BooleanQuery?
+> 
+> Thanks again,
+> Kumanan
+> 
+> On Sat, Jan 2, 2010 at 1:52 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> 
+> > I forgot:
+> > - How did you measure query time?
+> > - Did you warm your index reader?
+> > - omit tf and norms is not needed for numeric fields, it is disabled by
+> > default
+> >
+> > -----
+> > Uwe Schindler
+> > H.-H.-Meier-Allee 63, D-28213 Bremen
+> > http://www.thetaphi.de
+> > eMail: uwe@thetaphi.de
+> >
+> >
+> > > -----Original Message-----
+> > > From: Uwe Schindler [mailto:uwe@thetaphi.de]
+> > > Sent: Saturday, January 02, 2010 10:46 PM
+> > > To: java-user@lucene.apache.org; kumanan@kumanan.com
+> > > Subject: RE: NumericRangeQuery performance with 1/2 billion documents
+> in
+> > > the index
+> > >
+> > > The information you gave us is a little spare.
+> > > - What JVM do you use, what processor,...
+> > > - How many documents match the query? NRQ is very fast, but if your
+> range
+> > > hits e.g. one third of all documents, the hit collection of 166 mill
+> docs
+> > > also takes lots of time. 7 seconds is normal for this case. Even with
+> 50
+> > > mio
+> > > docs in the result range, collection would take in the seconds area
+> for
+> > > most
+> > > cpus.
+> > > - Why do you index and query with precision step 1? I would first try
+> 6
+> > or
+> > > 4
+> > > with long fields. With too low precSteps, queries get slower because
+> you
+> > > have a very, very large term index (64 terms per value!) and your
+> query
+> > > has
+> > > to reposition the term index very often.
+> > > - Why do you index NULL values as an integer (not long!) field with
+> value
+> > > 0?
+> > > Those fiels are useless for your query and will never match any range
+> on
+> > > LONG values. So why not simply remove them? They also produce lots of
+> > > terms
+> > > with precStep=1 (32 terms).
+> > >
+> > > Uwe
+> > >
+> > > -----
+> > > Uwe Schindler
+> > > H.-H.-Meier-Allee 63, D-28213 Bremen
+> > > http://www.thetaphi.de
+> > > eMail: uwe@thetaphi.de
+> > >
+> > > > -----Original Message-----
+> > > > From: Kumanan [mailto:kumanan@gmail.com]
+> > > > Sent: Saturday, January 02, 2010 8:03 PM
+> > > > To: java-user@lucene.apache.org
+> > > > Subject: NumericRangeQuery performance with 1/2 billion documents in
+> > the
+> > > > index
+> > > >
+> > > > Hi,
+> > > >
+> > > > We have an index with 500 million documents in the index. Index size
+> is
+> > > > 104
+> > > > GB and 4 GB RAM for the search server.
+> > > >
+> > > > When we try to do NumericRangeQuery on document_date field, it takes
+> > > > around
+> > > > 7-10 seconds. Is this expected for this size index?
+> > > >
+> > > > Here is how I index that field.
+> > > >
+> > > >             documentDateTimeField = new
+> > NumericField(DOCUMENT_DATE_TIME,
+> > > > 1,
+> > > > Field.Store.NO, true);
+> > > >             documentDateTimeField.setOmitNorms(true);
+> > > >             documentDateTimeField.setOmitTermFreqAndPositions(true);
+> > > >
+> > > >             if(scoreDetails.getDocumentDate() != null) {
+> > > >
+> > > >
+> > > >
+> > >
+> >
+> documentDateTimeField.setLongValue(scoreDetails.getDocumentDate().getTime(
+> > > > ));
+> > > >             } else {
+> > > >                 documentDateTimeField.setIntValue(0);
+> > > >             }
+> > > >             doc.add(documentDateTimeField);
+> > > >
+> > > > Here is how I construct the range query.
+> > > >
+> > > >                     Long begin = esq.getBeginDate().getTime();
+> > > >                     Long end = esq.getEndDate().getTime();
+> > > >
+> > > >                     NumericRangeQuery rangeQuery =
+> > > >
+> > >
+> >
+> NumericRangeQuery.newLongRange(WordSentenceDocumentFields.DOCUMENT_DATE_TI
+> > > > ME,
+> > > >                             1, begin, end,
+> > > >                             esq.isBeginDateInclusive(),
+> > > > esq.isEndDateInclusive());
+> > > >
+> > > >                     BooleanQuery bq = new BooleanQuery();
+> > > >                     bq.add(query, BooleanClause.Occur.MUST);
+> > > >                     bq.add(rangeQuery, BooleanClause.Occur.MUST);
+> > > >
+> > > >                     query = bq;
+> > > >
+> > > > Am I doing something wrong?
+> > > >
+> > > > Thanks
+> > > > Kumanan
+> > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

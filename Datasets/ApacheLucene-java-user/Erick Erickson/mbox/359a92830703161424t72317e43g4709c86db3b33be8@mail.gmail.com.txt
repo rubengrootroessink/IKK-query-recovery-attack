@@ -1,0 +1,172 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Fast index traversal and update for stored field?
+DATE: 16 Mar 2007
+
+Yet another idea just occurred. Remember that documents in
+Lucene do not all have to have the same field. So what if you had
+a *very special document* in your index that contained only the
+changing info? Perhaps in XML or even binary format? Then, updating
+your index would only involve deleting and re-adding this one
+document. That document would never interfere with other
+documents because you'd never search on that particular field.
+You could then think about reading that document at start-up and
+building your secondary (in this case ephemeral) index.
+
+
+Whoaaaaa, something just percolated to the top of my brain. Extend
+this last idea, and instead of storing the data, index it "super extra
+specially". That is.... Imagine that no document in your index has
+a field called "meta". Imagine further that you have your doc ID
+data pairs in the form "12345:data", "84943932:data"....
+You then index like this...
+
+Document special = new Document();
+special.add(new Field(new Term("meta", "12345:data"));
+special.add(new Field(new Term("meta", "84943932:data"));
+.
+.
+.
+write.add(special);
+
+Where the analyzer you use (PerFieldAnalyzerWrapper?) indexes
+the "meta" field as UN_TOKENIZED.
+
+Now, it's trivial to get the data corresponding to your doc ID, just use
+TermDocs/RegexTermEnum. In fact, I believe you only need RegexTermEnum
+because there'll only be one document that all "meta" terms appear in.
+You then try to seek to the term "12345:*" and there should be
+exactly one of them, and just splitting on the ':' will give you the updated
+data. This keeps all your data in a single index, and doesn't require
+complicated coordination of separate indexes. You only have a single
+document to delete and re-add, and the form of that document as
+amenable to batch updating.
+
+Look, if this is incoherent, it's after 5:00 on Friday <G>. I'm curious
+if this works for you though......
+
+There's probably some bookeeping here to be able to quickly find the
+document in order to delete it, but it'd be easy to also index one
+field new Term("superextraspecialdocument" "deleteme") to be
+able to find it at update time.....
+
+Best
+Erick
+
+
+On 3/14/07, Thomas K. Burkholder <burkhold@apple.com> wrote:
+>
+> Hey, thanks for the quick reply.
+>
+> I've considered using a secondary index just for this data but
+> thought I would look at storing the data in lucene first, since
+> ultimately this data gets transported to an outside system, and it's
+> a lot easier if there's only one "thing" to transfer.  The
+> destination environment that receives this lucene index doesn't (and
+> shouldn't) have access to the database, which is why we don't simply
+> store it there.  Even if it did, we try not to access the database
+> for search results when we don't have to, as this tends to make
+> searching slow (as I think you were alluding to).
+>
+> Sounds like there's nothing "out of the box" to solve my problem; if
+> I write something to update lucene indexes in place I'll follow up
+> about it in here (don't know that I will though; building a new,
+> narrower index is probably more expedient and will probably be fast
+> enough for my purposes in this case).
+>
+> Thanks again,
+>
+> //Thomas
+>
+> On Mar 14, 2007, at 4:50 PM, Erick Erickson wrote:
+>
+> > If you search the mail archive for "update in place" (no quotes),
+> > you'll find extensive discussions of this idea. Although you're
+> > raising an interesting variant because you're talking about a non-
+> > indexed field, so now I'm not sure those discussions are relevant.
+> >
+> > I don't know of anyone who has done what you're asking though...
+> >
+> > But if it's just stored data, you could go out to a database and
+> > pick it up at search time, although there are sound reasons for
+> > not requiring a database connection.
+> >
+> > What about having a separate index for just this one field? And
+> > make it an indexed value, along with some id (not the Lucene ID,
+> > probably) of your original. Something like
+> >
+> > index fields
+> > ID  (unique ID for each document)
+> > field (the corresponding value).
+> >
+> > Searching this should be very fast, and if the usual Hits based
+> > search wasn't fast enough, perhaps something with
+> > termenum/termdocs would be faster.
+> >
+> > Or you could just index the unique ID and store (but not index)
+> > the field. Hits or variants should work for that too.
+> >
+> > So the general algorithm would be:
+> >
+> > search main index
+> > for each hit:
+> >   search second index and fetch that field
+> >
+> > I have no idea whether this has any traction for your problem
+> > space, but I thought I'd mention it. This assumes that building
+> > the mutable index would be acceptably fast...
+> >
+> > Although conceptually, this is really just a Map of ID/value pairs.
+> > I have no idea how much data you're talking about, but if it's not
+> > a huge data set, might it be possible just to store it in
+> > a simple map and look it up that way?
+> >
+> > And if I'm all wet, I'm sure others will chime in...
+> >
+> > Best
+> > Erick
+> > *
+> >
+> > *
+> > On 3/14/07, Thomas K. Burkholder <burkhold@apple.com> wrote:
+> >>
+> >> Hi there,
+> >>
+> >> I'm using lucene to index and store entries from a database table for
+> >> ultimate retrieval as search results.  This works fine.  But I find
+> >> myself in the position of wanting to occasionally (daily-ish) bulk-
+> >> update a single, stored, non-indexed field in every document in the
+> >> index, without changing any indexed value at all.
+> >>
+> >> The obviously documented way to do this would be to remove and then
+> >> re-add each updated document successively.  However, I know from
+> >> experience that rebuilding our index from scratch in this fashion
+> >> would take several hours at least, which is too long to delay pending
+> >> incremental index jobs.  It seems to me that at some level it should
+> >> be possible to iterate over all the document storage on disk and
+> >> modify only the field I'm interested in (no index modification
+> >> required remember as this is a field that is stored but not
+> >> indexed).  It's plain from the documentation on file formats that it
+> >> would be potentially possible to do this from a low level, however
+> >> before I go possibly re-inventing that wheel, I'm wondering if anyone
+> >> knows of any existing code out there that would aid in solving this
+> >> problem.
+> >>
+> >> Thanks in advance,
+> >>
+> >> //Thomas
+> >> Thomas K. Burkholder
+> >> Code Janitor
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

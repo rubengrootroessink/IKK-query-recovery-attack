@@ -1,0 +1,113 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: NullPointerException in FieldDocSortedHitQueue.lessThan with	custom SortComparator
+DATE: 2 Feb 2009
+
+To quote the guys... "patches are always welcome".
+
+Glad you found a solution
+Erick
+
+On Mon, Feb 2, 2009 at 8:35 AM, ninaS <nina256@gmx.de> wrote:
+
+>
+> I already found another solution: I don't use a custom SortComparator.
+> Another solution would be to define a default value for null.
+>
+> Would be nice if lucene in future would be able
+> to search by null values also if a custom SortComparator is used.
+>
+> To tell you more:
+>
+> public class MyComparator extends SortComparator {
+>
+> ...
+>
+>  public ScoreDocComparator newComparator (final IndexReader reader, final
+> String fieldname)
+>  {
+>
+> throws IOException {
+>            final String field = fieldname.intern();
+>            final Comparable[] cachedValues
+>                = FieldCache.DEFAULT.getCustom (reader, field,
+> CollatorBasedComparator.this);
+>
+>            return new ScoreDocComparator() {
+>
+>                      public int compare (ScoreDoc i, ScoreDoc j) {
+>                          ... // compare and handle nulls
+>                       }
+>
+>              public Comparable sortValue (ScoreDoc i) {
+>                return cachedValues[i.doc];
+>              }
+>
+>              public int sortType(){
+>                  return org.apache.lucene.search.SortField.CUSTOM;
+>              }
+>            };
+>
+>  }
+>         @Override
+>        protected Comparable getComparable(String text) {
+>                return new MyComparable(text); //implements compare(Object
+> a, Object b),
+> handles nulls
+>        }
+>
+> }
+>
+> Using such a comparator will cause the exception above mentioned if null
+> values appear in the sort field.
+>
+> That is because:
+>
+> FieldDocSortedHitQueue 163-166:
+>
+>  case SortField.CUSTOM:{
+>           c = docA.fields[i].compareTo(docB.fields[i]);
+>                                     break;
+> }
+>
+> does not check whether docA.fields[i] is null.
+>
+> As you see in line 134-148:
+>
+> case SortField.STRING:{
+>                                        String s1 = (String) docA.fields[i];
+>                                        String s2 = (String) docB.fields[i];
+>                                        // null values need to be sorted
+> first, because of how
+> FieldCache.getStringIndex()
+>                                        // works - in that routine, any
+> documents without a value in the given
+> field are
+>                                        // put first.  If both are null, the
+> next SortField is used
+>                                        if (s1 == null) c = (s2==null) ? 0 :
+> -1;
+>                                        else if (s2 == null) c = 1;  //
+>                                        else if (fields[i].getLocale() ==
+> null) {
+>                                                c = s1.compareTo(s2);
+>                                        } else {
+>                                                c = collators[i].compare
+> (s1, s2);
+>                                        }
+>                                        break;
+>        }
+>
+> nulls are handled with the type SortField.STRING.
+>
+> --
+> View this message in context:
+> http://www.nabble.com/NullPointerException-in-FieldDocSortedHitQueue.lessThan-with-custom-SortComparator-tp21702845p21789742.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

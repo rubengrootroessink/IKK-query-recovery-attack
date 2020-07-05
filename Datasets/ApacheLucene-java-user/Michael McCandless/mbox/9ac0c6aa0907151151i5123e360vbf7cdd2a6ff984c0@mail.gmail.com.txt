@@ -1,0 +1,304 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: speed of BooleanQueries on 2.9
+DATE: 15 Jul 2009
+
+Well, skipTo does in fact throw UOE.
+
+And BS.next() does in fact work, which is interesting, but it will
+next() through docs out-of-order, which BS2 won't like.  Does anyone
+know of any cases where BS.next() is in fact used?
+
+Mike
+
+On Wed, Jul 15, 2009 at 2:15 PM, Paul Elschot<paul.elschot@xs4all.nl> wrote:
+> As long as next(), skipTo(), doc() and score() on a Scorer work,
+> the search will be done. I hope the results are correct in this
+> case, but I'm not sure.
+>
+> Regards,
+> Paul Elschot
+>
+> On Wednesday 15 July 2009 19:08:00 Michael McCandless wrote:
+>> I don't think a toplevel BS2 is able to use BS as sub-scorers?  BS2
+>> needs to do doc-at-once, for all sub-scorers, but BS can't do that.  I
+>> think?
+>>
+>> Mike
+>>
+>> On Wed, Jul 15, 2009 at 12:10 PM, Paul Elschot<paul.elschot@xs4all.nl> wrote:
+>> > On Wednesday 15 July 2009 17:16:23 Michael McCandless wrote:
+>> >> So now I'm confused.  Since your query has required (+) clauses, the
+>> >> setAllowDocsOutOfOrder should have no effect, on either 2.4 or trunk.
+>> >
+>> > Probably the top level BQ is using BS2 because of the required clauses,
+>> > but the nested BQ's are using BS because the docs are allowed out of order.
+>> >
+>> > In that case BS2 will use skipTo() on BS, and the BS.skipTo() implementation
+>> > could well be the culprit for performance. A long time ago BS.skipTo() used
+to
+>> > throw an unsupported operation exception, but that does not seem to
+>> > be happening.
+>> >
+>> > Eks, could you try a toString() on the top level scorer for one of the affected
+>> > queries to see whether it shows BS2 on top level and BS for the inner scorers?
+>> >
+>> > Regards,
+>> > Paul Elschot
+>> >
+>> >
+>> >>
+>> >> BooleanQuery only uses BooleanScorer when there are no required terms,
+>> >> and allowDocsOutOfOrder is true.  So I can't explain why you see this
+>> >> setting changing anything on this query...
+>> >>
+>> >> Mike
+>> >>
+>> >> On Tue, Jul 14, 2009 at 7:04 PM, eks dev<eksdev@yahoo.co.uk> wrote:
+>> >> >
+>> >> > I do not know exactly why, but
+>> >> > when I BooleanQuery.setAllowDocsOutOfOrder(true); I have the problem,
+but with setAllowDocsOutOfOrder(false);  no problems whatsoever
+>> >> >
+>> >> > not really scientific method to find such bug, but does the job and
+makes me happy.
+>> >> >
+>> >> > Empirical, "deprecated methods are not to be taken as thoroughly tested,
+as they have short life expectancy"
+>> >> >
+>> >> >
+>> >> >
+>> >> >
+>> >> >
+>> >> > ----- Original Message ----
+>> >> >> From: eks dev <eksdev@yahoo.co.uk>
+>> >> >> To: java-user@lucene.apache.org
+>> >> >> Sent: Wednesday, 15 July, 2009 0:24:43
+>> >> >> Subject: Re: speed of BooleanQueries on 2.9
+>> >> >>
+>> >> >>
+>> >> >> Mike, we are definitely hitting something with this one!
+>> >> >>
+>> >> >> we had report from our QA chaps that our servers got stuck (limit
+is on 180
+>> >> >> Seconds Request)... We are on average 14 Requsts per second....
+has nothing to
+>> >> >> do with gc() as
+>> >> >> we can repeat it with freshly restarted searcher.
+>> >> >>
+>> >> >> - it happens on a less than 0.1% of queries, not much of a  pattern,
+repeatable
+>> >> >> on our index...
+>> >> >> it is always combination of two expanded tokens (we use
+>> >> >> minimumNooShouldMatch)...
+>> >> >>
+>> >> >> (+(t1 [up to 40 expansions]) +(t2 [up to 40 expansions of t2]))
+>> >> >> all tokens are with set boost, and  minNumShouldMatch is set to
+two
+>> >> >>
+>> >> >> I cannot provide self-contained test, nor index (contains sensitive
+data and is
+>> >> >> rather big, ~5G)
+>> >> >>
+>> >> >> I can repeat this test on t1 and t2 with 40 expansions each. even
+if I take the
+>> >> >> most frequent tokens in collection it runs well under one second...but
+these two
+>> >> >> particular tokens with their "expansions" are making it run forever...
+>> >> >>
+>> >> >> and yes, if I run t1 plus expansions only, it runs super fast,
+the same for t2
+>> >> >>
+>> >> >> java 1.4U14, tried wit 1.6U6, no changes...
+>> >> >>
+>> >> >> will report if I dig something out
+>> >> >>
+>> >> >> partial stack trace while "stuck", cpu is on max:
+>> >> >>
+>> >> >> org.apache.lucene.search.TopScoreDocCollector$OutOfOrderTopScoreDocCollector.collect(Unknown
+>> >> >> Source)
+>> >> >> org.apache.lucene.search.BooleanScorer.score(Unknown Source)
+>> >> >> org.apache.lucene.search.BooleanScorer.score(Unknown Source)
+>> >> >> org.apache.lucene.search.IndexSearcher.search(Unknown Source)
+>> >> >> org.apache.lucene.search.IndexSearcher.search(Unknown Source)
+>> >> >> org.apache.lucene.search.Searcher.search(Unknown Source)
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >> ----- Original Message ----
+>> >> >> > From: eks dev
+>> >> >> > To: java-user@lucene.apache.org
+>> >> >> > Sent: Monday, 13 July, 2009 13:28:45
+>> >> >> > Subject: Re: speed of BooleanQueries on 2.9
+>> >> >> >
+>> >> >> > Hi Mike,
+>> >> >> >
+>> >> >> > getMaxNumOfCandidates() in test was 200, Index is optimised
+and read-only
+>> >> >> >
+>> >> >> > We found (due to an error in our warm-up code, funny) that
+only this Query
+>> >> >> runs
+>> >> >> > slower on 2.9.
+>> >> >> >
+>> >> >> > A hint where to look could be that this Query cointains two,
+the most frequent
+>> >> >>
+>> >> >> > tokens in two particular fields
+>> >> >> > NAME:hans and ZIPS:berlin (index has ca 80Mio very short documents,
+3Mio
+>> >> >> unique
+>> >> >> > terms)
+>> >> >> >
+>> >> >> > But all of this *could be just wrong measurement*, I just
+could not spend more
+>> >> >>
+>> >> >> > time to get to the bottom of this. We moved forward as we
+got overall better
+>> >> >> > average performance (sweet 10% in average) on much bigger
+real query log from
+>> >> >> > our regression test.
+>> >> >> >
+>> >> >> > Anyhow I just wanted to throw it out, maybe it triggers some
+synapses :) If
+>> >> >> > false alarm, sorry.
+>> >> >> >
+>> >> >> >
+>> >> >> >
+>> >> >> >
+>> >> >> >
+>> >> >> > ----- Original Message ----
+>> >> >> > > From: Michael McCandless
+>> >> >> > > To: java-user@lucene.apache.org
+>> >> >> > > Sent: Monday, 13 July, 2009 11:50:48
+>> >> >> > > Subject: Re: speed of BooleanQueries on 2.9
+>> >> >> > >
+>> >> >> > > This is not expected; 2.9 has had a number of changes
+that ought to
+>> >> >> > > reduce CPU cost of searching.  If this holds up we definitely
+need to
+>> >> >> > > get to the root cause.
+>> >> >> > >
+>> >> >> > > Did your test exclude the warmup query for both 2.4.1
+& 2.9?  How many
+>> >> >> > > segments in the index?  What is the actual value of
+>> >> >> > > getMaxNumOfCandidates()?  If you simplify the query
+down (eg just do
+>> >> >> > > the NAME clause or the ZIPSS clause, alone) are those
+also 4X slower?
+>> >> >> > >
+>> >> >> > > Mike
+>> >> >> > >
+>> >> >> > > On Sun, Jul 12, 2009 at 12:53 PM, eks devwrote:
+>> >> >> > > >
+>> >> >> > > > Is it possible that the same BooleanQuery on 2.9
+runs significantly slower
+>> >> >>
+>> >> >> > > than on 2.4?
+>> >> >> > > >
+>> >> >> > > > we have some strange effects where the following
+query runs approx
+>> >> >> 4(ouch!)
+>> >> >> > > times slower on 2.9, test done by 1000 times executing
+the same Query...
+>> >> >> But!
+>> >> >> > if
+>> >> >> > > I run test from some real Query log with mixed Queries,
+I get almost the
+>> >> >> same
+>> >> >> > > results (?!), even slightly faster on 2.9 !?
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > > > Query:
+>> >> >> > > > +((NAME:hans NAME:hahns^0.23232001 NAME:hams^0.27648002
+NAME:hamz^0.25392
+>> >> >> > > NAME:hanas^0.18722998 NAME:hanbs^0.18722998 NAME:hanfs^0.18722998
+>> >> >> > > NAME:hangs^0.18722998 NAME:hanhs^0.24030754 NAME:hanis^0.18722998
+>> >> >> > > NAME:hanjs^0.18722998 NAME:hanks^0.18722998 NAME:hanms^0.18722998
+>> >> >> > > NAME:hanos^0.18722998 NAME:hanrs^0.18722998 NAME:hansb^0.20172001
+>> >> >> > > NAME:hansd^0.20172001 NAME:hansf^0.20172001 NAME:hansg^0.20172001
+>> >> >> > > NAME:hansi^0.20172001 NAME:hansj^0.20172001 NAME:hansk^0.20172001
+>> >> >> > > NAME:hansl^0.20172001 NAME:hansn^0.20172001 NAME:hanso^0.20172001
+>> >> >> > > NAME:hansp^0.20172001 NAME:hanst^0.20172001 NAME:hansu^0.20172001
+>> >> >> > > NAME:hansw^0.20172001 NAME:hansy^0.20172001 NAME:hansz^0.20172001
+>> >> >> > > NAME:hants^0.18722998 NAME:hanus^0.18722998 NAME:hanws^0.18722998
+>> >> >> > > NAME:hehns^0.20172001 NAME:hens^0.2736075 NAME:hins^0.24843
+>> >> >> NAME:hons^0.24843
+>> >> >> > > NAME:huhns^0.1801875 NAME:huns^0.24843)^2.0)
+>> >> >> > > > +(((ZIPS:berlin ZIPS:barlin^0.28227 ZIPS:berien^0.25947002
+>> >> >> > > ZIPS:berling^0.23232001 ZIPS:perlin^0.26133335))^1.2)
+>> >> >> > > >
+>> >> >> > > > The question is just to get some hints where I should
+look...
+>> >> >> > > >
+>> >> >> > > > Both fealds are without norms, omitTf(true) , RAMDirectory,
+using
+>> >> >> > > > TopDocs top = ixSearcher.search(q, null, getMaxNumOfCandidates());
+>> >> >> > > > and BooleanQuery.setAllowDocsOutOfOrder(true);
+>> >> >> > > >
+>> >> >> > > > maybe we made some mistakes on measuring, but we
+did simple timing here on
+>> >> >>
+>> >> >> > > search() method... strange. I would bet it is something
+we did, but I cannot
+>> >> >>
+>> >> >> > see
+>> >> >> > > where ...
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > > > ---------------------------------------------------------------------
+>> >> >> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> >> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >> > > >
+>> >> >> > > >
+>> >> >> > >
+>> >> >> > > ---------------------------------------------------------------------
+>> >> >> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> >> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >>
+>> >> >> ---------------------------------------------------------------------
+>> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >
+>> >> >
+>> >> >
+>> >> >
+>> >> >
+>> >> > ---------------------------------------------------------------------
+>> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >
+>> >> >
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >>
+>> >
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

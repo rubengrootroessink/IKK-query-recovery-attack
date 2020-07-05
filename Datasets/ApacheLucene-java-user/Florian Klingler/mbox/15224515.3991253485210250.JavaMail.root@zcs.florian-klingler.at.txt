@@ -1,0 +1,337 @@
+FROM: Florian Klingler <off...@florian-klingler.at>
+SUBJECT: Re: Lucene search in URL
+DATE: 20 Sep 2009
+
+Here are the Java Methods:
+
+public void addDomain(ListType listtype, String domain) throws CorruptIndexException, IOException
+{
+		this.add(listtype, URIType.Domain, domain, null);
+	}
+	
+	public void addURL(ListType listtype, String url) throws CorruptIndexException, IOException
+{
+		URL parsed_url = new URL(url);
+		this.add(listtype, URIType.URL, parsed_url.getHost(), parsed_url.getPath());
+	}
+	
+	public boolean matchBlacklistDomain(String domain) throws ParseException, IOException {
+		return this.search(ListType.Blacklist, URIType.Domain, domain, null);	
+	}
+	
+	public boolean matchBlacklistURL(String domain, String path) throws ParseException, IOException
+{	
+		if(this.search(ListType.Blacklist, URIType.URL, domain, null)) {
+			String[] dirs = path.split("/");
+			String search_path = "";
+			for(String dir: dirs) {
+				if(dir.length()==0) {
+					continue;
+				}
+				search_path = search_path+"/"+dir;
+				if(this.search(ListType.Blacklist, URIType.URL, domain, search_path)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	
+	private void add(ListType listtype, URIType uritype, String domain, String path) throws CorruptIndexException,
+IOException {
+		
+		this.listtype.setValue(listtype.toString());
+		this.uritype.setValue(uritype.toString());
+		this.domain.setValue(domain);
+		this.path.setValue(path);
+		
+		this.writer.addDocument(this.document);
+	}
+	
+
+	private boolean search(ListType listtype, URIType uritype, String domain, String path) throws
+ParseException, IOException {
+		
+		//System.err.println("Searching Domain: "+domain);
+		//System.err.println("Searching PATH: "+path);
+		
+		BooleanFilter bool = new BooleanFilter();
+		
+		TermsFilter term1 = new TermsFilter();
+		term1.addTerm(new Term("listtype", listtype.toString()));
+		TermsFilter term2 = new TermsFilter();
+		term2.addTerm(new Term("uritype", uritype.toString()));
+		bool.add(new FilterClause(term1, BooleanClause.Occur.MUST));
+		bool.add(new FilterClause(term2, BooleanClause.Occur.MUST));
+
+		BooleanQuery booleanQuery = new BooleanQuery();
+		
+		QueryParser queryParserDomain = new QueryParser("domain", this.analyzer);
+		Query queryDomain = queryParserDomain.parse(domain);
+		booleanQuery.add(queryDomain, BooleanClause.Occur.MUST);
+		
+		if(path!=null) {
+			QueryParser queryParserPath = new QueryParser("path", this.analyzer);
+			Query queryPath = queryParserPath.parse(path);
+			booleanQuery.add(queryPath, BooleanClause.Occur.MUST);
+		}
+		
+		TopDocs hits = searcher.search(booleanQuery, bool, 1);
+		return hits.totalHits>0;
+	}
+
+
+Florian Klingler
+
+----- Ursprüngliche Mail -----
+Von: "Florian Klingler" <office@florian-klingler.at>
+An: java-user@lucene.apache.org
+Gesendet: Montag, 21. September 2009 00:14:25
+Betreff: Re: Lucene search in URL
+
+Thanks for all the Help.
+
+I've now implemented a modified Version of Ahmet Arslan's Idea and it works.
+
+i've splitted up the url in 2 parts: domain and path (with URL.getHost() and URL.getPath()).
+Add these two Fields to Lucene with Keywordanalyzer().
+Hope that helps!
+To Search for a URL i check, if the domain matches.
+if yes, i split the path with path.split(/);
+then i costruct a path, for example:
+
+Blacklist-Entry: en.wikipedia.org/wiki/production_code
+
+URL to test = en.wikipedia.org/wiki/production_code/test
+search = * "domain: en.wikipedia.org" matches, so we search with path
+search = "domain: en.wikipedia.org path: /wiki"
+search = * "domain: en.wikipedia.org path: /wiki/production_code" matches
+search = "domain: en.wikipedia.org path: /wiki/production_code/test"
+
+if i reach a match, i can stop the iteration and return a true.
+
+if all iterations pass and there isn't a match, then i return a false.
+
+The Performance shoudn't be too bad, because it's a linear complexity.
+
+I'll post the java methods if anyone is interested.
+
+Thanks,
+Florian Klingler
+
+----- Ursprüngliche Mail -----
+Von: "Anshum" <anshumg@gmail.com>
+An: java-user@lucene.apache.org
+Gesendet: Sonntag, 20. September 2009 12:22:11
+Betreff: Re: Lucene search in URL
+
+HI Florian,
+A token would get you a hit on being searched i.e. if you search for any of
+the tokens from the document you'd get the document as a hit.
+Also, exact searches work by considering positions.
+if you search for "A B". All documents having A and B as adjacent terms (in
+that order) would be picked up.
+Hope that helps!
+
+--
+Anshum Gupta
+Naukri Labs!
+http://ai-cafe.blogspot.com
+
+The facts expressed here belong to everybody, the opinions to me. The
+distinction is yours to draw............
+
+
+On Sun, Sep 20, 2009 at 1:40 PM, Florian Klingler <
+office@florian-klingler.at> wrote:
+
+> Thanks for all the Answers,
+>
+>
+> I'll now try to implement this.
+> But i have another question now:
+>
+> Is there a possibility in Lucene to do a Exact Search with
+> Tokenized text?
+>
+> Like: "en.wikipedia.org/wiki/production_code" is Tokenized in
+> "en.wikipedia.org"
+> "wiki"
+> "production"
+> "code"
+> with Standardanalyzer.
+>
+> And a search will match iff(and only if) all the Tokens match?
+> Like "en.wikipedia.org/wiki/production_code" matches
+> "en.wikipedia.org" does not match.
+>
+>
+> The Purpose of this is following:
+> I have a Blacklist of URLs.
+> If i want to access a URL the Domain is searched in Lucene. (fast)
+> If there is a match, following will be searched (a bit slowlier)
+> "en.wikipedia.org/wiki" -> does not match
+> "en.wikipedia.org/wiki/production" -> does not match
+> * "en.wikipedia.org/wiki/production_code" -> Matches, so the URL and all
+> subURLs are blocked.
+>
+> So my Question is, is there a possibility to specify an Query to serch only
+> for exact Document-Matches.
+>
+>
+> Thanks very much,
+> Florian Klingler
+>
+> ----- Ursprüngliche Mail -----
+> Von: "Anshum" <anshumg@gmail.com>
+> An: java-user@lucene.apache.org
+> Gesendet: Sonntag, 20. September 2009 06:58:24
+> Betreff: Re: Lucene search in URL
+>
+> Hi Florian,
+> Perhaps you might run into issues with using an ngram. How I see it is that
+> you need tokenized urls and need to run an exact search using a keyword
+> tokenizer on the search string.
+> You could try this. I am assuming it'll work.
+> so something like
+> en.wikipedia.org/wiki/production_code/test
+> gets tokenized as
+> [en] [wikipedia] [org] [wiki[ [production_code] [test]
+>
+> so an exact search for any set of subsequent (while maintaining the order)
+> would get you the result. And yes, you might want to look at your
+> tokenizers
+> a little bit.
+>
+> --
+> Anshum Gupta
+> Naukri Labs!
+> http://ai-cafe.blogspot.com
+>
+> The facts expressed here belong to everybody, the opinions to me. The
+> distinction is yours to draw............
+>
+>
+> On Sun, Sep 20, 2009 at 3:30 AM, AHMET ARSLAN <iorixxx@yahoo.com> wrote:
+>
+> > > Dear List,
+> > >
+> > > I'm working on a project where i have to check a Blacklist
+> > > of URL's with Lucene. (about 500.000)
+> > > Is it possible to search for a URL in a hierarchical
+> > > context?
+> > >
+> > > for Example:
+> > > Blacklist entry: "en.wikipedia.org/wiki/production_code"
+> > >
+> > > "en.wikipedia.org/wiki/production_code/test" should match
+> > > "en.wikipedia.org/wiki/test" should not match
+> >
+> > If any substring (0 to n) of your query matches a document completely
+> than
+> > that query should match, right? Thats what I understand from your
+> examples.
+> >
+> > You can achieve this bu using two different analyzers for index and query
+> > time.
+> >
+> > query analyzer:
+> >
+> > KeywordTokenizer
+> > EdgeNGramTokenFilter (side = EdgeNGramTokenFilter.Side.FRONT , mingram =
+> 1,
+> > maxgram=512)
+> >
+> > index analyzer:
+> >
+> > KeywordTokenizer
+> >
+> > The index analyzer comes out-of-the-box:
+> > org.apache.lucene.analysis.KeywordAnalyzer
+> > But you need to write query analyzer.
+> >
+> > If you want case-insensitive search you can add LowercaseFilter to both
+> of
+> > your analyzers.
+> >
+> > By using this, your black list urls will be indexed verbatim. (one token)
+> >
+> > Your query "en.wikipedia.org/wiki/production_code/test"
+> > will be broken in to these pieces and one of them will match your
+> document:
+> >
+> > e
+> > en
+> > en.
+> > en.w
+> > en.wi
+> > en.wik
+> > en.wiki
+> > en.wikip
+> > en.wikipe
+> > en.wikiped
+> > en.wikipedi
+> > en.wikipedia
+> > en.wikipedia.
+> > en.wikipedia.o
+> > en.wikipedia.or
+> > en.wikipedia.org
+> > en.wikipedia.org/
+> > en.wikipedia.org/w
+> > en.wikipedia.org/wi
+> > en.wikipedia.org/wik
+> > en.wikipedia.org/wiki
+> > en.wikipedia.org/wiki/
+> > en.wikipedia.org/wiki/p
+> > en.wikipedia.org/wiki/pr
+> > en.wikipedia.org/wiki/pro
+> > en.wikipedia.org/wiki/prod
+> > en.wikipedia.org/wiki/produ
+> > en.wikipedia.org/wiki/produc
+> > en.wikipedia.org/wiki/product
+> > en.wikipedia.org/wiki/producti
+> > en.wikipedia.org/wiki/productio
+> > en.wikipedia.org/wiki/production
+> > en.wikipedia.org/wiki/production_
+> > en.wikipedia.org/wiki/production_c
+> > en.wikipedia.org/wiki/production_co
+> > en.wikipedia.org/wiki/production_cod
+> > * en.wikipedia.org/wiki/production_code  // this is your document a
+> match
+> > en.wikipedia.org/wiki/production_code/
+> > en.wikipedia.org/wiki/production_code/t
+> > en.wikipedia.org/wiki/production_code/te
+> > en.wikipedia.org/wiki/production_code/tes
+> > en.wikipedia.org/wiki/production_code/test
+> >
+> > The none of the pieces of the query "en.wikipedia.org/wiki/test" will
+> > match your document.
+> >
+> > Hope this helps.
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

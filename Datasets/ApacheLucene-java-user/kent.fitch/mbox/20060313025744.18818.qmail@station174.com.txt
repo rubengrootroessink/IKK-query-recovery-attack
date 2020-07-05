@@ -1,0 +1,194 @@
+FROM: "kent.fitch" <kent.fi...@projectcomputing.com>
+SUBJECT: Good MMapDirectory performance
+DATE: 13 Mar 2006
+
+I thought I'd post some good news about MMapDirectory as
+the comments in the release notes are quite downbeat about
+its performance.  In some environments MMapDirectory
+provides a big improvement.
+
+Our test application is an index of 11.4 million
+documents which are derived from MARC (bibliographic)
+catalogue records.  Our aim is to build a system
+to demonstrate relevance ranking and result clustering
+for library union catalogue searching (a "union"
+catalogue accumulates/merges records from multiple 
+ibraries).
+
+Our main index component sizes:
+fdt 17GB
+fdx 91MB
+tis 82MB
+frq 45MB
+prx 11MB
+tii 1.2 MB
+
+We have a separate Lucence index (not discussed further)
+which stores the MARC records.
+
+Each document has many fields.   We'll probably reduce the
+number after we decide on the best search strategies, but
+lots of fields gives us lots of flexability whilst testing
+search and ranking strategies.
+
+Stored and unindexed fields, used for summary results:
+  display title
+  display author
+  display publication details
+  holdingsCount (number of libraries holding)
+
+Tokenized indices:
+  title
+  author
+  subject
+  genre
+  keyword (all text)
+
+Keyword (untokenized) indices:
+  title
+  author
+  subject
+  genre
+  audience
+  Dewey/LC classification
+  language
+  isbn/issn
+  publication date (date range code)
+  unique bibliographic id
+
+"Wildcard" Tokenized indices created by a custom "stub"
+ analyzer which reduces a term to its first few characters:
+  title
+  author
+  subject
+  keyword
+
+Field boosts are set for some fields.  For example, "title"
+"sub title", "series title", "component title" are all
+stored as "title" but with different field boosts (as a 
+match on normal title is deemed more relevant than a match
+on series title).
+
+The document boost is set to the sqrt of the holdingsCount
+(favouring "popular" resources).
+
+The user interface supports searching and refining searches
+on specific fields but the most common search is created 
+from a single google style search box.  Here's a typical
+query generated from a 2 word search:
+
++(titleWords:"franz kafka^4.0" 
+  authorWords:"franz kafka^3.0" 
+  subjectWords:"franz kafka^3.0" 
+  keywords:"franz kafka^1.4" 
+  title:franz kafka^4.0 
+  (+titleWords:franz +titleWords:kafka^3.0)
+  author:franz kafka^3.0
+  +authorWords:franz +authorWords:kafka^2.0)
+  subject:franz kafka^3.0 
+  (+subjectWords:franz +subjectWords:kafka^1.5) 
+  (+genreWords:franz +genreWords:kafka^2.0) 
+  (+keywords:franz +keywords:kafka) 
+  (+titleWildcard:fra +titleWildcard:kaf^0.7)
+  (+authorWildcard:fra +authorWildcard:kaf^0.7) 
+  (+subjectWildcard:fra +subjectWildcard:kaf^0.7)
+  (+keywordWildcard:fra +keywordWildcard:kaf^0.2)
+ ) 
+
+It generated 1635 hits.  We then read the first 700
+documents in the hit list and extract the date, subject,
+author, genre, Dewey/LC classification and audience
+fields for each, accumulating the popularity of each.
+
+Using this data, for each of the subject, author, genre,
+Dewey/LC and audience categories, we find the 30 most 
+popular field values and for each of these we query the
+index to find their frequency in the entire index.
+
+We then render the first 100 document results (title,
+author, publication details, holdings) and the top 30 
+for each of subject, author, genre, Dewey/KC and audience,
+ordering each list by the popularity of the term in the
+hit results (sample of the first 700) and rendering the
+size of the text based on the frequency of the term in
+the entire database (a bit like the Flickr tag popularity
+lists).  We also render a graph of hit results by date
+range.
+
+The initial search is very quick - typically a small
+number of tens of millsecs.  The "clustering" takes
+much longer - reading up to 700 records, extracting
+all those fields, sorting to get the top 30 of each
+field category, looking up the frequency of each term
+in the database.
+
+The test machine was a SunFire440 with 2 x 1.593GHz
+UltraSPARC-IIIi processors and 8GB of memory running
+Solaris 9, Java 1.5 in 64 bit mode, Jetty. The Lucene data
+directory is stored on a local 10K SCSI disk.
+
+The benchmark consisted of running 13,142 representative
+and unique search phrases collected from another system.
+The search phrases are unsorted.  The client (testing)
+system is run on another unloaded computer and was
+configured to run a varying number of threads representing
+different loads.  The results discussed here were
+produced with 3 threads - 3 simultaneous requests
+and the response rates are as seen by the client at
+the completion of the request when the last byte of
+the response is received.
+
+The Jetty/Lucene JVM was run with:
+ -ms1200M -mx1200M -d64 -server  -verbose:gc
+The JVM (and file cache!) were "warmed up" with
+a first pass before results were recorded.
+
+The first test was run with Lucene 1.4.1 and achieved
+3.3 responses/sec. (The time to generate the response
+includes the Jetty "client" time to process and render
+the result).  CPU Utilisation was low (typically <= 40%),
+but IO rates were not very high.  We mirrored the
+disk and achieved 3.7 responses/sec, but still CPU
+utilisation rarely went over 50%.
+
+We moved to Lucene 1.5.1 and with the same configuration
+(mirrored) achieved 3.6 responses/sec.
+
+We then set the parameter:
+-Dorg.apache.lucene.FSDirectory.class=org.apache.lucene.store.MMapDirectory
+to use MMapDirectory and achieved 8.1 responses/sec
+with very high CPU utilisation (over 90%).  Running
+a separate (unseen) set of 10,743 search terms without
+a "warm up" achieved 7.8 responses/sec.
+
+With 3 simultaneous requests the total response time
+profile as recorded at the client was:
+
+ < 200ms for 40% of requests
+ < 500ms for 80% of requests
+ < 800ms for 90% of requests.
+
+I read from Peter Keegan's recent postings:
+"The Lucene server is using MMapDirectory. I'm running
+ the jvm with -Xmx16000M. Peak memory usage of the jvm
+ on Linux is about 6GB and 7.8GB on windows."
+
+We don't have nearly as much memory as Peter but I
+wonder whether he is gaining anything with such
+a large heap.  The file buffers allocated via MMap
+reside outside the JVM heap.  We notice that although
+our JVM heap is 1.2GB max (and regularly reduces
+to ~400MB after GC), the process expands to use all
+available memory with MMap, and a big Java heap
+means less memory for MMap to use(?).
+
+We are very happy with Lucene/MMAP performance given the
+extensive processing undertaken for the result clustering.
+
+Kent Fitch
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

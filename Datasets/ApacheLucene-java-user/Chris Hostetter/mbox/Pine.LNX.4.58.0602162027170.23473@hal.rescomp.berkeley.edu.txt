@@ -1,0 +1,87 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Highlighting text for queries with huge numbers of terms
+DATE: 17 Feb 2006
+
+
+: The existing highlighting code we wrote basically works like this...
+:    1. Get the text out of the Swing component.
+:    2. Break the text into tokens using the appropriate Analyzer.
+:    3. For each term:
+:        3.1. Break the term into tokens using the same Analyzer.
+:        3.2. Iterate through the list of text tokens looking for the list
+:             of term tokens (basically find a sublist in a list.)
+:
+: This has served us well so far, but for enormous numbers of terms it
+: starts to get quite slow.
+
+I don't know squat about highlighting, but this doesn't seem like a
+highlighting question, it seems like a parallel substring (or sublist)
+matching question.
+
+You have a large chunk of text, which can be broken down into a long list
+of tokens.  And you have a Big collection of queries, and each query has
+assocaited with it a list of tokens, and you want to know if/where each
+query's list of tokens is a substring of the main text's list.
+
+if you build a map whose keys are tokens which begin token lists for
+queries, each of which is is mapped to a value which is a list of lists of
+tokens, then you can make one pass over the tokens from the main text, and
+"lookup" wether or not this is the potential start of something to
+highlight, and if it is then check the rest of the tokens.
+
+that proabbly didn't make a lot of sense did it?
+
+imagine these are your queries, and their token lists after analysis...
+
+   q1: "the quick brown fox"    ... QUICK BROWN FOX
+   q2: "turnip"                 ... TURNIP
+   q3: "the quick and the dead" ... QUICK DEAD
+   q4: "the turnip eaters"      ... TURNIP EATERS
+   ...
+
+then you build a Map like so...
+
+   QUICK => ( QUICK BROWN FOX , QUICK DEAD )
+   TURNIP => ( TURNIP , TURNIP EATERS )
+
+as you walk your source text, you lookup each token you encounter, if it's
+a key in your map then check the lists it points to and see if they are a
+match.
+
+priority to longer or shorter matches *with the same start token* can be
+done by carefully ordering the lists when you put them in the map ... but
+if you don't want overlapping highlighting, and you want to give priority
+to longer/shorter matches (instead of just the "first" match) then i think
+you really have to do at least two passes ... in the first pass you
+anotate each token with it's highlight phrase, and alow tokens to be in
+multiple phrase; in the second pass you look for highlighted phrases
+containing tokens which are in other highlighted phrases you that are
+"better" and undo that highlighting.
+
+
+If you *really* have a lot of queries, you can even save some redundency
+in the sublist checks, by making the Map contain other Maps, as deep as
+they need to be to allways contain one level per token. As you iterate
+over the tokens, if you find one in your Map, keep looking up the
+succisive tokens in the subMap untill you either get a match or not...
+
+   "QUICK" => (
+      "BROWN" => (
+         "FOX" => "QUICK BROWN FOX"
+      ),
+      "DEAD" => "QUICK DEAD"
+   ),
+   "TURNIP" => (
+      "_" => "TURNIP",
+      "EATERS" => "TURNIP EATERS"
+   )
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,63 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Optimize for large index size
+DATE: 19 Jan 2008
+
+
+vivek sar wrote:
+
+> Thanks Michael for the feedback. Couple more questions,
+>
+> 1) Doesn't Lucene do some sort of optimization internally based on
+> mergefactor, i.e, if the number of segments grow over the mergefactor
+> number Lucene would automatically merge them into one segment - is
+> this different than optimization? Does optimize do more than this?
+> The reason we are keeping high merge factor (200) is so Lucene doesn't
+> do frequent optimization on its own.
+
+Lucene does periodically merge segments, but this is in general a
+lower cost operation than optimize.  With mergeFactor 10, after you
+have flushed 10 segments (call these "level 0" segments), they will be
+merged together into a level 1 segment.  Then 10 flushes later,
+another level 1 segment, etc.... once you have 10 level 1 segments,
+they are merged into a level 2 segment.  Etc.
+
+So over time this results in a logarithmic segment structure, whereby
+you have < 10 segments at each level and each level is 10X the
+size of the previous one (unless you start doing deletes...).
+
+The merges can cascade, which means at certain times this merging does
+in fact equate to an optimize.  But that does not happen very often.
+
+Whereas optimize() always forces merging down to a single segment,
+which is extremely costly.
+
+I'm guessing, with Lucene 2.3, you will win with a lower mergeFactor
+because this allows background threads to merge as you go.  Then at
+the end there will be fewer segments that optimize has to merge.
+
+> 2) Do you know any approximate release date for 2.3?
+
+Actually any day now ... the final vote to release 2.3 is underway
+now!:
+
+   http://markmail.org/message/x66w2c5b5psvhc54
+
+> We do have around 30 fields in our index (over 10 are untokenized, can
+> I just make then NO_NORM?).
+
+Yes, definitely test this and see if it reduces memory usage.  You  
+have to fully
+rebuild your index because norms are "contagious" meaning if any  
+document
+has norms turned on, then, the segment holding that doc will have norms
+allocated for all docs, and when that segment gets merged, all merged  
+docs
+then have norms allocated, etc.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

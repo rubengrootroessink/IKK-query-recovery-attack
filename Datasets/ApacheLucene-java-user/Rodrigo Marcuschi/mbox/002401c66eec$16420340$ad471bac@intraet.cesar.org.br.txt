@@ -1,0 +1,93 @@
+FROM: "Rodrigo Marcuschi" <rodrigo.marcus...@cesar.org.br>
+SUBJECT: Problem with lucene 1.9.1
+DATE: 3 May 2006
+
+Hello, 
+
+I am having problems using lucene 1.9.1. I was using 1.4.3 successfully, and tried upgrading
+to 1.9.1. As I changed my source code so I would no longer be invocating deprecated methods,
+the application no longer worked properly, i.e. the IndexModifier was no longer storing documents.
+Here is my source code:
+
+-------------------------------------------------------------------------------------------------------
+package org.cesar.trulog.search.api;
+
+import java.io.File;
+import java.io.IOException;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexModifier;
+
+public class UserIndexer {
+
+ public static final String ID = "userId";
+ public static final String KEYWORDS = "searchKeywords";
+ public static final String USERNAME = "searchUsername";
+
+ private final File index;
+ private final Analyzer analyzer;
+ private IndexModifier modifier; 
+
+ public UserIndexer(final Analyzer analyzer, final String dir) throws IOException {
+      index = new File(dir);
+  
+      this.analyzer = analyzer;
+      synchronized(UserIndexer.class) {
+           if (!index.exists()) {
+                index.mkdirs();
+           }
+      }
+  
+      this.modifier = new IndexModifier(this.index, this.analyzer, true);
+ }
+
+ public UserIndexer(final String dir) throws IOException {
+      this(new StandardAnalyzer(), dir);
+ }
+ 
+ private Document getDocument(final SearchItem searchItem) {
+      Document doc = new Document(); 
+      doc.add(new Field(ID, ((Integer) searchItem.getValue(SearchItemField.ID)).toString(),
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+      doc.add(new Field(KEYWORDS, (String) searchItem.getValue(SearchItemField.KEYWORD), Field.Store.YES,
+Field.Index.TOKENIZED));
+      doc.add(new Field(USERNAME, (String) searchItem.getValue(SearchItemField.NAME), Field.Store.YES,
+Field.Index.TOKENIZED));
+  
+      return doc;
+ }
+ 
+ public synchronized void add(final SearchItem searchItem) throws IOException { 
+     modifier.deleteDocuments(new Term(ID, ((Integer) searchItem.getValue(SearchItemField.ID)).toString()));
+ 
+     Document doc = this.getDocument(searchItem);
+     modifier.addDocument(doc);
+     modifier.flush();
+     System.out.println(modifier.docCount() + " docs in index");
+     modifier.close();   
+ } 
+}
+
+-------------------------------------------------------------------------------------------------------
+
+SearchItem is a custom class that has the data to be used by lucene. The relevant method in
+there is 
+
+void add(final SearchItem searchItem) 
+
+which calls lucene's 'addDocument' method. It used to work back when I was using Field.Keyword,
+Field.Text and modifier.delete --- but all these got deprecated, so.... Here's what happens:
+no matter how many documents I add, all I get is '1 docs in index'. If I DON'T close the modifier,
+I get the right results 2, 3, 4 docs in index etc --- but if the application is restarted,
+the docs are lost, i.e. a search that should return 2 or 3 results returns no result at all.
+
+Any ideas where to start? What to fix? If I should go back using the deprecated methods? I
+tried using FSDirectory instead of File, didn't work. I tried not deleting the documents before
+adding them, it didn't work. I tried using a custom analyzer, it didn't work. I'm running
+out of ideas.
+
+Thank you very much for your attention,
+    Rodrigo

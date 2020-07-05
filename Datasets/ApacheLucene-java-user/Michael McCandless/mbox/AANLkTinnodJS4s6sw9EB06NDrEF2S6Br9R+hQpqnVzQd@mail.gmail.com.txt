@@ -1,0 +1,173 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Problems with Lucene 3.0.2 and Java 1.6.0_12
+DATE: 19 Aug 2010
+
+Phew... thanks for bringing closure!  And, good sleuthing.
+
+So the takeaway is JRE 1.6.0_12 = BAD and JRE 1.6.0_21 = GOOD.
+
+Mike
+
+On Wed, Aug 18, 2010 at 10:48 PM, Nader, John P <john.nader@cengage.com> wrote:
+>
+> This is a follow up related to my original post Term browsing performance problems with
+our upgrade to Lucene 3.0.2.  The suggestions were helpful and did give us a performance
+increase.  However, in a full scale environment under load our performance issue remained
+a problem.
+>
+> Our investigation lead us to an issue with our patch level of Java.  This is not too
+surprising considering we were on revision 12, and the current is 21.  The behavior we saw
+was that some JVMs would come up in a state where browsing ran very slowly, while others would
+run as expected.  The JVM would stay in that state until it was restarted.
+>
+> The only change we made was to upgrade our JVM to 1.6.0_21.  At that point, all JVMs
+performed consistently with no issues.  I wanted to make sure I share this info with the
+forum as others may encounter similar problems.
+>
+> I have no specific info about what changed between 3.0.2 from 2.4.0 that would cause
+an issue with Java 1.6.0_12.  Nor do any Java release notes indicate what might have been
+fixed to address this issue.  I strongly suspect that it is JIT compiler related and would
+be glad to share thoughts on this with anyone that is interested.
+>
+> -John
+>
+>
+> -----Original Message-----
+> From: Nader, John P [mailto:john.nader@cengage.com]
+> Sent: Friday, July 30, 2010 3:17 PM
+> To: java-user@lucene.apache.org
+> Subject: RE: Term browsing much slower in Lucene 3.x.x
+>
+> Mike,
+>
+> We took your suggestion and refactored like this:
+>
+>  TermEnum termEnum = indexReader.terms(new Term(field, "0"));
+>  TermDocs allTermDocs = indexReader.termDocs();
+>
+>  while(termEnum.next() && termEnum.term().field().equals(field) {
+>   allTermsDocs.seek(termEnum);
+>   while(allTermDocs.next()) {
+>        ...doo something to each doc...
+>   }
+>  }
+>
+> The results were much better than creating a new TermDocs for each term.  We were about
+6x faster than the old algorithm in Lucene 3.0.2, and 3x faster than the old algorithm in
+Lucene 2.4.0.
+>
+> Thanks much for your help.
+>
+> With respect to a 3.0.2 enhancement that would yield the same performance without using
+different APIs, I'm not sure what the impact would be.  We definitely have proven the synchronization
+had a dramatic impact in our environment.  But the synchronization in the constructor looks
+like it is necessary in other API calls.
+>
+> BTW, that environment is Java 1.6.0_12 on 64-bit SUSE Linux with 32G of RAM and using
+MMapDirectory.
+>
+> Thanks.
+>
+> -John
+>
+>
+> -----Original Message-----
+> From: Nader, John P [mailto:john.nader@cengage.com]
+> Sent: Thursday, July 29, 2010 5:49 PM
+> To: java-user@lucene.apache.org
+> Subject: RE: Term browsing much slower in Lucene 3.x.x
+>
+> Thanks much for your response.  Yes, our terms are sorted in index-sort order.  I think
+you have a good suggestion, which is to get the term docs once and then seek to each term.
+ I will try that approach and report back to the forum on the results.
+>
+> Like you I am surprised by the overhead of the added synchronization.  I don't think
+is waiting on locks, but rather the memory flush and loading that goes on.
+>
+> -John
+>
+> -----Original Message-----
+> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Sent: Thursday, July 29, 2010 5:55 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: Term browsing much slower in Lucene 3.x.x
+>
+> On Wed, Jul 28, 2010 at 2:39 PM, Nader, John P <john.nader@cengage.com> wrote:
+>> We recently upgraded from lucene 2.4.0 to lucene 3.0.2.  Our load testing revealed
+a serious performance drop specific to traversing the list of terms and their associated documents
+for a given indexed field.  Our code looks something like this:
+>>
+>> for(Term term : terms) {
+>> TermDocs termDocs = indexReader.termDocs(term);
+>> while(termDocs.next()) {   //  much slower here
+>>    int doc = termDocs.doc();
+>>    ...do something with each doc...
+>> }
+>
+> Is that IndexReader reading multiple segments or single segment?
+>
+>> The slowness is all on the first call to TermDocs.next() for each term.  Further
+investigation comparing 2.4.0 and 3.0.2 revealed that there is some new synchronization on
+the SegmentTermDocs constructor and the SegmentReader.getTermsReader().  The first call to
+next() hits this synchronization, causing a 4x slowdown on an 8 CPU machine.
+>
+> There was some added sync, however, the code within those sync blocks
+> is minuscule (looking up a field).  It's weird that you're seeing a 4X
+> hit because of this.  We could conceivably optimize this code to avoid
+> the sync blocks if the reader is readOnly.
+>
+>> My first question is should we be using a different approach to process each term's
+doc list that would be more efficient?  The synchronization appears to be on aspects of these
+classes that the next() operation is not concerned with.
+>
+> Are you sorting your terms in index-sort order (UTF16, ie
+> String.compareTo)?  This can be an important gain especially if you
+> have many terms.
+>
+> Also, if you are working with your top reader, you should see some
+> perf gain by instead working w/ the sub readers directly, ie:
+>
+>  for(IndexReader subReader : indexReader.getSequentialSubReaders()) {
+>     ...
+>  }
+>
+> Also, instead of getting a new TermDocs every time, you should get a
+> single TermDocs up front (IndexReader.termDocs()), and then seek it to
+> your term (termDocs.seek(term)), validate the term in seek'd to in
+> fact matches what you asked for, then iterate its docs.
+>
+>> My other question is whether there are planned performance enhancements to address
+this loss of performance?
+>
+> These APIs are very different in the next major release (4.0) of
+> Lucene, so except for problems spotted by users like you, there's not
+> much more dev happening against them.
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

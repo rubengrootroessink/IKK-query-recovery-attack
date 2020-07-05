@@ -1,0 +1,173 @@
+FROM: "Elias Khsheibun" <eli...@gmail.com>
+SUBJECT: RE: Payloads
+DATE: 20 Dec 2009
+
+
+I'm trying to run queries now, the problem is - the scoring of the
+BoostingTermQuery is always giving a double weight to even terms, and not if
+the query itself contains the term, here is the code that I'm using:
+
+
+public class DocumentAnalyzer extends Analyzer {
+
+	@Override
+	public TokenStream tokenStream(String fieldName, Reader reader) {
+		TokenStream result = new WhitespaceTokenizer(reader);
+		result = new TermPositionPayloadTokenFilter(result);
+		
+		return result;
+	}
+	
+}
+
+
+public class TermPositionPayloadTokenFilter extends TokenFilter {
+
+    protected PayloadAttribute payAtt;
+    protected PositionIncrementAttribute posIncrAtt;
+
+    private static final Payload evenPayload = new
+Payload(PayloadHelper.encodeFloat(2.0f));
+
+    private int termPosition = 0;
+
+    public TermPositionPayloadTokenFilter(TokenStream input) {
+        super(input);
+        payAtt = (PayloadAttribute) addAttribute(PayloadAttribute.class);
+        posIncrAtt = (PositionIncrementAttribute)
+addAttribute(PositionIncrementAttribute.class);
+    }
+
+    @Override
+    public final boolean incrementToken() throws IOException {
+        if (input.incrementToken()) {
+            if ((termPosition % 2) == 0)
+                payAtt.setPayload(evenPayload);
+            termPosition += posIncrAtt.getPositionIncrement();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+}
+
+
+
+public class BoostingSimilarity extends DefaultSimilarity {
+	public float scorePayload(String fieldName, byte[] payload, int
+offset, int length) {
+	if (payload != null)
+	return PayloadHelper.decodeFloat(payload, offset);
+	
+	else
+	return 1.0F;
+	}
+}
+
+And this is a test I've written, if you look at the scores, then you will
+notice that the BoostingTermQuery is always giving a double weight to even
+terms no matter if they appear in the query or no (this is my current
+problem now):
+
+public class PayloadsTest extends TestCase {
+	Directory dir;
+	IndexWriter writer;
+	DocumentAnalyzer analyzer;
+	protected void setUp() throws Exception {
+	super.setUp();
+	dir = new RAMDirectory();
+	analyzer = new DocumentAnalyzer();
+	writer = new IndexWriter(dir, analyzer,
+IndexWriter.MaxFieldLength.UNLIMITED);
+	}
+	protected void tearDown() throws Exception {
+	super.tearDown();
+	writer.close();
+	}
+	void addDoc(String title, String contents) throws IOException {
+	Document doc = new Document();
+	doc.add(new Field("title",
+	title,
+	Field.Store.YES,
+	Field.Index.NO));
+	
+	doc.add(new Field("contents",
+			contents,
+			Field.Store.NO,
+			Field.Index.ANALYZED));
+	
+	writer.addDocument(doc);
+	}
+	
+	public void testBoostingTermQuery() throws Throwable {
+	addDoc("Hurricane warning", "A hurricane warning was issued at 6 AM
+for the outer great banks");
+	addDoc("Warning label maker", "The warning label maker is a
+delightful toy for your precocious six year old's warning needs");
+	addDoc("Tornado warning", "There is a tornado warning for Worcester
+county until 6 PM today");
+	writer.commit();
+	IndexSearcher searcher = new IndexSearcher(dir);
+	searcher.setSimilarity(new BoostingSimilarity());
+	Term warning = new Term("contents", "tornado");
+	Query query1 = new TermQuery(warning);
+	System.out.println("\nTermQuery results:");
+	
+	ScoreDoc [] hits = searcher.search(query1, 10).scoreDocs;
+	 for (int i = 0; i < hits.length; i++) {
+	      Document hitDoc = searcher.doc(hits[i].doc);
+	      System.out.println(hitDoc.get("title"));
+	 }
+	Query query2 = new BoostingTermQuery(warning);
+	System.out.println("\nBoostingTermQuery results:");
+	
+	ScoreDoc [] hits2 = searcher.search(query2, 10).scoreDocs;
+	for (int i = 0; i < hits2.length; i++) {
+	      Document hitDoc = searcher.doc(hits2[i].doc);
+	      System.out.println(hitDoc.get("title"));
+	 }
+	}
+	}
+
+
+-----Original Message-----
+From: AHMET ARSLAN [mailto:iorixxx@yahoo.com] 
+Sent: Saturday, December 19, 2009 11:19 PM
+To: java-user@lucene.apache.org
+Subject: RE: Payloads
+
+
+> If I need to override the QueryParser
+> to return PayloadTermQuery, what
+> function for PayloadFunction should I use in the
+> constructor (If you can
+> show me an example).
+
+I am not sure about that. Maybe custom one.
+
+> In your code I didn't see an indexer, will this work with
+> the regular
+> IndexWriter but with the new Analyzer that you overloaded
+
+No, at index time [IndexWriter] you are going to use a new analyzer that
+uses WhitespaceTokenizer  + TermPositionPayloadTokenFilter.
+
+PayloadAnalyzer will be used at query time. [QueryParser]
+
+You need to setSimilarity(new CustomSimilarity) of both indexer and
+searcher.
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

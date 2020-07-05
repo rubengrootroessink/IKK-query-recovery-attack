@@ -1,0 +1,110 @@
+FROM: Grant Ingersoll <gsing...@apache.org>
+SUBJECT: Re: Payloads, Tokenizers, and Filters.  Oh My!
+DATE: 17 Nov 2007
+
+Inline below
+
+On Nov 16, 2007, at 6:03 PM, Tricia Williams wrote:
+
+> Hi All,
+>
+>   I'll explain what I'm working on, and then I'll ask my two  
+> questions.
+>
+>   I'm working on the issue https://issues.apache.org/jira/browse/SOLR-380 
+>  which is a feature request that allows one to index a "Structured  
+> Document" which is anything that can be represented by XML in order  
+> to provide more context to hits in the result set.  This allows us  
+> to do things like query the index for "Canada" and be able to not  
+> only say that that query matched a document titled "Some Nonsense"  
+> but also that the query term appeared on page 7 of chapter 1.  We  
+> can then take this one step further and markup/highlight the image  
+> of this page based on our OCR and position hit.
+> For example:
+>
+> <book title='Some Nonsense'><chapter title='One'><page name='1'>Some
+ 
+> text from page one of a book.</page><page name='7'>Some more text  
+> from page seven of a book. Oh and I'm from Canada.</page></chapter></
+
+> book>
+>
+>   I accomplished this by creating a custom Tokenizer which strips  
+> the xml elements and stores them as a Payload at each of the Tokens  
+> created from the character data in the input.  The payload is the  
+> string that describes the XPath at that location.  So for <Canada>  
+> the payload is "/book[title='Some Nonsense']/chapter[title='One']/ 
+> page[name='7']"
+>
+>   The other part of this work is the SolrHighlighter which is less  
+> important to this list.  I retrieve the TermPositions for the  
+> Query's Terms and use the TermPosition functionality to get back the  
+> payload for the hits and build output which shows hit positions  
+> categorized by the payload they are associated with.
+>
+> QUESTION 1:  Applying TokenFilters to my Tokenizer creates some  
+> strange (in my opinion) behavior.  First of all the TermPositions  
+> change and second the Payload is removed.  Is this the expected  
+> behavior, or is this a bug?  With the Payload being an "experimental  
+> feature" I can understand if this persistence just hasn't been  
+> implemented yet.  But is it, or will it be?
+>
+
+Do you have other TokenFilters in your Analyzer?  Are you reusing the  
+same Token or creating a new one in your TokenFilters?  If creating a  
+new one, you will have to set the payload as it won't be copied down.   
+Perhaps we should add a constructor that takes a payload.  On the  
+other hand, I think we are going to remove the Payload object in favor  
+of just using the byte array.
+
+
+> In the following example I will denote a token by {pos,<term  
+> text>,<payload>}:
+>
+> input: <class name='mammalia'>Dog, and Cat</class>
+>
+> XmlPayloadTokenizer:
+> {1,<Dog,>,</class[name='mammalia'][startPos='0']>},{2,<and>,</ 
+> class[name='mammalia'][startPos='0']>},{3,<Cat>,</ 
+> class[name='mammalia'][startPos='0']>}
+> StopFilter:
+> {1,<Dog,>,</class[name='mammalia'][startPos='0']>},{2,<Cat>,</ 
+> class[name='mammalia'][startPos='0']>}
+> WordDelimiterFilter:
+> {1,<Dog>,<>} {2,<Cat>,</class[name='mammalia'][startPos='0']>}
+> LowerCaseFilter:
+> {1,<dog>,<>} {2,<cat>,</class[name='mammalia'][startPos='0']>}
+>
+>
+> QUESTION 2:  As I explained I'm storing the String representing the  
+> XPath of the token as the Payload (well the ByteArray of the String)  
+> of each token.   Is there a more efficient way to do this?  Is this  
+> exploiting Payload functionality and will it turn around and bite me  
+> when I get to indexing hundreds of thousands of documents?  Perhaps  
+> I shouldn't be relying on the Payload functionality before it is  
+> deemed not experimental?
+>
+
+I think this is reasonable.  Micheal Busch had a nice talk at  
+ApacheCon on payloads that you can find at http://people.apache.org/~buschmi/apachecon/AdvancedIndexingLuceneAtlanta07.ppt
+
+I guess you just want to be careful about how big your payloads get.
+
+One of the original use cases for payloads was for doing XPath queries.
+
+Also, the only thing experimental about Payloads is the actual  
+signature of the methods, not the need for them.  If anything, I think  
+you will see an expansion of payload capability in the future.  Also  
+note, that you will probably be interested in adding more Payload  
+querying capability.  And also note, I am in the process of adding the  
+ability to get payloads from Spans, but I am not sure if this gets  
+into 2.3 or not.
+
+Cheers,
+Grant
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

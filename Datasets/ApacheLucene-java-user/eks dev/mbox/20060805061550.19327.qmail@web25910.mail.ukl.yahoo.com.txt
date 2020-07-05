@@ -1,0 +1,89 @@
+FROM: eks dev <eks...@yahoo.co.uk>
+SUBJECT: Re: running a lucene indexing app as a windows service on xp, crashing
+DATE: 5 Aug 2006
+
+This is windows/jvm issue . Have a look at how ant is dealing with it, maybe we could give
+it a try with something like that (I have not noticed ant having problems).
+
+We are not able to reproduce this in our environment systematically, so it would be great
+if you could patch your lucene with this trick and let us know how it goes.
+delete/rename->System.gc()->Thread.sleap()->delete/rename Again  
+
+
+    /**
+     * Accommodate Windows bug encountered in both Sun and IBM JDKs.
+     * Others possible. If the delete does not work, call System.gc(),
+     * wait a little and try again.
+     */
+    private boolean delete(File f) {
+        if (!f.delete()) {
+             System.gc();
+            try {
+                Thread.sleep(DELETE_RETRY_SLEEP_MILLIS);
+            } catch (InterruptedException ex) {
+                // Ignore Exception
+            }
+            if (!f.delete()) {
+                if (deleteOnExit) {
+                    int level = quiet ? Project.MSG_VERBOSE : Project.MSG_INFO;
+                    log("Failed to delete " + f + ", calling deleteOnExit."
+                        + " This attempts to delete the file when the Ant jvm"
+                        + " has exited and might not succeed.", level);
+                    f.deleteOnExit();
+                    return true;
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+----- Original Message ----
+From: Michael McCandless <lucene@mikemccandless.com>
+To: java-user@lucene.apache.org
+Sent: Friday, 4 August, 2006 11:28:02 PM
+Subject: Re: running a lucene indexing app as a windows service on xp, crashing
+
+
+> The Lucene code is crashing under circumstances that seem pretty lame.
+> At periodic intervals, lucene tries to File.renameTo(newfile).
+> Sometimes this fails, so Lucene implemented some fall-back code to
+> manually copy the contents of the file from old to new.  Our problem is
+> that sometimes *this* fails too, then the whole thing blows up.
+
+I agree Lucene should not be affected by things like having Windows 
+Explorer windows up!
+
+Can you post the traceback you're seeing?  In particular, what's failing 
+about the fallback approach?
+
+Is it in the FSDirectory's renameFile method?  There is this comment in 
+there:
+
+     // Rename the old file to the new one. Unfortunately, the renameTo()
+     // method does not work reliably under some JVMs.  Therefore, if the
+     // rename fails, we manually rename by copying the old file to the 
+new one
+
+and correspondingly this comment in the original commit for this (back 
+on March 1 2003):
+
+- Added a manual renaming of files in case the java.io.File's renameTo(File)
+   call fails.  It has been reported that this happens on Windows JVMs.
+Contributed by: Matt Tucker
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

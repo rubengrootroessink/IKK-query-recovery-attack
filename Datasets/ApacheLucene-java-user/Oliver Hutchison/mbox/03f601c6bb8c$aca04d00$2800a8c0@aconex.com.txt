@@ -1,0 +1,145 @@
+FROM: "Oliver Hutchison" <ohutchi...@aconex.com>
+SUBJECT: RE: Poor performance "race condition" in FieldSortedHitQueue
+DATE: 9 Aug 2006
+
+Otis, Doron, thanks for the feedback. 
+
+First up I'd just like to say that I totally agree with Doron on this - any
+attempt to fix this issue needs to be done using as fine grain
+synchronization as is possible or you'd just be introducing a new bottle
+neck. 
+
+It terms of the level of granularity, the work around I posted in my
+previous email and the approach suggested by Doron are basically the same
+(though Doron's code is certainly preferable) and I can certainly say that
+synchronizing the object creation against the field name does solve the
+problem. 
+
+However I have another solution that I'm working on that may be cleaner - by
+encapsulate the caching logic that is currently spread across FieldCacheImpl
+and FieldSortedHitQueue it becomes quite easy to implement a more complex
+but certainly more fine grained level of synchronization and we don't have
+to worry about synchronizing against an interned String or using some other
+trick to synchronize on the field name. 
+
+I currently have:
+
+public abstract class Cache {
+
+	private final Map readerCache = new WeakHashMap();
+
+	protected Cache() {
+	}
+
+	protected abstract Object createValue(IndexReader reader, Object
+key)
+			throws IOException;
+
+	public Object get(IndexReader reader, Object key) throws IOException
+{
+		Map innerCache;
+		Object value;
+		synchronized (readerCache) {
+			innerCache = (Map) readerCache.get(reader);
+			// no inner cache create it
+			if (innerCache == null) {
+				innerCache = new HashMap();
+				readerCache.put(reader, innerCache);
+				value = null;
+			} else {
+				value = innerCache.get(key);
+			}
+			if (value == null) {
+				value = new CreationPlaceholder();
+				readerCache.put(reader, value);
+			}
+		}
+		if (value instanceof CreationPlaceholder) {
+			// must be one of the first threads to request this
+value,
+			// synchronize on the CreationPlaceholder so we
+don't block
+			// any other calls for different values
+			CreationPlaceholder ph = (CreationPlaceholder)
+value;
+			synchronized (ph) {
+				// if this thread is the very first one to
+reach this point
+				// then this test will be true and we should
+do the creation
+ 				if (ph.value == null) {
+					ph.value = createValue(reader, key);
+					synchronized (readerCache) {
+						innerCache.put(key,
+ph.value);
+					}
+				}
+				return ph.value;
+			}
+		}
+		return value;
+	}
+
+	static final class CreationPlaceholder {
+		Object value;
+	}
+}
+
+
+class FieldCacheImpl implements FieldCache {
+
+...
+
+	public String[] getStrings(IndexReader reader, String field)
+			throws IOException {
+		return (String[]) stringsCache.get(reader, field);
+	}
+
+	Cache stringsCache = new Cache() {
+
+		protected Object createValue(IndexReader reader, Object
+fieldKey)
+				throws IOException {
+			String field = ((String) fieldKey).intern();
+
+... create String[] ...
+
+			return retArray;
+		}
+	};
+
+	public StringIndex getStringIndex(IndexReader reader, String field)
+			throws IOException {
+		return (StringIndex) stringsIndexCache.get(reader, field);
+	}
+
+	Cache stringsIndexCache = new Cache() {
+
+		protected Object createValue(IndexReader reader, Object
+fieldKey)
+				throws IOException {
+			String field = ((String) fieldKey).intern();
+
+... create StringIndex ...
+
+			return value;
+		}
+	};
+
+... etc
+ 
+}
+
+Is this an avenue worth pursuing further? Or are you guys happy to simply
+synchronizing on the field?
+
+Thanks again,
+
+Oliver
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

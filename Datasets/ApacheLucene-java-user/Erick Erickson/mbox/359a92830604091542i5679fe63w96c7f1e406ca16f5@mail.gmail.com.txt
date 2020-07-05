@@ -1,0 +1,59 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: I just don't get wildcards at all.
+DATE: 9 Apr 2006
+
+I think I'm almost there, thanks y'all have been a great help. Here are, I
+hope, my last questions and I'll be all done beating on this....
+
+Let's claim that all my clauses contain wildcards. What I *think* that means
+is that I can't very well use a filter "the normal way" since seachers
+require a query. And I don't want a query with a wildcard term.
+
+So here's what I worked out today....
+
+Postulate 3 clauses, all with wildcards. I'm returning the top 250 matches.
+NOTE: the point of my tests is to see if I can break Lucene. So far I've
+only been able to make it go slow. Very cool.
+
+There are 1M docs. The index is 3G. I'm wildcarding over the field (not
+stored) that, when stored, accounted for, 70% of the size of the index (the
+index was 10G when storing this field).
+
+It's easy enough (and I'm still stunned at how fast it happens) to construct
+a filter that aggregates the three clauses using WildcardTermEnum. I found
+the MatchAllQuery, and tried using that and passing it the filter I
+constructed to the searcher, something like...
+
+searcher.search(new MatchAllDocsQuery(), mynewfilter);
+
+This is painfully slow. So I got clever and just iterated through the bitset
+in mynewfilter, pulling out the chunk of docs I wanted by putting the
+following in a loop.
+
+doc = indexreader.document(next set bit in the bitset);
+<extract the relevant info and package it up>
+
+This runs about 40 times faster.
+
+So here are my questions:
+1> Did I misuse/misunderstand MatchAllDocs? What's it for anyway if not
+this?
+2> Since all the terms have wildcards, I don't get ranking etc. anyway.
+right? So I'm not losing anything by messing with the bitset myself, right?
+3> I should create a BooleanQuery (or equivalent) on any terms that do NOT
+have wildcards and pass the filter to the searcher in order to get some
+rankings/relevance. And one expects that to perform substantially better
+than using MatchAllDocs. Yes? No?
+4> In my specific case, I don't believe caching filters helps me because the
+chances of any of my search terms being the same across requests is small.
+Given that, is there anything but convenience to using a ChainedFilter? In
+my crude testing, I just declared another bitset, populated it and then
+anded/ored/andnoted it to the bitset returned from my filter. Don't worry,
+I'm going to chain them, I'm just checking my understanding.
+
+Thanks again for all your patience. I'm more impressed than ever. My target
+qps is 2. I'm hitting 11. And that's not even claiming the other 3 machines
+that I can have if I want <GGGGG>.
+
+Erick Erickson
+

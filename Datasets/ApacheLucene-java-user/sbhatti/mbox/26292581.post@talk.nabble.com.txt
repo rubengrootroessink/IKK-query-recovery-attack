@@ -1,0 +1,210 @@
+FROM: sbhatti <sbha...@peak6.com>
+SUBJECT: Sorting and Pagination with Lucene 2.9
+DATE: 10 Nov 2009
+
+
+I noticed that this question has been asked but I could not find good answer
+so I am posting again. Is there a good example of sorting and pagination
+wtih Lucene 2.9. I have looked at Solr 1.4 source code for examples and put
+together some code for testing but it's not quite working. 
+
+I have defined a collector similar to how Solr does it:
+
+
+
+import org.apache.lucene.search.Collector;
+import org.apache.lucene.search.Scorer;
+import org.apache.lucene.util.OpenBitSet;
+import org.apache.lucene.index.IndexReader;
+import org.apache.solr.search.BitDocSet;
+import org.apache.solr.search.DocSet;
+import org.apache.solr.search.SortedIntDocSet;
+
+import java.io.IOException;
+
+class DocSetCollector extends Collector {
+    private final int maxDoc;
+    private final int smallSetSize;
+    private int base;
+    private int numHits;
+    private OpenBitSet bits;
+    private float topscore = Float.NEGATIVE_INFINITY;
+    private Scorer scorer;
+
+    // in case there aren't that many hits, we may not want a very sparse
+    // bit array. Optimistically collect the first few docs in an array
+    // in case there are only a few.
+    final int[] scratch;
+
+    DocSetCollector(final int maxDoc) {
+        this(maxDoc >> 6, maxDoc);
+    }
+
+    DocSetCollector(final int smallSetSize, final int maxDoc) {
+        this.smallSetSize = smallSetSize;
+        this.maxDoc = maxDoc;
+        this.scratch = new int[smallSetSize];
+    }
+
+    public void collect(int doc) throws IOException {
+        doc += base;
+
+        if (numHits < scratch.length) {
+            scratch[numHits] = doc;
+        } else {
+            // this conditional could be removed if BitSet was preallocated,
+but
+            // that
+            // would take up more memory, and add more GC time...
+            if (bits == null) {
+                bits = new OpenBitSet(maxDoc);
+            }
+            bits.fastSet(doc);
+        }
+        topscore = Math.max(scorer.score(), topscore);
+
+        numHits++;
+    }
+
+    public float getTopScore() {
+        return topscore;
+    }
+
+    public int getNumHits() {
+        return numHits;
+    }
+
+    public DocSet getDocSet() {
+        if (numHits <= scratch.length) {
+            // assumes docs were collected in sorted order!
+            return new SortedIntDocSet(scratch, numHits);
+        } else {
+            // set the bits for ids that were collected in the array
+            for (int i = 0; i < scratch.length; i++)
+                bits.fastSet(scratch[i]);
+            return new BitDocSet(bits, numHits);
+        }
+    }
+
+    public void setScorer(final Scorer scorer) throws IOException {
+        this.scorer = scorer;
+    }
+
+    public Scorer getScorer() {
+        return scorer;
+    }
+
+    public void setNextReader(IndexReader reader, int docBase)
+            throws IOException {
+        this.base = docBase;
+    }
+
+    public boolean acceptsDocsOutOfOrder() {
+        return true;
+    }
+
+    public int getSmallSetSize() {
+        return smallSetSize;
+    }
+}
+
+
+
+
+Then I defined following query methods:
+
+   private Tuple doQuery(final org.apache.lucene.search.Query query,
+            final Filter filter, final Sort sort, final int offset,
+            final int len) throws IOException {
+        final int maxDocRequested = Math.max(reader.maxDoc(), offset + len);
+
+        final DocSetCollector collector = new
+DocSetCollector(maxDocRequested);
+        searcher.search(query.weight(searcher), filter, collector);
+        int sliceLen = collector.getNumHits(); // Math.min(maxDocRequested,
+        // collector.getNumHits());
+        if (sliceLen < 0) {
+            sliceLen = 0;
+        }
+        final DocList superset = sortDocSet(query, collector, sort,
+sliceLen);
+        return new Tuple(collector.getNumHits(), superset.subset(offset,
+len));
+    }
+
+    private DocList sortDocSet(final org.apache.lucene.search.Query query,
+            final DocSetCollector collector, final Sort sort, final int
+nDocs)
+            throws IOException {
+        final DocSet set = collector.getDocSet();
+        // bit of a hack to tell if a set is sorted
+        boolean inOrder = set instanceof BitDocSet
+                || set instanceof SortedIntDocSet;
+        final boolean needScores = true;
+        final TopDocsCollector topCollector = TopFieldCollector.create(sort,
+                nDocs, false, needScores, needScores, inOrder);
+        final int base = 0;
+
+        topCollector.setNextReader(reader, base);
+
+        DocIterator iter = set.iterator();
+
+        while (iter.hasNext()) {
+            int doc = iter.nextDoc();
+            topCollector.collect(doc - base);
+        }
+
+        TopDocs topDocs = topCollector.topDocs(0, nDocs);
+        int totalHits = topCollector.getTotalHits();
+
+        final float maxScore = totalHits > 0 ? topDocs.getMaxScore() : 0.0f;
+        int nDocsReturned = topDocs.scoreDocs.length;
+
+        final int[] ids = new int[nDocsReturned];
+        final float[] scores = new float[nDocsReturned];
+        for (int i = 0; i < nDocsReturned; i++) {
+            ScoreDoc scoreDoc = topDocs.scoreDocs[i];
+            ids[i] = scoreDoc.doc;
+            if (scores != null) {
+                scores[i] = scoreDoc.score;
+            }
+        }
+
+        int sliceLen = Math.min(nDocs, nDocsReturned);
+        if (sliceLen < 0)
+            sliceLen = 0;
+
+        return new DocSlice(0, sliceLen, ids, scores, topDocs.totalHits,
+                maxScore);
+    }
+
+
+
+
+But I get
+java.lang.NullPointerException
+	at
+org.apache.lucene.search.TopFieldCollector$OneComparatorScoringMaxScoreCollector.collect(TopFieldCollector.java:280)
+	at
+com.peak6.weseed.os.query.lucene.QueryImpl.sortDocSet(QueryImpl.java:677)
+	at com.peak6.weseed.os.query.lucene.QueryImpl.doQuery(QueryImpl.java:649)
+	at com.peak6.weseed.os.query.lucene.QueryImpl.doSearch(QueryImpl.java:402)
+	at com.peak6.weseed.os.query.lucene.QueryImpl.search(QueryImpl.java:179)
+	at
+com.peak6.weseed.os.index.lucene.IndexerImplTest.query(IndexerImplTest.java:263)
+
+It is failing because line 280 is refering scorer which is not set and per
+Solr comments does not need to be setup.
+Can someone suggest how to fix this?
+Thanks.
+
+-- 
+View this message in context: http://old.nabble.com/Sorting-and-Pagination-with-Lucene-2.9-tp26292581p26292581.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

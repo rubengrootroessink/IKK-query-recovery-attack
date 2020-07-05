@@ -1,0 +1,115 @@
+FROM: Paul Taylor <paul_t...@fastmail.fm>
+SUBJECT: Re: Filter before tokenize ?
+DATE: 12 Sep 2009
+
+AHMET ARSLAN wrote:
+> --- On Sat, 9/12/09, Paul Taylor <paul_t100@fastmail.fm> wrote:
+>
+>   
+>> From: Paul Taylor <paul_t100@fastmail.fm>
+>> Subject: Filter before tokenize ?
+>> To: java-user@lucene.apache.org
+>> Date: Saturday, September 12, 2009, 9:39 PM
+>> Is it possible to filter before
+>> tokenize, or is that not a good idea.
+>> I want to convert '&' to 'and' , so they are dealt with
+>> the same way, but the StandardTokenizer I am using removes
+>> the &, I could change the tokenizer but  because
+>> I'm not too clear on jflex syntax it would seem easier to
+>> just apply a CharFilter before tokenizing, but is that
+>> possible
+>>     
+>
+> May be you can use WhitespaceTokenizer that won't remove &?
+> Why and's (&) are import for you? Do you need to search them?
+> Replacing &'s before indexing (by preprocessing) can be a option?
+>
+>
+> Filter before tokenizer can be simulated by using:
+>
+> 1-)KeywordTokenizer 
+> 2-)Your CharFilter
+> 3-)A token filter that tokenizes input token's text using StandardTokenizer
+>
+> But i think this is not a good idea.
+>
+> Hope this helps.
+>
+>   
+Yes, I want to search them and I want to be able to search using either 
+'&' or 'and' and get the same results. Ive just been playing with this 
+and using a CharFilter before the Tokenizer did work, the only problem 
+was modifications required for reusableTokenStream because CharFilter 
+doesn't have a reset(Reader) method like tokenizer, so I guess I 
+recreate this bit and then reset tokenizer, seems to work okay so thats 
+what Im going with, if this is wronmg please someone let me know.
+
+Because of this problem I also tried modifying the StandardTokenizer 
+jflex file so that it didn't remove &s, but then realised CharFilter HAS 
+to be before a tokenizer it cant work on a tokenizers output. I then 
+tried making a modiofication to StandardFilter, but because this only 
+removes characters it wasnt clear how tro add a case for adding characters.
+
+Paul
+
+public class StandardUnaccentAnalyzer extends Analyzer {
+
+private NormalizeCharMap charConvertMap;
+
+private void setCharConvertMap() {
+charConvertMap = new NormalizeCharMap();
+charConvertMap.add("&","and");
+}
+
+public StandardUnaccentAnalyzer() {
+setCharConvertMap();
+}
+
+public TokenStream tokenStream(String fieldName, Reader reader) {
+CharFilter mappingCharFilter = new MappingCharFilter(charConvertMap,reader);
+StandardTokenizer tokenStream = new StandardTokenizer(mappingCharFilter);
+TokenStream result = new ICUTransformFilter(tokenStream, 
+Transliterator.getInstance("[ー[:Script=Katakana:]]Katakana-Hiragana"));
+result = new StandardFilter(result);
+result = new AccentFilter(result);
+result = new LowerCaseFilter(result);
+return result;
+}
+
+private static final class SavedStreams {
+CharFilter preFilter;
+StandardTokenizer tokenStream;
+TokenStream filteredTokenStream;
+}
+
+public TokenStream reusableTokenStream(String fieldName, Reader reader) 
+throws IOException {
+SavedStreams streams = (SavedStreams)getPreviousTokenStream();
+if (streams == null) {
+streams = new SavedStreams();
+setPreviousTokenStream(streams);
+streams.preFilter = new MappingCharFilter(charConvertMap,reader);
+streams.tokenStream = new StandardTokenizer(streams.preFilter);
+streams.filteredTokenStream = new 
+ICUTransformFilter(streams.tokenStream, Transliterator.getInstance("[ー 
+[:Script=Katakana:]]Katakana-Hiragana"));
+streams.filteredTokenStream = new 
+StandardFilter(streams.filteredTokenStream);
+streams.filteredTokenStream = new AccentFilter(streams.filteredTokenStream);
+streams.filteredTokenStream = new 
+LowerCaseFilter(streams.filteredTokenStream);
+}
+else {
+streams.preFilter = new MappingCharFilter(charConvertMap,reader);
+streams.tokenStream.reset(streams.preFilter);
+}
+return streams.filteredTokenStream;
+}
+
+>     
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

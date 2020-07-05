@@ -1,0 +1,123 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: RE: grouping results by fields
+DATE: 30 Jan 2006
+
+
+An approach like mark is describing sould should be a lot more space
+efficient then the BitSet intersection approach i described before, but
+depending on how many groupings you want, i can immagine that it might be
+slower some cases.
+
+Unfortunately, it also only works if the grouping you wnat are tied
+directly to field values (in my case, i need to support ranges, prefix
+queries, and and boolean queries for each grouping item)
+
+Along a similar line of thinking: if the fields you want to group by are
+non-tokenized (ie: only one value per doc) then you can iterate of the set
+bits from your orriginal search and looking the value for each matching
+doc using the FieldCache.  not sure if that would be more space/time
+efficient then looping over the TermEnum/TermDocs ... i guess it depends
+on the average size of your results, the average size of your index, and
+the average number of terms in the fields you want to group by.
+
+
+
+: Date: Mon, 30 Jan 2006 17:45:10 +0000 (GMT)
+: From: mark harwood <markharw00d@yahoo.co.uk>
+: Reply-To: java-user@lucene.apache.org
+: To: java-user@lucene.apache.org
+: Subject: RE: grouping results by fields
+:
+: > A simple solution if you only have 20,000 docs is
+: > just to iterate
+: > through the hits and count them up against each
+: > color etc,
+:
+: The one thing to avoid is reader.document() calls in
+: such a tight loop. This is always a killer.
+:
+: The best way I've found is to create one bitset for
+: all the matching docs then use TermEnum on the "group"
+: field(s) to find all the docids - then check each
+: docId against the "matches" bitset to accumulate
+: scores for each unique "group" field value:
+:
+:         TermEnum te = reader.terms(new
+: Term(groupFieldName, ""));
+:         Term term = te.term();
+:         while (term!=null)
+:         {
+:             if (term.field().equals(groupFieldName))
+:             {
+:                 TermDocs termDocs =
+: reader.termDocs(term);
+:                 GroupTotal groupTotal = null;
+:
+:                 boolean continueThisTerm = true;
+:                 while ((continueThisTerm) &&
+: (termDocs.next()))
+:                 {
+:                     int docID = termDocs.doc();
+:                     if (queryMmatchedDocs.get(docId))
+:                     {
+:                         if (groupTotal == null)
+:                         {
+:                             //look up the group key
+: and initialize
+:                             String termText =
+: term.text();
+:                             Object key = termText;
+:                             groupTotal = (GroupTotal)
+: totals.get(key);
+:                             if (groupTotal == null)
+:                             {
+:                                 //no totals exist yet,
+: create new one.
+:                                 groupTotal = new
+: GroupTotal((key);
+:                                 totals.put(key,
+: groupTotal);
+:                             }
+:                         }
+:
+: groupTotal.addQueryMatchDoc(docID);
+:                     }
+:                 }
+:             } else
+:             {
+:                 break;
+:             }
+:            if(te.next())
+:            {
+:                term=te.term();
+:            }
+:            else
+:            {
+:                break;
+:            }
+:         }
+:
+: Cheers
+: Mark
+:
+:
+:
+:
+: ___________________________________________________________
+: Win a BlackBerry device from O2 with Yahoo!. Enter now. http://www.yahoo.co.uk/blackberry
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

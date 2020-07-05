@@ -1,0 +1,219 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: How to create segments files?
+DATE: 11 Mar 2008
+
+
+: Ladies and Gentlemen:
+: Below is an exception and the source code that generates it:
+
+first off -- the source code you've posted does not match the exception 
+you posted: the exception comes from something called "results.jsp" which 
+attempts to open an IndexSearcher; the code you posted is for a class 
+named "Parser" that appears to be a command line app (with a "main" 
+function) that attempts to build an index (at first glance, i only see it 
+attempting to add one document)
+
+I suspect the cause of your problem is that you are never calling the 
+"close()" method on your IndexWriter, so nothing is ever getting written 
+to disk ... this is just a guess however.
+
+
+: ERROR opening the Index - contact sysadmin!
+: 
+: Error message: no segments* file found in
+: org.apache.lucene.store.FSDirectory@/home/hdiwan/public_html/Q4D: files:
+: 
+: Stack Trace follows...
+: org.apache.lucene.index.SegmentInfos$FindSegmentsFile.run(SegmentInfos.java:587)
+: org.apache.lucene.index.DirectoryIndexReader.open(DirectoryIndexReader.java:63)
+: org.apache.lucene.index.IndexReader.open(IndexReader.java:209)
+: org.apache.lucene.index.IndexReader.open(IndexReader.java:173)
+: org.apache.lucene.search.IndexSearcher.(IndexSearcher.java:48)
+: org.apache.jsp.results_jsp._jspService(results_jsp.java:130)
+: org.apache.jasper.runtime.HttpJspBase.service(HttpJspBase.java:70)
+: javax.servlet.http.HttpServlet.service(HttpServlet.java:803)
+: org.apache.jasper.servlet.JspServletWrapper.service(JspServletWrapper.java:374)
+: org.apache.jasper.servlet.JspServlet.serviceJspFile(JspServlet.java:337)
+: org.apache.jasper.servlet.JspServlet.service(JspServlet.java:266)
+: javax.servlet.http.HttpServlet.service(HttpServlet.java:803)
+: org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:290)
+: org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:206)
+: org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:233)
+: org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:175)
+: org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:128)
+: org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:102)
+: org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:109)
+: org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:286)
+: org.apache.coyote.http11.Http11Processor.process(Http11Processor.java:844)
+: org.apache.coyote.http11.Http11Protocol$Http11ConnectionHandler.process(Http11Protocol.java:583)
+: org.apache.tomcat.util.net.JIoEndpoint$Worker.run(JIoEndpoint.java:447)
+: java.lang.Thread.run(Thread.java:619)
+: 
+: -- Source code follows --
+: import java.io.File;
+: import java.io.FilenameFilter;
+: import java.io.IOException;
+: import java.net.URLDecoder;
+: import java.util.Collection;
+: import java.util.Collections;
+: import java.util.Comparator;
+: import java.util.Date;
+: import java.util.HashSet;
+: import java.util.Vector;
+: import org.apache.lucene.analysis.WhitespaceAnalyzer;
+: import org.apache.lucene.document.DateTools;
+: import org.apache.lucene.document.Document;
+: import org.apache.lucene.document.Field;
+: import org.apache.lucene.index.CorruptIndexException;
+: import org.apache.lucene.index.IndexWriter;
+: import org.apache.lucene.store.Directory;
+: import org.apache.lucene.store.LockObtainFailedException;
+: import org.apache.lucene.store.FSDirectory;
+: public class Parser implements Runnable,Comparator {
+:            String path;
+:            public Parser(String string) {
+:                     path = string;
+:             }
+:             public void run() {
+:                     IndexWriter writer = null;
+:                     Directory directory = null;
+:                     try {
+:                          directory = FSDirectory.getDirectory(this.path);
+:                     } catch (IOException e) {
+:                         System.err.println(e.getStackTrace());
+:                     }
+:                     try {
+:                         writer = new IndexWriter(directory,new
+: WhitespaceAnalyzer(), true);
+:                     } catch (CorruptIndexException e) {
+:                             e.printStackTrace();
+:                     } catch (LockObtainFailedException e) {
+:                             e.printStackTrace();
+:                     } catch (IOException e) {
+:                             e.printStackTrace();
+:                     }
+:                     Document doc = new Document();
+:                     File image = null;
+:                     File file = null;
+:                     for (File f : this.listFiles(new File(path))) {
+:                             if (f.getAbsolutePath().endsWith("xml") ||
+: f.getAbsolutePath().endsWith("q4d")) {
+:                                     System.err.println("Q4D file found!");
+:                                     file = f;
+:                             } else {
+:                                     image = f;
+:                             }
+:                             if ((f != null) && (image != null)) break;
+:                     }
+:                     Date lastModified = new Date(file.lastModified());
+:                     System.err.println("Found a file and its corresponding
+: image!");
+:                     String imageName = image.getName();
+:                     String filename = file.getName();
+:                     String lastModifiedDownToSecond =
+: DateTools.dateToString(lastModified, DateTools.Resolution.SECOND);
+:                     System.err.println("the time the file was last modified
+: was "+lastModifiedDownToSecond);
+:                     String author = System.getProperty("author");
+:                        String source = System.getProperty("source");
+:                     String url = System.getProperty("url");
+:                     String description =
+: URLDecoder.decode(System.getProperty("description", "UTF-8"));
+:             System.err.println("about to create fields");
+:                     doc.add(new Field("author", author, Field.Store.YES,
+: Field.Index.TOKENIZED));
+:                     doc.add(new Field("source", source, Field.Store.YES,
+: Field.Index.TOKENIZED));
+:                     doc.add(new Field("name", filename, Field.Store.YES,
+: Field.Index.NO));
+:                     doc.add(new Field("image", imageName, Field.Store.YES,
+: Field.Index.NO));
+:                     doc.add(new Field("date", lastModifiedDownToSecond,
+: Field.Store.YES, Field.Index.NO));
+:                     doc.add(new Field("url", url, Field.Store.YES,
+: Field.Index.NO));
+:                     if (description != null) {
+:                         doc.add(new Field("description", description,
+: Field.Store.YES, Field.Index.TOKENIZED));
+:                     } else {
+:                         doc.add(new Field("description", "none",
+: Field.Store.YES, Field.Index.TOKENIZED));
+:                     }
+:                     doc.add(new Field("all",
+: author+lastModifiedDownToSecond+source+imageName+description+url,
+: Field.Store.YES, Field.Index.TOKENIZED));
+:                     try {
+:                             writer.addDocument(doc);
+:                     } catch (CorruptIndexException e) {
+:                             e.printStackTrace();
+:                     } catch (IOException e) {
+:                             e.printStackTrace();
+:                     }
+:                     try {
+:                             writer.optimize();
+:                     } catch (CorruptIndexException e) {
+:                             e.printStackTrace();
+:                     } catch (IOException e) {
+:                             e.printStackTrace();
+:                     }
+:             }
+:                       private Collection<File> listFiles(
+:                             File directory)
+:             {
+:                     Vector<File> files = new Vector<File>();
+:                     // Get files / directories in the directory
+:                     File[] entries = directory.listFiles();
+:                        // Go over entries
+:                     for (File entry : entries)
+:                     {
+:                             files.add(entry);
+:                     }
+:                        // Return collection of files, sorted by date
+:                     Collections.sort(files, this);
+:                     for (File entry : files) {
+:                             System.err.println(entry+"
+: "+entry.lastModified());
+:                     }
+:                     return files;
+:             }
+:                       public int compare(Object o1, Object o2) {
+:                     File f1 = (File)o1;
+:                     File f2 = (File)o2;
+:                     Date d1 = new Date(f1.lastModified());
+:                     Date d2 = new Date(f2.lastModified());
+:                     return d1.compareTo(d2);
+:             }
+:                       public static void main (String []args) {
+:                     Parser obj = new Parser(args[0]);
+:                     try {
+:                            obj.run();
+:                     } finally { // in case it crashes, I don't want a locked
+: repository!
+:                             File f = new
+: File(args[0]+File.separator+"write.lock");
+:                             f.delete();
+:                     }
+:             }
+:     }
+: == end ==
+: The code is supposed to add a document to the repository, as you can see from
+: the first 19 lines, it generates an exception, the backtrace is also included.
+: I've been struggling with this problem all day today (Thursday) without making
+: headway. Hence, I turn to your good guidance. I'm sure you won't disappoint.
+: Many thanks! -- H
+: 
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+: 
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

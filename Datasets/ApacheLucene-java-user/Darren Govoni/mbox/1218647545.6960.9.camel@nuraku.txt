@@ -1,0 +1,137 @@
+FROM: Darren Govoni <dar...@ontrenet.com>
+SUBJECT: Re: possible to read index into memory?
+DATE: 13 Aug 2008
+
+Erick,
+    Thank you for the valuable tips. The time I'm measuring is
+just around the lucene search calls with standard analyzer, such as:
+
+    word = "helloo"
+    starttime = ...
+    query = QueryParser("word", analyzer).parse(word+"~0.76")
+    hits = searcher.search(query)
+    endtime = ...
+    endtime-starttime = .33 seconds
+
+Its a fuzzy match, which I presume should take longer, but for a single
+word in the query against a tiny 17MB index, the above code takes
+
+.33 seconds for the first couple dozen or so, then about .15-.20 after
+that. Still way way too long for a simple query as this. Do those
+figures sound right for Lucene doing this kind of single field match?
+
+Darren
+
+On Wed, 2008-08-13 at 10:24 -0400, Erick Erickson wrote:
+> How are you measuring? There is a bunch of setup work for the first
+> few queries that go through the system. In either case (RAM or FS),
+> you should fire a few representative warmup queries at the search
+> engine before you go ahead and measure the response time.
+> 
+> You also *must* isolate your search time from your response
+> assembly time. That is, if you have something like
+> Hits hits = search()
+> for (each element of hits) {
+>    do something with the hit
+> }
+> 
+> you MUST measure the time for the search() call exclusive of the
+> for loop before you know where to concentrate your efforts.
+> 
+> In this example, if you get more than 100 hits, your query is
+> actually re-executed every 100 times through the above loop.
+> 
+> There are other gotchas if you process your query results other ways,
+> so be sure you know exactly what is taking the time before worrying
+> about the proper way to speed things up.
+> 
+> I strongly suspect that the RAMDir is a complete red herring. a 17M index
+> will almost certainly be cached by the system after a bit of use.
+> 
+> There's a whole section up on the Lucene website that talks about various
+> ways to speed up processing....
+> 
+> Measure, *then* optimize <G>......
+> 
+> Best
+> Erick
+> 
+> On Wed, Aug 13, 2008 at 7:42 AM, Darren Govoni <darren@ontrenet.com> wrote:
+> 
+> > Hoss,
+> >   Thank you for the detailed response. What I found weird was it
+> > seemed to take 0.09 seconds to create a RAMDirectory off a 17MB index.
+> > Suspiciously fast, but ok.
+> >
+> > Yet, when I do a simple fuzzy search on a single field
+> >
+> > "word: someword~0.76"
+> >
+> > It was taking .35 seconds. That's a very very long time all things
+> > considered. I understand about the OS paging and such but in
+> > doing some variations of this to "throw the OS off", I still saw
+> > no difference between on-disk and RAM times. But despite that, the
+> > times are really slow.
+> >
+> > Any ideas?
+> >
+> > thanks again,
+> > Darren
+> >
+> > On Tue, 2008-08-12 at 19:55 -0700, Chris Hostetter wrote:
+> > > : On one index, I am seeing no speed change when flipping between
+> > > : RAMDirectory IndexSearcher and file system version.
+> > >
+> > > that is probably because even if you just use an FSDirectory, your OS
+> > will
+> > > cache the disk "pages" in RAM for you -- all using a RAMDirectory does
+> > for
+> > > you is garuntee that the entire index is copied into the heap you
+> > allocate
+> > > for your JVM.  If you've got 16GB or RAM, and a 5GB index, and you
+> > > allocated 12GB of RAM to the JVM and read your index into a RAMDirectory,
+> > > your index will always be in RAM, no matter what other processes do on
+> > > your machine.
+> > >
+> > > If instead you only allocate 6GB of RAM to the JVM, and nothing else is
+> > > using up the rest of your RAM, the OS has plenty to load the whole index
+> > > into RAM as part of the filesystem cache once you use it -- but if
+> > another
+> > > process comes along and really needs that RAM (or if something reads a
+> > lot
+> > > of other pages of disk) your index might get bumped from the filesystem
+> > > cache, and the next few reads could be slow.
+> > >
+> > > : Creating the RAMDirectory from the on-disk index only takes 0.09
+> > > : seconds. It appears it is not loading the data into memory, but maybe
+> > > : just the file names of the index?
+> > >
+> > > passing an FSDIrectory to the constructor of a RAMDIrectory uses the
+> > > Directory.copy() method whose source is fairly straight forward and easy
+> > > to read -- unless your index is ginormous it's not suprising that it's
+> > > "fast" particularly if it's already in the filesystem cache.
+> > >
+> > >
+> > >
+> > >
+> > > -Hoss
+> > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

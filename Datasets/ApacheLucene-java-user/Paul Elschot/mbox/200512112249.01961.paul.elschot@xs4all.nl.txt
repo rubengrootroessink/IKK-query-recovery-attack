@@ -1,0 +1,98 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Lucene performance bottlenecks
+DATE: 11 Dec 2005
+
+
+On Wednesday 07 December 2005 10:51, Andrzej Bialecki wrote:
+> Paul Elschot wrote:
+> >On Saturday 03 December 2005 14:09, Andrzej Bialecki wrote:
+> >>Paul Elschot wrote:
+> >>
+...
+> >>>This is one of the cases in which BooleanScorer2 can be faster
+> >>>than the 1.4 BooleanScorer because the 1.4 BooleanScorer does
+> >>>not use skipTo() for the optional clauses.
+> >>>Could you try this by calling the static method
+> >>>BooleanQuery.setUseScorer14(true) and repeating the test?
+> >>>      
+> >>>
+> 
+> 
+> As far as I can tell it doesn't make any statistically significant 
+> difference - all search times remain nearly the same. If anything the 
+> test runs with useScorer14 == true are fractionally faster.
+> 
+
+There is one indexing parameter that might help performance
+for BooleanScorer2, it is the skip interval in Lucene's TermInfosWriter.
+The current value is 16, and there was a question about it
+on 16 Oct 2005 on java-dev with title "skipInterval".
+I don't know how the value of skipInterval was initially determined.
+It's possible that a larger value gives somewhat better query
+performance in this case.
+Changing the skip interval might require reindexing, though.
+
+I considered a specialised scorer for the earlier query:
+
++(url:term1^4.0 anchor:term1^2.0 content:term1
+   title:term1^1.5  host:term1^2.0)
++(url:term2^4.0 anchor:term2^2.0 content:term2
+   title:term2^1.5 host:term2^2.0)
+url:"term1 term2"~2147483647^4.0 
+anchor:"term1 term2"~4^2.0
+content:"term1 term2"~2147483647
+title:"term1 term2"~2147483647^1.5
+host:"term1 term2"~2147483647^2.0
+
+In this query, term1 and term2 are each used in 5 fields,
+and each such combination is used in 2 clauses,
+one required and one optional.
+In the required clause the term scorer uses a TermDocs,
+in the optional clause the phrase scorer uses a TermPositions.
+
+For each combination of a query term and a field, a TermDocs
+and a TermPositions is currently used.
+TermPositions inherits from TermDocs, so there is
+redundancy here, and one could try and reduce this by using
+only a TermPositions. The redundancy consists ao. of
+some double readVInt's from the index files for the TermDocs.
+I don't know how much double work is actually going on
+behind the scenes in the IndexReader. This depends
+among others on how effective skipTo() on a TermPositions is.
+
+On the top level of the query, the optional phrases are
+skipTo()'ed when the two required clauses match.
+The required clauses only use the TermDocs info, so
+it should be straightforward to implement the optional phrase.
+There is a catch here in that the advanceAfterCurrent() method
+for the disjunctions inside the required clauses does what it sais:
+it advances the scorers to documents after the current match,
+and this makes it impossible to skipTo() a possible matching
+phrase in the document being scored.
+That means that to use only a TermPositions (and not also a
+TermDocs) it will be necessary to rewrite DisjunctionSumScorer
+so that it never advances after the current doc when the doc
+matches.
+
+For the rest one could try and refactor the existing scorers for
+terms and phrases to use given TermDocs/TermPositions instead of
+private ones.
+A constructor for a specialized scorer for this query could be passed
+term1 and term2, an array of the 5 field names and some
+more arrays for weights and slops.
+
+But there still are some unknowns: the cost of the method calls in
+the current trees of scorers, how effective skipTo() is on a
+TermPositions, and how much influence the skip interval has.
+
+Regards,
+Paul Elschot
+
+P.S. Please feel free to use this on the nutch list(s).
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

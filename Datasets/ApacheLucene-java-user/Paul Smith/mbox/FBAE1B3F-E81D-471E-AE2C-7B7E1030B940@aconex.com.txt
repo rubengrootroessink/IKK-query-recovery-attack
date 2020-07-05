@@ -1,0 +1,40 @@
+FROM: Paul Smith <psm...@aconex.com>
+SUBJECT: Re: CompoundFileReader question/'leaking' file descriptors ?
+DATE: 13 Feb 2006
+
+>
+> No, all CSInputStream's share a single FSInputStream, so the  
+> FSInputStream shouldn't be closed until all of the CSInputStream's,  
+> have been closed.  This is done by CompoundFileReader.close().  It  
+> sounds like that's what's not getting called.  As you update  
+> indexes, how do you close stale readers?
+
+Total false alarm (as even I expected this would be).  AFter digging  
+further and further around our code I have discovered that the  
+Incremental Indexer does a search of the index to find related  
+records to delete (when preparing for an update of an item, it needs  
+to know what child items to also delete, in our case which  
+Distributions to a mail to be removed on a mail update).
+
+This search ends up creating an IndexSearcher which is held open for  
+a short time.  A cache of IndexSearchers is used to smooth out lots  
+of change, and is held open for at least 15 seconds to ensure any  
+existing queries get a chance to complete (the index searcher going  
+into 'wait' queue to be closed).
+
+This search of course is what is holding the files open.  The search  
+is done just prior to the delete, and hence why the segment is marked  
+for deletion.  Waiting the amount of time for the IndexSearcher to  
+close sees the file descriptor released.
+
+Sorry for the intrusion.
+
+cheers,
+
+Paul Smith
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,65 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Highlighter that works with phrase and span queries
+DATE: 27 Jun 2007
+
+
+> I have not looked at any highlighting code yet. Is there already an extension
+> of PhraseQuery that has getSpans() ?
+>   
+Currently I am using this code originally by M. Harwood:
+            Term[] phraseQueryTerms = ((PhraseQuery) query).getTerms();
+            int i;
+            SpanQuery[] clauses = new SpanQuery[phraseQueryTerms.length];
+
+            for (i = 0; i < phraseQueryTerms.length; i++) {
+                clauses[i] = new SpanTermQuery(phraseQueryTerms[i]);
+            }
+
+            SpanNearQuery sp = new SpanNearQuery(clauses,
+                    ((PhraseQuery) query).getSlop(), false);
+            sp.setBoost(query.getBoost());
+
+I don't think it is perfect logic for PhraseQuery's edit distance, but 
+it approximates extremely well in most cases.
+
+I wonder if this approach to Highlighting would be worth it in the end. 
+Certainly, it would seem to require that you store offsets or you would 
+have to re-tokenize anyway.
+
+Some more interesting "stuff" on the current Highlighter methods:
+
+We can gain a lot of speed on the implementation of the current 
+Highlighter if we grab from the source text in bigger chunks. Ronnie's 
+Highlighter appears to be faster than the original due to two things: he 
+doesn't have to re-tokenize text and he rebuilds the original document 
+in large pieces. Depending on how you want to look at it, he loses most 
+of the speed gained from just looking at the Query tokens instead of all 
+tokens to pulling the Term offset information (which appears pretty slow).
+
+If you use a SimpleAnalyzer on docs around 1800 tokens long, you can 
+actually match the speed of Ronnies highlighter with the current 
+highlighter if you just rebuild the highlighted documents in bigger 
+pieces i.e. instead of going through each token and adding the source 
+text that it covers, build up the offset information until you get 
+another hit and then pull from the source text into the highlighted text 
+in one big piece rather than a tokens worth at a time. Of course this is 
+not compatible with the way the Fragmenter currently works. If you use 
+the StandardAnalyzer instead of SimpleAnalyzer, Ronnie's highlighter 
+wins because it takes so darn long to re-analyze.
+
+It is also interesting to note that it is very difficult to see in a 
+gain in using TokenSources to build a TokenStream. Using the 
+StandardAnalyzer, it takes docs that are 1800 tokens just to be as fast 
+as re-analyzing. Notice I didn't say fast, but "as fast". Anything 
+smaller, or if you're using a simpler analyzer, and TokenSources is 
+certainly not worth it. It just takes too long to pull TermVector info.
+
+- Mark
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

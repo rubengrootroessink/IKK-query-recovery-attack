@@ -1,0 +1,81 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Question about FilterIndexReader and IndexSearcher
+DATE: 26 Jun 2011
+
+Hi,
+
+usage of FilterIndexReader is not always as easy as it seems. There are
+several problem, that can easy lead to the fact that you FilterIndexReader
+implements all document filtering, but IndexSearcher does not respect it. I
+have no idea what you are doing, but the following thing need to be done to
+correcty filter documents:
+
+- FilterIndexReader should implement isDeleted() methods & co (I assume you
+did this)
+- FilterIndexReader should filter postings returned: termPositions(...) and
+termDocs(...) to exclude deleted documents
+- return the correct numer for numDocs()
+
+The biggest problem since Lucene 2.9 is one specific method that will
+circumvent all you had done above:
+
+getSequentialSubReaders() is used by IndexSearcher to directly pass the
+searches to all atomic segments of a MultiReader/DirectoryReader structure.
+As the subreaders returned by this method do not implement the above (they
+are passed as is by the default impl), IndexSearcher will in fact only talk
+to them and so ignore the above methods on the top-level reader
+
+To do this correct do one of the following:
+ 
+- easy: override getSequentialSubReaders() to return null, this will make
+the filtered IndexReader itself atomic, so IndexSearcher will use it during
+search. The backside: searches may get significantly slower
+- override getSequentialSubReaders() and also wrap each subreader returned
+by the delegate reader with your impl.
+
+If you implement the last option (but also the return-null option) you may
+also override reopen(), to correctly wrap reopened segments - you need to do
+this if you use reopen.
+
+If you are already using Lucene trunk (coming version 4.0), you can follow
+the following issue: https://issues.apache.org/jira/browse/LUCENE-3212
+It will implement exactly the above once I have time to do it finally. I
+will post a first patch soon. This version will not work with Lucene 3.x, as
+it is lots of work to get all this running easily with Lucene 3.x
+(especially the above termPositions, termDocs mehods). In Lucene 4.0 the
+filtering of documents is much easier, you only have to override
+getDeletedDocs() and numDocs(), everything else is automatically handled!
+
+Hope that helps.
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: 周洲 [mailto:zhou518zhou@gmail.com]
+> Sent: Sunday, June 26, 2011 7:08 AM
+> To: java-user
+> Subject: Question about FilterIndexReader and IndexSearcher
+> 
+> Hello,
+> I want to let IndexReader finding the modification in time,so i use
+> MyFilterIndexReader which extend FilterIndexReader to cache the deleted
+> document in RAM.when this FilterIndexReader be the argument of  a
+> IndexSearcher,i found that this IndexSearcher can not filter the deleted
+> document,so i want to know how IndexSearcher and FilterIndexReader be
+> used can deleted documents filtered?
+> 
+> 
+>  zhouzhou
+> ----------
+> 2011-06-26
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,88 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: NPE when using explain
+DATE: 4 Dec 2003
+
+This looks like a bug.  I think your query contains a term in a field 
+that is not indexed, and hence has no norm value.  Perhaps (as Brisbart 
+Franck) suggests, it is indexed in some documents, but not in others. 
+But, in a single IndexReader, if it is indexed in any document, it 
+should have a norm value for all documents.  Are you using a 
+MultiSearcher?  I can see how this would happen with a MultiSearcher, 
+where different fields exist in the different indexes, and the query 
+contains a term which is only in one of the indexes.
+
+Try applying the following patch and tell me if it helps.
+
+--- TermQuery.java.~1.7.~       2003-01-15 11:25:04.000000000 -0800
++++ TermQuery.java      2003-12-04 10:07:46.000000000 -0800
+@@ -139,7 +139,10 @@
+        fieldExpl.addDetail(idfExpl);
+
+        Explanation fieldNormExpl = new Explanation();
+- 
+fieldNormExpl.setValue(Similarity.decodeNorm(reader.norms(field)[doc]));
++      byte[] fieldNorms = reader.norms(field);
++      float fieldNorm =
++        fieldNorms!=null ? Similarity.decodeNorm(fieldNorms[doc]) : 0.0f;
++      fieldNormExpl.setValue(fieldNorm);
+        fieldNormExpl.setDescription("fieldNorm(field="+field+", 
+doc="+doc+")");
+        fieldExpl.addDetail(fieldNormExpl);
+
+Thanks,
+
+Doug
+
+
+
+Dror Matalon wrote:
+> Hi,
+> 
+> I'm trying to use IndexSearcher.explain(Query query, int doc) and am
+> getting a NPE. If I remove the "explain" the search works fine.
+> I poked a little at the TermQuery.java code, but I can't really tell
+> what's causing the exception.
+> 
+> This is with 1.3rc3
+> 
+> 
+> Exception in thread "main" java.lang.NullPointerException at
+> org.apache.lucene.search.TermQuery$TermWeight.explain(TermQuery.java:142) at
+> org.apache.lucene.search.BooleanQuery$BooleanWeight.explain(BooleanQuery.java:186) at
+> org.apache.lucene.search.IndexSearcher.explain(IndexSearcher.java:196)
+> at LuceneCli.search(LuceneCli.java:78)
+> at LuceneLine.handleCommand(LuceneLine.java:188)
+> at LuceneLine.<init>(LuceneLine.java:117)
+> at LuceneLine.main(LuceneLine.java:136)
+> 
+> The area of the code that caused this.
+> 
+>     Hits hits = initSearch(queryString);
+>     System.out.println(hits.length() + " total matching documents");
+> 
+>     final int HITS_PER_PAGE = 10;
+>     message ("--------------------------------------");
+>     for (int start = 0; start < hits.length(); start += HITS_PER_PAGE) {
+>       int end = Math.min(hits.length(), start + HITS_PER_PAGE);
+>       for (int ii = start; ii < end; ii++) {
+>         Document doc = hits.doc(ii);
+>         message ("---------------- " + ii + " score:" + hits.score(ii) + "---------------------");
+>         if (explain) {
+>           Explanation exp = searcher.explain(query, ii);
+>           message("Explanation:" + exp.toString());
+>         }
+>         printHit(doc);
+>       }
+> 
+> 
+> Regards,
+> 
+> Dror
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

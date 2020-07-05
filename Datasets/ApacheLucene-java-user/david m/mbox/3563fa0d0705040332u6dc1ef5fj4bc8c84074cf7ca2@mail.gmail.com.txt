@@ -1,0 +1,79 @@
+FROM: "david m" <dmat...@gmail.com>
+SUBJECT: Re: For indexing: how to estimate needed memory?
+DATE: 4 May 2007
+
+> First, are you sure you're free memory calculation is OK? Why not
+> just use freeMemory?
+I _think_ my calculation is ok - my reasoning:
+
+Runtime.maxMemory() - Amount of memory that can be given to the JVM -
+based on -Xmx<value>
+
+Runtime.totalMemory() - Amount of memory currently owned by the JVM
+
+Runtime.freeMemory() - Amount of unused memory currently owned by the JVM
+
+The amount of memory currently in use (inUse) = totalMemory() - freeMemory()
+
+The amount we can still get (before hitting -Xmx<value>) = maxMemory() - inUse
+And in the absence of -Xms, nothing to say we will be given that much.
+
+> Perhaps also calling the gc if the avail isn't
+> enough. Although I confess I don't know the innards of the
+> interplay of getting the various memory amounts.....
+I do call the gc - but sparingly. If I've done a flush to reclaim
+memory in hopes of having enough memory for a pending document, then
+I'll call the gc before checking if I now have enough memory
+available. However, I too know little of the gc workings. On the
+assumption that the JRE is smarter at knowing how & when to
+execute gc than I am, I operate on the premise that it is not a good
+practice to routinely be calling the gc.
+
+> The approach I've been using is to gather some data as I'm indexing
+> to decide whether to flush the indexwriter or not. That is, record the
+> size change that ramSizeInBytes() returns before I start to index
+> a document, record the amount after, and keep the worst
+> ratio around. This got easier when I subclassed IndexWriter and
+> overrode the add methods.
+I agree this gives a conservative measure of the worse case memory
+consumption by an indexed document. But it measures memory _after_
+indexing. My observation is that the peak memory usage occurs _during_
+indexing - so that if the process is low on memory, that is when the
+problem (OutOfMemoryError) will hit. In my mind it is the peak usage
+that really matters.
+
+If there were a way to record and retrieve peak usage for each
+document, we would be able to see if there is a relationship between
+the peak during indexing and ramSizeInBytes() after indexing. If there
+were a (somewhat) predictable relationship, then I think we'd have a
+more accurate value to decide on a factor to use for avoiding
+OutOfMemeoryErrors.
+
+> Then I'm requiring that I have 2X the worst case I've seen for the
+> incoming document, and flushing (perhaps gc-ing) if I don't have
+> enough.
+Based on the data I've collected, we've been using 1.5x - 2.0x of
+document size as our value (and made it a configuration parameter).
+
+> And I think that this is "good enough". What it allows (as does your
+> approach) is letting the usual cases of much smaller than 20M+ files
+> to accumulate and flush reasonably efficiently, and not penalizing
+> my speed by, say, always keeping 250M free or some such.
+Agreed... To me it is a balancing act of avoiding OutOfMemoryErrors
+without unnecessarily throttling throughput in order to keep that 250M
+(or whatever) of memory available for what we think is the unusual
+document - and one that arrives for indexing while available memory
+is relatively low. If it arrives when the indexer isn't busy with other
+documents, then likely not a problem anyway.
+
+>
+> Keep me posted if you come up with anything really cool!
+Ditto.
+
+Thanks, david.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

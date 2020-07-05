@@ -1,0 +1,672 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Faceted Search using Lucene
+DATE: 1 Mar 2009
+
+sorrry I added
+
+release(multiSearcher);
+
+
+instead of multiSearcher.close();
+
+On Sun, Mar 1, 2009 at 2:17 PM, Amin Mohammed-Coleman <aminmc@gmail.com>wrote:
+
+> Hi
+> I've now done the following:
+>
+> public Summary[] search(final SearchRequest searchRequest)  throwsSearchExecutionException
+{
+>
+> final String searchTerm = searchRequest.getSearchTerm();
+>
+> if (StringUtils.isBlank(searchTerm)) {
+>
+> throw new SearchExecutionException("Search string cannot be empty. There
+> will be too many results to process.");
+>
+> }
+>
+> List<Summary> summaryList = new ArrayList<Summary>();
+>
+> StopWatch stopWatch = new StopWatch("searchStopWatch");
+>
+> stopWatch.start();
+>
+> List<IndexSearcher> indexSearchers = new ArrayList<IndexSearcher>();
+>
+> try {
+>
+> LOGGER.debug("Ensuring all index readers are up to date...");
+>
+> maybeReopen();
+>
+> LOGGER.debug("All Index Searchers are up to date. No of index searchers '"+ indexSearchers.size()
++
+> "'");
+>
+>  Query query = queryParser.parse(searchTerm);
+>
+> LOGGER.debug("Search Term '" + searchTerm +"' ----> Lucene Query '" +
+> query.toString() +"'");
+>
+>  Sort sort = null;
+>
+> sort = applySortIfApplicable(searchRequest);
+>
+>  Filter[] filters =applyFiltersIfApplicable(searchRequest);
+>
+>  ChainedFilter chainedFilter = null;
+>
+> if (filters != null) {
+>
+> chainedFilter = new ChainedFilter(filters, ChainedFilter.OR);
+>
+> }
+>
+> TopDocs topDocs = get().search(query,chainedFilter ,100,sort);
+>
+> ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+>
+> LOGGER.debug("total number of hits for [" + query.toString() + " ] = "+topDocs.
+> totalHits);
+>
+>  for (ScoreDoc scoreDoc : scoreDocs) {
+>
+> final Document doc = multiSearcher.doc(scoreDoc.doc);
+>
+> float score = scoreDoc.score;
+>
+> final BaseDocument baseDocument = new BaseDocument(doc, score);
+>
+> Summary documentSummary = new DocumentSummaryImpl(baseDocument);
+>
+> summaryList.add(documentSummary);
+>
+> }
+>
+> multiSearcher.close();
+>
+> } catch (Exception e) {
+>
+> throw new IllegalStateException(e);
+>
+> }
+>
+> stopWatch.stop();
+>
+>  LOGGER.debug("total time taken for document seach: " +
+> stopWatch.getTotalTimeMillis() + " ms");
+>
+> return summaryList.toArray(new Summary[] {});
+>
+> }
+>
+>
+> And have the following methods:
+>
+> @PostConstruct
+>
+> public void initialiseQueryParser() {
+>
+> PerFieldAnalyzerWrapper analyzerWrapper = new PerFieldAnalyzerWrapper(
+> analyzer);
+>
+> analyzerWrapper.addAnalyzer(FieldNameEnum.TYPE.getDescription(), newKeywordAnalyzer());
+>
+> queryParser = newMultiFieldQueryParser(FieldNameEnum.fieldNameDescriptions(),
+> analyzerWrapper);
+>
+>  try {
+>
+> LOGGER.debug("Initialising multi searcher ....");
+>
+> this.multiSearcher = new MultiSearcher(searchers.toArray(newIndexSearcher[] {}));
+>
+> LOGGER.debug("multi searcher initialised");
+>
+> } catch (IOException e) {
+>
+> throw new IllegalStateException(e);
+>
+> }
+>
+>  }
+>
+>
+> Initialises mutltisearcher when this class is creared by spring.
+>
+>
+>  private synchronized void swapMultiSearcher(MultiSearcher
+> newMultiSearcher)  {
+>
+> try {
+>
+> release(multiSearcher);
+>
+> } catch (IOException e) {
+>
+> throw new IllegalStateException(e);
+>
+> }
+>
+> multiSearcher = newMultiSearcher;
+>
+> }
+>
+>   public void maybeReopen() throws IOException {
+>
+>  MultiSearcher newMultiSeacher = null;
+>
+>  boolean refreshMultiSeacher = false;
+>
+>  List<IndexSearcher> indexSearchers = new ArrayList<IndexSearcher>();
+>
+>  synchronized (searchers) {
+>
+>  for (IndexSearcher indexSearcher: searchers) {
+>
+>  IndexReader reader = indexSearcher.getIndexReader();
+>
+>  reader.incRef();
+>
+>  Directory directory = reader.directory();
+>
+>  long currentVersion = reader.getVersion();
+>
+>  if (IndexReader.getCurrentVersion(directory) != currentVersion) {
+>
+>  IndexReader newReader = indexSearcher.getIndexReader().reopen();
+>
+>  if (newReader != reader) {
+>
+>  reader.decRef();
+>
+>  refreshMultiSeacher = true;
+>
+>  }
+>
+>  reader = newReader;
+>
+>  IndexSearcher newSearcher = new IndexSearcher(newReader);
+>
+>  indexSearchers.add(newSearcher);
+>
+>  }
+>
+>  }
+>
+>  }
+>
+>
+>
+>  if (refreshMultiSeacher) {
+>
+> newMultiSeacher = new MultiSearcher(indexSearchers.toArray(newIndexSearcher[] {}));
+>
+> warm(newMultiSeacher);
+>
+> swapMultiSearcher(newMultiSeacher);
+>
+>  }
+>
+>
+>
+>  }
+>
+>
+>   private void warm(MultiSearcher newMultiSeacher) {
+>
+>  }
+>
+>
+>
+>  private synchronized MultiSearcher get() {
+>
+> for (IndexSearcher indexSearcher: searchers) {
+>
+> indexSearcher.getIndexReader().incRef();
+>
+> }
+>
+> return multiSearcher;
+>
+> }
+>
+>  private synchronized void release(MultiSearcher multiSearcher) throwsIOException {
+>
+> for (IndexSearcher indexSearcher: searchers) {
+>
+> indexSearcher.getIndexReader().decRef();
+>
+> }
+>
+> }
+>
+>
+> However I am now getting
+>
+>
+> java.lang.IllegalStateException:
+> org.apache.lucene.store.AlreadyClosedException: this IndexReader is closed
+>
+>
+> on the call:
+>
+>
+>  private synchronized MultiSearcher get() {
+>
+> for (IndexSearcher indexSearcher: searchers) {
+>
+> indexSearcher.getIndexReader().incRef();
+>
+> }
+>
+> return multiSearcher;
+>
+> }
+>
+>
+> I'm doing something wrong ..obviously..not sure where though..
+>
+>
+> Cheers
+>
+>
+> On Sun, Mar 1, 2009 at 1:36 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>>
+>> I was wondering the same thing ;)
+>>
+>> It's best to call this method from a single BG "warming" thread, in which
+>> case it would not need its own synchronization.
+>>
+>> But, to be safe, I'll add internal synchronization to it.  You can't
+>> simply put synchronized in front of the method, since you don't want this to
+>> block searching.
+>>
+>>
+>> Mike
+>>
+>> Amin Mohammed-Coleman wrote:
+>>
+>>  just a quick point:
+>>> public void maybeReopen() throws IOException {                 //D
+>>>  long currentVersion = currentSearcher.getIndexReader().getVersion();
+>>>  if (IndexReader.getCurrentVersion(dir) != currentVersion) {
+>>>    IndexReader newReader = currentSearcher.getIndexReader().reopen();
+>>>    assert newReader != currentSearcher.getIndexReader();
+>>>    IndexSearcher newSearcher = new IndexSearcher(newReader);
+>>>    warm(newSearcher);
+>>>    swapSearcher(newSearcher);
+>>>  }
+>>> }
+>>>
+>>> should the above be synchronised?
+>>>
+>>> On Sun, Mar 1, 2009 at 1:25 PM, Amin Mohammed-Coleman <aminmc@gmail.com
+>>> >wrote:
+>>>
+>>>  thanks.  i will rewrite..in between giving my baby her feed and playing
+>>>> with the other child and my wife who wants me to do several other
+>>>> things!
+>>>>
+>>>>
+>>>>
+>>>> On Sun, Mar 1, 2009 at 1:20 PM, Michael McCandless <
+>>>> lucene@mikemccandless.com> wrote:
+>>>>
+>>>>
+>>>>> Amin Mohammed-Coleman wrote:
+>>>>>
+>>>>> Hi
+>>>>>
+>>>>>> Thanks for your input.  I would like to have a go at doing this myself
+>>>>>> first, Solr may be an option.
+>>>>>>
+>>>>>> * You are creating a new Analyzer & QueryParser every time, also
+>>>>>> creating unnecessary garbage; instead, they should be created once
+>>>>>> & reused.
+>>>>>>
+>>>>>> -- I can moved the code out so that it is only created once and
+>>>>>> reused.
+>>>>>>
+>>>>>>
+>>>>>> * You always make a new IndexSearcher and a new MultiSearcher even
+>>>>>> when nothing has changed.  This just generates unnecessary garbage
+>>>>>> which GC then must sweep up.
+>>>>>>
+>>>>>> -- This was something I thought about.  I could move it out so that
+>>>>>> it's
+>>>>>> created once.  However I presume inside my code i need to check
+>>>>>> whether
+>>>>>> the
+>>>>>> indexreaders are update to date.  This needs to be synchronized as
+>>>>>> well I
+>>>>>> guess(?)
+>>>>>>
+>>>>>>
+>>>>> Yes you should synchronize the check for whether the IndexReader is
+>>>>> current.
+>>>>>
+>>>>> * I don't see any synchronization -- it looks like two search
+>>>>>
+>>>>>> requests are allowed into this method at the same time?  Which is
+>>>>>> dangerous... eg both (or, more) will wastefully reopen the
+>>>>>> readers.
+>>>>>> --  So i need to extract the logic for reopening and provide a
+>>>>>> synchronisation mechanism.
+>>>>>>
+>>>>>>
+>>>>> Yes.
+>>>>>
+>>>>>
+>>>>> Ok.  So I have some work to do.  I'll refactor the code and see if I
+>>>>> can
+>>>>>
+>>>>>> get
+>>>>>> inline to your recommendations.
+>>>>>>
+>>>>>>
+>>>>>> On Sun, Mar 1, 2009 at 12:11 PM, Michael McCandless <
+>>>>>> lucene@mikemccandless.com> wrote:
+>>>>>>
+>>>>>>
+>>>>>>  On a quick look, I think there are a few problems with the code:
+>>>>>>>
+>>>>>>> * I don't see any synchronization -- it looks like two search
+>>>>>>> requests are allowed into this method at the same time?  Which
+is
+>>>>>>> dangerous... eg both (or, more) will wastefully reopen the
+>>>>>>> readers.
+>>>>>>>
+>>>>>>> * You are over-incRef'ing (the reader.incRef inside the loop)
+-- I
+>>>>>>> don't see a corresponding decRef.
+>>>>>>>
+>>>>>>> * You reopen and warm your searchers "live" (vs with BG thread);
+>>>>>>> meaning the unlucky search request that hits a reopen pays the
+>>>>>>> cost.  This might be OK if the index is small enough that
+>>>>>>> reopening & warming takes very little time.  But if index
+gets
+>>>>>>> large, making a random search pay that warming cost is not nice
+to
+>>>>>>> the end user.  It erodes their trust in you.
+>>>>>>>
+>>>>>>> * You always make a new IndexSearcher and a new MultiSearcher
+even
+>>>>>>> when nothing has changed.  This just generates unnecessary garbage
+>>>>>>> which GC then must sweep up.
+>>>>>>>
+>>>>>>> * You are creating a new Analyzer & QueryParser every time,
+also
+>>>>>>> creating unnecessary garbage; instead, they should be created
+once
+>>>>>>> & reused.
+>>>>>>>
+>>>>>>> You should consider simply using Solr -- it handles all this
+logic
+>>>>>>> for
+>>>>>>> you and has been well debugged with time...
+>>>>>>>
+>>>>>>> Mike
+>>>>>>>
+>>>>>>> Amin Mohammed-Coleman wrote:
+>>>>>>>
+>>>>>>> The reason for the indexreader.reopen is because I have a webapp
+>>>>>>> which
+>>>>>>>
+>>>>>>>  enables users to upload files and then search for the documents.
+ If
+>>>>>>>> I
+>>>>>>>> don't
+>>>>>>>> reopen i'm concerned that the facet hit counter won't be
+updated.
+>>>>>>>>
+>>>>>>>> On Tue, Feb 24, 2009 at 8:32 PM, Amin Mohammed-Coleman <
+>>>>>>>> aminmc@gmail.com
+>>>>>>>>
+>>>>>>>>  wrote:
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>> Hi
+>>>>>>>>
+>>>>>>>>  I have been able to get the code working for my scenario,
+however I
+>>>>>>>>> have
+>>>>>>>>> a
+>>>>>>>>> question and I was wondering if I could get some help.
+ I have a
+>>>>>>>>> list
+>>>>>>>>> of
+>>>>>>>>> IndexSearchers which are used in a MultiSearcher class.
+ I use the
+>>>>>>>>> indexsearchers to get each indexreader and put them into
+a
+>>>>>>>>> MultiIndexReader.
+>>>>>>>>>
+>>>>>>>>> IndexReader[] readers = new IndexReader[searchables.length];
+>>>>>>>>>
+>>>>>>>>> for (int i =0 ; i < searchables.length;i++) {
+>>>>>>>>>
+>>>>>>>>> IndexSearcher indexSearcher = (IndexSearcher)searchables[i];
+>>>>>>>>>
+>>>>>>>>> readers[i] = indexSearcher.getIndexReader();
+>>>>>>>>>
+>>>>>>>>> IndexReader newReader = readers[i].reopen();
+>>>>>>>>>
+>>>>>>>>> if (newReader != readers[i]) {
+>>>>>>>>>
+>>>>>>>>> readers[i].close();
+>>>>>>>>>
+>>>>>>>>> }
+>>>>>>>>>
+>>>>>>>>> readers[i] = newReader;
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> }
+>>>>>>>>>
+>>>>>>>>> multiReader = new MultiReader(readers);
+>>>>>>>>>
+>>>>>>>>> OpenBitSetFacetHitCounter facetHitCounter =
+>>>>>>>>> newOpenBitSetFacetHitCounter();
+>>>>>>>>>
+>>>>>>>>> IndexSearcher indexSearcher = new IndexSearcher(multiReader);
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> I then use the indexseacher to do the facet stuff.  I
+end the code
+>>>>>>>>> with
+>>>>>>>>> closing the multireader.  This is causing problems in
+another
+>>>>>>>>> method
+>>>>>>>>> where I
+>>>>>>>>> do some other search as the indexreaders are closed.
+ Is it ok to
+>>>>>>>>> not
+>>>>>>>>> close
+>>>>>>>>> the multiindexreader or should I do some additional checks
+in the
+>>>>>>>>> other
+>>>>>>>>> method to see if the indexreader is closed?
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> Cheers
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> P.S. Hope that made sense...!
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> On Mon, Feb 23, 2009 at 7:20 AM, Amin Mohammed-Coleman
+<
+>>>>>>>>> aminmc@gmail.com
+>>>>>>>>>
+>>>>>>>>>  wrote:
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>> Hi
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>> Thanks just what I needed!
+>>>>>>>>>>
+>>>>>>>>>> Cheers
+>>>>>>>>>> Amin
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> On 22 Feb 2009, at 16:11, Marcelo Ochoa <marcelo.ochoa@gmail.com>
+>>>>>>>>>> wrote:
+>>>>>>>>>>
+>>>>>>>>>> Hi Amin:
+>>>>>>>>>>
+>>>>>>>>>> Please take a look a this blog post:
+>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> http://sujitpal.blogspot.com/2007/04/lucene-search-within-search-with.html
+>>>>>>>>>>> Best regards, Marcelo.
+>>>>>>>>>>>
+>>>>>>>>>>> On Sun, Feb 22, 2009 at 1:18 PM, Amin Mohammed-Coleman
+<
+>>>>>>>>>>> aminmc@gmail.com>
+>>>>>>>>>>> wrote:
+>>>>>>>>>>>
+>>>>>>>>>>> Hi
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>> Sorry to re send this email but I was wondering
+if I could get
+>>>>>>>>>>>> some
+>>>>>>>>>>>> advice
+>>>>>>>>>>>> on this.
+>>>>>>>>>>>>
+>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>
+>>>>>>>>>>>> Amin
+>>>>>>>>>>>>
+>>>>>>>>>>>> On 16 Feb 2009, at 20:37, Amin Mohammed-Coleman
+<
+>>>>>>>>>>>> aminmc@gmail.com>
+>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>
+>>>>>>>>>>>> Hi
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>  I am looking at building a faceted search
+using Lucene.  I know
+>>>>>>>>>>>>> that
+>>>>>>>>>>>>> Solr
+>>>>>>>>>>>>> comes with this built in, however I would
+like to try this by
+>>>>>>>>>>>>> myself
+>>>>>>>>>>>>> (something to add to my CV!).  I have
+been looking around and I
+>>>>>>>>>>>>> found
+>>>>>>>>>>>>> that
+>>>>>>>>>>>>> you can use the IndexReader and use TermVectors.
+ This looks ok
+>>>>>>>>>>>>> but
+>>>>>>>>>>>>> I'm
+>>>>>>>>>>>>> not
+>>>>>>>>>>>>> sure how to filter the results so that
+a particular user can
+>>>>>>>>>>>>> only
+>>>>>>>>>>>>> see
+>>>>>>>>>>>>> a
+>>>>>>>>>>>>> subset of results.  The next option I
+was looking at was
+>>>>>>>>>>>>> something
+>>>>>>>>>>>>> like
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Term term1 = new Term("brand", "ford");
+>>>>>>>>>>>>> Term term2 = new Term("brand", "vw");
+>>>>>>>>>>>>> Term[] termsArray = new Term[] { term1,
+term2 };un
+>>>>>>>>>>>>> int[] docFreqs = indexSearcher.docFreqs(termsArray);
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> The only problem here is that I have
+to provide the brand type
+>>>>>>>>>>>>> each
+>>>>>>>>>>>>> time a
+>>>>>>>>>>>>> new brand is created.  Again I'm not
+sure how I can filter the
+>>>>>>>>>>>>> results
+>>>>>>>>>>>>> here.
+>>>>>>>>>>>>> It may be that I'm using the wrong api
+methods to do this.
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> I would be grateful if I could get some
+advice on this.
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Cheers
+>>>>>>>>>>>>> Amin
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> P.S.  I am basically trying to do something
+that displays the
+>>>>>>>>>>>>> following
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> Personal Contact (23) Business Contact
+(45) and so on..
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>  --
+>>>>>>>>>>> Marcelo F. Ochoa
+>>>>>>>>>>> http://marceloochoa.blogspot.com/
+>>>>>>>>>>> http://marcelo.ochoa.googlepages.com/home
+>>>>>>>>>>> ______________
+>>>>>>>>>>> Want to integrate Lucene and Oracle?
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> http://marceloochoa.blogspot.com/2007/09/running-lucene-inside-your-oracle-jvm.html
+>>>>>>>>>>> Is Oracle 11g REST ready?
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> http://marceloochoa.blogspot.com/2008/02/is-oracle-11g-rest-ready.html
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

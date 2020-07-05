@@ -1,0 +1,51 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: MergePolicy public but SegmentInfos package protected?
+DATE: 27 Mar 2009
+
+On Fri, Mar 27, 2009 at 03:59:09PM -0400, Michael McCandless wrote:
+
+> >> Why must merge policy be made public for realtime search? [In Lucy]
+> >
+> > Because real-time search under Lucy needs to be able to operate using multiple
+> > write processes, since threads will not always be available.
+> >
+> > You need to be able to tell one indexer *not* to merge anything when
+> > performing fast updates, and you need to be able to tell another indexer what
+> > to merge when performing background consolidation.
+> 
+> Is this because you want to not swamp IO system?  
+
+No, the goal is to reduce the worst-case latency between adding new docs or
+deletions to the index and being able to see the changes in a search.  
+
+The fast updater should not decide that it's going to merge some big segment
+before it writes a snapshot file, because that will cause a sudden spike in
+latency.  So we thwart that by assigning it a merge policy to the effect of
+"make only small merges on recently added material, or don't merge at all".
+
+But of course we can't keep adding small segments to the index forever, so we
+need a background consolidator process.  That process also needs a custom
+merge policy.
+
+> Ie you're emulating IO prioritization.  (Which I think makes sense, but,
+> it's more of an optimization than purely necessary for realtime search).
+
+How else do we stop the fast updater from applying the default merge policy,
+which has poor worst-case latency?
+
+> In the prototype near realtime search in Lucene (on LUCENE-1516), it's
+> fully independent of the merge policy (but, yes, a smarter merge
+> policy can reduce the turnaround times).
+
+I think the difference here is that Lucene gets to use multiple threads within
+one process, while Lucy has to at least be capable of using a multiple-process
+concurrency model in order to support real-time search for non-threaded hosts.
+
+Marvin Humphrey
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

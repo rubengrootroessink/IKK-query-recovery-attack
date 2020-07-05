@@ -1,0 +1,157 @@
+FROM: Gerret Apelt <g...@cs.waikato.ac.nz>
+SUBJECT: Re: term counts during indexing
+DATE: 7 Nov 2003
+
+Peter --
+
+sorry for the delay; I just accidentally saw your reply in the mailing 
+list archive -- mustave overlooked it in my inbox :(
+
+Peter Keegan wrote:
+
+>As I understand it, the field text is being tokenized by the analyzer when
+>IndexWriter.addDocument is called. At this point, the tokens are indexed
+>and/or stored. Would it be possible for 'addDocument' to save and make the
+>_actual_ counts of 'tokens stored' and 'tokens indexed' available in either
+>the Document or IndexWriter object? I guess I may be turning this into a
+>feature request :)
+>
+>  
+>
+Lucene uses an inverted index, so the index is based on a mapping from 
+"term" instances to the documents that contain them, as opposed to 
+"document" instances mapping to a list of terms contained in that 
+document (which is a fancy way of saying, "Lucene doesn't store 
+documents; filesystems do that").
+So in terms of the index representation, Lucene could not simply add a 
+"term count" parameter to the entry for a given document, because 
+(unless we're talking about a stored field) there is no table in which 
+such an entry could exist. You would need to add a totally new data 
+structure to the index, which can store document properties for 
+un-stored fields. This which sort of defeats the purpose of un-stored 
+fields. It sounds wrong to have an un-stored field and store its termcount.
+
+Here's a proposal for a hack you could do: write an Analyzer wrapper 
+that counts tokens emitted by the Analyzer's TokenStream's next() 
+method, which it is called by IndexWriter.addDocument(Document). When 
+TokenStream.next() returns null, you can store the tokenCount that you 
+have maintained in a file or database. This is fairly ugly but it has 
+the advantage that it will work for for non-stored fields.
+
+I doubt there will be much support for extending Lucene to store field 
+properties for unstored fields. Maybe there could be another field type 
+called TERMCOUNTED_FIELD? Maybe some of the core coders could comment.
+
+>Also, I can't find this method from the code snippit provided by Gerret (I'm
+>using v1.2):
+>  
+>
+>>String[] fieldTerms = doc.getValues(fieldName);
+>>    
+>>
+hmm, it must have been added later then:
+http://jakarta.apache.org/lucene/docs/api/org/apache/lucene/document/Document.html
+
+cheers,
+Gerret
+
+>
+>
+>Thanks,
+>Peter
+>
+>----- Original Message ----- 
+>From: "Gerret Apelt" <ga11@cs.waikato.ac.nz>
+>To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>Sent: Wednesday, October 29, 2003 9:44 PM
+>Subject: Re: term counts during indexing
+>
+>
+>  
+>
+>>Peter Keegan wrote:
+>>
+>>    
+>>
+>>>Is there a simple and efficient way of determining the number of tokens
+>>>added
+>>>to a document after adding each field ('Document.add), as a result of the
+>>>actions
+>>>of the Analyzer, without having to re-parse the field
+>>>      
+>>>
+>>Peter --
+>>
+>>you can ask the Document instance.
+>>
+>>Document doc = getDocumentInstanceFromSomewhere();
+>>int termCount = 0;
+>>Enumertion fields = doc.fields();
+>>while (fields.hasMoreElements()) {
+>>    Field field = (Field)fields.nextElement();
+>>    String fieldName = field.name();
+>>    String[] fieldTerms = doc.getValues(fieldName);
+>>    termCount += fieldTerms.length;
+>>}
+>>System.out.println("The fields of the document together contain
+>>"+termCount+" terms.");
+>>
+>>Note that
+>>1) I haven't tried to compile this code, so I'm not sure if it works
+>>2) this will only work for those fields where field.isStored() == true.
+>>If the field isnt stored in the index, then you don't have a choice but
+>>to go back to the document.
+>>
+>>[not sure on the following, so please correct me if in error:] Remember
+>>that unStored fields are indexed, so you can query on them, but the
+>>field terms themselves are not stored in the index. Therefore you cannot
+>>count them by asking Lucene. A Lucene field instance also has no way to
+>>reference the source of the terms that are added to it. The field
+>>doesn't care where its terms came from. So if field.isStored() == false,
+>>then for that particular field Lucene cannot tell you how many terms are
+>>in it. You'll have to write your own code that analyzes the original
+>>data source in this case.
+>>
+>>    
+>>
+>>>Alternatively, is there a way to determine the number of tokens added
+>>>      
+>>>
+>after
+>  
+>
+>>>adding the document to the index ('IndexWriter.addDocument')?
+>>>
+>>>
+>>>      
+>>>
+>>Whether you want the termCount for a document before or after you add
+>>the document to the index doesn't matter, so the answer is "see above".
+>>
+>>cheers,
+>>Gerret
+>>
+>>
+>>---------------------------------------------------------------------
+>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+>>    
+>>
+>
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+>  
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,150 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Possible bug in SpanNearQuery
+DATE: 6 May 2007
+
+Moti,
+
+I tried your test and it fails in the way you describe, however, I don't think 
+the test shows a bug.
+
+Below is the javadoc comment for the package private class NearSpansOrdered.
+Would that be sufficient documentation for the ordered case?
+
+/** A Spans that is formed from the ordered subspans of a SpanNearQuery
+ * where the subspans do not overlap and have a maximum slop between them.
+ * <p>
+ * The formed spans only contains minimum slop matches.<br>
+ * The matching slop is computed from the distance(s) between
+ * the non overlapping matching Spans.<br>
+ * Successive matches are always formed from the successive Spans
+ * of the SpanNearQuery.
+ * <p>
+ * The formed spans may contain overlaps when the slop is at least 1.
+ * For example, when querying using
+ * <pre>t1 t2 t3</pre>
+ * with slop at least 1, the fragment:
+ * <pre>t1 t2 t1 t3 t2 t3</pre>
+ * matches twice:
+ * <pre>t1 t2 .. t3      </pre>
+ * <pre>      t1 .. t2 t3</pre>
+ */
+
+Unfortunately for the unordered case in NearSpansUnordered.java there is no 
+class comment available in the code.
+
+You can take a look at the existing span tests here:
+http://svn.apache.org/viewvc/lucene/java/trunk/src/test/org/apache/lucene/search/spans
+
+
+Regards,
+Paul Elschot
+
+
+
+On Sunday 06 May 2007 16:11, Moti Nisenson wrote:
+> Looking over the implementation of SpanNearQuery I came upon what looked
+> like a bug. Below is a test which fails due to it. SpanNearQuery doesn't
+> return all matching spans; once it's found a span it always increments the
+> span of the clause appearing first in that span (ie. in the example below
+> the two spans should be "one two" and "one two two" where the second has a
+> slop of 1 - unfortunately the span of "one" gets incremented after "one two"
+> is found and so no additional spans get returned). Both in-order and
+> out-of-order SpanNearQueries fail this test.
+> 
+> I  think this is an undocumented feature and that the assumption is that if
+> someone searches for "one" near "two"  they're interested in the "one two"
+> result and not necessarily the "one two two" result. However,
+> SpanNearQueries can be combined and by not returning all matching spans this
+> can result in problems. For example were we to intersect (ie. SpanNearQuery
+> with 0 slop) between the results of different SpanNearQueries, it is
+> possible that the shortest possible span won't intersect, while a longer
+> span (with legal slop) would.
+> 
+> In my mind this is a bug (at least until there is some documentation), and I
+> would expect there to be an option (either a boolean parameter or a
+> different class) which would indeed return all spans which satisfy the slop
+> constraint.
+> 
+> What I'd like to know is:
+> 
+> 1) Is this a bug?
+> 2) Is there any known workaround for this issue (besides rolling my own, of
+> course)?
+> 3) Could this bug/feature lead to problems with document scoring?
+> 
+> Thanks,
+> 
+> Moti
+> 
+> 
+> 
+> import java.io.StringReader;
+> 
+> import junit.framework.TestCase;
+> 
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field ;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.spans.SpanNearQuery;
+> import org.apache.lucene.search.spans.SpanQuery ;
+> import org.apache.lucene.search.spans.SpanTermQuery;
+> import org.apache.lucene.search.spans.Spans;
+> import org.apache.lucene.store.RAMDirectory;
+> 
+> public class SpanNearQueryTest extends TestCase {
+> 
+>     private RAMDirectory dir;
+> 
+>     @Override
+>     protected void setUp() throws Exception {
+>         super.setUp();
+>         dir = new RAMDirectory();
+>         Document doc = new Document();
+>         doc.add(new Field("field", new StringReader("one two two")));
+>         IndexWriter writer = new IndexWriter(dir, new StandardAnalyzer());
+>         writer.addDocument(doc);
+>         writer.close();
+>     }
+> 
+>     public void testNearQueryInOrder() throws Exception {
+>         checkNearQuery(true);
+>     }
+> 
+>     public void testNearQueryNotInOrder() throws Exception {
+>         checkNearQuery(false);
+>     }
+> 
+>     private void checkNearQuery(boolean inOrder) throws Exception {
+>         SpanNearQuery query = new SpanNearQuery(new SpanQuery[]
+>                     {new SpanTermQuery(new Term("field", "one")),
+>                     new SpanTermQuery(new Term("field", "two"))}, 5,
+> inOrder);
+> 
+>         IndexReader reader = IndexReader.open(dir);
+>         Spans spans = query.getSpans(reader);
+> 
+>         int numSpans = 0;
+>         while (spans.next())
+>             numSpans++;
+> 
+>         reader.close();
+> 
+>         assertEquals(2, numSpans);
+>     }
+> 
+> 
+>     @Override
+>     protected void tearDown() throws Exception {
+>         dir = null; // release directory
+>         super.tearDown();
+>     }
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

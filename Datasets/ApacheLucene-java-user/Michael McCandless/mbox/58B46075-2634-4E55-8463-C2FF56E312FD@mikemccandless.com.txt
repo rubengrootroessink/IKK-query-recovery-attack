@@ -1,0 +1,242 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: How can we know if 2 lucene indexes are same?
+DATE: 4 Sep 2008
+
+
+Sorry, I should have said: you must always use the same writer, ie as  
+of 2.3, while IndexWriter.optimize (or normal segment merging) is  
+running, under one thread, another thread can use that *same* writer  
+to add/delete/update documents, and both are free to make changes to  
+the index.
+
+Before 2.3, optimize() was fully synchronized and blocked add/update/ 
+delete documents from changing the index until the optimize() call  
+completed.
+
+So, your test is expected to fail: you're not allowed to open 2  
+"writers" on a single index at the same time, where "writer" includes  
+an IndexReader that deletes documents; so those exceptions  
+(LockObtainFailed, StaleReader) are expected.
+
+Mike
+
+叶双明 wrote:
+
+> I don't agreed with Michael McCandless. :)
+>
+> I konw that after 2.3, add and delete can run in one IndexWriter at  
+> one
+> time, and also lucene has a update method which delete documents by  
+> term
+> then add the new document.
+>
+> In my test, either LockObtainFailedException with thread sleep  
+> sentence:
+>
+> org.apache.lucene.store.LockObtainFailedException: Lock obtain timed  
+> out:
+> SimpleFSLock@E:\index\write.lock
+> at org.apache.lucene.store.Lock.obtain(Lock.java:85)
+> at
+> org 
+> .apache 
+> .lucene 
+> .index 
+> .DirectoryIndexReader.acquireWriteLock(DirectoryIndexReader.java:298)
+> at  
+> org.apache.lucene.index.IndexReader.deleteDocument(IndexReader.java: 
+> 750)
+> at
+> org.apache.lucene.index.IndexReader.deleteDocuments(IndexReader.java: 
+> 786)
+> at org.test.IndexThread.run(IndexThread.java:33)
+>
+> or StaleReaderException without thread sleep sentence:
+>
+> org.apache.lucene.index.StaleReaderException: IndexReader out of  
+> date and no
+> longer valid for delete, undelete, or setNorm operations
+> at
+> org 
+> .apache 
+> .lucene 
+> .index 
+> .DirectoryIndexReader.acquireWriteLock(DirectoryIndexReader.java:308)
+> at  
+> org.apache.lucene.index.IndexReader.deleteDocument(IndexReader.java: 
+> 750)
+> at
+> org.apache.lucene.index.IndexReader.deleteDocuments(IndexReader.java: 
+> 786)
+> at org.test.IndexThread.run(IndexThread.java:31)
+>
+> My test code:
+>
+>
+> public class Main {
+>
+> public static void main(String[] args) throws IOException {
+>  Directory directory = FSDirectory.getDirectory("e:/index");
+>  IndexWriter writer = new IndexWriter(directory, null, false);
+>  Document document = new Document();
+>  document.add(new Field("bbb", "bbb", Store.YES, Index.UN_TOKENIZED));
+>  writer.addDocument(document);
+>
+>  Thread t = new IndexThread();
+>  t.start();
+>
+>  try {
+>   Thread.sleep(1000);
+>  } catch (InterruptedException e) {
+>   // TODO Auto-generated catch block
+>   e.printStackTrace();
+>  }
+>
+>  writer.optimize();
+>  writer.close();
+>  System.out.println("out");
+> }
+> }
+>
+> public class IndexThread extends Thread {
+>
+> @Override
+> public void run() {
+>  Directory directory;
+>  try {
+>   try {
+>    Thread.sleep(10);
+>   } catch (InterruptedException e) {
+>    // TODO Auto-generated catch block
+>    e.printStackTrace();
+>   }
+>
+>   directory = FSDirectory.getDirectory("e:/index");
+>   System.out.println("thread begin");
+>   //IndexWriter reader = new IndexWriter(directory, null, false);
+>   IndexReader reader = IndexReader.open(directory);
+>   Term term = new Term("bbb", "bbb");
+>   reader.deleteDocuments(term);
+>   reader.close();
+>   System.out.println("thread end");
+>  } catch (IOException e) {
+>   // TODO Auto-generated catch block
+>   e.printStackTrace();
+>  }
+> }
+> }
+>
+>
+>
+> 2008/9/4, Michael McCandless <lucene@mikemccandless.com>:
+>>
+>>
+>> Actually, as of 2.3, this is no longer true: merges and optimizing  
+>> run in
+>> the background, and allow add/update/delete documents to run at the  
+>> same
+>> time.
+>>
+>> I think it's probably best to use application logic (outside of  
+>> Lucene) to
+>> keep track of what updates happened to the master while the slave was
+>> optimizing.
+>>
+>> Mike
+>>
+>> 叶双明 wrote:
+>>
+>> No documents can added into index when the index is optimizing,  or
+>>> optimizing can't run durling documents adding to the index.
+>>> So, without other error, I think we can beleive the two index are  
+>>> indeed
+>>> the
+>>> same.
+>>>
+>>> :)
+>>>
+>>> 2008/9/4 Noble Paul നോബിള്‍ नोब्ळ्  
+>>> <noble.paul@gmail.com>
+>>>
+>>> The use case is as follows
+>>>>
+>>>> I have two indexes . One at the master and one at the slave. The  
+>>>> user
+>>>> occasionally keeps committing on the master and the delta is
+>>>> replicated everytime. But when the optimize happens the transfer  
+>>>> size
+>>>> can be really large. So I am thinking of  doing the optimize
+>>>> separately on master and slave .
+>>>>
+>>>> So far, so good. But how can I really know that after the  
+>>>> optimize the
+>>>> indexes are indeed the same or no documents got added in between.?
+>>>>
+>>>>
+>>>>
+>>>> On Fri, Aug 29, 2008 at 3:13 PM, Karl Wettin  
+>>>> <karl.wettin@gmail.com>
+>>>> wrote:
+>>>>
+>>>>>
+>>>>> 29 aug 2008 kl. 11.35 skrev Noble Paul നോബിള്‍  
+>>>>> नोब्ळ्:
+>>>>>
+>>>>> hi,
+>>>>>> I wish to know if the contents of two indexes have same data.
+>>>>>> will all the files be exactly same if I put same set of  
+>>>>>> documents to
+>>>>>>
+>>>>> both?
+>>>>
+>>>>>
+>>>>> If you insert the documents in the same order with the same  
+>>>>> settings and
+>>>>> both indices are optimized, then the files ought to be  
+>>>>> identitical. I'm
+>>>>> however not sure.
+>>>>>
+>>>>> The instantiated index contrib module contains a test that  
+>>>>> assert two
+>>>>>
+>>>> index
+>>>>
+>>>>> readers are identical. You could use this to be really sure, but  
+>>>>> it it a
+>>>>> rather long running process for a large index:
+>>>>>
+>>>>>
+>>>>>
+>>>> http://svn.apache.org/repos/asf/lucene/java/trunk/contrib/instantiated/src/test/org/apache/lucene/store/instantiated/TestIndicesEquals.java
+>>>>
+>>>>>
+>>>>>
+>>>>> Perhaps you should explain why you need to do this.
+>>>>>
+>>>>>
+>>>>>       karl
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>>
+>>>>
+>>>> --
+>>>> --Noble Paul
+>>>>
+>>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

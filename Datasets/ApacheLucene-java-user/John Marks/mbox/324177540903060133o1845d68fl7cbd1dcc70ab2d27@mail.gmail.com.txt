@@ -1,0 +1,115 @@
+FROM: John Marks <a85533...@gmail.com>
+SUBJECT: Re: indexing but not tokenizing
+DATE: 6 Mar 2009
+
+Another problem.
+
+Using the PerFieldAnalyzerWrapper solves the case where I have a
+simple query, such as the following:
+      Query query = parser.parse("X");
+or
+      Query query = parser.parse("X OR Y");
+but if I use a more complex query like the following:
+      Query query = parser.parse("[A TO Z]");
+then, again, the parser transforms the query to lowercase, as shown in
+the code below.
+
+Output is:
+      Query: B:[a TO z]
+      0 total matching documents
+while I would have expected to get
+      Query: B:[A TO Z]
+       ...
+
+This means that even the KeywordAnalyzer converts A and Z to lowercase
+in the range query?
+
+Should I report this as a bug?
+
+-John
+
+
+
+--- code ---
+package test;
+
+import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.analysis.KeywordAnalyzer;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TopDocCollector;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.queryParser.QueryParser;
+
+
+
+public class Test
+{
+  public static void main(String[] args)
+  {
+    try
+    {
+      RAMDirectory idx = new RAMDirectory();
+
+      PerFieldAnalyzerWrapper aWrapper =
+        new PerFieldAnalyzerWrapper(new SimpleAnalyzer());
+      aWrapper.addAnalyzer("B", new KeywordAnalyzer());
+
+      IndexWriter writer = new IndexWriter(idx, aWrapper, true,
+          IndexWriter.MaxFieldLength.LIMITED);
+
+      Document doc = new Document();
+      doc.add(new Field("A", "X",
+          Field.Store.YES, Field.Index.NO));
+      doc.add(new Field("B", "X",
+          Field.Store.YES, Field.Index.NOT_ANALYZED));
+      doc.add(new Field("C", "X",
+          Field.Store.YES, Field.Index.ANALYZED));
+      doc.add(new Field("D", "X",
+          Field.Store.NO, Field.Index.NOT_ANALYZED));
+      doc.add(new Field("E", "X",
+          Field.Store.NO, Field.Index.ANALYZED));
+      writer.addDocument(doc);
+      writer.close();
+
+      IndexSearcher searcher = new IndexSearcher(idx);
+      String field = "B";
+      QueryParser parser = new QueryParser(field, aWrapper);
+      Query query = parser.parse("[A TO Z]");
+      System.out.println("Query: " + query.toString());
+
+      TopDocCollector collector = new TopDocCollector(1);
+      searcher.search(query, collector);
+      int numHits = collector.getTotalHits();
+      System.out.println(numHits + " total matching documents");
+
+      if ( numHits > 0)
+      {
+        ScoreDoc[] hits = collector.topDocs().scoreDocs;
+        doc = searcher.doc(hits[0].doc);
+        System.out.println("A: " + doc.get("A"));
+        System.out.println("B: " + doc.get("B"));
+        System.out.println("C: " + doc.get("C"));
+        System.out.println("D: " + doc.get("D"));
+        System.out.println("E: " + doc.get("E"));
+      }
+    }
+    catch (Exception e)
+    {
+      System.out.println(" caught a " + e.getClass() + "\n with message: "
+          + e.getMessage());
+    }
+  }
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

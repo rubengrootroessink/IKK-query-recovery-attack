@@ -1,0 +1,83 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Wrapping IndexSearcher so that it is safe?
+DATE: 12 Nov 2009
+
+On Thu, Nov 12, 2009 at 4:44 PM, Jacob Rhoden <jrhoden@unimelb.edu.au> wrote:
+>
+> On 12/11/2009, at 8:42 PM, Michael McCandless wrote:
+>
+>> On Wed, Nov 11, 2009 at 7:33 PM, Jacob Rhoden <jrhoden@unimelb.edu.au>
+>> wrote:
+>>>
+>>> The source code for SearcherManager is even downloadable for free:
+>>>  http://www.manning.com/hatcher3/LIAsourcecode.zip
+>>>
+>>> The example source code does some things that is beyond my level of
+>>> understanding
+>
+> After staring it it a bit longer, it mostly makes sense to me now, the
+> example for book
+> was only hard to read because I don't understand completely what both
+> IndexWriter.IndexReaderWarmer() and searcher.getIndexReader().decRef()
+> are supposed to do. (Which I assume can be learnt from the book)
+
+SearcherManager can work with a near real-time reader (via
+IndexWriter.getReader), or with a standalone reader (via
+IndexReader.open), so that's another source of more complexity vs your
+use case.
+
+>> Any already in-flight searches will continue to use the old
+>> IndexSearcher, while new ones use the new IndexSearcher.  Once all
+>> in-flight searches are done against the old IndexSearcher, its
+>> underlying IndexReader is closed.
+>
+> To test I understand this correctly, the index reader getting closed
+> automatically
+> is achieved by the release() method calling
+> searcher.getIndexReader().decRef()?
+
+Right.  The decRef that drops the ref count to 0, closes the reader.
+
+>>> So I am going for something a bit simpler:
+>>>
+>>> If a thread wants to use the "SafeIndexSearcher", it first calls retain()
+>>> and then calls
+>>> release() when its done.
+>>
+>> I think this will work, but you need a central place that has called
+>> retain() and is holding onto the searcher, until it's time to reopen
+>> right?  Either that, or your retainCount begins life at 1 instead of
+>> 0?
+>
+> In my version, the "SafeIndexSearcher" is a static variable, the retain
+> count starts at 0. Being at zero simply indicates the object is not being
+> used and can safely be closed.
+
+If it starts as 0, then the first search that runs will then close it?
+ Is that intended.
+
+VS keeping a single searcher alive, until its time to reopen (which
+would mean some central place would call retain, and then would call
+release when reopen is done).
+
+>> Also, how will you handle reopening (if that's needed in your app)?
+>
+>
+> Another thread runs in the background and handles deciding when to do
+> an index rebuild, at which point it
+> 1) swaps in a new "SafeIndexSearcher"
+> 2) calls close on the old "SafeIndexSearcher" (which will safely close once
+> the retain count=0)
+
+OK I think that should work.  Just make sure when the search releases
+the SafeIndexSearcher, it releases the one it had started with, and
+not accidentally a new one which had swapped in while it was
+searching.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

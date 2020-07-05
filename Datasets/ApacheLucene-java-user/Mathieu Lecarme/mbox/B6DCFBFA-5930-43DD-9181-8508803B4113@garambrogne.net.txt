@@ -1,0 +1,263 @@
+FROM: Mathieu Lecarme <math...@garambrogne.net>
+SUBJECT: Re: Does Lucene support partition-by-keyword indexing?
+DATE: 2 Mar 2008
+
+Thanks for your clean and long answer.
+
+With Term splitted on different node you've got different drawback :
+PrefixQuery and FuzzyQuery will be very hard to implement.
+
+Your DHT look very nice, but Bittorrent, the best bandwidth consumer  
+in the world (something like 30% of the Internet), made the choice to  
+centralize this bottleneck. But recently, Bittorrent can be used  
+trackerless.
+When you read Google withe paper, more about cluster computing than  
+p2p computing, I agree, it says that one conductor (with redundancy)  
+is better than spreading and broadcasting information.
+The trouble is to be sure that every node is synchronized, and waiting  
+for the latest. Redundant reliable information is not very compatible  
+with P2P, IMHO, redundant caching should be better.
+
+Your dichotomic approach looks nice, first a simple action to know  
+wich node to ask, and after, consolidation of the answers.
+
+In your scheme, where are indexed documents? Each letter node contains  
+their own documents?
+
+M.
+
+Le 2 mars 08 à 17:09, 仇寅 a écrit :
+
+> Hi,
+>
+> I am just doing some simple research on P2P searches. In my
+> assumption, all nodes in this system index their own documents and
+> each node will be able to search all the documents in the network
+> (including others'). This is just like file sharing. The simple
+> approach is to keep all the indices locally and to flood the query
+> along the network. But this may consume much network bandwidth because
+> too much nodes, which are not relevant to one certain query, are
+> involved in handling a query.
+>
+> So I want to introduce DHT into my system to solve this problem. First
+> let me explain what DHT is if you don't know about it. Distributed
+> Hash Table implements a function lookup(key) on a P2P overlay. It
+> finds the node of nodeID "nearest"  to a certain "key" efficiently,
+> usually in logN hops, where N is the total number of nodes. Here the
+> concept "nearest" is not necessarily geographically, but is defined
+> the DHT implementation. For example, one implementation would define a
+> key is nearest to a nodeID when |nodeID-key| is the minimum value. DHT
+> is widely used in P2P file sharing tools, like Azureus and eMule.
+>
+> In my design, why I want to partition the indices by keyword is to
+> well facilitate this lookup(key) function. Suppose we have two terms:
+> A and B. Term A's docList contains 1, 2, and 3; while term B's docList
+> contains 2, 3, and 4. To partition the indices, we hashes terms A and
+> B to two keys. We transfer the indices to the corresponding nodes
+> after calling lookup(key). To handle this query, we would again hash
+> these two terms to two keys, and locate the nodes responsible for the
+> terms, respectively, also using the lookup(key) function. We finally
+> do an intersection and get the result "2 and 3". Of course here we
+> only get a pointer to the actual indexed document, so we still to
+> fetch the document content after this.
+>
+> And I don't think this scheme brings lots of single point of failures
+> because indices can be replicated on several nodes whose nodeID's are
+> near to each other. Even one node is down, the lookup(key) function
+> still finds a substituting node.
+>
+> As I don't know how to partition the indices by keyword yet, my design
+> now is to keep the Lucene indices locally and writes the simplified
+> inverted indices to the nodes responsible for certain keywords. For
+> example, node X has the postings like:
+>
+> termA: doc1, doc2, doc3
+> termB: doc2, doc3, doc4
+>
+> and lookup(hash(termA)) returns node Y, lookup(hash(termB)) returns  
+> node Z.
+>
+> Then in the indexing process, node X writes the info "termA:
+> nodeX.doc1, nodeX.doc2, nodeX.doc3" on node Y, an the info "termB:
+> nodeX.doc2, nodeX.doc3, nodeX.doc4" on node Z. At the final step, we
+> follow this info and go back to node X to get the Lucene Field values
+> and the real documents.
+>
+> Any idea or feedback on my preliminary design?
+>
+> On Sun, Mar 2, 2008 at 3:48 PM, Uwe Goetzke
+> <uwe.goetzke@healy-hudson.com> wrote:
+>> Hi,
+>>
+>> I do not yet fully understand what you want to achieve.
+>> You want to spread the index split by keywords to reduce the time  
+>> to distribute indexes?
+>> And you want the distribute queries to the nodes based on the same  
+>> split mechanism?
+>>
+>>
+>> You have several nodes with different kind of documents.
+>> You want to build one index for all nodes and split and distribute  
+>> the index based on a set of keywords specific to a node. This you  
+>> want to do to split the queries so "each query involves  
+>> communicating with constant number of nodes".
+>>
+>> Do documents at the nodes contain only such keywords? I doubt.
+>> So you need anyway a reference where the indexed doc can be found  
+>> and retrieve it from its node for display.
+>> You could index at each node, merge all indexes from all nodes and  
+>> distribute the combined index.
+>> On what criteria you can split the queries? If you have a combined  
+>> index each node can distribute the queries to other nodes on  
+>> statistical data found in the term distribution.
+>> You need to merge the results anyway.
+>>
+>> I doubt that this kind of overhead is worth the trouble because you  
+>> introduce a lot of single points of failure. And the scalability  
+>> seems limited because you would need to recalibrate the whole  
+>> network when a adding a new node. Why don't you distribute the  
+>> complete index (we do this after getting it locally zipped and  
+>> later unzipped on the receiver node, size is less than one third  
+>> for transfering). Each node should have some activity indicator.  
+>> Distribute the complete query to the node with the smallest  
+>> activiy. So you get redundancy, do not need to split queries and  
+>> merge results. OK, one "evil" query can bring a node "down" but the  
+>> network is still working.
+>>
+>> Do you have any results using lucene on a single node for your  
+>> approach? How many queries and how many documents do you expect?
+>>
+>> Regards
+>>
+>> Uwe
+>>
+>> -----Ursprüngliche Nachricht-----
+>> Von: allenchue@gmail.com [mailto:allenchue@gmail.com] Im Auftrag  
+>> von ??
+>> Gesendet: Sonntag, 2. März 2008 03:05
+>> An: java-user@lucene.apache.org
+>> Betreff: Re: Does Lucene support partition-by-keyword indexing?
+>>
+>>
+>>
+>> Hi,
+>>
+>> I agree with your point that it is easier to partition index by  
+>> document.
+>> But the partition-by-keyword approach has much greater scalability  
+>> over the
+>> partition-by-document approach. Each query involves communicating  
+>> with
+>> constant number of nodes; while partition-by-doc requires spreading  
+>> the
+>> query a long all or many of the nodes. And I am actually doing some  
+>> small
+>> research on this. By the way, the documents to be indexed are not
+>> necessarily web pages. They are mostly files stored on each node's  
+>> file
+>> system.
+>>
+>> Node failures are also handled by replicas. The index for each term  
+>> will be
+>> replicated on multiple nodes, whose nodeIDs are near to each other.  
+>> This
+>> mechanism is handled by the underlying DHT system.
+>>
+>> So any idea how can partition index by keyword in lucene? Thanks.
+>>
+>> On Sun, Mar 2, 2008 at 5:50 AM, Mathieu Lecarme <mathieu@garambrogne.net 
+>> >
+>> wrote:
+>>
+>>> The easiest way is to split index by Document. In Lucene, index
+>>> contains Document and inverse index of Term. If you wont to put Term
+>>> in different place, Document will be duplicated on each index, with
+>>> only a part of their Term.
+>>>
+>>> How will you manage node failure in your network?
+>>>
+>>> They were some trial to build big p2p search engine to compet with
+>>> Google, but, it will be easier to split by Document.
+>>>
+>>> If you have to many computers and want to see them working together,
+>>> why don't use Nutch with Hadoop?
+>>>
+>>> M.
+>>> Le 1 mars 08 à 19:16, Yin Qiu a écrit :
+>>>
+>>>> Hi,
+>>>>
+>>>> I'm planning to implement a search infrastructure on a P2P  
+>>>> overlay. To
+>>>> achieve this, I want to first distribute the indices to various  
+>>>> nodes
+>>>> connected by this overlay. My approach is to partition the  
+>>>> indices by
+>>>> keyword, that is, one node takes care of certain keywords (or
+>>>> terms). When a
+>>>> simple TermQuery is encountered, we just find the node associated
+>>>> with that
+>>>> term (with distributed hash table) and get the result. And  
+>>>> suppose a
+>>>> BooleanQuery is issued, we contact all the nodes involved in this
+>>>> query and
+>>>> finally merge the result.
+>>>>
+>>>> So my question is: does Lucene support partitioning the indices by
+>>>> keywords?
+>>>>
+>>>> Thanks in advance.
+>>>>
+>>>> --
+>>>> Look before you leap
+>>>> -------------------------------------------
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>>
+>> --
+>> Look before you leap
+>> -------------------------------------------
+>>
+>> -----------------------------------------------------------------------
+>> Healy Hudson GmbH - D-55252 Mainz Kastel
+>> Geschäftsführer Christian Konhäuser - Amtsgericht Wiesbaden HRB  
+>> 12076
+>>
+>> Diese Email ist vertraulich. Wenn Sie nicht der beabsichtigte  
+>> Empfänger sind, dürfen Sie die Informationen nicht offen legen  
+>> oder benutzen. Wenn Sie diese Email durch einen Fehler bekommen  
+>> haben, teilen Sie uns dies bitte umgehend mit, indem Sie diese  
+>> Email an den Absender zurückschicken. Bitte löschen Sie danach  
+>> diese Email.
+>> This email is confidential. If you are not the intended recipient,  
+>> you must not disclose or use this information contained in it. If  
+>> you have received this email in error please tell us immediately by  
+>> return email and delete the document.
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+>
+>
+> -- 
+> Look before you leap
+> -------------------------------------------
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

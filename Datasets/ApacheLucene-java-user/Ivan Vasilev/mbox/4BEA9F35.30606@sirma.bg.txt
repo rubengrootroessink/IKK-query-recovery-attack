@@ -1,0 +1,102 @@
+FROM: Ivan Vasilev <ivasi...@sirma.bg>
+SUBJECT: Re: How to avoid sharing docStore files?
+DATE: 12 May 2010
+
+Hi Michael,
+Thanks for your answer.
+What we do now:
+1. Splitting indexes. We do it not by reading indexes and distributing 
+docs in separate indexes like in MultiPassIndexSplitter. We do it by 
+binary copping segments to different folders and then recreate segment 
+descriptor file for each one (we have created tool for this). The 
+decision of which segment to which new index to go is taken by taking 
+segment sizes and calculating so that to have almost equal indexes. If 
+we have .cfx file this would be an obstacle for current logic of division.
+I saw the class MultiPassIndexSplitter. It offers splitting index by 
+docs (not by segments). It has a big advantage - index could be split 
+better (to more similar in size parts). It would be done even if index 
+was just optimized and we have only one big segment. But it has also 
+disadvantages. Index is read as many times as the number of new indexes 
+is (it is bad for ~40Gb indexes). Also the original index remains all 
+the time this means if we do the split in one and the same partition we 
+need double disk space.
+May be we should offer both index split approaches to the user... this 
+depends on higher levels :)
+
+2. More important problem with the .cfx file - we support document 
+modification on one field. We do it like this - for the index we have a 
+paired index that has only that field. We read and write both indexes by 
+parallel reader/writer. To be everything OK both indexes must have the 
+same responding documents distributed in the same responding segments 
+(due to our split mechanism). When changing document content in little 
+index we run optimization on it and we have some source changes and new 
+classes that make so that instead of current values for responding docs 
+to be used new onces - for stored values as well as for indexed terms 
+(this idea we got from Lucene forum by the way). So I expect we to have 
+problems with .cfx file - may be during the optimization it's content 
+could be sent to .cfs files... and may be some other things...
+
+Looking at the situation I think the best is I to see where are the 
+points where the "autoCommit" took place in Lucene 2.3 and to force 
+flushing at that points so that we to have CommitPoint for each CheckPoint.
+
+Ivan
+
+
+Michael McCandless wrote:
+> This isn't something you can disable in Lucene, currently.  In
+> general, how Lucene represents the index as files is "private" to it
+> -- it's free to change from release to release.
+>
+> That said, we are thinking of moving away from doc stores, with
+> LUCENE-2324.  Now that both stored fields & term vectors can be
+> bulk-copied during merging, the optimization does not buy us as much
+> as it did before.
+>
+> Can you explain in more detail what you are doing w/ Lucene that
+> requires the doc stores to not be shared?  EG for splitting an index,
+> there is the multi-pass index splitter (in contrib/misc).
+>
+> Mike
+>
+> On Wed, May 12, 2010 at 5:33 AM, Ivan Vasilev <ivasilev@sirma.bg> wrote:
+>   
+>> Hi Guys,
+>>
+>> Can anybody tell me how to avoid sharing of docStore files (term vectors &
+>> stored fields)? I mean to avoid creation of cfx files.
+>>
+>> This is important for us because we support some operations like splitting
+>> index, updating index fields (via running optimization that has some
+>> differences compare to normal optimization).
+>>
+>> With Lucene 2.4.X we used constructor of IndexWriter that used "autoCommit"
+>> parameter. We set it to "true" and this forced each flush to be done in a
+>> new .cfs file.
+>> Is there now some way to do it?
+>>
+>> Cheers,
+>> Ivan
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>     
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> __________ NOD32 3990 (20090406) Information __________
+>
+> This message was checked by NOD32 antivirus system.
+> http://www.eset.com
+>
+>
+>
+>   
+
+

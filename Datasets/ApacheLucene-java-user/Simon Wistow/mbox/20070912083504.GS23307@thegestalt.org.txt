@@ -1,0 +1,75 @@
+FROM: Simon Wistow <si...@thegestalt.org>
+SUBJECT: Some questions on transactions
+DATE: 12 Sep 2007
+
+I'm looking at doing a system which is looks something like this - I 
+have an IndexSearcher open with a on-disk index but all writes go to a 
+RAM based IndexWriter. Periodically I do
+
+	1. Close IndexSearcher
+	2. Open new  IndexWriter in same location
+	3. Use addIndexes with old RAM based IndexWriter
+	4. Close new IndexWriter
+      4a. Inform something that outstanding writes have been committed 
+	5. Close and then open afresh old RAM based IndexWriter
+	6. Open new IndexSearcher
+
+A few questions which may showcase my ignorance.
+
+1. Is this transactional? Is there at any point where the Index can be 
+left in an undefined state? One of the reasons for doing this is that if 
+a crash happens I can know exactly what documents have been 'committed' 
+and which are still in memory and need to be reindexed. Also, since 
+addIndexes is transactional there's should be no chance of the index 
+getting corrupted which was a problem we'd had before.
+
+2. This seems an awful lot like what IndexWriter does anyway - am I just 
+reimplementing the wheel?
+
+3. Because the IndexSearcher (or, more appropriately, its underlying 
+IndexReader) can have deletes I need to close() it before merging and 
+reopen it. I also need to reopen it to get all the new documents in the 
+new merged index. Currently I'm doing something roughly like this
+
+
+
+	private void reopenIndex() {
+		index_closed = true;
+		index.close();
+		index = new IndexSearcher(path);
+		index_close = false;
+	}
+
+
+and
+
+	public Results search(String query) {
+		// make sure the index is open
+		while (index_closed) {
+			sleep(1);
+		}
+		// now do the search
+		...
+	}
+
+But I'm convinced there must be a better way than this. A quick 
+first attempt of this
+
+
+	private void reopenIndex() {
+    	IndexSearcher old_index = index;
+		index = new IndexSearcher(path);
+		old_index.close();
+    }
+
+throws StaleIndex exceptions.
+
+Any ideas?
+
+Simon
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

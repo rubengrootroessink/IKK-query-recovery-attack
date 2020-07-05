@@ -1,0 +1,127 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: A lot of short documents, optimal query?
+DATE: 11 Nov 2005
+
+
+: - What is the purpose of hasCode and equals methods in
+: XxxFilter? (this is a question about actual usage in
+: Lucene, not java elementary :)
+
+You mean hashCode right? ... those methods are generally important for
+Hashing, which makes then key for effective caching in most cases.
+CachingWrapperFilter doesn't need them because each instance only caches
+one Filter -- but if you're trying to write a good, reusable Filter,
+you'll want to impliment them.  (for the same reasons you want to
+impliment them anytime your trying to write a good reusable class)
+
+
+: - What would be recommended usage of the SetFilter?
+: a) to use search(Query, SetFilter, HitCollector)
+: or
+: b) search(Query, HitCollector) + I do AND inside
+: hitCollector
+
+My suggestion about writing a SetFilter was so you could completely bypass
+the "search" -- which involves Weighting and Scoring -- instead you can
+just call the bits method directly.  If i remember correctly, I suggested
+it because you said you didn't care about score at all, so you can do
+something like this (off the top of my head, not 100 certain this is
+what you want)...
+
+  Set lnames = ...;
+  /* you need to write SetFilter */
+  Filter l = new SetFilter("name",lnames);
+  /* this is a poor mans "TermFilter" unless you want to write one */
+  Filter f = new RangeFilter("name","raimonds", "raimonds",true,true);
+  Filter zips = new ChainedFilter(new Filter[] {
+     new RangeFilter("ZIP","20000","20999",true,true),
+     ...
+     new RangeFilter("ZIP","24500","24599",true,true),
+     ...
+  }, ChainedFilter.OR);
+  Filter main = new ChainedFilter(new Filter[] { f, l, zips },
+                                  ChainedFilter.AND);
+  BitSet results = main.bits(r);
+
+
+Thinking about your use case a little more, those RangeFilters would make
+more sense as "PrefixFilters" ...
+
+Hey Yonik, are you ever going to add your PrefixFilter and
+ConstantScorePrefixQuery to LUCENE-383 ?
+
+: > : +(
+: > : (+raimonds +marschan)
+: > : (+raimonds +marschol)
+: > : (+raimonds +marschel)
+: > : (+raimonds +marschalfr)
+: > : (+raimonds +marschalek)
+: > : (+raimonds +marscha)
+: > : ...
+: > : )
+: > : +(ZIPS:22* ZIPS:21* ZIPS:20* ZIPS:23* ZIPS:245*
+: > : ZIPS:246* ZIPS:247* ZIPS:240* ZIPS:241* ZIPS:242*
+: > : ZIPS:243* ZIPS:254* ZIPS:253* ZIPS:255* ZIPS:256*
+: > : ZIPS:257* ZIPS:295* ZIPS:296* ZIPS:273* ZIPS:274*
+: > : ZIPS:275* ZIPS:276* ZIPS:192* ZIPS:190*)
+: > : )
+: >
+: > independent of how short/long your documents are,
+: > using RangeFilters on
+: > your ZIPS field is going to be more efficient then
+: > PrevixQueries ... I'd
+: > bet money it will even be more efficient then making
+: > a two character
+: > prefix_ZIPS field and doing a TermQuery on it -- and
+: > there's no reason not
+: > to use a Filter if you dont' care about the score.
+: >
+: > take a look at RangeFilter in SVN, even if you are
+: > using 1.4.3 it should
+: > be combatible.  Also take a look at ChainedFilter as
+: > a way to compose lots
+: > of individual RangeFilters...
+: >
+: >
+: http://svn.apache.org/viewcvs.cgi/lucene/java/trunk/contrib/miscellaneous/src/java/org/apache/lucene/misc/ChainedFilter.java
+: >
+: > You can probably get additional speed ups by using
+: > Filters on whatever
+: > your default name search field is, google for
+: > "lucene Hoss SetFilter" to
+: > see a previous discussion where i suggested
+: > something similar.
+: >
+: > -Hoss
+: >
+: >
+: >
+: ---------------------------------------------------------------------
+: > To unsubscribe, e-mail:
+: > java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail:
+: > java-user-help@lucene.apache.org
+: >
+: >
+:
+:
+:
+:
+: ___________________________________________________________
+: Yahoo! Model Search 2005 - Find the next catwalk superstars - http://uk.news.yahoo.com/hot/model-search/
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

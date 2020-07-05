@@ -1,0 +1,216 @@
+FROM: <an...@orbita1.ru>
+SUBJECT: RE: speed
+DATE: 10 Mar 2006
+
+Index size: 3,6G, about 5500000 documents.
+Each document contains 22 fields. 
+For search use:
+
+
+int count....
+
+public void search() {
+	String query = ...
+		.................
+	String[] mainFields = new String[]{"name", "keywords",
+"description"};
+	HashMap required = new HashMap();
+	required.put("currency", currency.toLowerCase());
+	count = count(query,mainFields,required,null);
+}
+................
+
+
+public int count(String query, String[] mainFields, HashMap required,HashMap
+prohibited) {
+        if (is == null) {
+            try {
+                is = new IndexSearcher(pathToIndex);
+            } catch (IOException e) {
+                System.err.println(e.toString());
+            }
+        }
+        Query luceneQuery = createQuery(query, mainFields, null, required,
+prohibited);
+        int count = 0;
+        try {
+//------------Range Filter
+            Filter filter = null;
+            if (!rangeFilterField.equals("") &&
+!rangeFilterMinValue.equals("") && !rangeFilterMaxValue.equals("")) {
+                if (rangeFilterMaxValue.equals("0")) {
+                    filter =
+RangeFilter.More(rangeFilterField,rangeFilterMinValue);
+                } else {
+                    filter = new
+RangeFilter(rangeFilterField,rangeFilterMinValue,rangeFilterMaxValue,rangeFi
+lterIncludeLower,rangeFilterIncludeUpper);
+                }
+                luceneQuery = new FilteredQuery(luceneQuery,filter);
+            }
+
+//------------Make Search
+/*            CountCollector collector = new CountCollector();
+            is.search(luceneQuery,collector);
+            count = collector.getCount();
+            */
+
+            count = is.search(luceneQuery,null,1).totalHits;
+        } catch (IOException e) {
+        }
+        return count;
+}
+
+public Query createQuery(String query, String[] mainFields, float[] boosts,
+HashMap required, HashMap prohibited) {
+        BooleanQuery bq = new BooleanQuery();
+        Query luceneQuery = null;
+        if (!query.equals("") && mainFields != null) {
+            luceneQuery = parseQuery(query, mainFields, boosts);
+        }
+        if (luceneQuery != null) {
+            bq.add(luceneQuery, BooleanClause.Occur.MUST);
+        }
+//------------add required
+        if (required != null) {
+            Iterator iterator = required.keySet().iterator();
+            while (iterator.hasNext()) {
+                String field = (String) iterator.next();
+                String value = (String) required.get(field);
+                bq.add(new TermQuery(new Term(field, value)),
+BooleanClause.Occur.MUST);
+            }
+        }
+//------------add prohibited
+        if (prohibited != null) {
+            Iterator iterator = prohibited.keySet().iterator();
+            while (iterator.hasNext()) {
+                String field = (String) iterator.next();
+                String value = (String) prohibited.get(field);
+                bq.add(new TermQuery(new Term(field, value)),
+BooleanClause.Occur.MUST_NOT);
+            }
+        }
+        return bq;
+    }
+
+
+
+
+
+    private Query parseQuery(String queryStr, String[] mainFields, float[]
+boosts) {
+        BooleanQuery query = null;
+        try {
+            StopAnalyzer analyzer;
+            if (pathToStopWords.equals("")) {
+                analyzer = new StopAnalyzer();
+            } else {
+                analyzer = new StopAnalyzer(new File(pathToStopWords));
+            }
+            query = new BooleanQuery();
+            try {
+                for (int i = 0; i < mainFields.length; i++) {
+                    QueryParser parser = new QueryParser(mainFields[i],
+analyzer);
+                    parser.setDefaultOperator(QueryParser.Operator.AND);
+                    Query mQuery = parser.parse(queryStr);
+                    if (boosts != null && boosts.length > i) {
+                        mQuery.setBoost(boosts[i]);
+                    }
+                    query.add(mQuery, BooleanClause.Occur.SHOULD);
+                }
+            } catch (ParseException e) {
+                System.err.println(e.toString());
+            }
+        } catch (IOException e) {
+            System.err.println(e.toString());
+        }
+        return query;
+    }
+
+
+
+When I make search I get count = 370000.
+May be I do something not correctly? 
+
+-----Original Message-----
+From: Erik Hatcher [mailto:erik@ehatchersolutions.com] 
+Sent: Friday, March 10, 2006 4:33 PM
+To: java-user@lucene.apache.org
+Subject: Re: speed 
+Importance: High
+
+I'm curious, how many documents in your index and what kind of  
+queries are you issuing?   Even 1.6 seconds is a LONG time for a  
+search in most Lucene indexes.
+
+	Erik
+
+
+On Mar 10, 2006, at 5:38 AM, Anton Potehin wrote:
+
+> I try 2 way for get count results:
+>
+> 1)
+> Query q = ....
+> IndexSearcher is = ....
+> int count = Is.search(q).length();
+>
+> 2)
+> Query q = ....
+> IndexSearcher is = ....
+> CountCollector collector = new CountCollector();
+> Is.search(q, collector);
+> Int count = collector.getCount();
+>
+> First way return results for 1.644 sec.
+> Second way return results fot 3.088 sec.
+> Why first way faster then second?
+> Can I accelerate it? And how? Can you offer any ways for get number of
+> results?
+>
+>
+> ----------------------CountCollector
+> import org.apache.lucene.search.HitCollector;
+>
+> /**
+>  * @author Anton Potekhin
+>  * @date: 03.03.2006 17:28:03
+>  */
+> public class CountCollector extends HitCollector {
+>
+>     private int numberRusults = 0;
+>     public int getCount() {
+>         return numberRusults;
+>     }
+>
+>     public CountCollector() {
+>
+>     }
+>
+>     public void collect(int doc, float score) {
+>         if (score > 0.0f) {
+>             numberRusults++;
+>         }
+>     }
+> }
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

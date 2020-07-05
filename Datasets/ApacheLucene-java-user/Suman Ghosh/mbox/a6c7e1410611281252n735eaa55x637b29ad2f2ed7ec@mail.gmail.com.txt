@@ -1,0 +1,115 @@
+FROM: "Suman Ghosh" <suman.ghos...@gmail.com>
+SUBJECT: Re: StackOverflowError while calling IndexReader.deleteDocuments(new Term())
+DATE: 28 Nov 2006
+
+The search functionality must be available during the index build. Since a
+relatively small number of documents are being affected (and also we plan to
+perform the build during a period of time we know to be relatively quiet
+from last 2 years site access data) during the build process, we hope that
+the build process will not cause any search issue.
+
+If you have any advice as to a better approach for incremental build and
+index optimization, I'll really appreciate if you could share it.
+
+Thanks
+
+Suman
+
+On 11/28/06, Michael McCandless <lucene@mikemccandless.com> wrote:
+>
+>
+> This looks correct to me.  It's good you are doing the deletes
+> "in bulk" up front for each batch of documents.  So I guess you
+> hit the error (& 5000 segments files) while processing batches
+> of 200 docs (because you then optimize in the end)?
+>
+> Do you search this index while it's building, or, only in the
+> end (after optimize)?
+>
+> Mike
+>
+> Suman Ghosh wrote:
+> > Mike,
+> >
+> > Below is the pseudo code of the application. A few implementation
+> > points to understand the pseudo-code:
+> >
+> >  - We have a home grown threadpool class that allows us to index
+> >    multiple documents in parallel. We usually submit 200 jobs to the
+> >    pool (2-3 worker threads usually for the pool). Once these jobs are
+> >    finished, we submit the next set of jobs.
+> >  - All metadata for a document comes from a Oracle database. We
+> >    retrieve the metadata in form of an XML document.
+> >  - The indexing routine is designed with incremental indexing in
+> >    mind. We intend to perform full index build once and continue
+> >    with incremental indexing from that point onwards (on the
+> >    average 200-300 document modified/added each day).
+> >
+> > Here is the pseudo-code. Please feel free to point out any
+> implementation
+> > issues that might cause the problem.
+> >
+> > ====================BEGIN===========================
+> > Initialization:
+> >  get database connection
+> >  get threadpool instance
+> >
+> > IndexBuilder:
+> >  for (;;) {
+> >      get next 200 documents (from database) to be indexed. Values
+> >      returned are a key for the document and the metadata xml
+> >
+> >      exit if no more document available
+> >
+> >      // first remove the documents (to be updated) from the
+> >      // index instead of deleting and inserting them one after
+> >      // another
+> >      get IndexReader instance
+> >      for all these documents {
+> >          use reader.deleteDocuments(new Term("KEY", document key))
+> >      }
+> >      finally close the IndexReader instance
+> >
+> >      // Now add these documents to the index
+> >      get IndexWriter instance and
+> >          set MergeFactor = 10
+> >          set MaxMergeDocs = 100000
+> >          set MaxFieldLength = 500000
+> >
+> >      for all these documents {
+> >          add a job to the threadpool with indexwriter instance
+> >            and document metadata
+> >      }
+> >      and wait till jobs are finished
+> >
+> >      finally close the IndexWriter instance
+> >  } //end for
+> >
+> >  get indexwriter instance and
+> >      optimize index
+> >  finally close the IndexWriter instance
+> >
+> > housekeeping:
+> >    finally close threadpool and database connection
+> >
+> > Threadpool job:
+> >
+> >    read individual metadata from XML and  construct a Lucene
+> >    Document object
+> >
+> >    Determine if there is an associated file for the document (
+> >    usually PDF/WORD/EXCEL/PPT). If so, extract text out of that
+> >    document and put it in a field called FULLTEXT for specific
+> >    searching.
+> >
+> >    Use the indexwriter instance (supplied with the job) to add
+> >    the document to the Lucene index
+> >
+> > ====================END===========================
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

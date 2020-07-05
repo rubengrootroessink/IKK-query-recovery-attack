@@ -1,0 +1,317 @@
+FROM: KK <dioxide.softw...@gmail.com>
+SUBJECT: Re: How to create a new index
+DATE: 20 May 2009
+
+Thanks a lot @John. That solved the problem and the other advice is really
+helpful. I'd have bumped over that otherwise.
+This clarifies my doubt, that everytime I've to create a new index just call
+the indexwriter with "true" thereby creating the directory, then start
+adding docs with "false" as the 3rd argument instead of "true", right?
+Lucene is pretty simple and gives you the full control of whatever you are
+doing. I've been trying to automate the creation of new solr cores for last
+two days without any luck. Finally today moved to Lucene and it fixed my
+problem very soon. Thank you all and special thanks to Lucene guys.
+
+Thanks,
+KK.
+
+On Wed, May 20, 2009 at 6:28 PM, John Byrne <john.byrne@propylon.com> wrote:
+
+> I think the problem is that you are creating an new index every time you
+> add a document:
+>
+> IndexWriter writer = new IndexWriter(trueIndexPath, new
+> StandardAnalyzer(), true);
+>
+> The last argument, the boolean 'true' tells IndexWriter to overwrite any
+> existing index in that directory. If you set that to false, it will not
+> overwrite the previous index, but will add to it.
+>
+> How, then do you create it in the first place? You call the IndexWriter's
+> constructor once with 'true' as the 3rd argumrent, creating the index, then
+> subsequently use 'false'. You could do this in your main method, right after
+> you create an instance of SimpleIndexer, but before you call createIndex.
+>
+> -John
+>
+>
+>
+> KK wrote:
+>
+>> Thank you very much.
+>> I'm using the one mentioned by @Anshum ..but the problem is that after
+>> indexing some no of docs what I see is only the last one indexed which
+>> clearly indicates that the index is getting overwritten. I'm posing my
+>> simple indexer and searcher herewith. Actually I'm trying to crawl web
+>> pages
+>> and add each pages content under a filed called "content" againts a field
+>> called "id" and for this id I'm using the page URL. These are the codes
+>>
+>> The indexer:
+>> --------------------------------------------
+>> package solrSearch;
+>>
+>> import org.apache.lucene.analysis.SimpleAnalyzer;
+>> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+>> import org.apache.lucene.document.Document;
+>> import org.apache.lucene.document.Field;
+>> import org.apache.lucene.index.IndexWriter;
+>>
+>> public class SimpleIndexer {
+>>
+>>  // Base Path to the index directory
+>>  private static final String baseIndexPath = "/opt/lucene/index/";
+>>
+>>
+>>  public void createIndex(String pageContent, String pageId, String coreId)
+>> throws Exception {
+>>    String trueIndexPath = baseIndexPath + coreId ;
+>>    String contentField = "content";
+>>    String contentId    = "id";
+>>
+>>    // Create a writer
+>>    IndexWriter writer = new IndexWriter(trueIndexPath, new
+>> StandardAnalyzer(), true);
+>>
+>>    System.out.println("Adding page to lucene " + pageId);
+>>    Document doc = new Document();
+>>    doc.add(new Field(contentField, pageContent, Field.Store.YES,
+>> Field.Index.TOKENIZED));
+>>    doc.add(new Field(contentId, pageId, Field.Store.YES,
+>> Field.Index.TOKENIZED));
+>>
+>>    // Add documents to the index
+>>    writer.addDocument(doc);
+>>
+>>    // Lucene recommends calling optimize upon completion of indexing
+>>    writer.optimize();
+>>
+>>    // clean up
+>>    writer.close();
+>>  }
+>>
+>>  public static void main(String args[]) throws Exception{
+>>       SimpleIndexer empIndex = new SimpleIndexer();
+>>    empIndex.createIndex("this is sample test content", "test0", "core0");
+>>    System.out.println("Data indexed by lucene");
+>>  }
+>>
+>> }
+>>
+>> and the searcher:
+>> ---------------------------------------
+>> package solrSearch;
+>>
+>> import java.io.FileReader;
+>> import java.io.IOException;
+>> import java.io.InputStreamReader;
+>> import java.util.Date;
+>>
+>> import org.apache.lucene.analysis.Analyzer;
+>> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+>> import org.apache.lucene.document.Document;
+>> import org.apache.lucene.index.FilterIndexReader;
+>> import org.apache.lucene.index.IndexReader;
+>> import org.apache.lucene.queryParser.QueryParser;
+>> import org.apache.lucene.search.HitCollector;
+>> import org.apache.lucene.search.Hits;
+>> import org.apache.lucene.search.IndexSearcher;
+>> import org.apache.lucene.search.Query;
+>> import org.apache.lucene.search.ScoreDoc;
+>> import org.apache.lucene.search.Searcher;
+>> import org.apache.lucene.search.TopDocCollector;
+>>
+>> /** Simple command-line based search demo. */
+>> public class SimpleSearcher {
+>>    private static final String baseIndexPath = "/opt/lucene/index/" ;
+>>
+>>    private void searchIndex(String queryString, String coreId) throws
+>> Exception{
+>>        String trueIndexPath = baseIndexPath + coreId;
+>>        String searchField = "content";
+>>         IndexSearcher searcher = new IndexSearcher(trueIndexPath);
+>>        QueryParser queryParser = null;
+>>        try {
+>>            queryParser = new QueryParser(searchField, new
+>> StandardAnalyzer());
+>>        } catch (Exception ex) {
+>>             ex.printStackTrace();
+>>        }
+>>
+>>        Query query = queryParser.parse(queryString);
+>>
+>>        Hits hits = null;
+>>        try {
+>>             hits = searcher.search(query);
+>>        } catch (Exception ex) {
+>>             ex.printStackTrace();
+>>        }
+>>
+>>        int hitCount = hits.length();
+>>        System.out.println("Results found :" + hitCount);
+>>
+>>        for (int ix=0; (ix<hitCount && ix<10); ix++) {
+>>             Document doc = hits.doc(ix);
+>>            System.out.println(doc.get("id"));
+>>            System.out.println(doc.get("content"));
+>>        }
+>>    }
+>>
+>>    public static void main(String args[]) throws Exception{
+>>         SimpleSearcher searcher = new SimpleSearcher();
+>>        String queryString = args[0];
+>>        System.out.println("Quering for :" + queryString);
+>>        searcher.searchIndex(queryString, "core0");
+>>    }
+>>
+>> }
+>>
+>> ---------------
+>> When I tried intially without having the core0 directory, it automatically
+>> created that. Its fine, but I'm not able to figure what is the issue, why
+>> the data is getting overwritten. Some silly mistakes some where. Can some
+>> one point me that?
+>> And this is the code snip that I'm using to post to lucene index.
+>>
+>> public void postToSolr(String rawText, String pageId) throws Exception{
+>>        // Which solr core are we posting to???
+>>        //String solrCoreId = getCoreId(pageId);
+>>        String coreId = "core0";
+>>        SimpleIndexer indexer = new SimpleIndexer();
+>>        indexer.createIndex(rawText, pageId, coreId);
+>>
+>>    }
+>>
+>> NB: I din't pay attention to change the names , so you might find the word
+>> "solr" here and there. I was using that earlier, but bcoz of lack of
+>> facility of creating new separate indexes I moved to lucene today only. I
+>> guess trying to crete a new index with non-existing directory will
+>> automatically create it, which is what i want. Correct me if i'm wrong. As
+>> I
+>> mentioned earlier for each domain [say www.bcd.co.uk] I want to have a
+>> separate index and coreId is a map of this URL to a unique number. Do let
+>> me
+>> know if i'm going wrong anywhere of if you feel it can be done in any
+>> other
+>> better way.
+>>
+>>
+>> Thanks,
+>> KK.
+>>
+>>
+>> On Wed, May 20, 2009 at 4:10 PM, Anshum <anshumg@gmail.com> wrote:
+>>
+>>
+>>
+>>> Hi KK,
+>>>
+>>> Easier still, you could just open the indexwriter with the last (3rd)
+>>> arguement as true, this way the indexwriter would create a new index as
+>>> soon
+>>> as you start indexing. Also, if you just leave the indexWriter without
+>>> the
+>>> 3rd arguement, it'd conditionally create a new directory i.e. only if the
+>>> index dir doesn't exist at that location would it create a new index else
+>>> it
+>>> would append to the already existing index at that location.
+>>> Coming to the 2nd point, if you are talking about the index name, as
+>>> mentioned by John you could simply use the timestamp as the index name.
+>>>
+>>> --
+>>> Anshum Gupta
+>>> Naukri Labs!
+>>> http://ai-cafe.blogspot.com
+>>>
+>>> The facts expressed here belong to everybody, the opinions to me. The
+>>> distinction is yours to draw............
+>>>
+>>>
+>>> On Wed, May 20, 2009 at 3:23 PM, John Byrne <john.byrne@propylon.com>
+>>> wrote:
+>>>
+>>>
+>>>
+>>>> You can do this with pure Java. Create a file object with the path you
+>>>> want, check if it exists, and it not, create it:
+>>>>
+>>>> File newIndexDir = new File("/foo/bar")
+>>>>
+>>>> if(!newFileDir.exists())   {
+>>>>
+>>>>  newDirFile.mkdirs();
+>>>> }
+>>>>
+>>>> The 'mkdirs()' method creates any necessary parent directories.
+>>>>
+>>>> If you want to automate the generation of the path itself, then there
+>>>> are
+>>>> several ways to do it, but the best way really depends on *why* you're
+>>>> generating a new index. For instance, you could just create a
+>>>> timestamped
+>>>> name, but that name might not be very meaningful.
+>>>>
+>>>> Hope that helps!
+>>>>
+>>>> -John
+>>>>
+>>>> KK wrote:
+>>>>
+>>>>
+>>>>
+>>>>> How to create a new index? everytime I need to do so , I've to create
+a
+>>>>> new
+>>>>> directory and put the path to that, right? how to automate the creation
+>>>>>
+>>>>>
+>>>> of
+>>>
+>>>
+>>>> new directory?
+>>>>>
+>>>>> I'm a new user of lucene. Please help me out.
+>>>>>
+>>>>> Thanks,
+>>>>> KK.
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>
+>>>  ------------------------------------------------------------------------
+>>>
+>>>
+>>>> No virus found in this incoming message.
+>>>>> Checked by AVG - www.avg.com Version: 8.5.339 / Virus Database:
+>>>>> 270.12.35/2123 - Release Date: 05/19/09 17:59:00
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>>>
+>>>
+>>  ------------------------------------------------------------------------
+>>
+>>
+>> No virus found in this incoming message.
+>> Checked by AVG - www.avg.com Version: 8.5.339 / Virus Database:
+>> 270.12.35/2123 - Release Date: 05/19/09 17:59:00
+>>
+>>
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

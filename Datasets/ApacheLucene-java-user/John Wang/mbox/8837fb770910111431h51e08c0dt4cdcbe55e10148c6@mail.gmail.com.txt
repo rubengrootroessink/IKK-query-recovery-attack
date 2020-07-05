@@ -1,0 +1,223 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: Realtime & distributed
+DATE: 11 Oct 2009
+
+Hi Eric:
+
+I regret the direction the thread has taken and partly take responsibility
+for it...
+
+As to your question:
+
+We have 2 nodes per commodity server, each holding 5 million docs (although
+given the numbers we are seeing, we think we were a bit too conservative,
+and may increase to 10). In terms of indexing, each partition is doing
+indexing in realtime. We have total about 12 partitions, so 6 machines. With
+about 4 - 5 replications.
+
+RamDir only holds the transient index, once flushed to the disk index,
+RamDir is emptied. So yes, it is the second part of your question. The trick
+is the synchronization logic as well as handling of deletes and updates
+between ram and disk index.
+
+I am not sure I can disclose what HW we are using, but Zoie is designed to
+run on commodity HW.
+
+I think it is always a good idea to archive your data. Since with our setup,
+we have replications that holds its own copy of the index, so there is
+already redundancy. So having a set of offline nodes doing just indexing is
+not necc.
+
+Yes, we are working hard to make zoie 2.9 compatible. As Jake has previously
+mentioned, Lucene 2.9 has changed alot internally
+
+(I personally think these changes are awesome and really allows applications
+the flexibility to unleash the powers of the lucene. Plus these changes are
+very performance oriented for incremental indexing, which is important to
+us. Much kudos to the lucene team and the contributors)
+
+so to fully take advantage of this work while maintaining backward
+compatibility is not a trivial project.
+
+Expect to see another maintenance release of zoie before 2.9. We hope to
+have 2.9 work done soon, but in terms of timing, lucene 3.0 (partiticularly
+looking forward to custom indexing) is also coming out, we are deciding
+whether to wait and include 3.0.
+
+Hope this helps.
+
+-John
+
+On Sun, Oct 11, 2009 at 1:51 PM, Angel, Eric <eangel@business.com> wrote:
+
+> Man, this thread really went south.  Anyhow, I have a few questions about
+> Zoie:
+>
+> * How many nodes are you using to support the speeds you desire at LI?
+> * Am I wrong to assume that the RAMDir holds the entire index - just as the
+> FSDir?  Or does RAMDir only hold a portion of the index that hasn't yet been
+> flushed to disk?
+> * Katta is supposed to be able to be able to run on commodity hardware - is
+> that the same case for Zoie?
+> * Would you agree that it's a good idea to build an "offline" index
+> parallel to the online index in case there is a crash on the online index
+> and data is lost?
+> * I see that there are plans to have Zoie use Lucene 2.9.  How long would
+> you say before it's available?
+>
+> Thanks,
+>
+> E
+>
+> -----Original Message-----
+> From: Jason Rutherglen [mailto:jason.rutherglen@gmail.com]
+> Sent: Sat 10/10/2009 12:16 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Realtime & distributed
+>
+> John,
+>
+> Actually everyone is entitled to their technical opinion and
+> none of the comments were misleading. Jake and yourself
+> validated that they are true in your comments. I'm simply trying
+> to create better technology as is everyone on here. The process
+> takes time and coordination between many parties of many
+> backgrounds around the globe. Sometimes there are differences of
+> opinion, however those are easily ironed out over time (and quite
+> frankly in this case benchmarks).
+>
+> However I am very concerned about your ignorant disregard of some of the
+> most basic human rights in existence.
+>
+> -J
+>
+> On Thu, Oct 8, 2009 at 10:26 PM, John Wang <john.wang@gmail.com> wrote:
+> > Jason:
+> >        I would really appreciate it if you would stop making false
+> > statements and misinformation. Everyone is entitled to his/her opinions
+> on
+> > technologies, but deliberately making misleading and false information on
+> > such a distribution is just unethical, and you'll end up just
+> discrediting
+> > yourself.
+> >
+> >        Making unsubstantiated comments while not willing to put in any
+> > effort is the primary reason you are no longer working at Linkedin and on
+> > Zoie.
+> >
+> > "The problem
+> > with this is, merging in the background becomes really tricky
+> > unless it's performed inside of IndexWriter" - *what does this really
+> mean?
+> > Merging happens regardless in an incremental indexing system. Especially
+> > with high indexing load, segments are created often, merging is crucial.*
+> > "There is the Zoie system which uses the RAMDir
+> > solution, however it's implemented using a customized deleted
+> > doc set based on a bloomfilter backed by an inefficient RB tree
+> > which slows down queries"  -* if you ever spend the time to read the
+> code,
+> > (even when you were working on it), it is just not true. We did have an
+> RB
+> > set for deleted docs, quite a few releases ago, and we changed to a
+> special
+> > type of bloomfilter set backed by a hash int set. You knew this and was
+> part
+> > of the discussion on it, and now saying such a thing is just plain
+> > disappointing.*
+> >
+> >        Thanks Jake for the clarification, and Eric, let me know if you to
+> > know more in detail with how we are dealing with realtime indexing/search
+> > with Zoie here at linkedin in a production environment powering a real
+> > internet company with real traffic.
+> >
+> > -John
+> >
+> > On Thu, Oct 8, 2009 at 7:56 PM, Jason Rutherglen <
+> jason.rutherglen@gmail.com
+> >> wrote:
+> >
+> >> Eric,
+> >>
+> >> Katta doesn't require HDFS which would be slow to search on,
+> >> though Katta can be used to copy indexes out of HDFS onto local
+> >> servers. The best bet is hardware that uses SSDs because merges
+> >> and update latency will greatly decrease and there won't be a
+> >> synchronous IO issue as there is with hard drives. Also, IO
+> >> caches get flushed as large merges occur, which means subsequent
+> >> queries may hit the HD and slow down. With SSDs this is much
+> >> less of an issue.
+> >>
+> >> Today near realtime search (with or without SSDs) comes at a
+> >> price, that is reduced indexing speed due to continued in RAM
+> >> merging. People typically hack something together where indexes
+> >> are held in a RAMDir until being flushed to disk. The problem
+> >> with this is, merging in the background becomes really tricky
+> >> unless it's performed inside of IndexWriter (see LUCENE-1313 and
+> >> IW.getReader). There is the Zoie system which uses the RAMDir
+> >> solution, however it's implemented using a customized deleted
+> >> doc set based on a bloomfilter backed by an inefficient RB tree
+> >> which slows down queries. There's always a trade off when trying
+> >> to build an NRT system, currently.
+> >>
+> >> Also, there isn't a clear way to replicate segments in realtime
+> >> so people usually end up analyzing documents on each replicated
+> >> node, which is redundant. A long term solution here could be a
+> >> distributed transaction log where encoded segments are stored
+> >> and replicated to N nodes.
+> >>
+> >> Deletes can pile up in segments so the
+> >> BalancedSegmentMergePolicy could be used to remove those faster
+> >> than LogMergePolicy, however I haven't tested it, and it may be
+> >> trying to not do large segment merges altogether which IMO
+> >> is less than ideal because query performance soon degrades
+> >> (similar to an unoptimized index).
+> >>
+> >> Hopefully in the future we can offer searching over
+> >> IndexWriter's RAM buffer where indexing and search speed would
+> >> be roughly what it is today. That combined with a way to insure
+> >> segments don't get flushed out of the IO cache during large
+> >> segment merges would mean really efficient NRT, even on systems
+> >> with HDs. In the interim, you'd need to play around and see what
+> >> works for your requirements.
+> >>
+> >> -J
+> >>
+> >> On Thu, Oct 8, 2009 at 7:00 PM, Angel, Eric <eangel@business.com>
+> wrote:
+> >> >
+> >> > Does anyone have any recommendations?  I've looked at Katta, but it
+> >> doesn't
+> >> > seem to support realtime searching.  It also uses hdfs, which I've
+> heard
+> >> can
+> >> > be slow.  I'm looking to serve 40gb of indexes and support about 1
+> >> million
+> >> > updates per day.
+> >> >
+> >> > Thx
+> >> >
+> >> > ---------------------------------------------------------------------
+> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

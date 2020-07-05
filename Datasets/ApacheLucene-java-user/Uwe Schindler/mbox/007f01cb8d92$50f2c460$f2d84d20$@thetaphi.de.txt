@@ -1,0 +1,71 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: best practice: 1.4 billions documents
+DATE: 26 Nov 2010
+
+This is the problem for Fuzzy: each searcher expands the fuzzy query to a
+different Boolean Query and so the scores are not comparable - MultiSearcher
+(but not Solr) tries to combine the resulting rewritten queries into one
+query, so every searcher has the same query.
+
+And here starts the second bug: If one of the clauses of a BQ are negative
+MTQs (MUST_NOT), then the result is wrong - and this is not fixable as it
+not only affects BQ. Also MTQs that rewrite to Span (like the new
+SpanOrWrapper) are totally wrong combined. The problem is that the negative
+clauses are only correct for the searcher they were created for. If you pass
+the rewritten query to another searcher (what MultiSearcher does) it may not
+exclude all needed documents, because some TermQueries or whatever are
+missing (because the got no term hit in the first searcher). The combine
+method is too stupid and does not handle that correctly.
+
+And the latter is the big problem:
+https://issues.apache.org/jira/browse/LUCENE-2756 (sorry the issue is not
+filled with all necessary information, as Robert an Me had lots of sleepless
+nights and discussions and tests done and came to the final answer: It's
+unfixable :( for all queries)
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: yseeley@gmail.com [mailto:yseeley@gmail.com] On Behalf Of Yonik
+> Seeley
+> Sent: Friday, November 26, 2010 3:28 PM
+> To: java-user@lucene.apache.org; Uwe Schindler
+> Subject: Re: best practice: 1.4 billions documents
+> 
+> On Mon, Nov 22, 2010 at 12:49 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> >  (Fuzzy scores on
+> > MultiSearcher and Solr are totally wrong because each shard uses
+> > another rewritten query).
+> 
+> Hmmm, really?  I thought that fuzzy scoring should just rely on edit
+distance?
+> Oh wait, I think I see - it's because we can use a hard cutoff for the
+number of
+> expansions rather than an edit distance cutoff.  If we used the latter,
+everything
+> should be fine?
+> 
+> The fuzzy issue I would classify as "working as designed".  Either that,
+or classify
+> FuzzyQuery as broken.  A cuttoff based on number of terms will yield
+strange
+> results even on a single index.  Consider this scenario: it's possible to
+add more
+> docs to a single index and have the same fuzzy query return fewer docs
+than it
+> did before!
+> 
+> -Yonik
+> http://www.lucidimagination.com
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

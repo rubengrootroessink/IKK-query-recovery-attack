@@ -1,0 +1,69 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: problems with lucene in multithreaded environment
+DATE: 4 Jun 2004
+
+Jayant Kumar wrote:
+> Please find enclosed jvmdump.txt which contains a dump
+> of our search program after about 20 seconds of
+> starting the program.
+> 
+> Also enclosed is the file queries.txt which contains
+> few sample search queries.
+
+Thanks for the data.  This is exactly what I was looking for.
+
+> "Thread-14" prio=1 tid=0x080a7420 nid=0x468e waiting for monitor entry [4d61a000..4d61ac18]
+>         at org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:112)
+>         - waiting to lock <0x44c95228> (a org.apache.lucene.index.TermInfosReader)
+> 
+> "Thread-12" prio=1 tid=0x080a58e0 nid=0x468e waiting for monitor entry [4d51a000..4d51ad18]
+>         at org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:112)
+>         - waiting to lock <0x44c95228> (a org.apache.lucene.index.TermInfosReader)
+
+These are all stuck looking terms up in the dictionary (TermInfos). 
+Things would be much faster if your queries didn't have so many terms.
+
+> Query : (  (  (  (  (  FIELD1: proof OR  FIELD2: proof OR  FIELD3: proof OR  FIELD4:
+proof OR  FIELD5: proof OR  FIELD6: proof OR  FIELD7: proof ) AND (  FIELD1: "george bush"
+OR  FIELD2: "george bush" OR  FIELD3: "george bush" OR  FIELD4: "george bush" OR  FIELD5:
+"george bush" OR  FIELD6: "george bush" OR  FIELD7: "george bush" )  ) AND (  FIELD1: script
+OR  FIELD2: script OR  FIELD3: script OR  FIELD4: script OR  FIELD5: script OR  FIELD6: script
+OR  FIELD7: script )  ) AND (  (  FIELD1: san OR  FIELD2: san OR  FIELD3: san OR  FIELD4:
+san OR  FIELD5: san OR  FIELD6: san OR  FIELD7: san ) OR (  (  FIELD1: war OR  FIELD2: war
+OR  FIELD3: war OR  FIELD4: war OR  FIELD5: war OR  FIELD6: war OR  FIELD7: war ) OR (  (
+ FIELD1: gulf OR  FIELD2: gulf OR  FIELD3: gulf OR  FIELD4: gulf OR  FIELD5: gulf OR  FIELD6:
+gulf OR  FIELD7: gulf ) OR (  (  FIELD1: laden OR  FIELD2: laden OR  FIELD3: laden OR  FIELD4:
+laden OR  FIELD5: laden OR  FIELD6: laden OR  FIELD7: laden ) OR (  (  FIE
+LD1: ttouristeat OR  FIELD2: ttouristeat OR  FIELD3: ttouristeat OR  FIELD4: ttouristeat OR
+ FIELD5: ttouristeat OR  FIELD6: ttouristeat OR  FIELD7: ttouristeat ) OR (  (  FIELD1: pow
+OR  FIELD2: pow OR  FIELD3: pow OR  FIELD4: pow OR  FIELD5: pow OR  FIELD6: pow OR  FIELD7:
+pow ) OR (  FIELD1: bin OR  FIELD2: bin OR  FIELD3: bin OR  FIELD4: bin OR  FIELD5: bin OR
+ FIELD6: bin OR  FIELD7: bin )  )  )  )  )  )  )  )  ) AND  RANGE: ([ 0800 TO 1100 ]) AND
+ (  S_IDa: (7 OR 8 OR 9 OR 10 OR 11 OR 12 OR 13 OR 14 OR 15 OR 16 OR 17 )  or  S_IDb: (2 )
+ )
+
+All your queries look for terms in fields 1-7.  If you instead combined 
+the contents of fields 1-7 in a single field, and searched that field, 
+then your searches would contain far fewer terms and be much faster.
+
+Also, I don't know how many terms your RANGE queries match, but that 
+could also be introducing large numbers of terms which would slow things 
+down too.
+
+But, still, you have identified a bottleneck: TermInfosReader caches a 
+TermEnum and hence access to it must be synchronized.  Caching the enum 
+greatly speeds sequential access to terms, e.g., when merging, 
+performing range or prefix queries, etc.  Perhaps however the cache 
+should be done through a ThreadLocal, giving each thread its own cache 
+and obviating the need for synchronization...
+
+Please tell me if you are able to simplify your queries and if that 
+speeds things.  I'll look into a ThreadLocal-based solution too.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,157 @@
+FROM: maureen tanuwidjaja <autumn_musi...@yahoo.com>
+SUBJECT: Re: Lock obtain timed out SimpleFSLock
+DATE: 25 Jan 2007
+
+
+  Hi Mike,thanks for the reply...
+  
+  
+  1.Here is the class that I use for indexing..
+  
+  package edu.ntu.ce.maureen.index;
+  
+  import org.apache.lucene.index.IndexWriter;
+  import org.apache.lucene.analysis.Analyzer;
+  import org.apache.lucene.analysis.standard.StandardAnalyzer;
+  import org.apache.lucene.document.Document;
+  import org.apache.lucene.document.Field;
+  import edu.ntu.ce.maureen.search.MySimilarity;
+  
+  import java.lang.String;
+  
+  
+  public class DocumentIndexer
+  {
+      public IndexWriter writer;
+      public Analyzer analyzer;
+      public Document doc;
+      public String indexDir;
+  
+      public Document getDoc(){
+          return doc;
+      }
+      public DocumentIndexer(int index,String f)
+      {
+      indexDir = "C:/sweetpea/dual_index/DI";
+      analyzer = new StandardAnalyzer();
+      
+      try{
+      writer = new IndexWriter(indexDir, analyzer,index  ==0);//true if index ==0,or the first
+document is indexed...which means  it creates new lucene indexfile,and false for the next
+documents  (append to existing indexfile)
+  
+      writer.setSimilarity(new MySimilarity());
+          doc = new Document();
+          doc.add(new  Field("filename",f,Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.YES));
+      }catch (Exception e) {
+          System.out.println(e.toString());
+      }
+      
+      }
+  
+  
+      public void setIndex(XMLData current,String f){
+      try{
+      doc.add(new Field(current.tag,current.value,Field.Store.YES,Field.Index.TOKENIZED,Field.TermVector.YES));
+      }catch(Exception e){}
+      }
+      
+      public Document closeIndex(){
+          try{
+          writer.addDocument(doc);
+          writer.close();
+          //System.out.println("index closed..");
+          }
+          catch(Exception e){
+              
+          }
+          return doc;
+      }
+  }
+
+  2.The class above(DocumentIndexer.java) is called by the main ,here is the part of the code:
+  
+  
+          File[] listfiles = dir.listFiles();
+          for (int i = 0;i< listfiles.length ;i++)
+          {
+              if (listfiles[i].isDirectory())
+              {
+                  FileTraverse(listfiles[i], myMap2,counter);
+                  continue;
+              }
+  
+              if (!listfiles[i].toString().endsWith(".xml")) continue;
+              
+              String filename = listfiles[i].getAbsolutePath();
+               DocumentIndexer luceneIndex = new  DocumentIndexer(counter,filename);//this
+counter is initially set to 0  so that for the first file  indexed,it creates new index (the
+IndexWriter flag set to true and  false otherwise) and later it is incremented.
+  
+              
+              System.out.println("Indexing "+luceneIndex.getDoc().get("filename"));
+               indexing(luceneIndex,filename,myMap2);//this method will basically  call  setIndex(XMLData
+current,String f) of the DocumentIndexer  class
+              
+              AssignTagNormFactor("article/",1.0,myMap2,luceneIndex.getDoc());
+              counter++;//a file has succesfully indexed,increment the counter
+               luceneIndex.closeIndex();//  ==>I close the index already,so it  should
+have released the lock....
+          }
+  
+  
+  3.I have deleted the directory where the indexfile exist and try to  index from the beginning...I
+dunno wheter 7 hrs later it will raise the  same problem"Lock obtain timed out"
+  
+  4.I use the latest version of Lucene (nightly build)
+  
+  Thanks and Regards,
+  Maureen
+  
+Michael McCandless <lucene@mikemccandless.com> wrote:  maureen tanuwidjaja wrote:
+
+>   I am indexing thousands of XML document,then it stops after indexing for about 7 hrs
+>    
+>   ...
+>   Indexing C:\sweetpea\wikipedia_xmlfiles\part-0\37027.xml
+>   java.io.IOException: Lock obtain timed out: SimpleFSLock@C:\sweetpea\dual_index\DI\write.lock
+>   java.lang.NullPointerException
+>    
+>   Can anyone suggest how to overcome this lock time out error?
+
+Which version of Lucene are you using?
+
+(Looks like it may be a recent trunk nightly build since the
+write.lock is stored in the index directory?).
+
+This often happens if the JVM exited un-gracefully previously and left
+the "write.lock" in the filesystem.  If that's what's hitting you then
+you can just remove that file and restart your indexing process.  You
+also might want to try switching to the NativeFSLockFactory (if you
+are using trunk) locking implementation.  Because it uses native (OS
+level) locking, the locks are always freed by the OS when the JVM
+exits.
+
+Also make sure you're not accidentally trying to create two writers
+in the same index.  There can be only one.
+
+If that's not what's happening here, can you provide more details
+about how you are using Lucene?  Is there only one IndexWriter, that you
+periodically close / reopen?  The IndexWriter only acquires this lock
+when it's first instantiated.
+
+Also: where is the java.lang.NullPointerException coming from?  Can
+you provide a traceback?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+ 
+---------------------------------
+Don't get soaked.  Take a quick peak at the forecast 
+ with theYahoo! Search weather shortcut.

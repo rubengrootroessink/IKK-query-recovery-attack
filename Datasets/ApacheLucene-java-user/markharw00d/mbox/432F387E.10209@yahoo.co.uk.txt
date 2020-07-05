@@ -1,0 +1,183 @@
+FROM: markharw00d <markharw...@yahoo.co.uk>
+SUBJECT: Re: Sort by relevance+distance
+DATE: 19 Sep 2005
+
+Here's an example I put together to illustrate the point.
+
+
+package distance;
+
+import java.io.IOException;
+import java.util.ArrayList;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.queryParser.ParseException;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.HitCollector;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.util.PriorityQueue;
+
+public class TestDistance
+{
+
+    private static QueryParser parser;
+    private static IndexReader reader;
+    private static Location[] locsCache;
+    private static IndexSearcher searcher;
+    /**
+     * @param args
+     */
+    public static void main(String[] args) throws Exception
+    {
+        Analyzer analyzer=new WhitespaceAnalyzer();
+        RAMDirectory dir=new RAMDirectory();
+        IndexWriter writer=new IndexWriter(dir,analyzer,true);
+        addDoc(writer,"the faraway mouse", 500,500);
+        addDoc(writer,"the semilocal cat", 50,50);
+        addDoc(writer,"the local dog", 20,20);
+        writer.close();
+        searcher=new IndexSearcher(dir);
+        parser=new QueryParser("description", analyzer);
+
+        //create location cache
+        reader = searcher.getIndexReader();
+        ArrayList allLocs=new ArrayList();
+        int docCount=reader.numDocs();
+        for (int i = 0; i < docCount; i++)
+        {
+            Document doc=reader.document(i);
+            allLocs.add(new Location(
+                            Float.parseFloat(doc.get("lat")),
+                            Float.parseFloat(doc.get("lon"))
+                            )
+                        );
+        }
+        locsCache=new Location[reader.numDocs()];
+        locsCache= (Location[]) allLocs.toArray(new 
+Location[allLocs.size()]);
+       
+        //example search 1
+        runSearch("the cat");
+       
+        runSearch("the dog");
+       
+        runSearch("the mouse");
+       
+       
+    }
+   
+    private static void runSearch(String queryString) throws 
+ParseException, IOException
+    {
+        System.out.println("query:"+queryString);
+        Query query=parser.parse(queryString);
+        Location queryLocation=new Location(1f,1f);
+        RelevanceAndDistanceCollector collector=new 
+RelevanceAndDistanceCollector(10,
+                    queryLocation,locsCache);
+        searcher.search(query,collector);
+        ScoreDoc[] results = collector.getMatches();
+        for (int i = 0; i < results.length; i++)
+        {
+            Document doc=reader.document(results[i].doc);
+            System.out.print("["+results[i].doc+"]");
+            System.out.print("("+results[i].score+")");
+            System.out.println("\t"+doc.get("description"));
+        }
+        System.out.println("");
+    }
+
+
+    public static void addDoc(IndexWriter writer,String description, 
+float lat, float lon) throws IOException
+    {
+        Document doc=new Document();
+        doc.add(Field.UnIndexed("lat", ""+lat));
+        doc.add(Field.UnIndexed("lon", ""+lon));
+        doc.add(Field.Text("description",description));
+        writer.addDocument(doc);       
+    }
+    static class Location
+    {
+        float lat;
+        float lon;
+        public Location(float lat, float lon)
+        {
+            this.lat=lat;
+            this.lon=lon;
+        }
+        public float distance(Location loc)
+        {
+            float latDiff = Math.abs(loc.lat-lat);
+            float lonDiff = Math.abs(loc.lon-lon);
+            float dist=(float) 
+Math.sqrt((latDiff*latDiff)+(lonDiff*lonDiff));
+            return dist;
+        }
+       
+    }
+    static class RelevanceAndDistanceCollector extends HitCollector
+    {
+        HitQueue hq;
+        Location queryLocation;
+        float maxDistance=5000;
+        private Location[] docLocs;
+       
+        public RelevanceAndDistanceCollector(int numDocs, Location 
+queryLocation, Location[] docLocs)
+        {
+            this.queryLocation=queryLocation;
+            this.docLocs=docLocs;
+            hq=new HitQueue(numDocs);
+        }
+        public void collect(int doc, float score)
+        {
+            score=score*(maxDistance-queryLocation.distance(docLocs[doc]));
+            hq.insert(new ScoreDoc(doc,score));           
+        }   
+        public ScoreDoc[] getMatches()
+        {
+            ScoreDoc sd[]=new ScoreDoc[hq.size()];
+            while(hq.size()>0)
+            {
+                sd[hq.size()-1]=(ScoreDoc) hq.pop();
+            }
+            return sd;
+        }
+    }
+    static  class HitQueue extends PriorityQueue {
+          public HitQueue(int size) {
+            initialize(size);
+          }
+          public final boolean lessThan(Object a, Object b) {
+            ScoreDoc hitA = (ScoreDoc)a;
+            ScoreDoc hitB = (ScoreDoc)b;
+            if (hitA.score == hitB.score)
+              return hitA.doc > hitB.doc;
+            else
+              return hitA.score < hitB.score;
+          }
+        }   
+
+}
+
+
+
+		
+___________________________________________________________ 
+How much free photo storage do you get? Store your holiday 
+snaps for FREE with Yahoo! Photos http://uk.photos.yahoo.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

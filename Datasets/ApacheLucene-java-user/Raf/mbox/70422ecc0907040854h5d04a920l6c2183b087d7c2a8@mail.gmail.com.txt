@@ -1,0 +1,218 @@
+FROM: Raf <r.ventag...@gmail.com>
+SUBJECT: Re: How to use RegexTermEnum
+DATE: 4 Jul 2009
+
+It works, thanks.
+I thought I had to call next() to know IF there was a term, as you normally
+do with hasNext() - next() using iterators, but I was wrong.
+
+So, in order to know if there is a match, I have to check if rte.term() is
+null, correct?
+Than I can use next() to look for additional matches.
+
+<code>
+... ... ...
+       String urlToSearch = "http://digiland
+\\.libero\\.it/forum/viewtopic\\.php\\?p=3432889\\&.*#3432889";
+        RegexTermEnum rte = new RegexTermEnum(reader, new Term("url",
+urlToSearch), regexpCapabilities);
+        int count = 0;
+        while (rte.term() != null) {
+            System.out.println(rte.term() + " " + rte.docFreq());
+            rte.next();
+            count++;
+        }
+        assertEquals(1, count);
+
+... ... ...
+</code>
+
+I find this a bit confusing, but at least I have solved my problem now :)
+
+Thank you very much Erick.
+
+Bye
+Raf
+
+
+On Fri, Jul 3, 2009 at 9:03 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+
+> WARNING: I haven't actually tried using RegexTermEnum in a
+> long time, but...
+>
+> I *think* that the constructor positions you at the first term that
+> matches, without calling next(). At least there's nothing I saw
+> in the documentation that indicates you need to call next() before
+> calling term().
+>
+> Assuming that's true, I think you're skipping the first term by calling
+> next() before incrementing your count.
+>
+> At least it's worth a try <G>....
+>
+> Best
+> Erick
+>
+> On Fri, Jul 3, 2009 at 12:27 PM, Raf <r.ventaglio@gmail.com> wrote:
+>
+> > Hi,
+> > I am trying to solve the following problem:
+> > In my index I have a "url" field added as Field.Store.YES,
+> > Field.Index.NOT_ANALYZED and I must use this field as a "key" to identify
+> a
+> > document.
+> >
+> > The problem is that sometimes two urls can differ only because they
+> contain
+> > a different session id:
+> > i.e.  I would like to identify that
+> >
+> >
+> http://digiland.libero.it/forum/viewtopic.php?p=3432879&sid=70acaeab02505591827a90fe5010f45c#3432879
+> > and
+> >
+> >
+> http://digiland.libero.it/forum/viewtopic.php?p=3432879&sid=70acaeab505d98a8229c10fe5010f45c#3432879
+> > are the same document!
+> >
+> > So I have tried using a regular expression, to ignore the sid and match
+> > both
+> > documents: "http://digiland
+> > \\.libero\\.it/forum/viewtopic\\.php\\?p=3432879\\&.*#3432879".
+> >
+> > At this point, I would like to retrieve all terms that satisfy my regex
+> so
+> > I
+> > tried to use a RegexTermEnum, but it returns to me only one of the two
+> > documents.
+> > Actually, it seems to me that it does not return the "first" match.
+> > So, if I have only one match in my index, RegexTermEnum returns nothing,
+> if
+> > I have two matches, it returns one doc, and so on.
+> >
+> > Here you can find a simple test that shows the problem (both assert
+> fail):
+> >
+> > <code>
+> > package it.celi.search;
+> >
+> > import static org.junit.Assert.assertEquals;
+> >
+> > import java.io.IOException;
+> >
+> > import org.apache.lucene.analysis.KeywordAnalyzer;
+> > import org.apache.lucene.document.Document;
+> > import org.apache.lucene.document.Field;
+> > import org.apache.lucene.index.IndexReader;
+> > import org.apache.lucene.index.IndexWriter;
+> > import org.apache.lucene.index.Term;
+> > import org.apache.lucene.index.IndexWriter.MaxFieldLength;
+> > import org.apache.lucene.search.regex.JakartaRegexpCapabilities;
+> > import org.apache.lucene.search.regex.RegexTermEnum;
+> > import org.apache.lucene.store.Directory;
+> > import org.apache.lucene.store.RAMDirectory;
+> > import org.junit.After;
+> > import org.junit.Before;
+> > import org.junit.Test;
+> >
+> > public class RegexLuceneTest {
+> >
+> >    private Directory directory;
+> >
+> >    @Before
+> >    public void setUp() throws Exception {
+> >
+> >        this.directory = new RAMDirectory();
+> >        this.addDocsToIndex();
+> >    }
+> >
+> >    @After
+> >    public void tearDown() throws Exception {
+> >    }
+> >
+> >    @Test
+> >    public void test() throws IOException {
+> >
+> >        IndexReader reader = IndexReader.open(this.directory);
+> >        System.out.println("Num docs: " + reader.numDocs());
+> >
+> >        JakartaRegexpCapabilities regexpCapabilities = new
+> > JakartaRegexpCapabilities();
+> >
+> >        String urlToSearch = "http://digiland
+> > \\.libero\\.it/forum/viewtopic\\.php\\?p=3432889\\&.*#3432889";
+> >        RegexTermEnum rte = new RegexTermEnum(reader, new Term("url",
+> > urlToSearch), regexpCapabilities);
+> >        int count = 0;
+> >        while (rte.next()) {
+> >            System.out.println(rte.term() + " " + rte.docFreq());
+> >            count++;
+> >        }
+> >        assertEquals(1, count);
+> >
+> >        urlToSearch = "http://digiland
+> > \\.libero\\.it/forum/viewtopic\\.php\\?p=3432879\\&.*#3432879";
+> >        rte = new RegexTermEnum(reader, new Term("url", urlToSearch),
+> > regexpCapabilities);
+> >        count = 0;
+> >        while (rte.next()) {
+> >            System.out.println(rte.term() + " " + rte.docFreq());
+> >            count++;
+> >        }
+> >        assertEquals(2, count);
+> >
+> >    }
+> >
+> >    private void addDocsToIndex() throws IOException {
+> >
+> >        IndexWriter writer = new IndexWriter(directory, new
+> > KeywordAnalyzer(), true, MaxFieldLength.UNLIMITED);
+> >
+> >        Document doc = new Document();
+> >        doc.add(new Field("url", "
+> >
+> >
+> http://digiland.libero.it/forum/viewtopic.php?p=3432879&sid=70acaeab02505591827a90fe5010f45c#3432879
+> > ",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        doc.add(new Field("contents", "contenuto documento 1",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        writer.addDocument(doc);
+> >
+> >        doc = new Document();
+> >        doc.add(new Field("url", "
+> >
+> >
+> http://digiland.libero.it/forum/viewtopic.php?p=3432889&sid=16c7ea74d98a8229c1ddd4800a2738ec#3432889
+> > ",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        doc.add(new Field("contents", "contenuto documento 2",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        writer.addDocument(doc);
+> >
+> >        doc = new Document();
+> >        doc.add(new Field("url", "
+> >
+> >
+> http://digiland.libero.it/forum/viewtopic.php?p=3432879&sid=70acaeab505d98a8229c10fe5010f45c#3432879
+> > ",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        doc.add(new Field("contents", "contenuto documento 3",
+> > Field.Store.YES, Field.Index.NOT_ANALYZED));
+> >        writer.addDocument(doc);
+> >
+> >        writer.optimize();
+> >        writer.close();
+> >    }
+> >
+> > }
+> > </code>
+> >
+> > What am I missing?
+> > Thanks.
+> >
+> > Bye,
+> > Raf
+> >
+>
+

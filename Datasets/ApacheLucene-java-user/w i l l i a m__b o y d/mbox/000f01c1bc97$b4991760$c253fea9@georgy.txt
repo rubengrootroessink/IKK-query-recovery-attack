@@ -1,0 +1,96 @@
+FROM: "w i l l i a m__b o y d" <w...@javafreelancer.com>
+SUBJECT: RE: JSP Parser class wanted
+DATE: 23 Feb 2002
+
+i have had some success in solving my problem. mind you, it is a hack; a quick fix. it may
+or may not work for everyone. also the jsp pages i am indexing/searching have very little
+dynamically generated content. they are mostly static. 
+
+my problem was there was too much gobbledy-gook turning up in the summary. i only wanted content
+from the main body of the document to appear in the summary. since all of my relevant body
+content is inside <p> tags my approach was to have the parser only add stuff that is
+in <p> tags to the summary. to do that, in the HtmlParser.jj file that comes with the
+lucene demo, I added the following line amongst the other variable declarations: 
+
+        ...
+
+	boolean inPTag = false;
+
+        ...
+
+
+then i changed the addText() method to: 
+  void addText(String text) throws IOException {
+    if (inScript)
+      return;
+    if (inTitle)
+      title.append(text);
+    else {
+		if ( !inPTag )  // I added this line...
+		  return;       // ... and this line 
+      addToSummary(text);
+      if (!titleComplete && !title.equals("")) {  // finished title
+	synchronized(this) {
+	  titleComplete = true;			  // tell waiting threads
+	  notifyAll();
+	} // end synchronized blick
+      } // if
+    } // end else
+
+    length += text.length();
+    pipeOut.write(text);
+
+    afterSpace = false;
+  }
+
+
+then i changed the Tag() method to: 
+void Tag() throws IOException :
+{
+  Token t1, t2;
+  boolean inImg = false;
+}
+{
+  t1=<TagName> {
+    inTitle = t1.image.equalsIgnoreCase("<title"); // keep track if in <TITLE>
+    inImg = t1.image.equalsIgnoreCase("<img");	  // keep track if in <IMG>
+    if (inScript) {				  // keep track if in <SCRIPT>
+      inScript = !t1.image.equalsIgnoreCase("</script");
+    } else {
+      inScript = t1.image.equalsIgnoreCase("<script");
+    }
+		// i added the following if conditional:
+   if (inPTag) {				  // keep track if in p tag
+      inPTag = !t1.image.equalsIgnoreCase("</p");
+    } else {
+      inPTag = t1.image.equalsIgnoreCase("<p");
+    }		
+  }
+  (t1=<ArgName>
+   (<ArgEquals>
+    (t2=ArgValue()				  // save ALT text in IMG tag
+     {
+// I commented the next two lines out because I didn't want the contents
+// of alt tags showing up in the summary:		 
+//       if (inImg && t1.image.equalsIgnoreCase("alt") && t2 != null)
+//         addText("[" + t2.image + "]");
+     }
+    )?
+   )?
+  )*
+  <TagEnd>
+}
+
+all of the above is in addition to the other changes i mentioned in my earlier posts. 
+
+Then I recompiled HtmlParser.jj with javacc; compiled the java files that javacc produced;
+stuffed those class files into a jar; then placed the jar in the classpath so that the lucene
+indexer could see the new parser. 
+
+hope this helps. if anyone has a better solution please post it here. as i said, it's a hack.
+but with my deadline, it is all i have time for. one day i would love to spend the time really
+learning javacc and lucene inside and out. then maybe i could build a proper parser. today
+is just not that day ;¬)
+
+
+

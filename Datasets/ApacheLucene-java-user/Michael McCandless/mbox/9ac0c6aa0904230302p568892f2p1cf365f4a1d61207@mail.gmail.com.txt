@@ -1,0 +1,78 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: semi-infinite loop during merging
+DATE: 23 Apr 2009
+
+On Tue, Apr 21, 2009 at 6:40 PM, Christiaan Fluit
+<christiaan.fluit@aduna-software.com> wrote:
+
+> I may be on to something already.
+>
+> I just looked at the commitMerge code and was surprised to see that the
+> commitMerge message that is almost at the beginning wasn't printed. Then I
+> saw the "if (hitOOM) return false;" part that takes place before that. I
+> think that this can only mean that an OOME was encountered at some point in
+> time.
+
+Very interesting!  I like this theory...
+
+> Now, the fact is that in my indexing code I do a catch(Throwable) in several
+> places. I do this particularly because JET handles OOMEs in a very, very
+> nasty way. Often you will just get an error dialog and then it quits the
+> entire application. Therefore, my client code catches, logs and swallows the
+> OOME before the JET runtime can intercept it. *Usually*, the application can
+> then recover gracefully and continue processing the rest of the information.
+>
+> Catching a OOME that results from the operation of a text extraction library
+> is one thing (and a fact of life really), but perhaps there are also OOME's
+> that occur during Lucene processing.
+>
+> I remember seeing those in the past with the original Java code, when very
+> large Strings were being tokenized and I got an OOME with a deep Lucene
+> stacktrace. I copied one such stacktrace that I have saved at the end of
+> this mail.
+>
+> I see some caught and swallowed OOME's in my log file but unfortunately they
+> are without a stacktrace - probably again a JET issue. I can run the normal
+> Java build though to see if such OOMEs occur on this dataset.
+>
+> Now, I wonder:
+>
+> - when the IW is in auto-commit mode, can the failed processing of a
+> Document due to an OOME have an impact on the processing of subsequent
+> Documents or the merge/optimize operations? Can the index(writer) become
+> corrupt and result in problems such as these?
+
+On hitting OOME, Lucene refuses to commit any further changes to the
+index.  Ie, you must at that point abandon the writer
+(writer.rollback()).  We do this as a defense against the possibility
+that an OOME might otherwise cause index corruption.
+
+> - even though the commitMerge returns false, it should probably not get into
+> an infinite loop. Is this an internal Lucene problem or is there something I
+> can/should do about it myself?
+
+Yes, something is wrong with Lucene's handling of OOME.  It certainly
+should not lead to infinite merge attempts.  I'll dig (once back from
+vacation) to see if I can find this path.  Likely we need to prevent
+launching of new merges after an OOME.  I think you must've happened
+to hit OOME when a merge was running.
+
+> - more generally, what is the recommended behavior when I get an OOME during
+> Lucene processing, particularly IW.addDocument? Should the IW be able to
+> recover by itself or is there some sort of rollback I need to perform?
+
+You need to call writer.rollback().
+
+> Again, note that my index is in auto-commit mode (though I had hoped to let
+> go of that too, it's only for historic reasons).
+
+I think being in autoCommit mode shouldn't affect this, ie likely
+you'd hit the infinite loop with autoCommit=false too.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

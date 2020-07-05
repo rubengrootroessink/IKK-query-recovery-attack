@@ -1,0 +1,152 @@
+FROM: "Russell M. Allen" <Russell.Al...@aebn.net>
+SUBJECT: RE: Scoring a document (count?)
+DATE: 31 Jul 2006
+
+Thank you for the reply Doran!  You are exactly right about the sql
+count(*).  I need the equivalent of group by, and count().
+
+We have considered a 'joined' index where we would have a document for
+each permutation.  We discarded it (possibly prematurely) based on the
+rapid explosion in the number of documents.  In our domain, we have
+movies as the main document type, and 5 other satellite document types
+with their own indexes: Star, Studio, Director, Series, and Category
+(genre).  With the exception of series, a movie has a many to many
+relationship with the other indexes.  So, with 60k movies, 20k stars, 2k
+studios, ... The document count quickly shoots through the roof.
+
+Also, the majority of our searching is based on a single domain type,
+such as movie.  It is only a small handful of corner cases where we want
+what amounts to a joined query.  If we merged these indexes, we would
+constantly have to 'roll up' the results into distinct instances of a
+type.  (The equivalent of an SQL 'group by')
+
+
+I find the parallels between the expressiveness of Lucene and SQL
+interesting.  I'm glad to see you compared what I was looking for to an
+sql count(*) as well.  We have a handful of indexing issues that I am
+attempting to solve/optimize, of which performing a count(*) is only
+one.  I also have the need to perform a JOIN across two indexes.  I have
+'ideas' about how I might go about this, but for now we are fortunate
+enough to have fairly static data and half of the join is static.  As a
+result we can cache a bitset filter for the results of half the join and
+apply it to the other (dynamic) half of the join query.
+
+Anyway, I digress...
+
+I saw you second post regarding creating a scorer.  I'd like to continue
+down that path.  My main issue now is simply understanding how lucene
+works under the covers enough to write the TermQuery variant.
+
+Thanks for the help,
+Russell.
+
+
+-----Original Message-----
+From: Doron Cohen [mailto:DORONC@il.ibm.com] 
+Sent: Friday, July 28, 2006 3:19 AM
+To: java-user@lucene.apache.org
+Subject: Re: Scoring a document (count?)
+
+This task reminds me more of a count(*) sql query than a text search
+query.
+
+Assuming that using a text search engine is a pre requisite, I can think
+of two approaches - basing on Lucene scoring as suggested in the
+question, or a more simple approach (below).
+
+For the scoring approach - I don't see an easy way to get the counts
+from the score of the results, although the TF (term frequency in
+candidate
+docs) is known+used during document scoring, and although it seems that
+the application can be arranged such that TF of search result documents
+would be the required count.
+
+But perhaps a more straight forward solution can do - adding a Lucene
+document for each star-movie pair. This would also allow easy update
+when a new movie arrives: just add a document for each "star" in that
+movie. A document can have these fields:
+   StarFirstName - stored, untokenized
+   StarLastName - stored, untokenized
+   MovieName - stored, tokenized
+   MovieType - stored, untokenized - this is the pre-computed type
+mentioned below
+   MovieProps  - unstored, tokenized - the word "horror" can appear in
+this field, avoiding a pre-computation step.
+Now a single search can do all the work:
+   +StarLastName:A* +MovieProps:horror
+Sorting results by StarLastName would group all results of same "star"
+and also allow to count them for each star.
+
+This would create more documents in the index -  #stars * |#movies per
+star| - so there may be performance considerations, depending on the 
+star| volume
+of the data...
+
+Regards,
+Doron
+
+"Russell M. Allen" <Russell.Allen@aebn.net> wrote on 27/07/2006
+09:02:46:
+
+> I am curious about the potential use of document scoring as a means to
+
+> extract additional data from an index.  Specifically, I would like the
+
+> score to be a count of how many times a particular field matched a set
+
+> of terms.
+>
+> For example, I am indexing movie-stars (Each document is a
+movie-star).
+> A movie-star has a number of fields, such as name, movies they have 
+> been in, etc.  I want to produce an 'index' of stars by name and show 
+> how many movies, which match a filter, that they have appeared in.
+>
+> In natural language my query might be:
+>    "List all stars who have appeared in a 'horror' movie, where last 
+> name starts with A, and tell me how many horror movies they were in."
+>
+> My search will look something like this:
+>    "+lastName:A* +movie:(1 7 21 58 92)"   //where movie is a
+> previously computed list of 'horror' movie ids
+>
+> If my index contained the following documents:
+>     doc1 = lastName:Anna   movie:{3 10}
+>     doc2 = lastName:Aba    movie:{1 10 12}
+>     doc3 = lastName:Addd   movie:{3 21 55 92}
+>     doc4 = lastName:Baaa   movie:{7 56}
+>
+> I would like to get back:
+>     doc2, score of 1   //score of 1 because only movie 1 matched
+>     doc3, score of 2   //score of 2 because movies 21 and 92 matched
+>
+>
+>
+> Currently, we perform an initial query against our Star index to 
+> retrieve a list of stars.  Then we perform N queries against a 
+> separate movie index to count the number of movies that match our sub 
+> filter 'horror'.  This is obviously very inefficient, and as I've 
+> shown above, the information (count) is available during the primary
+query.
+>
+> Thoughts?
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

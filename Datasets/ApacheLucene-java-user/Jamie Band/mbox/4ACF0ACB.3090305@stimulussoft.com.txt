@@ -1,0 +1,193 @@
+FROM: Jamie Band <ja...@stimulussoft.com>
+SUBJECT: Re: Index.close() infinite TIME_WAITING (repost)
+DATE: 9 Oct 2009
+
+Hi Mike
+
+There are other threads involved but none are simultaneously modifying 
+the idex.
+
+There is one read that retrieves the total count every 2 seconds on the 
+Index for GUI display:
+
+public long getTotalMessageCount(Volume volume) throws 
+MessageSearchException {
+              if (volume == null)
+                    throw new MessageSearchException("assertion failure: 
+null volume",logger);
+              int count = 0;
+              File indexDir = new File(volume.getIndexPath());
+              if (!indexDir.exists())
+                      return 0;
+              IndexReader indexReader = null;
+              try {
+                  indexReader = IndexReader.open(indexDir);
+                  count += indexReader.numDocs();
+              } catch (IOException e ) {
+                  logger.error("failed to close index to calculate total 
+count",e);
+              } finally {
+                  try { indexReader.close(); } catch (Exception e) {
+                      logger.error("failed to close index to calculate 
+total count",e);
+                  }
+              }
+              return count;
+}
+
+There are also other threads for performing searches across the various 
+indexes.
+
+I will rerun the reindex and send you the log.
+
+With the availability of Lucene 2.9.0 I changed our indexing routines, 
+so perhaps its an issue with my code. One thing I've already been 
+curious about is how it is possible to receive the 
+AlreadyClosedException when there is no
+other code writing to the index due to the indexLock. Very occasionally  
+an  AlreadyClosedException is thrown while adding a document to the 
+index. To ensure that nothing is list, a separate retry queue is maintained.
+
+Any you spot anything suspect in the below? I would also be interested 
+to get your thoughts on how to improve indexing speed. Using a thread 
+pool to addDocuments to the index does not seem to help much.
+
+
+public class IndexProcessor extends Thread {
+           
+            public IndexProcessor() {
+                setName("index processor");
+            }
+     
+            public void run() {
+                boolean exit = false;
+                //ExecutorService documentPool;
+                // we abandoned pool as it does not seem to offer any 
+major performance benefit
+                IndexInfo indexInfo = null;   
+                LinkedList<IndexInfo> pushbacks = new 
+LinkedList<IndexInfo>();
+               
+                while (!exit) {
+                   
+                    try {
+                        int maxIndexDocs = 
+Config.getConfig().getIndex().getMaxSimultaneousDocs();
+                        //documentPool = 
+Executors.newFixedThreadPool(Config.getConfig().getArchiver().getArchiveThreads());
+                        indexInfo = null;   
+                        indexInfo = (IndexInfo) queue.take();
+                        if (indexInfo==EXIT_REQ) {
+                            logger.debug("index exit req received. 
+exiting");
+                            exit = true;
+                            continue;
+                        }
+                   
+                        indexLock.lock();
+                        try {
+                             openIndex();
+                        } catch (Exception e) {
+                             logger.error("failed to open 
+index:"+e.getMessage(),e);
+                             return;
+                        }
+                        if (indexInfo==null) {
+                            logger.debug("index info is null");
+                        }
+                        int i = 0;
+                        while(indexInfo!=null && i<maxIndexDocs) {
+                            try {
+                                writer.addDocument(indexInfo.getDocument());
+                                indexInfo.cleanup();
+                            } catch (IOException io) {
+                                logger.error("failed to add document to 
+index:"+io.getMessage(),io);
+                                indexInfo.cleanup();
+                            } catch (AlreadyClosedException e) {
+                                pushbacks.add(indexInfo);
+                            }
+                              //documentPool.execute(new 
+IndexDocument(indexInfo,pushbacks));
+                           
+                             i++;
+                             if (i<maxIndexDocs) {
+                                 indexInfo = (IndexInfo) queue.poll();
+                                 
+                                 if (indexInfo==null) {
+                                        logger.debug("index info is null");
+                                 }
+                                 
+                                 if (indexInfo==EXIT_REQ) {
+                                         logger.debug("index exit req 
+received. exiting (2)");
+                                        exit = true;
+                                        break;
+                                  }
+                             }
+                             
+                        }
+                        if (pushbacks.size()>0) {
+                              closeIndex();
+                              try {
+                                     openIndex();
+                              } catch (Exception e) {
+                                 logger.error("failed to open 
+index:"+e.getMessage(),e);
+                                 return;
+                              }
+                              for (IndexInfo pushback : pushbacks) {
+                                    try {
+                                        
+writer.addDocument(pushback.getDocument());
+                                        pushback.cleanup();
+                                    } catch (IOException io) {
+                                        logger.error("failed to add 
+document to index:"+io.getMessage(),io);
+                                        pushback.cleanup();
+                                    } catch (AlreadyClosedException e) {
+                                        pushbacks.add(pushback);
+                                    }
+                                    //documentPool.execute(new 
+IndexDocument(pushback,pushbacks));
+                                    i++;
+                              }
+                        }
+                       
+                        //documentPool.shutdown();
+                        
+//documentPool.awaitTermination(30,TimeUnit.MINUTES);
+                       
+                     } catch (Throwable ie) {
+                         logger.error("index write 
+interrupted:"+ie.getMessage());
+                     } finally {
+                           closeIndex();
+                          indexLock.unlock();
+                    }
+                }   
+               }
+
+Many thanks
+
+Jamie
+
+Michael McCandless wrote:
+> Are there other threads involved, besides the one hung in close?  Can
+> you post their stack traces?
+>
+> This stack trace seems to indicate that IW believes another thread is
+> in the process of closing.
+>
+> Can you call IndexWriter.setInfoStream and post the output leading to the hang?
+>
+> Mike
+>
+>   
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

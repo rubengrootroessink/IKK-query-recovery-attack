@@ -1,0 +1,122 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: 2.9 per segment searching/caching
+DATE: 23 Oct 2009
+
+HI Michael:
+     I understand exactly what you mean.
+
+     I have done some experiments with the multiQ approach by carrying over
+the bottom to next segment. (which would need to extend the
+ScoreDocComparator api to support the same type of "convert", the difference
+here is that it is optional, support for this convert would be an
+opportunity for performance improvements)
+
+     By doing this, I see the insert count drop by almost 50% and the
+overall time much better. However, this approach still would imply more
+inserts than the singleQ approach because like you said, the PQ contains top
+N from each segment, and bottom is much better selected. Here is the time I
+have running on 1.5:
+
+||Seg size||Query||Tot hits||Sort||Top N||QPS old||QPS new||Pct change||
+|log|<all>|1000000|rand string|10|91.76|108.63|{color:green}18.4%{color}|
+|log|<all>|1000000|rand string|25|92.39|106.79|{color:green}15.6%{color}|
+|log|<all>|1000000|rand string|50|91.30|104.02|{color:green}13.9%{color}|
+|log|<all>|1000000|rand string|500|86.16|63.27|{color:red}-26.6%{color}|
+|log|<all>|1000000|rand string|1000|76.92|64.85|{color:red}-15.7%{color}|
+|log|<all>|1000000|country|10|92.42|108.78|{color:green}17.7%{color}|
+|log|<all>|1000000|country|25|92.60|106.26|{color:green}14.8%{color}|
+|log|<all>|1000000|country|50|92.64|103.76|{color:green}12.0%{color}|
+|log|<all>|1000000|country|500|83.92|50.30|{color:red}-40.1%{color}|
+|log|<all>|1000000|country|1000|74.78|46.59|{color:red}-37.7%{color}|
+|log|<all>|1000000|rand int|10|114.03|114.85|{color:green}0.7%{color}|
+|log|<all>|1000000|rand int|25|113.77|112.92|{color:red}-0.7%{color}|
+|log|<all>|1000000|rand int|50|113.36|109.56|{color:red}-3.4%{color}|
+|log|<all>|1000000|rand int|500|103.90|66.29|{color:red}-36.2%{color}|
+|log|<all>|1000000|rand int|1000|89.52|70.67|{color:red}-21.1%{color}|
+
+Usually multiQ is better with smaller queue sizes. But like you said, and
+supported by these numbers, more segments would cause degradation.
+
+On jdk1.6, the win on small queues with multiQ are very very slight. This
+puzzles me alot, I am guessing jdk1.5 String comparison cost is much lower.
+
+this is also consistent with the first set of numbers I gave you, which was
+run on jdk1.6, with small queue sizes, and there was very very slight
+difference  with multiQ faster by a tinu bit.
+
+Thanks
+
+-John
+
+On Thu, Oct 22, 2009 at 7:09 PM, Mark Miller <markrmiller@gmail.com> wrote:
+
+> Yes - in many cases, the other wins outweigh the queue transition cost -
+> in some cases it does not.
+>
+> But we are talking degradation as you add more segments, not pure speed.
+> Degradation is worse now in the sort case.
+>
+> John Wang wrote:
+> > With many other coding that happened in 2.9, e.g. the PQ api etc.,
+> sorting
+> > is actually faster than 2.4.
+> > -John
+> >
+> > On Thu, Oct 22, 2009 at 5:07 AM, Mark Miller <markrmiller@gmail.com>
+> wrote:
+> >
+> >
+> >> Bill Au wrote:
+> >>
+> >>> Since Lucene 2.9 has per segment searching/caching, does query
+> >>>
+> >> performance
+> >>
+> >>> degrade less than before (2.9) as more segments are added to the index?
+> >>> Bill
+> >>>
+> >>>
+> >>>
+> >> I think non sorting cases are actually faster now over multiple segments
+> >> - though you will still see performance degrade pretty signif. over a
+> >> single segment (I've measured even 5 segments as being 15-20% slower).
+> >> Doesn't really help the degrade, but should be faster at each point.
+> >>
+> >> Sorting is a bit different - you have to convert the p-queue as you go
+> >> from segment to segment - so the more segments (which also generally
+> >> means more larger segments), the more conversion you have to do. This
+> >> didn't appear to be to bad unless you got up to quite a few segments .
+> >> Worse degradation though.
+> >>
+> >> --
+> >> - Mark
+> >>
+> >> http://www.lucidimagination.com
+> >>
+> >>
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >>
+> >
+> >
+>
+>
+> --
+> - Mark
+>
+> http://www.lucidimagination.com
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

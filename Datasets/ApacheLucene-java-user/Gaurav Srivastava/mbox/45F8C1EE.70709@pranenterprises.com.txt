@@ -1,0 +1,469 @@
+FROM: Gaurav Srivastava <gau...@pranenterprises.com>
+SUBJECT: Please suggest how to use the different analyse to accomodate number and alphanumeric search
+DATE: 15 Mar 2007
+
+How to search numbers using Lucene API
+I am using a demo application so as to search the documents but when i 
+search the numbers or alphanumeric text it appends an empty space and no 
+hits are returned any help would be appreciated
+i am developing a new serach engine like Google .Currently it uses Mysql 
+and we run query to get the search results
+
+Currently i am using the simple demo application with the following code 
+for results.jsp.
+
+*
+<%@ page import = "  javax.servlet.*, javax.servlet.http.*, java.io.*, 
+org.apache.lucene.analysis.*, org.apache.lucene.document.*, 
+org.apache.lucene.index.*, org.apache.lucene.search.*, 
+org.apache.lucene.queryParser.*, org.apache.lucene.demo.*, 
+org.apache.lucene.demo.html.Entities, java.net.URLEncoder" %>
+<%@ page  import = "pran_enterprises.*"%>
+<%@ page  import = "java.util.*"%>
+<%@ page  import = "java.sql.*"%>
+<%@ page  import = "java.io.*"%>
+<%@ include file="pe_declarations.jsp"%>
+<%!
+public String escapeHTML(String s) {
+  s = s.replaceAll("&", "&amp;");
+  s = s.replaceAll("<", "&lt;");
+  s = s.replaceAll(">", "&gt;");
+  s = s.replaceAll("\"", "&quot;");
+  s = s.replaceAll("'", "&apos;");
+  return s;
+}
+%>
+<%@include file="header.jsp"%>
+<link rel="stylesheet" type="text/css" href="/images/wayback.css">
+<%
+   //RSS_Frame Code
+   String rowid = "";
+   String urlString = "";
+   String domain_name = "";
+   String modified = "";
+   String sender = "";
+   userid = "";
+   String hotWord = "";
+   int numRecords = 0;
+   LinkedHashMap htFields = new LinkedHashMap();
+   LinkedHashMap domain_name_map = new LinkedHashMap();
+   LinkedHashMap domainNamessMap = new LinkedHashMap();
+   ResultSet tempRset = null;  
+   String linkdata = "";
+   String hyperdata = ""; 
+   String senderName = "";
+   String createdDate = null;  
+   String co_js   = "onChange=\"company_select();\" size=8 multiple";
+   int id = 0;
+   String and = "";
+   String fordatabasequery="";
+   String includeDomainNameinSearch ="";
+   boolean isDate = false;
+   boolean isSocialNetwork = false;
+   Vector  rowid_vector = new Vector();
+   i = 0; 
+     
+       htQueryString = peHttp.parseQueryString( request 
+);                       
+       LinkedHashMap columnInrssSearch = new LinkedHashMap();
+       columnInrssSearch.clear();
+       columnInrssSearch.put("searchText" ,peUtil.obj2str( 
+htQueryString.get("matchword") ));
+       columnInrssSearch.put("userid" ,pUDB.getUserID() );
+       String match = (String)htQueryString.get("matchword");
+       if (peUtil.isNullString(match))
+               columnInrssSearch.put("rowid" ,peUDB.genRowID());
+           else
+               columnInrssSearch.put("rowid" ,peEncryption.md5(match));
+       columnInrssSearch.put("beaconid" ,new peBeacons( request, 
+response ).getBeaconID());
+       columnInrssSearch.put("modified" ,pUDB.db_datetime());
+       //insert into rss_searches
+       pUDB.insert("rss_searches",columnInrssSearch);
+       //out.println( peJavaScript.opentag() );      
+       //out.println("alert(parent.parent.parent.location);");
+       //out.println("parent.parent.parent.location.refresh();");
+       //out.println( peJavaScript.closetag() );
+       if( jbConstants.debug > 0 )
+       {
+         peLogger.dbg  ( "jbSearchRSS: htQueryString is " );
+         peLogger.dbgln( htQueryString.toString() );
+       }
+      keyword = peUtil.obj2str( htQueryString.get("matchword") );
+      String startDate = peUtil.getDateTime("start_date", htQueryString) ;
+      String endDate = peUtil.getDateTime("end_date", htQueryString) 
+;        
+      String domainnames  = peUtil.obj2str( 
+htQueryString.get("domain_name") ); 
+      if (    domainnames != null)
+      {
+          LinkedHashMap domainValues = new LinkedHashMap();               
+          domainNamessMap.clear();
+          %>
+          <%@ include file="prepareList.jsp"%>     
+          <%
+          domain_vector.clear();
+          domain_vector = peUtil.splitOnComma( domainnames );
+          includeDomainNameinSearch = "";
+          for( int countDomain=0; countDomain < domain_vector.size(); 
+countDomain++ )
+          {
+             String domain = peUtil.obj2str( 
+domain_vector.elementAt(countDomain) );
+             if (domain_vector.size() == 1)
+                 includeDomainNameinSearch = includeDomainNameinSearch + 
+"(" + domain_name_map.get(domain) + ")";
+             else if(countDomain == 0)       
+                 includeDomainNameinSearch = includeDomainNameinSearch + 
+"(" + domain_name_map.get(domain) + " OR " ;
+             else if (countDomain + 1 == domain_vector.size())
+                 includeDomainNameinSearch = includeDomainNameinSearch  
++  domain_name_map.get(domain) + ")";   
+             else        
+                  includeDomainNameinSearch = includeDomainNameinSearch  
++ domain_name_map.get(domain) + " OR ";
+          }           
+          }              
+           
+      String where = "";     
+      //get the emails of the friends in the social network of current user
+      htWhereClause.clear();
+      htColumns.clear();
+      htWhereClause.put("userid", pUDB.getUserID());
+      htColumns.put("friendsemailid", "1");
+     
+      rset = pUDB.select2( "socialnetwork", htColumns, htWhereClause );
+      while(rset.next())
+      {
+          rowid_vector.addElement(rset.getString("friendsemailid"));
+         
+      }       
+      //get the userid of the friends in the social network of current 
+user if  they are registered
+      htColumns.clear();
+      htWhereClause.clear();
+      htColumns.put("userid", "1");
+      htWhereClause.put( "email", "[in]"+peUtil.vector2str(rowid_vector) );
+      rset = pUDB.select2( "users", htColumns, htWhereClause );     
+      String includeSocialNetworkInSearch = "";
+      boolean onlyOnce = true;
+      while(rset!= null && rset.next())
+      {
+          if (onlyOnce)
+          {
+            includeSocialNetworkInSearch = includeSocialNetworkInSearch 
++ "(" + rset.getString("userid") + " OR "  ;         
+            onlyOnce = false;
+          }
+          else
+            includeSocialNetworkInSearch = includeSocialNetworkInSearch  
++ rset.getString("userid") + " OR "  ;                    
+      }     
+      if (includeSocialNetworkInSearch.length() > 1)
+          includeSocialNetworkInSearch = 
+includeSocialNetworkInSearch.substring(0, 
+includeSocialNetworkInSearch.lastIndexOf(" OR "))  + ")";
+            
+      if(htQueryString.get("search_all")!= null && 
+htQueryString.get("search_all").equals("Search All Feeds"))
+      {
+      }
+      else if(htQueryString.get("search_all") != null && 
+htQueryString.get("search_all").equals("Search My Social Network") && 
+includeSocialNetworkInSearch.trim().length() > 1)
+      {
+         and = and + includeSocialNetworkInSearch;
+         isSocialNetwork = true;
+           
+      }
+      else if(htQueryString.get("search_all") != null && 
+htQueryString.get("search_all").equals("Search My Feeds"))
+      {
+         and = and + pUDB.getUserID();            
+      }     
+         
+      if( !(startDate.trim().equals("00:00:00") || 
+endDate.trim().equals("00:00:00")) )
+      {
+            if(includeSocialNetworkInSearch != null && 
+includeSocialNetworkInSearch.length() > 1)     
+                and = and + " AND " + startDate + " AND " +  endDate ;
+            else
+              and = and + startDate + " AND " +  endDate ;
+          isDate = true;
+      }   
+      if( !peUtil.isNullString(includeDomainNameinSearch))
+      {
+          if (includeDomainNameinSearch.length() > 1)
+              and = and + " AND " +    includeDomainNameinSearch;    
+               
+      }      
+%>
+<%
+//start of original query.jsp file
+        boolean error = false;                  //used to control flow 
+for error messages
+        String indexName = indexLocation;       //local copy of the 
+configuration variable
+        IndexSearcher searcher = null;          //the searcher used to 
+open/search the index
+        Query query = null;                     //the Query created by 
+the QueryParser
+        Hits hits = null;                       //the search results
+        int startindex = 0;                     //the first index 
+displayed on this page
+        int maxpage    = 50;                    //the maximum items 
+displayed on this page
+        String queryString = null;              //the query entered in 
+the previous page
+        String startVal    = null;              //string version of 
+startindex
+        String maxresults  = null;              //string version of maxpage
+        int thispage = 0;                       //used for the for/next 
+either maxpage or
+                                                //hits.length() - 
+startindex - whichever is
+                                                //less
+
+        try {
+          searcher = new IndexSearcher(indexName);      //create an 
+indexSearcher for our page
+                                                        //NOTE: this 
+operation is slow for large
+                                                        //indices (much 
+slower than the search itself)
+                                                        //so you might 
+want to keep an IndexSearcher
+                                                        //open
+                                                       
+        } catch (Exception e) {                         //any error that 
+happens is probably due
+                                                        //to a 
+permission problem or non-existant
+                                                        //or otherwise 
+corrupt index
+%>
+                <p>ERROR opening the Index - contact sysadmin!</p>
+                <p>Error message: <%=escapeHTML(e.getMessage())%></p>  
+<%                error = true;                                  //don't 
+do anything up to the footer
+        }
+%>
+<%
+       if (error == false) {                                           
+//did we open the index?
+                queryString = request.getParameter("matchword");
+                hotWord = queryString;
+                //add the conditions
+                if (isSocialNetwork || isDate)
+                    queryString = queryString  + " AND " + and;
+                else
+                    queryString = queryString  + and; 
+                                      
+               out.println("QueryString" + queryString);
+                //out.println (queryString);           //get the search 
+criteria
+                startVal    = request.getParameter("startat");         
+//get the start index
+                maxresults  = request.getParameter("maxresults");      
+//get max results per page
+                try {
+                        maxpage    = Integer.parseInt(maxresults);    
+//parse the max results first
+                        startindex = Integer.parseInt(startVal);      
+//then the start index 
+                } catch (Exception e) { } //we don't care if something 
+happens we'll just start at 0
+                                          //or end at 50
+
+               
+
+                if (queryString == null)
+                    queryString = "Search";
+                        //throw new ServletException("no query "+       
+//if you don't have a query then
+                                                 //  "specified");      
+//you probably played on the
+                                                                      
+//query string so you get the
+                                                                      
+//treatment
+
+                Analyzer analyzer = new StopAnalyzer();               
+//construct our usual analyzer
+                try {
+                        query = new 
+QueryParser("contents",analyzer).parse(queryString);  //parse the
+                        out.println(query.toString());
+                } catch (Exception e) {                          //query 
+and construct the Query
+                                                                      
+//object
+                                                                      
+//if it's just "operator error"
+                                                                      
+//send them a nice error HTML
+                                                                     
+                out.println(jbConstants.err_begin );
+                out.println( "No matches found" );               
+                out.println( jbConstants.err_end );                
+                error = true;                                         
+//don't bother with the rest of
+                                                                      
+//the page
+                }
+        }
+%>
+<%
+        if (error == false && searcher != null) {                     // 
+if we've had no errors
+                                                                      // 
+searcher != null was to handle
+                                                                      // 
+a weird compilation bug
+                thispage = maxpage;                                   // 
+default last element to maxpage
+                hits = searcher.search(query);
+                //out.println("hits" + hits);// run the query
+                if (hits.length() == 0) {                             // 
+if we got no results tell the user
+                out.println(jbConstants.err_begin );
+                out.println( "No matches found" );               
+                out.println( jbConstants.err_end );                
+                error = true;                                        // 
+don't bother with the rest of the
+                                                                     // page
+                }
+        }
+
+        if (error == false && searcher != null) {                  
+%>
+                <table width="700">
+                <th>Title</th>
+                <th>Url</th>
+                <th>Created</th>               
+<%
+                if ((startindex + maxpage) > hits.length()) {
+                        thispage = hits.length() - startindex;      // 
+set the max index to maxpage or last
+                }                                                   // 
+actual search result whichever is less
+                numRecords = thispage + startindex;               
+                for (i = startindex; i < (thispage + startindex); i++) 
+{  // for each element
+%>
+                <tr id="<%=i%>" bgColor='#F6F6F6' 
+onClick="changeColor(this);parent.frames[1].Escape('<%=rowid%>','<%=hotWord%>');">
+<%
+                        Document doc = hits.doc(i);                    
+//get the next document
+                        String doctitle = doc.get("title");            
+//get its title
+                        url = doc.get("url");                   //get 
+its url field
+                        if ((doctitle == null) || doctitle.equals("")) 
+//use the url if it has no title
+                                doctitle = url;
+                        String summary = doc.get("summary");
+                        StringTokenizer st = new 
+StringTokenizer(summary.substring(25, summary.length()), "###");
+                        while(st.hasMoreTokens())
+                        {
+                            sender = st.nextToken();
+                            rowid = st.nextToken();
+                            urlString = st.nextToken();
+                            modified = st.nextToken();
+                            domain_name = st.nextToken();
+                            userid = 
+st.nextToken();                           
+                            rowid = rowid.trim();
+                        }
+                       // out.println("sender" + sender + "rowid" + 
+rowid + "urlString" + urlString + "modified" + modified + "domain_name" 
++ domain_name + "userid" + userid);
+                       
+                       
+                       
+                       
+                                                                       
+//then output!
+%>
+                        <td   width="280" class="fontClass"   
+color="#ffffff">
+                          <a id=<%=i%>   href= 
+"javascript:Escape('<%=rowid%>','<%=hotWord%>');"  target="bot"">
+                          <div id="<%="div" + i%>"><%=doctitle%></div></a>
+                          </td>                          
+                        <%if (sender == null || 
+sender.trim().equals("null"))
+                           {                         
+                    %>   
+                          <td  width="280" class="fontClass" 
+ ><%=urlString%></td>
+                    <%
+                           }
+                           else
+                           {                              
+                    %>
+                       <td   width="280" class="fontClass"  
+ ><%=sender%></td>
+                    <%
+                            }
+                    %>   
+                        <td  width="140" class="fontClass">
+                           <%=modified.substring(0,10)%></td>
+                </tr>
+                <div type="hidden" id="<%="divv" + i%>" 
+style="display:none"><%=rowid%></div>
+<%
+                }
+%>
+<%                if ( (startindex + maxpage) < hits.length()) {   //if 
+there are more results...display
+                                                                   //the 
+more link
+
+                        String moreurl="results.jsp?query=" +
+                                       URLEncoder.encode(queryString) +  
+//construct the "more" link
+                                       "&amp;maxresults=" + maxpage +
+                                       "&amp;startat=" + (startindex + 
+maxpage);
+%>
+                <tr>
+                        <td></td><td><a href="<%=moreurl%>">More
+
+Results>></a></td>
+                </tr>
+<%
+                }
+%>
+                </table>
+
+<%       }                                            //then include our 
+footer.
+         if (searcher != null)
+                searcher.close();
+%>
+
+<SCRIPT LANGUAGE="JavaScript">
+function changeColor(currentHref)
+{
+    for (var id = 0; id <=<%=numRecords - 1%>; id++)
+    {   
+    if (id != currentHref.id)
+        document.getElementById(id).bgColor='#F6F6F6';
+    else
+        document.getElementById(id).bgColor='#9E9C91';
+    }
+}
+</script>
+     
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

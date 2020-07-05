@@ -1,0 +1,410 @@
+FROM: Dror Matalon <d...@zapatec.com>
+SUBJECT: Re: Query Parser AND / OR
+DATE: 29 Dec 2003
+
+my $.02.
+
+Before having patches, I think it's a good idea to agree on what the
+"right" solution is. Most of it is obvious using boolean logic, but we
+have some additional requirements like not having a query that only has
+a NOT clause. Is this the only exception?
+
+
+As far as the actual patch, I would suspect that a better approach than
+using java would be to use precedence operations in the actual parser.
+I've never used javacc, and it's been years since I've used yacc/bison,
+but one of the basic capbilities in parsers is to define precedence. It
+should be quite easy to fix it this way, and it should be more "bullet
+proof."  I looked a bit at the javacc code, but I don't really have the
+time right now to analyze it. It certainly seems like the strategy of
+having all the operators together is problematic:
+
+<DEFAULT> TOKEN : {
+	  <AND:       ("AND" | "&&") >
+		| <OR:        ("OR" | "||") >
+		| <NOT:       ("NOT" | "!") >
+		| <PLUS:      "+" >
+		| <MINUS:     "-" >
+		| <LPAREN:    "(" >
+		| <RPAREN:    ")" >
+		| <COLON:     ":" >
+		| <CARAT:     "^" > : Boost
+		| <QUOTED:     "\"" (~["\""])+ "\"">
+		| <TERM:      <_TERM_START_CHAR> (<_TERM_CHAR>)*  >
+		| <FUZZY:     "~" >
+		| <SLOP:      "~" (<_NUM_CHAR>)+ >
+		| <PREFIXTERM:  <_TERM_START_CHAR> (<_TERM_CHAR>)* "*" >
+		| <WILDTERM:  <_TERM_START_CHAR>
+		              (<_TERM_CHAR> | ( [ "*", "?" ] ))* >
+									| <RANGEIN_START: "[" > : RangeIn
+									| <RANGEEX_START: "{" > : RangeEx
+}
+
+Something like http://www.lysator.liu.se/c/ANSI-C-grammar-y.html where
+different operators are grouped differently according to precedence
+would work better.
+
+As is often the case, trying to *correctly* parse a string is not
+trivial.
+
+Regards,
+
+Dror
+
+
+
+On Sun, Dec 28, 2003 at 07:11:22PM -0500, Erik Hatcher wrote:
+> Morus,
+> 
+> I haven't had time to think through all of the issues and the patch you 
+> submitted, but I suggest that you go ahead and attach this to a 
+> Bugzilla issue so that it can be addressed more formally and avoid 
+> being lost in the mounds of e-mail we all get.
+> 
+> Thanks,
+> 	Erik
+> 
+> 
+> On Dec 28, 2003, at 11:46 AM, Morus Walter wrote:
+> 
+> >Morus Walter writes:
+> >>
+> >>I attached the patch (made against 1.3rc3 but working for 1.3final as 
+> >>well)
+> >>and a test program.
+> >
+> >Seems the attachments got stripped...
+> >
+> >So once again:
+> >
+> >The patch:
+> >
+> >===File lucene/QueryParser.jj.patch===============
+> >*** QueryParser.jj.org	Mon Dec 22 11:47:30 2003
+> >--- QueryParser.jj	Mon Dec 22 13:20:57 2003
+> >***************
+> >*** 233,255 ****
+> >
+> >    protected void addClause(Vector clauses, int conj, int mods, Query 
+> >q) {
+> >      boolean required, prohibited;
+> >!
+> >!     // If this term is introduced by AND, make the preceding term 
+> >required,
+> >      // unless it's already prohibited
+> >      if (conj == CONJ_AND) {
+> >!       BooleanClause c = (BooleanClause) 
+> >clauses.elementAt(clauses.size()-1);
+> >!       if (!c.prohibited)
+> >!         c.required = true;
+> >!     }
+> >!
+> >!     if (operator == DEFAULT_OPERATOR_AND && conj == CONJ_OR) {
+> >!       // If this term is introduced by OR, make the preceding term 
+> >optional,
+> >!       // unless it's prohibited (that means we leave -a OR b but +a 
+> >OR b-->a OR b)
+> >!       // notice if the input is a OR b, first term is parsed as 
+> >required; without
+> >!       // this modification a OR b would parsed as +a OR b
+> >!       BooleanClause c = (BooleanClause) 
+> >clauses.elementAt(clauses.size()-1);
+> >!       if (!c.prohibited)
+> >!         c.required = false;
+> >      }
+> >
+> >      // We might have been passed a null query; the term might have 
+> >been
+> >--- 233,249 ----
+> >
+> >    protected void addClause(Vector clauses, int conj, int mods, Query 
+> >q) {
+> >      boolean required, prohibited;
+> >!     //  System.out.println(conj+ " " + mods + " " + 
+> >q.toString("text"));
+> >!     // If this term is introduced by AND, check if the previous term 
+> >is the
+> >!     // first term in this or-group and make that term required,
+> >      // unless it's already prohibited
+> >      if (conj == CONJ_AND) {
+> >! 	Vector clauses2 = (Vector)clauses.elementAt(clauses.size()-1);
+> >! 	//if ( clauses2.size() == 1 ) {
+> >! 	    BooleanClause c = (BooleanClause) 
+> >clauses2.elementAt(clauses2.size()-1);
+> >! 	    if (!c.prohibited)
+> >! 		c.required = true;
+> >! 	    //}
+> >      }
+> >
+> >      // We might have been passed a null query; the term might have 
+> >been
+> >***************
+> >*** 257,277 ****
+> >      if (q == null)
+> >        return;
+> >
+> >      if (operator == DEFAULT_OPERATOR_OR) {
+> >-       // We set REQUIRED if we're introduced by AND or +; PROHIBITED 
+> >if
+> >        // introduced by NOT or -; make sure not to set both.
+> >        prohibited = (mods == MOD_NOT);
+> >!       required = (mods == MOD_REQ);
+> >!       if (conj == CONJ_AND && !prohibited) {
+> >!         required = true;
+> >!       }
+> >!     } else {
+> >!       // We set PROHIBITED if we're introduced by NOT or -; We set 
+> >REQUIRED
+> >!       // if not PROHIBITED and not introduced by OR
+> >        prohibited = (mods == MOD_NOT);
+> >!       required   = (!prohibited && conj != CONJ_OR);
+> >      }
+> >!     clauses.addElement(new BooleanClause(q, required, prohibited));
+> >    }
+> >
+> >    /**
+> >--- 251,279 ----
+> >      if (q == null)
+> >        return;
+> >
+> >+     // start new or-group if there's an explit or
+> >+     if ( conj == CONJ_OR ) {
+> >+ 	clauses.addElement(new Vector());
+> >+     }
+> >+
+> >      if (operator == DEFAULT_OPERATOR_OR) {
+> >        // introduced by NOT or -; make sure not to set both.
+> >        prohibited = (mods == MOD_NOT);
+> >!       // for explizit conjunctions: set required to true
+> >!       if ( conj == CONJ_AND ) {
+> >! 	  required = true;
+> >!       }
+> >!       else {
+> >! 	  // default OR -> required only when requested
+> >! 	  required = (mods == MOD_REQ);
+> >!       }
+> >!     } else { // operator == DEFAULT_OPERATOR_AND
+> >!       // We set PROHIBITED if we're introduced by NOT or -
+> >        prohibited = (mods == MOD_NOT);
+> >!       // always REQUIRED unless PROHIBITED
+> >!       required   = (!prohibited);
+> >      }
+> >!     ((Vector)clauses.elementAt(clauses.size()-1)).addElement(new 
+> >BooleanClause(q, required, prohibited));
+> >    }
+> >
+> >    /**
+> >***************
+> >*** 359,369 ****
+> >     */
+> >    protected Query getBooleanQuery(Vector clauses) throws 
+> >ParseException
+> >    {
+> >!     BooleanQuery query = new BooleanQuery();
+> >!     for (int i = 0; i < clauses.size(); i++) {
+> >! 	query.add((BooleanClause)clauses.elementAt(i));
+> >!     }
+> >!     return query;
+> >    }
+> >
+> >    /**
+> >--- 361,389 ----
+> >     */
+> >    protected Query getBooleanQuery(Vector clauses) throws 
+> >ParseException
+> >    {
+> >!       BooleanQuery query = new BooleanQuery();
+> >!       if ( clauses.size() == 1 ) {
+> >! 	  clauses = (Vector)clauses.elementAt(0);
+> >! 	  for (int i = 0; i < clauses.size(); i++) {
+> >! 	      query.add((BooleanClause)clauses.elementAt(i));
+> >! 	  }
+> >!       }
+> >!       else {
+> >! 	  for ( int i = 0; i < clauses.size(); i++ ) {
+> >! 	      Vector clauses2 = (Vector)clauses.elementAt(i);
+> >! 	      if ( clauses2.size() == 1 && 
+> >((BooleanClause)clauses2.elementAt(0)).prohibited == false ) {
+> >! 		  query.add(new 
+> >BooleanClause(((BooleanClause)clauses2.elementAt(0)).query, false, 
+> >false));
+> >! 	      }
+> >! 	      else if ( clauses2.size() >= 1 ) {
+> >! 		 BooleanQuery query2 = new BooleanQuery();
+> >! 		 for ( int j = 0; j < clauses2.size(); j++ ) {
+> >! 		     query2.add((BooleanClause)clauses2.elementAt(j));
+> >! 		 }
+> >! 		 query.add(new BooleanClause(query2, false, false));
+> >! 	     }
+> >! 	  }
+> >!       }
+> >!      return query;
+> >    }
+> >
+> >    /**
+> >***************
+> >*** 551,556 ****
+> >--- 571,577 ----
+> >  Query Query(String field) :
+> >  {
+> >    Vector clauses = new Vector();
+> >+   clauses.addElement(new Vector());
+> >    Query q, firstQuery=null;
+> >    int conj, mods;
+> >  }
+> >***************
+> >*** 566,572 ****
+> >      { addClause(clauses, conj, mods, q); }
+> >    )*
+> >      {
+> >!       if (clauses.size() == 1 && firstQuery != null)
+> >          return firstQuery;
+> >        else {
+> >  	return getBooleanQuery(clauses);
+> >--- 587,593 ----
+> >      { addClause(clauses, conj, mods, q); }
+> >    )*
+> >      {
+> >!       if (clauses.size() == 1 && 
+> >((Vector)clauses.elementAt(0)).size() == 1 && firstQuery != null)
+> >          return firstQuery;
+> >        else {
+> >  	return getBooleanQuery(clauses);
+> >============================================================
+> >
+> >and the test program:
+> >
+> >===File lucene/LuceneTest.java===============
+> >import org.apache.lucene.document.*;
+> >import org.apache.lucene.analysis.*;
+> >import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> >import org.apache.lucene.index.*;
+> >import org.apache.lucene.store.*;
+> >import org.apache.lucene.search.*;
+> >import org.apache.lucene.queryParser.QueryParser;
+> >
+> >class LuceneTest
+> >{
+> >    static String[] docs = {
+> >        "a", "b", "c", "d",
+> >        "a b", "a c", "a d", "b c", "b d", "c d",
+> >        "a b c", "a b d", "a c d", "b c d",
+> >        "a b c d"
+> >    };
+> >
+> >    static String[] queries = {
+> >        "a OR b AND c",
+> >        "(a OR b) AND c",
+> >        "a OR (b AND c)",
+> >        "a AND b",
+> >        "a AND b OR c AND d",
+> >        "(a AND b) OR (c AND d)",
+> >        "a AND (b OR c) AND d",
+> >        "((a AND b) OR c) AND d",
+> >        "a AND (b OR (c AND d))",
+> >        "a AND b AND c AND d",
+> >
+> >        "a OR b AND NOT c",
+> >        "(a OR b) AND NOT c",
+> >        "a OR (b AND NOT c)",
+> >        "a AND NOT d",
+> >        "a AND NOT b OR c AND NOT d",
+> >        "(a AND NOT b) OR (c AND NOT d)",
+> >        "a AND NOT (b OR c) AND NOT d",
+> >        "((a AND NOT b) OR c) AND NOT d",
+> >        "a AND NOT (b OR (c AND NOT d))",
+> >        "a AND NOT b AND NOT c AND NOT d",
+> >	
+> >	"a OR NOT b",
+> >	"a OR NOT a",
+> >
+> >	"a b",
+> >	"a b c",
+> >	"a b (c d e)",
+> >	"+a +b",
+> >	"a -b",
+> >	"a +b -c",
+> >	"+a b -c",
+> >	"+a -b c",
+> >	"a -b -c",
+> >	"-a b c",
+> >
+> >	"a OR b c AND d",
+> >	"a OR b c",
+> >	"a AND b c",
+> >	"a OR b c OR d",
+> >	"a OR b c d OR e",
+> >	"a AND b c AND d",
+> >	"a AND b c d AND e"
+> >    };
+> >
+> >    public static void main(String argv[]) throws Exception {
+> >        Directory dir = new RAMDirectory();
+> >        String[] stop = {};
+> >        Analyzer analyzer = new StandardAnalyzer(stop);
+> >
+> >        IndexWriter writer = new IndexWriter(dir, analyzer, true);
+> >
+> >        for ( int i=0; i < docs.length; i++ ) {
+> >            Document doc = new Document();
+> >            doc.add(Field.Text("text", docs[i]));
+> >            writer.addDocument(doc);
+> >        }
+> >        writer.close();
+> >
+> >        Searcher searcher = new IndexSearcher(dir);
+> >        for ( int i=0; i < queries.length; i++ ) {
+> >	    QueryParser parser = new QueryParser("text", analyzer);
+> >	    parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+> >
+> >	    Query [] query = new Query[4];
+> >
+> >            query[0] = QueryParser.parse(queries[i], "text", analyzer);
+> >	    query[1] = QueryParser.parse(query[0].toString("text"), "text", 
+> >analyzer);
+> >	    query[2] = parser.parse(queries[i]);
+> >	    query[3] = QueryParser.parse(query[2].toString("text"), "text", 
+> >analyzer);
+> >
+> >            System.out.println(i + ": " + queries[i] + " ==> " + 
+> >query[0].toString("text") + " -> " + query[1].toString("text") + " / " 
+> >+ query[2].toString("text") + " -> " + query[3].toString("text"));
+> >	    if ( argv.length > 0 && argv[0].equals("-q") ) {
+> >		for ( int k=0; k<4; k++ ) {
+> >		    Hits hits = searcher.search(query[k]);
+> >		    System.out.println(k + " " + query[k].toString("text") + 
+> >		    "\t" + hits.length() + " documents found");
+> >		    for ( int j=0; j < hits.length(); j++ ) {
+> >			Document doc = hits.doc(j);
+> >			System.out.println("\t"+doc.get("text"));
+> >		    }
+> >		}
+> >	    }
+> >        }
+> >    }
+> >}
+> >============================================================
+> >
+> >---------------------------------------------------------------------
+> >To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> >For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+
+-- 
+Dror Matalon
+Zapatec Inc 
+1700 MLK Way
+Berkeley, CA 94709
+http://www.fastbuzz.com
+http://www.zapatec.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

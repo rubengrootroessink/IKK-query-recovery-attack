@@ -1,0 +1,141 @@
+FROM: Yang Sun <mryyz...@yahoo.com>
+SUBJECT: Question on Lucene when indexing big pdf files
+DATE: 20 Aug 2003
+
+Hi,
+    I am a newbie on Lucene. Now I want to index all my harddisk contents for searching, these
+includes html file, pdf file, word file and etc. But I have encounter a problem when I try
+to index pdf files, I need your help.
+    My environment is lucene-1.3-rc (lucene-1.2 has also been tried), jdk1.4.02, pdfbox-0.62.
+I try to index all my pdfs. There seems no error when executing the indexing (I use StandardAnalyzer,
+you can refer to my sources in the attachment). But when I search using the keyword, I find
+a lot of useless results. The pdf haven't contain the content I want. Can you help me with
+this problem.
+    In my attachment, I put my source files and the test pdf files. After I use my program
+to index these three pdf files, it seems all right then. But when I search the result using
+keyword "cisco" based on the indexing result, I get three Hits as the result. But two of the
+results do not contain the keyword "cisco", they are useless. I wonder if the pdfbox wrong,
+so I print out the indexed content, it also does not contain the keyword "cisco". I use Luke
+and my searcher program as the searching client, it seems no problem.
+    Can anyone help me? Or any comments on this problem. Everyone is welcome. My email is
+suny@ffcs.fujitsu.co.jp.
+    suny 
+
+PS: sorry, I can not attach the files, this mailing list can not hold attachment? So I have
+to put my source codes here. My three test pdf files are totally 100k, if someone would like
+to help me test it, I will be very appreciate.
+ 
+IndexPDF.java
+
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import java.io.File;
+import java.util.Date;
+/**
+ * FileName:
+ * User: Administrator
+ * Date: 2003-8-19
+ * Time: 23:18:30
+ * Functions:
+ */
+public class IndexPDF {
+  File indexFiles;            //the file or directory we want to index
+  public static void indexDocs(IndexWriter writer, File file) throws Exception {
+    if (file.isDirectory()) {
+      String[] files = file.list();
+      for (int i = 0; i < files.length; i++) {
+        indexDocs(writer, new File(file, files[i]));
+      }
+    } else if (file.getPath().endsWith(".pdf")) {
+      System.out.println("adding " + file);
+      writer.addDocument(PdfDocument.Document(file));
+    } else {
+      System.out.println("Ignoring " + file);
+    }
+  }
+  public static void main(String args[]) throws Exception {
+    if (args.length != 1) {
+      System.out.println("Usage: IndexPDF <file/directory>");
+      return;
+    }
+    try {
+      Date start = new Date();
+      IndexWriter writer = new IndexWriter("E:/Index", new StandardAnalyzer(), true);
+      indexDocs(writer, new File(args[0]));
+      writer.optimize();
+      writer.close();
+      Date end = new Date();
+      System.out.println(end.getTime() - start.getTime());
+      System.out.println(" total milliseconds");
+    } catch (Exception e) {
+      System.out.println(" caught a " + e.getClass() +
+          "\n with message: " + e.getMessage());
+    }
+  }
+}
+
+PdfDocument.java
+
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.pdfbox.pdfparser.PDFParser;
+import org.pdfbox.pdmodel.PDDocument;
+import org.pdfbox.util.PDFTextStripper;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
+import net.vicp.resshare.weblucene.document.PDFDocument;
+/**
+ * FileName:
+ * User: Administrator
+ * Date: 2003-8-19
+ * Time: 23:20:54
+ * Functions:
+ */
+public class PdfDocument {
+  /* lucene object which represent a single data file */
+  static Document doc = new Document();
+  public static Document Document(File f ) {
+    //set relative path to the path field in lucene
+    doc.add(Field.UnIndexed("path", f.getPath()));
+    System.out.println("Path is " + f.getPath());
+    // use 10000 as the limit for temporary use
+    doc.add(Field.Text("content", getPDFContent(f)));
+    doc.add(Field.UnIndexed("filetype", "pdf"));
+    doc.add(Field.UnIndexed("title", f.getName()));
+    return doc;
+  }
+  /**
+   * get the text content from the specified pdf file.
+   * @param f the pdf we should extract the content
+   * @return  the string contains the pdf content
+   */
+  private static String getPDFContent(File f) {
+    byte[] contents = null;
+    try {
+      FileInputStream is = new FileInputStream(f);
+      PDFParser parser = new PDFParser( is );
+      parser.parse();
+      PDDocument nbsp = parser.getPDDocument();
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      OutputStreamWriter writer = new OutputStreamWriter( out );
+      PDFTextStripper stripper = new PDFTextStripper();
+      stripper.writeText(nbsp.getDocument(), writer);
+      writer.close();
+      contents = out.toByteArray();
+    } catch (Exception e) {
+      e.printStackTrace();
+      return "";
+    }
+    String ts = new String(contents);
+    System.out.println("the string length is"+contents.length+"\n");
+    return ts;
+  }
+}
+
+
+
+---------------------------------
+Do you Yahoo!?
+Yahoo! SiteBuilder - Free, easy-to-use web site design software

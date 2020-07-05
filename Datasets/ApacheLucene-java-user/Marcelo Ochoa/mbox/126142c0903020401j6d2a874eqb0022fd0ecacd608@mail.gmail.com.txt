@@ -1,0 +1,119 @@
+FROM: Marcelo Ochoa <marcelo.oc...@gmail.com>
+SUBJECT: Re: Merging database index with fulltext index
+DATE: 2 Mar 2009
+
+Hi:
+  The point to catch with bad performance during merging a database
+result is to reduce the number of rows visited by your first query.
+  As an example take a look a these two queries using Lucene Domain
+Index, the two are equivalents:
+Option A:
+
+select * from (select rownum as ntop_pos,q.* from (
+select extractValue(object_value,'/page/revision/timestamp'),extractValue(object_value,'/page/title')
+  from pages where lcontains(object_value,
+  'musica')>0
+  and extractValue(object_value,'/page/revision/timestamp')
+  between TO_TIMESTAMP_TZ('06-JAN-07 12.20.05.000000000 PM +00:00')
+  and TO_TIMESTAMP_TZ('17-JUL-07 11.47.38.000000000 AM +00:00')
+  order by extractValue(object_value,'/page/revision/timestamp')) q)
+where ntop_pos>=20 and ntop_pos<=30;
+
+Option B:
+
+select /*+ DOMAIN_INDEX_SORT */
+extractValue(object_value,'/page/revision/timestamp'),extractValue(object_value,'/page/title')
+  from pages where lcontains(object_value,
+  'rownum:[20 TO 30] AND musica AND revisionDate:[20070101 TO
+20070718]','revisionDate')>0;
+
+First query is using all traditional SQL syntax to do filtering,
+sorting and pagination (Oracle Top-N syntax), the second query is
+using filtering (revisionDate:[20070101 TO 20070718]), sorting
+(revisionDate) and pagination (rownum:[20 TO 30], Lucene Domain Index
+syntax) resolved inside the Lucene Domain Index.
+In execution time the two queries over a sub set (around 32000 pages)
+of WikiPedia Dumps uploaded into an Oracle 11g are  4 minutes for the
+first option and 55 millisecond for the second option.
+The big difference is how many rows the DB need to visits and then
+discard, for the first option my DB performs 2.900.671 buffer gets
+(block disk that are loaded into memory) and 21 for the second option.
+In second execution plan the optimizer receives the exact 10 rows to
+return by the Domain Index.
+So, no matter what the technology used, the more you can filter on the
+index, the faster will be the query.
+Obviously there will be queries when this rule is not true, for
+example if you have a bit map index on some column, querying the
+bitmap index first could be faster than a Domain Index scan, but the
+optimizer knows the true.
+Best regards, Marcelo.
+
+PD: If you need more information about how to use or how Lucene Domain
+Index works inside Oracle please take a look at:
+http://docs.google.com/Doc?id=ddgw7sjp_54fgj9kg
+On Sat, Feb 28, 2009 at 5:07 PM,  <spring@gmx.eu> wrote:
+> Hi,
+>
+> what is the best approach to merge a database index with a lucene fulltext
+> index? Both databases store a unique ID per doc. This is the join criteria.
+>
+> requirements:
+>
+> * both resultsets may be very big (100.000 and much more)
+> * the merged resultset must be sorted by database index and/or relevance
+> * optional paging the merged resultset, a page has a size of 1000 docs max.
+>
+> example:
+>
+> select a, b from dbtable where c = 'foo' and content='bar' order by
+> relevance, a desc, d
+>
+> I would split this into:
+>
+> database: select ID, a, b from dbtable where c = 'foo' order by a desc, d
+> lucene: content:bar (sort:relevance)
+> merge: loop over the lucene resultset and add the db record into a new list
+> if the ID matches.
+>
+> If the resultset must be paged:
+>
+> database: select ID from dbtable where c = 'foo' order by a desc, d
+> lucene: content:bar (sort:relevance)
+> merge: loop over the lucene resultset and add the db record into a new list
+> if the ID matches.
+> page 1: select a,b from dbtable where ID IN (list of the ID's of page 1)
+> page 2: select a,b from dbtable where ID IN (list of the ID's of page 2)
+> ...
+>
+>
+> Is there a better way?
+>
+> Thank you.
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+-- 
+Marcelo F. Ochoa
+http://marceloochoa.blogspot.com/
+http://marcelo.ochoa.googlepages.com/home
+______________
+Want to integrate Lucene and Oracle?
+http://marceloochoa.blogspot.com/2007/09/running-lucene-inside-your-oracle-jvm.html
+Is Oracle 11g REST ready?
+http://marceloochoa.blogspot.com/2008/02/is-oracle-11g-rest-ready.html
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

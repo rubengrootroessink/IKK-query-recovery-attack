@@ -1,0 +1,50 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Lock files in a read-only application
+DATE: 2 Apr 2007
+
+"Nilesh Bansal" <nileshbansal@gmail.com> wrote:
+> thanks for your replies. i have two more questions.
+> > You need to be really certain your own locking protects Lucene
+> > properly.  Specifically, no IndexReader can be created (restarted)
+> > while a writer is open against the index, and, only one writer can be
+> > open on the index at once (it sounds like you already have that).  If
+> > you're sure about that then disabling the locks as Hoss describes
+> > above is OK.
+> 1. If our locking fails, what will happen in the worst case, i.e., an
+> IndexSearcher tries to read while an IndexWriter is updating the
+> index. Can it lead to index corruption, or just that the searcher will
+> give garbage results (or fail with exception) for that query.
+
+As long as you only have one writer and the only risk is that
+IndexSearcher is opening without proper locking, I believe the worst
+that will happen is actually quite benign and quickly detected: the
+IndexReader (IndexSearcher just creates IndexReader under the hood)
+will hit some sort of IOException while instantiating.  If it
+instantiates without an IOException it should then do searches just
+fine, correctly.  I *think* this is the case but I honestly haven't
+explored this area too heavily so this is somewhat speculation :)
+But I'm quite sure your index will not be corrupted, ie, the worst
+that happens is the IndexReader has problems.
+
+And, this is assuming your index is not on NFS, which has its own
+challenges (even beyond locking).
+
+> 2. Currently we are not using any IndexReader. When a request arrives,
+> we create a new IndexSearcher, and destroy it when it finishes
+> searching. Is it more efficient to create just one IndexSearcher and
+> share it with all threads? Or create one IndexReader and use it for
+> creating all IndexSearchers.
+
+You don't need to use IndexReader; IndexSearcher creates its own
+IndexReader.  But, it is substantially more efficient to create a
+single IndexSearcher and then use it for all threads that need to do
+searching, periodically re-instantiating it when you want index
+changes to be visible to your users.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

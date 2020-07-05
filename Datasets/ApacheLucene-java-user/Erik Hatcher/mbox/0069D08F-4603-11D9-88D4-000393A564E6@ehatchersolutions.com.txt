@@ -1,0 +1,80 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: restricting search result
+DATE: 4 Dec 2004
+
+On Dec 4, 2004, at 6:44 AM, Paul wrote:
+>> One way to restrict results is by using a Filter.
+>
+> but a filter is applied after the whole search is performed, isn't it?
+
+Incorrect.  A filter is applied *before* the search truly occurs - in 
+other words it reduces the search space.
+
+Here is a code example using an "owner" field to filter on:
+
+public class SecurityFilterTest extends TestCase {
+   private RAMDirectory directory;
+
+   protected void setUp() throws Exception {
+     directory = new RAMDirectory();
+     IndexWriter writer = new IndexWriter(directory,
+         new WhitespaceAnalyzer(), true);
+
+     // Elwood
+     Document document = new Document();
+     document.add(Field.Keyword("owner", "elwood"));
+     document.add(Field.Text("keywords", "elwoods sensitive info"));
+     writer.addDocument(document);
+
+     // Jake
+     document = new Document();
+     document.add(Field.Keyword("owner", "jake"));
+     document.add(Field.Text("keywords", "jakes sensitive info"));
+     writer.addDocument(document);
+
+     writer.close();
+   }
+
+   public void testSecurityFilter() throws Exception {
+     TermQuery query = new TermQuery(new Term("keywords", "info"));
+
+     IndexSearcher searcher = new IndexSearcher(directory);
+     Hits hits = searcher.search(query);
+     assertEquals("Both documents match", 2, hits.length());
+
+     QueryFilter jakeFilter = new QueryFilter(
+         new TermQuery(new Term("owner", "jake")));
+
+     hits = searcher.search(query, jakeFilter);
+     assertEquals(1, hits.length());
+     assertEquals("elwood is safe",
+         "jakes sensitive info", hits.doc(0).get("keywords"));
+   }
+
+}
+
+If you index a field that can be used for filtering purposes, 
+QueryFilter will do the trick nicely.  One recommendation when using a 
+filter though - be sure to keep the instance around over multiple 
+searches.  QueryFilter first does a TermQuery on the term provided to 
+pre-screen the documents available to the Query passed to the search 
+method.  Since you're doing this on a per-user basis, my recommendation 
+is to keep their filter, once created, around in their session (in a 
+web application) or wherever appropriate in another type of 
+environment.
+
+The above code example is directly from Lucene in Action.  I will make 
+the complete source code distribution available early this coming week, 
+as soon as Manning releases the electronic book edition.  We have been 
+told the e-book will be available from http://www.manning.com/hatcher2 
+on Monday.  Rest assured Otis or I will announce it as soon as it's 
+officially there.
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

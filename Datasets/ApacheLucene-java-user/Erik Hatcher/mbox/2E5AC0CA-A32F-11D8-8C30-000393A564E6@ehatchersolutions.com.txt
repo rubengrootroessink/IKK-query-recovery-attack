@@ -1,0 +1,87 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Mixing database and lucene searches
+DATE: 11 May 2004
+
+
+On May 10, 2004, at 11:02 PM, Glen Stampoultzis wrote:
+> Hi... I have a query screen where most of the fields search a regular
+> database but one field searches for text in the body of the document.  
+> You
+> could say the database holds metadata about the documents.  
+> Effectively this
+> means I have two separate queries going on - a lucene query and a 
+> database
+> query.  These results need to be combined.
+>
+> Anyone have any strategies for dealing with this?  I'm wondering 
+> whether
+> it's better to replicate searchable fields in the lucene index.  This 
+> means
+> being very careful that updates get done in two places so it is not 
+> ideal.
+
+Beyond what the other responses on this thread have been, another 
+option is to use a custom Filter which can narrow a Lucene query down 
+based on external criteria.  Wrap that with the caching filter wrapper 
+if things don't change and this could be highly efficient for 
+successive searches.
+
+In CVS HEAD, there is a new FilteredQuery which could leverage any 
+custom Filter you create and allow you to constrain a query clause by 
+DB criteria.
+
+I built a proof-of-concept one for the book, which looks like this:
+
+public interface SpecialsAccessor {
+   String[] isbns();
+}
+
+public class SpecialsFilter extends Filter {
+   private SpecialsAccessor accessor;
+
+   public SpecialsFilter(SpecialsAccessor accessor) {
+     this.accessor = accessor;
+   }
+
+   public BitSet bits(IndexReader reader) throws IOException {
+     BitSet bits = new BitSet(reader.maxDoc());
+
+     String[] isbns = accessor.isbns();
+
+     int[] docs = new int[1];
+     int[] freqs = new int[1];
+
+     for (int i = 0; i < isbns.length; i++) {
+       String isbn = isbns[i];
+       if (isbn != null) {
+         TermDocs termDocs =
+             reader.termDocs(new Term("isbn", isbn));
+         int count = termDocs.read(docs, freqs);
+         if (count == 1) {
+           bits.set(docs[0]);
+
+         }
+       }
+     }
+
+     return bits;
+   }
+
+   public String toString() {
+     return "SpecialsFilter";
+   }
+}
+
+The implementation of SpecialsAccessor is left as an exercise for the 
+reader :)  (I implemented a Mock version as an example).  Consider 
+adapting something like this for your DB access, then wrap with the 
+caching wrapper.
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

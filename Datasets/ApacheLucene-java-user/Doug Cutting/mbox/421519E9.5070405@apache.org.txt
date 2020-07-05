@@ -1,0 +1,43 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Concurrent searching & re-indexing
+DATE: 17 Feb 2005
+
+Paul Mellor wrote:
+> I've read from various sources on the Internet that it is perfectly safe to
+> simultaneously search a Lucene index that is being updated from another
+> Thread, as long as all write access to the index is synchronized.  But does
+> this apply only to updating the index (i.e. deleting and adding documents),
+> or to a complete re-indexing (i.e. create a new IndexWriter with the
+> 'create' argument true and then re-add all the documents)?
+[ ...]
+> java.io.IOException: couldn't delete _a.f1
+> at org.apache.lucene.store.FSDirectory.create(FSDirectory.java:166)
+[...]
+> This is running on Windows 2000.
+
+On Windows one cannot delete a file while it is still open.  So, no, on 
+Windows one cannot remove an index entirely while an IndexReader or 
+Searcher is still open on it, since it is simply impossible to remove 
+all the files in the index.
+
+We might attempt to patch this by keeping a list of such files and 
+attempt to delete them later (as is done when updating an index).  But 
+this could cause problems, as a new index will eventually try to use 
+these same file names again, and it would then conflict with the open 
+IndexReader.  This is not a problem when updating an existing index, 
+since filenames (except for a few which are not kept open, like 
+"segments") are never reused in the lifetime of an index.  So, in order 
+for such a fix to work we would need to switch to globally unique 
+segment names, e.g., long random strings, rather than increasing integers.
+
+In the meantime, the safe way to rebuild an index from scratch while 
+other processes are reading it is simply to delete all of its documents, 
+then start adding new ones.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

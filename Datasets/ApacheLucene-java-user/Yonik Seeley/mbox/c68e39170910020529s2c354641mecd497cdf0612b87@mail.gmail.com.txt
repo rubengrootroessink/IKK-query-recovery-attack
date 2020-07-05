@@ -1,0 +1,232 @@
+FROM: Yonik Seeley <yo...@lucidimagination.com>
+SUBJECT: Re: Error using multireader searcher in Lucene 2.9
+DATE: 2 Oct 2009
+
+On Fri, Oct 2, 2009 at 7:09 AM, Raf <r.ventaglio@gmail.com> wrote:
+> Hello,
+> I have tried to switch my application from Lucene 2.4.1 to Lucene 2.9, but I
+> have found a problem.
+> My searcher uses a MultiReader and, when I try to do a search using a custom
+> filter based on a bitset, it does not behave as it did in Lucene 2.4.
+> It looks like the new searcher does not use the "offset" when it reads the
+> subreaders docIds...
+
+Correct - the DocIdSets returned from Filter should be for the
+particular reader passed in the call to
+        public DocIdSet getDocIdSet(IndexReader reader) throws IOException {
+People could ignore the reader in the past (assuming it was always the
+same top-level reader), but that no longer works.
+
+-Yonik
+http://www.lucidimagination.com
+
+
+
+> I have written a self-contained test to show the problem:
+>
+> import static org.junit.Assert.assertEquals;
+> import java.io.IOException;
+> import org.apache.lucene.analysis.Analyzer;
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.index.CorruptIndexException;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.MultiReader;
+> import org.apache.lucene.index.IndexWriter.MaxFieldLength;
+> import org.apache.lucene.search.DocIdSet;
+> import org.apache.lucene.search.DocIdSetIterator;
+> import org.apache.lucene.search.Filter;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.MatchAllDocsQuery;
+> import org.apache.lucene.search.ScoreDoc;
+> import org.apache.lucene.search.TopDocs;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.LockObtainFailedException;
+> import org.apache.lucene.store.RAMDirectory;
+> import org.apache.lucene.util.OpenBitSet;
+> import org.junit.After;
+> import org.junit.Before;
+> import org.junit.Test;
+>
+> public class Lucene_2_9SearcherTest {
+>
+>    private Directory dir1 = new RAMDirectory();
+>    private Directory dir2 = new RAMDirectory();
+>    private Analyzer analyzer = new WhitespaceAnalyzer();
+>
+>    @Before
+>    public void setUp() throws Exception {
+>        this.createIndex1();
+>        this.createIndex2();
+>    }
+>
+>    @After
+>    public void tearDown() throws Exception {
+>    }
+>
+>    @Test
+>    public void testSearchWithMultiReader() throws CorruptIndexException,
+> IOException {
+>
+>        IndexReader reader = this.getMultiReader();
+>
+>        OpenBitSet bitSet = new OpenBitSet(10);
+>        bitSet.fastSet(1);
+>        bitSet.fastSet(2);
+>        bitSet.fastSet(6);
+>
+>        Filter filter = new DocIdSetFilter(bitSet);
+>
+>        DocIdSetIterator docIdIt = filter.getDocIdSet(reader).iterator();
+>        int numDocs = 0;
+>        System.out.println("Filter extraction:");
+>        while (docIdIt.next()) {
+>            System.out.println("Extracted: " + docIdIt.doc() + " --> " +
+> reader.document(docIdIt.doc()).getField("text").stringValue());
+>            numDocs++;
+>        }
+>
+>        assertEquals(3, numDocs);
+>
+>        IndexSearcher searcher = new IndexSearcher(reader);
+>        TopDocs topDocs = searcher.search(new MatchAllDocsQuery(), filter,
+> 10);
+>        int totSearchDocs = topDocs.totalHits;
+>        // assertEquals(3, totSearchDocs);
+>
+>        ScoreDoc[] hits = topDocs.scoreDocs;
+>        System.out.println("\nSearcher extraction:");
+>        for (ScoreDoc sd : hits) {
+>            System.out.println("Extracted: " + sd.doc + " --> " +
+> reader.document(sd.doc).getField("text").stringValue());
+>        }
+>
+>    }
+>
+>    private void createIndex1() throws CorruptIndexException,
+> LockObtainFailedException, IOException {
+>
+>        IndexWriter writer = new IndexWriter(dir1, analyzer, true,
+> MaxFieldLength.UNLIMITED);
+>
+>        Document doc = new Document();
+>        doc.add(new Field("text", "a", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "b", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "c", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "d", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "e", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        writer.optimize();
+>        writer.close();
+>    }
+>
+>    private void createIndex2() throws CorruptIndexException,
+> LockObtainFailedException, IOException {
+>
+>        IndexWriter writer = new IndexWriter(dir2, analyzer, true,
+> MaxFieldLength.UNLIMITED);
+>
+>        Document doc = new Document();
+>        doc.add(new Field("text", "x", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "y", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        doc = new Document();
+>        doc.add(new Field("text", "z", Field.Store.YES,
+> Field.Index.NOT_ANALYZED));
+>        writer.addDocument(doc);
+>
+>        writer.optimize();
+>        writer.close();
+>    }
+>
+>    private IndexReader getMultiReader() throws CorruptIndexException,
+> IOException {
+>        IndexReader[] subReaders = new IndexReader[] {
+> IndexReader.open(dir1, false), IndexReader.open(dir2, false) };
+>        MultiReader reader = new MultiReader(subReaders);
+>
+>        return (reader);
+>    }
+>
+>    private class DocIdSetFilter extends Filter {
+>
+>        private static final long serialVersionUID = 1L;
+>
+>        private DocIdSet myBitset;
+>
+>        public DocIdSetFilter(DocIdSet bitset) {
+>            this.myBitset = bitset;
+>        }
+>
+>        @Override
+>        public DocIdSet getDocIdSet(IndexReader reader) throws IOException {
+>            return (this.myBitset);
+>        }
+>
+>    }
+>
+> }
+>
+>
+> In Lucene 2.4.1 the output is:
+> Filter extraction:
+> Extracted: 1 --> b
+> Extracted: 2 --> c
+> Extracted: 6 --> y
+>
+> Searcher extraction:
+> Extracted: 1 --> b
+> Extracted: 2 --> c
+> Extracted: 6 --> y
+>
+> while in Lucene 2.9 I have:
+> Filter extraction:
+> Extracted: 1 --> b
+> Extracted: 2 --> c
+> Extracted: 6 --> y
+>
+> Searcher extraction:
+> Extracted: 1 --> b
+> Extracted: 2 --> c
+> Extracted: 6 --> y
+> Extracted: 7 --> z
+>
+>
+> Is it a bug in the new Lucene searcher or am I missing something?
+> Thanks,
+>
+> Bye
+> Raf
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

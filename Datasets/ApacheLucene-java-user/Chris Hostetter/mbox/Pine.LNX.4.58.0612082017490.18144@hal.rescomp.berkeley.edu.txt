@@ -1,0 +1,230 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Reading Performance
+DATE: 9 Dec 2006
+
+
+: > on the searching.  I still get really bad times when two or more people
+: > ask for data at the same time.  The problem doesn't seem to be in
+: > writing the files, it's in getting data from the index when two or more
+: > people ask for large recordsets back (I can take all the I/O statements
+: > out and still see the performance bottleneck)
+
+I'm not sure why it would be particularly bad when dealing with concurrent
+requests, but as a general rules you want to avoid calling doc(n) inside
+of a HitCollector, particularly given your use case...
+
+: >                            Document doc = is.doc(id);
+: >                            if (fw2 == null)
+: >                             {
+: >                                 fw2 = new BufferedWriter( new
+: > FileWriter( "WHERETOWRITEFILE"), 8196 );
+: >                             }
+: >                             fw2.write(doc.get("field1") + "\n");
+: >                             fw2.flush();
+
+...if all you are doing is pulling out a single stored field, then you'll
+see much better performance if you index that data in another field
+UN_TOKENIZED and read it out of the FieldCache ... alternatley you could
+use a FieldSelector so that only the stored value of field1 (and not any
+other stored fields) are read by the doc(id) call.
+
+: > is.search(query, hc);
+
+i assume you are, reusing the same IndexSearcher object for all of your
+parallel threads right? ... otherwise that may explain the behavior you
+are seing as well.
+
+
+: >
+: >
+: > -----Original Message-----
+: > From: Aigner, Thomas [mailto:TAigner@WescoDist.com]
+: > Sent: Thursday, December 07, 2006 1:36 PM
+: > To: java-user@lucene.apache.org
+: > Subject: RE: Reading Performance
+: >
+: > Thanks Grant and Erik for your suggestions.  I will try both of them and
+: > let you know if I see a marked increase in speed.
+: >
+: > Tom
+: >
+: >
+: > -----Original Message-----
+: > From: Grant Ingersoll [mailto:grant.ingersoll@gmail.com]
+: > Sent: Thursday, December 07, 2006 1:24 PM
+: > To: java-user@lucene.apache.org
+: > Subject: Re: Reading Performance
+: >
+: > Have you done any profiling to identify hotspots in Lucene versus
+: > your application?
+: >
+: > You might look into the FieldSelector code (used in IndexReader) in
+: > the Trunk version of Lucene could be used to only load the fields you
+: > are interested when getting the document from disk.  This can be
+: > useful if you have large fields that are being loaded that you don't
+: > necessarily need (thus skipping them).
+: >
+: > Also, do you need the BufferedWriter construction and check in side
+: > the loop?  Probably small in comparison to loading, but  It seems
+: > like it is only created once, why have it in the loop?
+: >
+: >
+: >
+: > On Dec 7, 2006, at 1:14 PM, Aigner, Thomas wrote:
+: >
+: > >
+: > >
+: > >
+: > >
+: > > Howdy all,
+: > >
+: > >
+: > >
+: > >       I have a question on reading many documents and time to do this.
+: > > I have a loop on the hits object reading a record, then writing it
+: > > to a
+: > > file.  When there is only 1 user on the Index Searcher, this
+: > > process to
+: > > read say 100,000 takes around 3 seconds.  This is slow, but can be
+: > > acceptable.  When a few more users do searchers, this time to just
+: > > read
+: > > from the hits object becomes well over 10 seconds, sometimes even 30+
+: > > seconds.  Is there a better way to read through and do something with
+: > > the hits information?  And yes, I have to read all of them to do this
+: > > particular task.
+: > >
+: > >
+: > >
+: > > for (int i = 0;(i <= hits.length() - 1); i++)
+: > >
+: > > {
+: > >
+: > >
+: > >
+: > >       if (fw == null)
+: > >
+: > >       {
+: > >
+: > >             fw = new BufferedWriter( new FileWriter
+: > > ( searchWriteSpec ),
+: > > 8196) ;
+: > >
+: > >       }
+: > >
+: > >
+: > >
+: > >       //Write Out records
+: > >
+: > >       String tmpHold = "";
+: > >
+: > > tmpHold = hits.doc(i).get("somefield1") + hits.doc(i).get
+: > > ("somefield2");
+: > >
+: > >
+: > >
+: > >       fw.write(tmpHold + "\n" );
+: > >
+: > >
+: > >
+: > > }
+: > >
+: > >
+: > >
+: > > Any ideas on how to speed this up especially with multiple users?
+: > > Each
+: > > user gets their own class which has the above code in it.
+: > >
+: > >
+: > >
+: > > Thanks,
+: > >
+: > > Tom
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: > >
+: >
+: > ------------------------------------------------------
+: > Grant Ingersoll
+: > http://www.grantingersoll.com/
+: >
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

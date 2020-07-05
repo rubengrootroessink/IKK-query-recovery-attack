@@ -1,0 +1,235 @@
+FROM: Jason <ja...@holmbrew.org>
+SUBJECT: re-indexing
+DATE: 29 Sep 2004
+
+I am having touble reindexing.
+
+Basically what I want to do is:
+
+1. Delete the old index
+2. Write the new index.
+
+The enviroment:
+The index is search by a web app running from the Orion App Server. This
+code runs fin and reindexes fine prior to any searches.  After the first
+search against the index is completed the index ends up beiong read-only
+( or not writeable), I cannot reindex and subsequently cannot search
+because the index is incomplete.
+
+1. Why doesn't IndexReader.delete(i) really delete the file. it seems to
+just make anothe 1K file with a .del extension the IndexWriter still
+cannot content with?
+2. How can I make this work?
+
+Thanks,
+Jason
+
+The code below produces the following output when run AFTER an initial
+search against the index have be completed:
+
+IndexerDrug->disableLuceneLocks: true
+Directory: FSDirectory@C:\lucene_index_drug
+Deleted [0]: true
+... (out put form for loop confirming deleted items)
+Deleted [367]: true
+
+Hit uncaught exception java.io.IOException
+java.io.IOException: Cannot delete _ba.cfs
+    at org.apache.lucene.store.FSDirectory.create(FSDirectory.java:144)
+    at
+org.apache.lucene.store.FSDirectory.getDirectory(FSDirectory.java:105)
+    at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:193)
+    at IndexerDrug.index(IndexerDrug.java:103)
+    at IndexerDrug.main(IndexerDrug.java:246)
+Exception in thread "main"
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-
+My indexing code  (some items have been deleted to protect the innocent)
+=-=-=-=-=-=-=-=-=-=-=-=-=-
+import java.io.*;
+import java.sql.*;
+import javax.naming.*;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.standard.*;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.store.*;
+
+public class IndexerDrug {
+
+  private String sql = "my query code ";
+
+  public static String[] stopWords =
+org.apache.lucene.analysis.standard.StandardAnalyzer.STOP_WORDS;
+  public File indexDir = new File("C:\\lucene_index_drug\\");
+  public Directory fsDir;
+
+
+  public void index() throws IOException {
+        try {
+            // Delete old index
+            fsDir = FSDirectory.getDirectory(indexDir, false);
+            if (indexDir.list().length > 0) {
+                IndexReader reader = IndexReader.open(fsDir);
+                
+System.out.println("Directory:"+reader.directory().toString());
+                reader.unlock(fsDir);
+                for (int i = 0; i < reader.maxDoc()-1; i++) {
+                    reader.delete(i);
+                    System.out.println("Deleted ["+i+"]: " 
++reader.isDeleted(i));
+                }
+                reader.close();
+            }
+        }
+        catch (Exception ex) {
+            System.out.println("Error while deleting index: " 
++ex.getMessage());
+        }
+        // Write new index
+        Analyzer analyzer = new StandardAnalyzer(stopWords);
+        IndexWriter writer = new IndexWriter(indexDir, analyzer, 
+true);// << fails here *********
+        writer.mergeFactor = 1000;
+        indexDirectory(writer);
+        writer.setUseCompoundFile(true);
+        writer.optimize();
+        writer.close();
+
+  }
+
+  private void indexDirectory(IndexWriter writer) throws IOException {
+    Connection c = null;
+    ResultSet rs = null;
+    Statement stmt = null;
+
+    long startTime = System.currentTimeMillis();
+    System.out.println("Start Time: " + new
+java.sql.Timestamp(System.currentTimeMillis()).toString());
+
+    try {
+      Class.forName("xxxx");
+      c = DriverManager.getConnection( "xxxx", "xxxx", "xxxx");
+      stmt = c.createStatement();
+      rs = stmt.executeQuery(this.sql);
+      System.out.println("Query Completed: " + new
+java.sql.Timestamp(System.currentTimeMillis()).toString());
+      int total = 0;
+
+      String resourceID = "";
+      String resourceName = "";
+      String summary = "";
+      String shortSummary = "";
+      String hciPick = "";
+      String url = "";
+      String format = "";
+      String orgType = "";
+      String holdingType = "";
+      String indexText = "";
+      String c_indexText = "";
+
+      boolean ready = false;
+
+      Document doc = null;
+      String oldResourceID = null;
+      String newResourceID = null;
+
+      while (rs.next()) {
+        newResourceID = rs.getString("resourceID")!= null ?
+rs.getString("resourceID") : "";
+        resourceID = newResourceID;
+        resourceName = rs.getString("resourceName") != null ?
+rs.getString("resourceName") : "";
+        summary = rs.getString("summary") != null ?
+rs.getString("summary") : "";
+
+        if (summary.length() > 300) {
+          shortSummary = summary.substring(0, 300) + "...";
+        } else {
+          shortSummary = summary;
+        }
+
+        hciPick = rs.getString("hciPick") != null 
+?rs.getString("hciPick") : "";
+        url = rs.getString("url") != null ? rs.getString("url") : "";
+        format = rs.getString("format") != null ? 
+rs.getString("format"): "";
+        orgType = rs.getString("orgType") != null 
+?rs.getString("orgType") : "";
+        holdingType = rs.getString("holdingType") != null 
+?rs.getString("holdingType") : "";
+        indexText = rs.getString("indexText") != null 
+?rs.getString("indexText") : "";
+
+        if (!newResourceID.equals(oldResourceID)) {
+          if (doc != null) {
+            doc.add(Field.Text("indexText", c_indexText));
+            writer.addDocument(doc); // add previoue doc
+            total++;
+          }
+          doc = new Document(); // make a new one
+
+          // These only go into the doc once
+          doc.add(Field.Keyword("resourceID", resourceID));
+
+          Field f_resourceName = Field.Text("resourceName", 
+resourceName);
+          doc.add(f_resourceName);
+
+          Field f_fullResourceName = 
+Field.Keyword("fullResourceName",resourceName);
+          doc.add(f_fullResourceName);
+
+          doc.add(Field.Text("url", url));
+          doc.add(Field.Keyword("format", format));
+          doc.add(Field.Text("orgType", orgType));
+          doc.add(Field.Text("holdingType", holdingType));
+          doc.add(Field.Text("summary", summary));
+          doc.add(Field.UnIndexed("shortSummary", shortSummary));
+          doc.add(Field.UnIndexed("hciPick", hciPick));
+
+          // This gets set here and them concatenated to while
+          // while the resourceID is still the same
+          c_indexText = indexText;
+
+        }
+        oldResourceID = newResourceID;
+        if (newResourceID.equals(oldResourceID)){
+          if (!indexText.equals("")) {
+            c_indexText = c_indexText + " " + indexText;
+          }
+        }
+      }
+
+      System.out.println("Finish Time: " + 
+newjava.sql.Timestamp(System.currentTimeMillis()).toString());
+      long stopTime = System.currentTimeMillis();
+      System.out.println("Total time: " + (stopTime - startTime) + " 
+ms");
+      System.out.println("Total Holdings Indexed: " + total);
+
+    } catch (Exception ex) {
+      System.err.println("Error while indexing: " + ex.getMessage());
+    } finally {
+      try {
+        c.close();
+      } catch (SQLException ex) {
+        System.err.println("Unable to close database connection");
+      }
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    IndexerDrug ind = new IndexerDrug();
+    ind.index();
+  }
+}
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

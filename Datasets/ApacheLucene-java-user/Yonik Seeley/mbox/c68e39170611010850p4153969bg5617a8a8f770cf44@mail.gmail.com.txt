@@ -1,0 +1,120 @@
+FROM: "Yonik Seeley" <yo...@apache.org>
+SUBJECT: Re: Indexing floating point number
+DATE: 1 Nov 2006
+
+On 11/1/06, Nadav Har'El <nyh@math.technion.ac.il> wrote:
+> On Mon, Oct 30, 2006, Yonik Seeley wrote about "Re: Indexing floating point number":
+> > On 10/30/06, KEGan <khoon.ee.gan@gmail.com> wrote:
+> > >Newbie question. How do we index floating point number in Lucene, so that
+> > >it
+> > >is sortable ? There is a built-in utility class 'NumberTools' which help
+> > >with indexing integer. Does Lucene has the same mechanism for floating
+> > >point
+> > >number?
+> >
+> > You can look at NumberUtils in Solr, it has conversions for
+> > int/long/float/double that make strings that sort correctly
+>
+> This question was asked so many times, that I think it belongs in the FAQ.
+> Moreover, I wonder if we shouldn't add a floating-point version of NumberTools
+> to the base Lucene, instead of referring people to Solr every time this
+> question is asked?
+
+There are different ways to do it, with different tradeoffs.  I'd
+rather not see a proliferation of different methods put into Lucene,
+but a single "good" one.
+I'm not crazy about the implementation of lucene's NumberUtils long
+representation (takes up too much room in the fieldcache).
+
+> I'm attaching another possible implementation. It's a class ToSortableString
+> with two static functions fromDouble(double) and fromInt(int). These convert
+> numbers into strings which sort lexicographically in the same order as the
+> original numbers.
+
+This is the road I went down before using the binary version.
+It converts integers directly from base10 (text) to sortable base100
+or sortable base10000 (since Solr gets it's data/queries in text form
+anyway).  I never got to the floating point version since the binary
+version that Solr uses by default turned out to be faster.
+http://svn.apache.org/viewvc/incubator/solr/trunk/src/java/org/apache/solr/util/BCDUtils.java?view=markup
+
+> The long comments in the attached code explain my encoding, the details of
+> which are different from Solr's. In particular differences include:
+> 1. In my code, integers and floating point can be mixed: the encoding of
+>    7 (integer) and 7.0 (double) is the same.
+
+I like this property.... same idea I had in BCDUtils, but the float
+stuff looked like it was going to be a *lot* of work to implement
+efficiently.
+
+> 2. In my code, we can decide how much precision (significant digits) we want
+>    to keep from doubles. I decided to keep only 10 significant digits (out of
+>    the available ~16) by default, which is more than enough for search
+>    application.
+
+"more than enough" depends on the application, but I like the idea of
+being able to chop off precision too.
+
+> 3. My code currently uses base 10 encoding, and therefore often generates
+>    longer strings than Solr's NumberTools. Moving to base 100 or even 256
+>    (as I suggest in the comments) can eliminate this difference.
+
+Or higher, depending on what you are optimizing for.
+If you are going to hold String instances in memory (like the
+FieldCache does) it's probably better to use more of those 16 bit
+chars.
+
+> 4. My code is probably a bit slower, though I didn't actually check.
+
+It would be nice to get rid of those Math.log() and Math.exp() calls...
+things like mantissa and exponent can be obtained directly from the float bits.
+
+> 5. I did not yet implement a reverse transformation (from String back to
+>    number), because it practice it wasn't needed.
+>
+> > (for range queries as well as sorts).
+>
+> This support for floating-point range queries is a "honey trap". It sounds
+> really good, but when you actually try to use it, you'll notice how extremely
+> inefficient it is during search (unless you're lucky enough to have only a
+> few distinct floating point values in the given range).
+
+Yeah, some of the same problems exist with date ranges.
+Often, there are a fixed number of ranges though, so they may be
+pulled out as filter queries and cached (restricting things by price
+range, etc).
+
+> To really support numeric search well, Lucene may need some additional data
+> structure in addition to the usual lexicon and posting lists - like some sort
+> tree of sub-range posting lists, or something.
+
+I think totally arbitrary numeric range queries (where the endpoints
+are different all the time) is a rare usecase for Lucene.
+
+Sorting by distances from a certain point is probably a more common
+usecase, but that might be better served by a specific geolocation
+class.
+
+
+
+> But perhaps this can even be done without any changes to Lucene: for example,
+> imagine we index the number 2.345 as four tokens "2.345", "2.34", "2.3", "2".
+> Now, if we're looking for the range [2.3-2.4) we can just search for "2.3",
+> and if we're looking for the range [2.2-2.45) we can search for
+>         "2.2" OR "2.3" OR "2.40" OR "2.41" OR "2.42" OR "2.43" OR "2.44"
+> (note that this is an OR of just 7 posting lists, even if this range contains
+> thousands of distinct values).
+>
+> I wonder if anybody ever done such a thing (or came up with an better
+> solution) in Lucene.
+
+
+
+-Yonik
+http://incubator.apache.org/solr Solr, the open-source Lucene search server
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,95 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Index sync up
+DATE: 27 Apr 2007
+
+<4> is also easy....
+
+>From the javadoc:
+"*Caution:* Iterate only over the hits needed. Iterating over all hits is
+generally not desirable and may be the source of performance issues."
+
+So an iterator should be fine for all documents, even those > 100. But do be
+aware that the entire query gets re-executed each 100 docs or so, so yes,
+there is a performance issue. You'll pay a price how big depends on a lot of
+variables. But let's say the query takes 2 seconds to run. You'll spend two
+seconds searching before returning document 0, two more seconds between
+documents 100 and 101, two seconds between 200 and 201, etc. *even if you
+just throw them away* if you use an iterator.
+
+So, getting hits 10,000 through 10,100 will spend a LOT if time processing
+queries. You're better off using a HitCollector, perhaps a TopDocs etc.
+
+On the other hand, if your query takes 10 ms and you never really expect to
+fetch more than, say, 500 documents, who cares? Do it as simply as possible.
+
+But now that I'm thinking about it, it's unclear to me what happens if you
+just ask for Hits.doc(401) as your first call to get any document from the
+Hits object. I took a quick look at the Hits code and it *looks* like, for
+fetching an arbitrary 100 documents, the maximum number of searches you'll
+make is two. Again, it's a quick look, but it seems like the following
+
+Hits hits = search();
+Document doc = hits.doc(401);
+
+will execute the search twice. First to get the first 100 docs, then to get
+documents 400-800. At least I think that's what's happening. That said, I
+think you'd still be ahead by implementing your own HitCollector if you
+expect to fetch thousands of documents.... The "fetch twice as many
+documents as the one we're asked for" algorithm seems tailored for
+relatively small data sets, which shouldn't be any surprise......
+
+Erick
+
+On 4/27/07, Tony Qian <tonyqian@hotmail.com> wrote:
+>
+> All,
+>
+> After playing around with Lucene, we decided to replace old full-text
+> search
+> engine with Lucene. I got "Lucene in Action" a week ago and finished
+> reading
+> most of the book. I got several questions.
+>
+> 1) Since the book was written two years ago and Lucene has made a lot of
+> changes, is there any plan for 2nd edition? (I guess this question is for
+> Otis and Erik, btw, it is a great book.)
+>
+> 2) I have two processes for indexing. one runs every 5 minutes to add new
+> contents into an existing index. Another one runs daily to rebuild entire
+> index which also handles removing old contents. After rebuild process
+> finishes indexing, we'd like to replace the index built by first process
+> (every 5 minutes) with index built by second process. How do i do it
+> safely
+> and also avoid duplicating or missing documents (It is possible that first
+> process is still adding documents to the index when we try to replace it
+> with second one).
+> NOTE: both processes retrieve data from same database.
+>
+> 3) we are doing indexing on a master server and push index data to slave
+> servers. In order to make new data visible to client, we have to close
+> IndexSearcher and open it after new data is coped over. We use web based
+> application (servlet) as search interface, creating a IndexSearcher as an
+> instance variable for all clients. My question is what will happen to
+> clients if I close IndexSearcher while clients are still doing search. How
+> to safely update index when client are searching?
+>
+> 4) Lucene caches first 100 hits in memmory. We decided to use requery to
+> return search results back to clients. For first 100 documents, i can
+> iterator through "Hits". Do i have to use doc(n) to retrive documents for
+> any documents > 100? Any performance issues?
+>
+> Thanks in advance for help,
+> Tony
+>
+> _________________________________________________________________
+> The average US Credit Score is 675. The cost to see yours: $0 by Experian.
+>
+> http://www.freecreditreport.com/pm/default.aspx?sc=660600&bcd=EMAILFOOTERAVERAGE
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

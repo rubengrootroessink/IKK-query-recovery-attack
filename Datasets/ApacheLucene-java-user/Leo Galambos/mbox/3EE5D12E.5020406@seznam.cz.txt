@@ -1,0 +1,78 @@
+FROM: Leo Galambos <Le...@seznam.cz>
+SUBJECT: Re: High Capacity (Distributed) Crawler
+DATE: 10 Jun 2003
+
+Otis Gospodnetic wrote:
+
+>>What interface do you need for Lucene? Will you use PUSH (=the robot 
+>>will modify Lucene's index) or PULL (=the engine will get deltas from
+>>
+>>the robot) mode? Tell me what you need and I will try to do all my
+>>best.
+>>    
+>>
+>
+>I'd imagine one would want to use it in the PUSH mode (e.g. the crawler
+>fetches a web page and adds it to the searchable index).
+>How does PULL mode work?  I've never heard of web crawlers being used
+>in the PULL mode.  What exactly does that mean, could you please
+>describe it?
+>  
+>
+It is a long story, so I will assume, that everything runs on a single 
+box - it is the most simple case.
+"[x]" will denote points, where Lucene may have problems with a fast 
+implementation, I guess.
+
+Crawler: The crawler stores meta and body of all documents. If you want 
+to retrieve the document meta or body (knowing its URI), it costs O(1) 
+(2 seeks and 2 read requests in auxiliary data structures). After this 
+retrieval you also get a direct handle to meta and body - then the price 
+of retrieval becomes O(1), but no extra seeks in any structures. The 
+handle is persistent and is related to URI. The meta and body is updated 
+as soon as the crawler fetches a new fresh copy.
+
+Engine: engine stores the handle for each document. Moreover it knows 
+the last (highest) handle, which is stored in the main index. So the 
+trick is this:
+1) build up an auxiliary index from new documents. The new documents are 
+documents which have their handle greater than the last handle which is 
+known to the engine, thus you can iterate them easily - this process can 
+run in a separate thread
+2) consult the changes. You read meta, which are stored in index, and 
+test if they are obsolete (note: you have already got the handle, so it 
+smokes). If so, you denote the respective document as "deleted" and its 
+new version (if any) is appended to another index - the index of 
+changes. The insertion to the index runs in a separate thread, so the 
+main thread is not blocked. BTW: [x] The documents, which are not 
+modified, may modify their ranks (depthrank, pagerank, frequencyrank 
+etc) in this round.
+
+[x] The two auxiliary indices are then merged with the main index.
+
+Obviously, the weak point is the test if anything is changed. This can 
+be easily solved with the index dynamization I use. Despite Lucene, I 
+order barrels (segments in your terminology) by their size. I do not 
+want to describe all the details - I hate long e-mails ;-), but the 
+dynamization guarantees that:
+a) the query time is never worse than 8x, comparing with 
+fully-optimalized index (if you buy 8x faster HW, you overcome this easily)
+b) the documents, which are often modified, are stored in small barrels 
+of the main index. It means, that their actualization is fast.
+
+So, I process only the small barrels once a day, and the larger ones 
+less often. If we say, that 5M of docs are updated daily, PULL mode can 
+handle this load in few minutes. Unfortunately, the slowest point is the 
+HTML parser which may run few hours :-(.
+
+If you want to actualize other 10^10 crap pages once a month, it can be 
+done too, but it is out of my first assumption above ;-).
+
+-g-
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

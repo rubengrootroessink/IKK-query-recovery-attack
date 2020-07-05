@@ -1,0 +1,97 @@
+FROM: Toke Eskildsen ...@statsbiblioteket.dk>
+SUBJECT: Re: faceted search performance
+DATE: 27 Oct 2009
+
+On Mon, 2009-10-12 at 20:02 +0200, Jake Mannix wrote:
+> This killer is the "TermQuery for each term" part - this is huge. You need
+> to invert this process, and use your query as is, but while walking in the 
+> HitCollector, on each doc which matches your query, increment counters for
+> each of the terms in that document (which means you need an in-memory 
+> forward lookup for your documents, like a multivalued FieldCache - and if
+> you've got roughly the same number of terms as documents, this cache is 
+> likely to be as large as your entire index - a pretty hefty RAM cost).
+
+We use something a lot like this, with some tricks to reduce memory
+usage, primarily by storing the terms as a file:
+
+A docID-array (#docs * 4 bytes) has an entry for each document that
+specifies where in the field/term list to start reading. The number of
+field/term entries to read is inferred by looking at the offset for the
+next docID.
+
+The field/term array (#terms * 4 bytes) consists of packed pairs, where
+the field is specified by 5 bits (giving a max of 32 fields) and the
+term by 27 bits (giving a maximum of 134 million unique terms/field).
+
+For each field, a file is stored with the concatenated terms. An
+in-memory array (#terms * 8 bytes) of offsets in the file for the terms
+provides fast lookup. It should be possible to store this array as a
+file, which would significantly reduce memory usage.
+
+Total memory usage: (#docs * 4 bytes) + (#terms * 12 bytes).
+
+[...]
+
+> For each document you look at (which matches your query), you need to look
+> at all of the terms in that document, and increment a counter for that term.
+
+This can be done surprisingly fast as you do not need to look at the
+terms (Strings) themselves. The pseudo-code for our counting is
+something like
+
+for (int id: docIDs) {
+  for (int pos = docID-array[id] ; pos < docID-array[id+1] ; pos++) {
+    counters[field_terms >> 27][field_terms & TERM_MASK]++
+  )
+)
+
+In order to provide the result, we iterate the counters, extracting the
+top-10 (or whatever amount of terms we want). After that we can retrieve
+the actual Strings for the terms, as we can get the offset of the terms
+by using the position from the counters.
+
+Total memory-usage thus jumped to
+(#docs * 4 bytes) + (#terms * 12 bytes) + 
+((#terms * 4 bytes) * #concurrent searches)
+
+To recap, our faceted search is thus
+
+ - The search itself, providing a bitset with all matching docIDs
+ - Counting (very tight loop with no conditionals)
+ - Extracting top-x term-IDs for each field (heapsort or such)
+ - Retrieving only the relevant terms from file
+ - Clearing the counters for next usage
+
+The last step is obviously somewhat critical, as requesting a facet
+model with 10 fields of 20 terms each means a worst-case of 200 seeks.
+In real world usage, caching helps a lot and SSDs help even more.
+
+We did some tests on this and got the following, where #references is
+the number of facet-search-relevant terms in the documents (in the first
+example, this means that each document had an average of 10
+facet-relevant terms).
+
+* 10M docs, 10M unique facet-relevant terms, 100M refs, 1 machine
+     A few 1000 hits < 100 ms
+     A few 100.000 hits < 200 ms
+     10M hits ~3 sec
+
+* 100M docs, 1G unique facet-relevant terms, 1G refs, 3 machines
+     A few 1000 hits ~1 sec (ouch)
+     A few 100.000 hits ~1 sec
+     10M hits < 3 sec
+     100M hits ~15 sec
+
+Lots of room for improvement for small numbers of hits and as always,
+YMMW, but faceted search with a large number of terms in a large number
+of documents is feasible.
+
+Regards,
+Toke Eskildsen
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

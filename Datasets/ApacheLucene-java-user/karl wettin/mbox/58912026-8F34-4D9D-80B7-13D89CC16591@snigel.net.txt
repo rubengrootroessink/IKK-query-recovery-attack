@@ -1,0 +1,146 @@
+FROM: karl wettin <ka...@snigel.net>
+SUBJECT: Re: Using Lucene for searching tokens, not storing them.
+DATE: 17 Apr 2006
+
+
+16 apr 2006 kl. 19.18 skrev karl wettin:
+
+> For any interested party, I do this because I have a fairly small  
+> corpus with very heavy load. I think there is a lot to win by not  
+> creating new instances of what not, seeking in the file-centric  
+> Directory, parsing pseudo-UTF8, et.c. at query time. I simply store  
+> all instance of everything (the index in a bunch of Lists and Maps.  
+> Bits are cheaper than ticks.
+
+I will most definitely follow this path.
+
+My tests used the IMDB tv-series as corpus. It contains about 45 000  
+documents and has plenty of unique terms.
+
+On my G4 the 190 000 queries took:
+193 476 milliseconds on a RAMDirectory
+123 193 milliseconds with my code branch.
+
+That is about 40% less time. The code contains lots of things that  
+can be optimized for both memory and CPU. Pretty sure it can be  
+cranked down to use a fraction of the ticks spent by a RAMDirectory.  
+I aim at 1/3.
+
+The FSDirectory take 5MB with no fields stored. My implementation  
+occupies about 100MB RAM, but that includes me treating all fields as  
+Store.YES so it is not comparable at this stage.
+
+I did not time the indexing, but it felt as it was about three to  
+five times as fast.
+
+Personally I'll be using Prevayler for persistence  
+(java.io.Serializable with transactions).
+
+
+Basically, this is what I did:
+
+public final class Document implements java.io.Serializable {
+     private static final long serialVersionUID = 1l;
+
+     private Integer documentNumber;
+     private Map<Term, int[]> termsPositions;
+     private Map<String, TermFreqVector> termFrequecyVectorsByField;
+     private TermFreqVector[] termFrequencyVectors;
+
+
+public final class Term implements Comparable, java.io.Serializable {
+     private static final long serialVersionUID = 1l;
+
+     private int orderIndex;
+     private ArrayList<Document> documents;
+
+
+public class MemImplManager implements Serializable {
+     private static final long serialVersionUID = 1l;
+
+     private transient Map<String, byte[]> normsByFieldCache;
+     private Map<String, ArrayList<Byte>> normsByField;
+
+     private ArrayList<Term> orderedTerms;
+     private ArrayList<Document> documents;
+
+     private Map<String, Map<String, Term>> termsByFieldAndName;
+
+     private class MemImplReader extends IndexReader {
+         ...
+
+
+So far everything is not fully implemented yet, hence my test only  
+contains SpanQueries.
+
+	for (int i = 0; i < 10000; i++) {
+             placeQuery(new String[]{"csi", "ny"});
+             placeQuery(new String[]{"csi", "new", "york"});
+             placeQuery(new String[]{"star", "trek", "enterprise"});
+             placeQuery(new String[]{"star", "trek", "deep", "space"});
+             placeQuery(new String[]{"lust", "in", "space"});
+             placeQuery(new String[]{"lost", "in", "space"});
+             placeQuery(new String[]{"lost"});
+             placeQuery(new String[]{"that", "70", "show"});
+             placeQuery(new String[]{"the", "y-files"});
+             placeQuery(new String[]{"csi", "las", "vegas"});
+             placeQuery(new String[]{"stargate", "sg-1"});
+             placeQuery(new String[]{"stargate", "atlantis"});
+             placeQuery(new String[]{"miami", "vice"});
+             placeQuery(new String[]{"miami", "voice"});
+             placeQuery(new String[]{"big", "brother"});
+             placeQuery(new String[]{"my", "name", "is", "earl"});
+             placeQuery(new String[]{"falcon", "crest"});
+             placeQuery(new String[]{"dallas"});
+             placeQuery(new String[]{"v"});
+         }
+
+
+protected Query buildQuery(String[] nameTokens) {
+
+         BooleanQuery q = new BooleanQuery();
+         BooleanQuery bqStrategies = new BooleanQuery();
+
+         /**name ^10 */
+         {
+             SpanQuery[] spanQueries = new SpanQuery[nameTokens.length];
+             for (int i = 0; i < spanQueries.length; i++) {
+                 spanQueries[i] = new SpanTermQuery(new Term("name",  
+nameTokens[i]));
+             }
+             SpanQuery nameQuery = new SpanNearQuery(spanQueries, 0,  
+true);
+             nameQuery.setBoost(10);
+             bqStrategies.add(new BooleanClause(nameQuery,  
+BooleanClause.Occur.SHOULD));
+         }
+
+         /** aka name in order ^1 */
+         {
+             SpanQuery[] spanQueries = new SpanQuery[nameTokens.length];
+             for (int i = 0; i < spanQueries.length; i++) {
+                 spanQueries[i] = new SpanTermQuery(new Term 
+("akaName", nameTokens[i]));
+             }
+             SpanQuery nameQuery = new SpanNearQuery(spanQueries, 0,  
+true);
+             nameQuery.setBoost(1);
+             bqStrategies.add(new BooleanClause(nameQuery,  
+BooleanClause.Occur.SHOULD));
+         }
+
+
+         q.add(new BooleanClause(bqStrategies,  
+BooleanClause.Occur.MUST));
+
+         return q;
+     }
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

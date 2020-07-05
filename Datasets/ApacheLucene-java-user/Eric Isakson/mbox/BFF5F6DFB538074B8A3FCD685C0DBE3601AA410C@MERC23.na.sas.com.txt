@@ -1,0 +1,151 @@
+FROM: "Eric Isakson" <Eric.Isak...@sas.com>
+SUBJECT: RE: Partial token matches
+DATE: 28 Apr 2006
+
+Thank you all for the ideas and thanks to the developers for producing such a great tool. I
+hadn't considered the "too many clauses" problem in my original implementation and I'm definitely
+hitting it.
+
+I decided to use a bi-gram tokenization approach combined with a PhraseQuery to get the "terms
+containing" feature. This keeps me from needing N fields each with different length n-grams
+at the expense of a little more work at query time. My indexed field ends up looking like:
+
+in  nf  fo  or rm  ma  at
+
+and my query for "form" looks like:
+
+"fo or rm"
+
+I build the query using the PhraseQuery object and my bi-gram tokenizer. I haven't tried to
+solve single character queries yet, but I don't expect that to be too much trouble. I'll probably
+just use a single character tokenization strategy in another field of the index and make that
+a special case.
+
+This bi-gram approach actually produces an index smaller than the one I was getting with my
+previous algorithm and the search performance is great.
+
+I also had the "too many clauses" problem in my "terms starting with" feature which used PrefixQuery.
+I solved this case using this same bi-gram tokenized field. For this case, I need the user
+supplied text at the beginning of the field. So I build a SpanNearQuery with the tokens to
+get a phrase like query using spans and then a SpanFirstQuery with the number of tokens to
+force the query to only match at the start of the field. So a "starts with" query for "form"
+looks like
+
+SpanQuery fo = new SpanTermQuery(new Term(FIELD_CONTAINS, "fo");
+SpanQuery or = new SpanTermQuery(new Term(FIELD_CONTAINS, "or");
+SpanQuery rm = new SpanTermQuery(new Term(FIELD_CONTAINS, "rm");
+SpanQuery form = new SpanNearQuery(new SpanQuery[] {fo, or, rm}, 0, true);
+SpanQuery query = new SpanFirstQuery(form, 3);
+
+>From what I read, this strategy will not perform as fast as a prefix query, but it will
+allow me to use arbitrarily short query text without running into the "too many clauses" problem.
+
+Thanks again for the suggestions!
+Eric
+
+-----Original Message-----
+From: Paul.Illingworth@saaconsultants.com [mailto:Paul.Illingworth@saaconsultants.com] 
+Sent: Thursday, April 27, 2006 4:06 AM
+To: java-user@lucene.apache.org
+Subject: Re: Partial token matches
+
+
+
+
+
+
+Another approach maybe to use n-grams. Index each word as follows
+
+2 gram field
+in  nf  fo  or rm  ma  at
+
+3 gram field
+inf  nfo  for  orm rma  mat
+
+4 gram field
+info nfor form orm rmat
+
+and so on.
+
+To search for term "form" simply search the 4 gram field.
+
+The prefix query approach may suffer from the too many clauses exception if you have lots
+of words beginning with, in your exmaple, "form". The approach above would avoid this but
+will obviously have a much bigger index size.
+
+Regards
+
+Paul I.
+
+
+
+                                                                           
+             "Eric Isakson"                                                
+             <Eric.Isakson@sas                                             
+             .com>                                                      To 
+                                       <java-user@lucene.apache.org>       
+             26/04/2006 17:20                                           cc 
+                                                                           
+                                                                   Subject 
+             Please respond to         Partial token matches               
+             java-user@lucene.                                             
+                apache.org                                                 
+                                                                           
+                                                                           
+                                                                           
+                                                                           
+
+
+
+
+Hi All,
+
+Just wanted to throw out something I'm working on. It is working well for me, but I wanted
+to see if anyone can suggest any other alternatives that might perform better than what I'm
+doing now.
+
+I have a field in my index that contains keywords (back of the book index
+terms) and a UI feature that allows the user to find documents that contain a partial keyword
+supplied by the user. So a particular document in my index might have the token "informat"
+in the keywords field and the user may supply "form" in the UI and I should get a match.
+
+My old implementation does not use Lucene and just uses String.matches with a regular expression
+that looks like ".*form.*". I reimplemented using Lucene and just tokenize the field so I
+get the tokens
+
+informat
+nformat
+format
+ormat
+rmat
+mat
+at
+t
+
+Then I use a prefix query to find hits. Both implementations ignore case in the search and
+the hit order is controlled by another field that I'm sorting on, so relevance ranking is
+not important in this use case. Search time performance is crucial, time to create the index
+and index size are not really important. The index is created statically at application startup
+or possibly delivered to the application and is not updated while the application is using
+it.
+
+Thanks for any suggestions,
+Eric
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,426 @@
+FROM: liat oren <oren.l...@gmail.com>
+SUBJECT: Boosting query - debuging
+DATE: 3 May 2009
+
+Hi,
+
+I try to debug boosting query.
+Is there a way to see the term boost in the documents? I see them in spans
+in BoostingTermQuery, yet, from there I can't see which document I am in.
+If I want to copy some of the document in an index that saves the boosting -
+how can it be done?
+
+The problem I am facing is that I get unexpected results - If for word "a",
+I have the worlds "1111" (boosting 3) and "2222" and for word "b" I have the
+world "1111". When I try to search for "1111" (boosting 5), word "a" gets
+better results.
+
+When I debugged it, I saw that the boosting is always three, but since in
+the index I have a lot of documents, I tried to do the same on a smaller
+index.
+
+I put only two words as you can see in the code below (I put all the methods
+and classes needed to run this code).
+
+The problem I saw here is the scorePayload in the Explain method - it took a
+differnt value from the one I indexed.
+You can see below the output - for TTD - 1.0 = scorePayload(...)
+and for finlin 3.0 = scorePayload(...)
+while the boosting I used was the opposite - for TTD, I used 3 and for
+finlin, I used 1
+
+The scorePayload should be the factor I put when I indexed, right?
+
+Thanks a lot,
+Liat
+
+TTD, score: 1.2611988
+
+0.26274973 = (MATCH) weight(worlds:666666 in 0), product of:
+  0.99999994 = queryWeight(worlds:666666), product of:
+    0.5945349 = idf(worlds: 666666=2)
+    1.681987 = queryNorm
+  0.26274976 = (MATCH) fieldWeight(worlds:666666 in 0), product of:
+    0.70710677 = (MATCH) btq, product of:
+      0.70710677 = tf(phraseFreq=0.5)
+      1.0 = scorePayload(...)
+    0.5945349 = idf(worlds: 666666=2)
+    0.625 = fieldNorm(field=worlds, doc=0)
+********************************************************
+finlin, score: 0.26274976
+
+1.2611988 = (MATCH) weight(worlds:666666 in 1), product of:
+  0.99999994 = queryWeight(worlds:666666), product of:
+    0.5945349 = idf(worlds: 666666=2)
+    1.681987 = queryNorm
+  1.2611989 = (MATCH) fieldWeight(worlds:666666 in 1), product of:
+    2.1213202 = (MATCH) btq, product of:
+      0.70710677 = tf(phraseFreq=0.5)
+      3.0 = scorePayload(...)
+    0.5945349 = idf(worlds: 666666=2)
+    1.0 = fieldNorm(field=worlds, doc=1)
+
+*The code*
+**
+public class Test
+{
+ public Test()
+ {
+ }
+ public static void main(String[] args) throws IOException, Exception
+ {
+  Test st = new Test();
+  st.index(); //
+  st.testRealIndex();
+ }
+ public void index() throws IOException
+ {
+  DoubleMap wordMap = new DoubleMap();
+  wordMap.insert("TTD", 666666, 3);
+  wordMap.insert("finlin", 666666, 1);
+  wordMap.insert("finlin", 222222, 2);
+  index(wordMap, "wordIndexTry", "", "0");
+ }
+ public synchronized void index(DoubleMap doubleMap, String dirPath, String
+originalPath, String includeFreq) throws IOException
+ {
+  File f = new File(dirPath);
+  IndexWriter writer = null;
+  PayloadAnalyzer panalyzer = new PayloadAnalyzer();
+  if(f.exists())
+  {
+   writer = new IndexWriter(dirPath, panalyzer, false);
+  }
+  else
+  {
+   writer = new IndexWriter(dirPath, panalyzer, true);
+  }
+  Iterator it = doubleMap.getMap().entrySet().iterator();
+  int count = 0;
+  int size = doubleMap.getMap().size();
+  while(it.hasNext())
+  {
+   count++;
+   Map.Entry entry = (Map.Entry) it.next();
+   String word = entry.getKey().toString();
+   Word w = new Word();
+   w.word = word;
+   Date date = new Date();
+   System.out.println(date.toString() + " : Updateing word " + word + " ( "
++ count + " out of " + size + ") " + " FROM " + originalPath);
+   Map<Long, Double> innerMap = (Map<Long, Double>) entry.getValue();
+   Map<String, Integer> scoresMap = processMap(writer, panalyzer, innerMap,
+entry, w, dirPath, includeFreq);
+   index(writer, panalyzer, innerMap, scoresMap, w, dirPath, includeFreq);
+  }
+  System.out.println("Optimizing " + dirPath + " ...");
+  writer.optimize();
+  writer.close();
+ }
+ public synchronized Map<String, Integer> processMap(IndexWriter writer,
+PayloadAnalyzer panalyzer, Map<Long, Double> innerMap, Map.Entry entry, Word
+w, String dirPath, String includeFreq) throws IOException
+ {
+  Map<String, Integer> scoresMap = new HashMap<String, Integer>();
+  Iterator worldsIter = innerMap.entrySet().iterator();
+  String worlds = "";
+  synchronized(worldsIter)
+  {
+   while(worldsIter.hasNext())
+   {
+    Map.Entry worldsEntry = (Map.Entry) worldsIter.next();
+    String world = worldsEntry.getKey().toString();
+    int freq = (int) Double.parseDouble(worldsEntry.getValue().toString());
+    scoresMap.put(world, freq);
+    worlds += world + " ";
+    FileUtil.writeToFile("Output\\WordWorldsFreq.txt", w.word +
+Constants.TAB_SEP + world + Constants.TAB_SEP + freq);
+   }
+  }
+  panalyzer.setMapScores(scoresMap); //MapUtil.copyStringIntMap(scoresMap));
+  return scoresMap;
+ }
+ public synchronized void index(IndexWriter writer, PayloadAnalyzer
+panalyzer, Map<Long, Double> innerMap, Map<String, Integer> scoresMap, Word
+w, String dirPath, String includeFreq) throws IOException
+ {
+  System.out.println("indexing");
+  w.worldsMap = innerMap;
+  WordIndex wi = new WordIndex(w);
+  wi.createDocument(includeFreq);
+  writer.addDocument(wi.getDocument());
+ }
+ public void testRealIndex() throws IOException
+ {
+  String word = "TTD";
+  String worlds = "666666";
+  DoubleMap wordsWorldsFreqMap = new DoubleMap();
+  wordsWorldsFreqMap.insert("TTD", 666666, 1.0);
+  BoostingBooleanQueryParser bbqp = new BoostingBooleanQueryParser();
+  BooleanQuery bq = bbqp.parse(word, worlds, wordsWorldsFreqMap, "worlds");
+  IndexSearcher searcher = new IndexSearcher("wordIndexTry");
+//D:\\PaiDatabase\\Indexes\\WordIndex");
+  searcher.setSimilarity(new WordsSimilarity());
+  TopDocCollector collector = new TopDocCollector(30);
+  searcher.search(bq, collector);
+  ScoreDoc[] hits = collector.topDocs().scoreDocs;
+  for(int j = 0; j < Math.min(hits.length, 10); j++)
+  {
+   int docId = hits[j].doc;
+   Document curDoc = searcher.doc(docId);
+   System.out.println(curDoc.getField("word").stringValue() + ", score: " +
+hits[j].score);
+   Explanation explanation = searcher.explain(bq, j);
+   System.out.println(explanation.toString());
+   String sym = curDoc.getField("word").stringValue();
+  }
+ }
+ public abstract class Index
+ {
+  protected Document doc = new Document();
+  public Index()
+  {
+  }
+  public Document getDocument()
+  {
+   return doc;
+  }
+  public void setDocument(Document d)
+  {
+   this.doc = d;
+  }
+ }
+ public class WordIndex extends Index
+ {
+  protected Word w;
+  public String FIELD_WORD = "word";
+  public String FIELD_WORLDS = "worlds";
+  public WordIndex(Word w)
+  {
+   this.w = w;
+  }
+  public void createDocument(String includeFreq) throws
+java.io.FileNotFoundException
+  {
+   // make a new, empty document
+   doc = new Document();
+   doc.add(new Field(FIELD_WORD, w.word, Field.Store.YES,
+Field.Index.NOT_ANALYZED));
+   doc.add(new Field(FIELD_WORLDS,
+String.valueOf(w.getWorldIds(includeFreq)), Field.Store.YES,
+Field.Index.ANALYZED, Field.TermVector.YES));
+  }
+  public Document getDoc(String word, String indexPath) throws IOException
+  {
+   IndexSearcher mapSearcher = new IndexSearcher(indexPath);
+   TermQuery mapQuery = new TermQuery(new Term(FIELD_WORD, word));
+   Hits mapHits = mapSearcher.search(mapQuery);
+   if(mapHits.length() != 0)
+   {
+    Document doc = mapHits.doc(0);
+    return doc;
+   }
+   return null;
+  }
+ }
+ public class Word
+ {
+  public String word;
+  public Map<Long, Double> worldsMap = new HashMap<Long, Double>();
+  public Word()
+  {
+  }
+  public String getWorldIds(String includeFreq)
+  {
+   String worlds = "";
+   Iterator iter = worldsMap.entrySet().iterator();
+   while(iter.hasNext())
+   {
+    Map.Entry entry = (Map.Entry) iter.next();
+    if(includeFreq.equals("1"))
+    {
+     int freq = (int) Double.parseDouble(entry.getValue().toString());
+     for(int i = 0; i < freq; i++)
+     {
+      worlds += entry.getKey().toString() + " ";
+     }
+    }
+    else
+    {
+     worlds += entry.getKey().toString() + " ";
+    }
+   }
+   return worlds;
+  }
+ }
+ public class DoubleMap
+ {
+  private Map<String, Map<Long, Double>> map;
+  public Map<String, String> worldsListMap = new HashMap<String, String>();
+  public List<String> entriesList = new ArrayList<String>();
+  public DoubleMap()
+  {
+   map = new HashMap<String, Map<Long, Double>>();
+  }
+  public void insert(String word, long worldId, double beta)
+  {
+   if(map.get(word) != null)
+   {
+    Map<Long, Double> innerMap = map.get(word);
+    if(innerMap.get(worldId) != null)
+    {
+     return;
+    }
+    innerMap.put(worldId, beta);
+    map.put(word, innerMap);
+   }
+   else
+   {
+    Map<Long, Double> innerMap = new HashMap<Long, Double>();
+    innerMap.put(worldId, beta);
+    map.put(word, innerMap);
+   }
+  }
+  public void insert(String word, long worldId, double beta, int size)
+  {
+   if(map.get(word) != null)
+   {
+    Map<Long, Double> innerMap = map.get(word);
+    if(innerMap.get(worldId) != null)
+    {
+     return;
+    }
+    if(innerMap.size() == size)
+    {
+     Iterator iter = innerMap.entrySet().iterator();
+     int count = 0;
+     while(iter.hasNext())
+     {
+      Map.Entry entry = (Map.Entry) iter.next();
+      count++;
+     }
+     System.out.println(count);
+     long minWorldId = getMinItem(innerMap);
+     innerMap.remove(minWorldId);
+    }
+    innerMap.put(worldId, beta);
+    map.put(word, innerMap);
+   }
+   else
+   {
+    Map<Long, Double> innerMap = new HashMap<Long, Double>();
+    innerMap.put(worldId, beta);
+    map.put(word, innerMap);
+   }
+  }
+  private long getMinItem(Map<Long, Double> innerMap)
+  {
+   Iterator it = innerMap.entrySet().iterator();
+   long worldId = -1;
+   while(it.hasNext())
+   {
+    Map.Entry entry = (Map.Entry) it.next();
+    worldId = Long.parseLong(entry.getKey().toString());
+   }
+   return worldId;
+  }
+  public Map<String, Map<Long, Double>> getMap()
+  {
+   return map;
+  }
+ }
+ public class BoostingBooleanQueryParser
+ {
+  public BoostingBooleanQueryParser()
+  {
+  }
+  public BooleanQuery parse(String word, String worlds, DoubleMap
+wordsWorldsFreqMap, String fieldName) throws IOException
+  {
+   BooleanQuery bq = new BooleanQuery();
+   String[] splitWorlds = worlds.split(" ");
+   for(int i = 0; i < splitWorlds.length; i++)
+   {
+    double freq =
+wordsWorldsFreqMap.getMap().get(word).get(Long.parseLong(splitWorlds[i]));
+    BoostingTermQuery tq = new BoostingTermQuery(new Term(fieldName,
+splitWorlds[i]));
+    tq.setBoost((float) freq);
+    bq.add(tq, BooleanClause.Occur.SHOULD);
+   }
+   return bq;
+  }
+ }
+ public class PayloadAnalyzer extends Analyzer
+ {
+  private PayloadTokenStream payToken = null;
+  private int score;
+  private Map<String, Integer> scoresMap = new HashMap<String, Integer>();
+  public synchronized void setScore(int s)
+  {
+   score = s;
+  }
+  public synchronized void setMapScores(Map<String, Integer> scoresMap)
+  {
+   this.scoresMap = scoresMap;
+  }
+  public final TokenStream tokenStream(String field, Reader reader)
+  {
+   payToken = new PayloadTokenStream(new WhitespaceTokenizer(reader)); //new
+LowerCaseTokenizer(reader));
+   payToken.setScore(score);
+   payToken.setMapScores(scoresMap);
+   return payToken;
+  }
+ }
+ public class PayloadTokenStream extends TokenStream
+ {
+  private Tokenizer tok = null;
+  private int score;
+  private Map<String, Integer> scoresMap = new HashMap<String, Integer>();
+  public PayloadTokenStream(Tokenizer tokenizer)
+  {
+   tok = tokenizer;
+  }
+  public void setScore(int s)
+  {
+   score = s;
+  }
+  public synchronized void setMapScores(Map<String, Integer> scoresMap)
+  {
+   this.scoresMap = scoresMap;
+  }
+  public Token next(Token t) throws IOException
+  {
+   t = tok.next(t);
+   if(t != null)
+   {
+    //t.setTermBuffer("can change");
+    //Do something with the data
+    byte[] bytes = ("score:" + score).getBytes();
+    //                              t.setPayload(new Payload(bytes));
+    String word = String.copyValueOf(t.termBuffer(), 0, t.termLength());
+    if(!word.equals("") && word != null)
+    {
+     int score = scoresMap.get(word);
+     if(score > 127)
+     {
+      score = 127;
+     }
+     byte payLoad = Byte.parseByte(String.valueOf(score));
+     t.setPayload(new Payload(new byte[] { Byte.valueOf(payLoad) }));
+    }
+   }
+   return t;
+  }
+  public void reset(Reader input) throws IOException
+  {
+   tok.reset(input);
+  }
+  public void close() throws IOException
+  {
+   tok.close();
+  }
+ }
+}
+

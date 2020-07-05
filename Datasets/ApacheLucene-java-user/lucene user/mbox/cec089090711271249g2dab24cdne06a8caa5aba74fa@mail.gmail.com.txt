@@ -1,0 +1,196 @@
+FROM: "lucene user" <luz...@gmail.com>
+SUBJECT: Re: Searching user-private annotations associated with indexed documents
+DATE: 27 Nov 2007
+
+These annotations are private to a specific user and they can change at any
+time. What are the challenges associated with this fact? What are the best
+ways to address these challenges? There are likely to be lots of small
+changes to these annotations. Can we delete and re-insert these annotation
+documents without causing problems for our main index?
+
+Thanks!
+
+On Nov 27, 2007 3:41 PM, Binkley, Peter <Peter.Binkley@ualberta.ca> wrote:
+
+> One approach would be to take advantage of Lucene's ability to handle
+> different kinds of documents in a single index. You could put the
+> annotations in the same index as the main articles, but with extra
+> fields, like this:
+>
+> Article document:
+>
+> Id: article1
+> Type: article
+> Text: blah blah blah
+>
+> Annotation document:
+>
+> Id: user1:article1
+> Type: annotation
+> User: user1
+> Article: article1
+> Text: comment on blah blah blah
+>
+> You could then query something like "(type:article AND text:blah) OR
+> (type:annotation AND user:user1 AND text:blah)". When annotations are
+> retrieved, it would be up to your application to call up the associated
+> article (or maybe you repeat the necessary display fields in the
+> annotation document, e.g. title).
+>
+> This way your privacy requirement is easy because it's easy to limit a
+> query to annotations by the current user, and you can update a user's
+> annotation on a given article without having to reindex the article.
+> However, the trade-off is that by having the article and annotation in
+> separate documents, you'll lose the relevance boost you would otherwise
+> get when the search terms appear both in the annotation and in the
+> article.
+>
+> Peter
+>
+> -----Original Message-----
+> From: lucene user [mailto:luz290@gmail.com]
+> Sent: Tuesday, November 27, 2007 12:49 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Searching user-private annotations associated with indexed
+> documents
+>
+> These annotations are not positional within the underlying article.
+> They are just comments the user associates with the entire underlying
+> document, i.e., "This article gets the facts wrong about the real
+> reasons the US went into Iraq." Could be a sentence or a few sentences
+> about the entire underlying article. Perhaps a few hundred words
+> associated with a small percentage of the documents we index.
+>
+> Am I being clear?
+>
+> I want to do phrase searches BOTH for the underlying article and for the
+> associated annotation at the same time. So, for example, search for all
+> articles where the article talks about "US Army" and the annotation
+> includes the word "reasons"
+>
+> I don't know what you mean  by "PERSON_ANNOTATION works for Google".
+>
+> On Nov 27, 2007 7:54 AM, mark harwood <markharw00d@yahoo.co.uk> wrote:
+> > Do the annotations have positions ?
+> >
+> > Do you want to do things like phrase-search e.g.
+> >      "PERSON_ANNOTATION works for Google"
+> >
+> > Or is your idea of an annotation more simply a del.ici.ous-style tag
+> associated with the whole document?
+> >
+> > Cheers
+> > Mark
+> >
+> >
+> > ----- Original Message ----
+> > From: lucene user <luz290@gmail.com>
+> > To: java-user@lucene.apache.org
+> > Sent: Tuesday, 27 November, 2007 12:31:38 PM
+> > Subject: Re: Searching user-private annotations associated with
+> > indexed documents
+> >
+> > I'd be VERY grateful for your help, folks! Thanks! I really need some
+> > insight on this. THANKS!!
+> >
+> > On Nov 26, 2007 6:43 PM, lucene user <luz290@gmail.com> wrote:
+> > > Here are the three options that seem practical to us right now.
+> > >
+> > > (1) Do The annotation search in postgres using LIKE or the
+> > >    postgres native full text search. Take the resulting list
+> > >    of file ids and use it to build a filter for the lucene query,
+> > >    the way we currently do for folders.
+> > >
+> > > (2) Add a second lucene index that contains only annotations.
+> > >    First retrieve a list of file ids satisfying the annotation
+> > >    query from this index and use it to create a filter for the
+> > >    main lucene query on the archive.
+> > >    Whenever annotation text is edited,
+> > >      if blank, delete annotation from index
+> > >      otherwise add or replace annotation in index.
+> > >
+> > > (3) Add a second lucene index that contains contentrefs.
+> > >     This index would contain the same fields as the arhicve index
+> > >     plus the following:
+> > >       database_id: list of systemuser_id and contentref_id.
+> > >       annotation:  list of all annotation text for this
+> > >                    system user and content ref.
+> > >       folders:     list of all folder names for this systemuser and
+> > >                    content ref
+> > >
+> > >     Whenever an article is added to or removed from a folder,
+> > >     or its annotation text is edited, the following would occur:
+> > >       See if it has an entry in the lucene index for the database.
+> > >       if so,
+> > >         extract the lucene document from the index.
+> > >         if the updated list of folders that contain it is empty,
+> > >            delete this document from the lucene database index.
+> > >         otherwise,
+> > >           update the folder and annotation in the document object.
+> > >           delete this document from the index.
+> > >           add the updated document object to the index.
+> > >       if not,
+> > >         extract the lucene document for the article from the archive
+> >  index
+> > >         add the database_id, folders, and annotation fields to this
+> >  object
+> > >         add the document object to the lucene database index.
+> > >
+> > > Got a better idea on this?
+> > >
+> > > Thanks!!
+> > >
+> > >
+> > > On Nov 26, 2007 5:33 PM, lucene user <luz290@gmail.com> wrote:
+> > > > Folks
+> > > >
+> > > > I have some additional textual data that is user specific,
+> >  basically
+> > > > annotations about documents. I would like to be able to do
+> > > > **combined** searches, looking for some words in the document and
+> >  some
+> > > > in my users' private annotations about that document. Any
+> >  suggestions
+> > > > about how I should handle this? The annotations are changeable by
+> > > > users at any time so we have to be ready to delete them and add
+> >  others
+> > > > at any time when the user does edit an annotation.
+> > > >
+> > > > Do I need a second Lucene index? Can I do a query against two
+> >  indexes
+> > > > at the same time? If so, how?
+> > > >
+> > > > The annotations will be very small but highly volatile. The
+> >  database
+> > > > of documents will grow large but nothing will be deleted from it.
+> > > >
+> > > > Thanks!
+> > > >
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> >
+> >
+> >
+> >       ___________________________________________________________
+> > Yahoo! Answers - Got a question? Someone out there knows the answer.
+> > Try it now.
+> > http://uk.answers.yahoo.com/
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

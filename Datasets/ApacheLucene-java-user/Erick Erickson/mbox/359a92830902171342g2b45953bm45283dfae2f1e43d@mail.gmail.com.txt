@@ -1,0 +1,207 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Querying for a catagory
+DATE: 17 Feb 2009
+
+OK, I think I'm getting it, but I'm slow sometimes.
+
+The first thing I'd try is to make sure you index the user
+with each document. Then in you HitCollector.collect, use
+FieldSelector to load ONLY the user ID from each document
+and add the score for that doc to that user (you'll have
+to keep some sort of map, the usual Java variety to record
+this for different users). Run some timings on this process
+to insure your performance is adequate. That keeps your
+extra work to a minimum.
+
+If that doesn't work, you could create a map of doc IDs
+to users that you access in your HitCollector.collect
+method to see what user to add the current score to.
+This could be created by using TermDocs/TermEnum at,
+say, index open time.
+
+Since you're not talking a huge index here, this shouldn't
+be to costly.
+
+Best
+Erick
+
+
+
+On Tue, Feb 17, 2009 at 4:09 PM, AmigoProgrammer <mgr@papaecho.com> wrote:
+
+>
+> I previous posts I have used document for both a file (e.g. Word or Pdf)
+> and
+> a Lucene document. Let me try again:
+>
+> A client can have many files but a file only has one client.
+>
+> For some queries I am not interested in the individual files that match the
+> query, but rather in the sum of the score for matching files grouped by
+> clients. Hence the reference to 'group by'.
+>
+> If the index contains three matching documents A, B and C with a score of
+> 0.2, 0.1 and 0.5 respectively. Where A and B is associated to client X and
+> C
+> is associated to client Y.
+>
+> The query should ideally return
+> Y: 0.5
+> X: 0.3 (sum of 0.2 and 0.1)
+>
+> I have made a small PoC index where all files for a client is added to the
+> same Lucene document along with the client id as a keyword. This works fine
+> for the above purpose, but does not allow me to query for individual
+> documents. Which I am also interested in.
+>
+> I haven't built the index yet, but I estimat an index of less than 100.000
+> documents. I hope to achieve responce times less that 2 secs.
+>
+> Unsure what you mean by 'user'?
+>
+> Best,
+>
+> Michael
+>
+>
+>
+> Erick Erickson wrote:
+> >
+> > Well, I can imagine several schemes, how suitable they are depends
+> > upon some as yet unspecified characteristics of your problem space.
+> >
+> > You don't want to iterate blindly over the responses in a
+> > HitCollector.collect method  unless your index is quite small (see the
+> > API docs for an explanation).
+> >
+> > If you don't have very many users, you could consider creating a Filter
+> > at startup time, one for each user with a bit set for each document
+> > that user has (see TermDocs/TermEnum).
+> >
+> > You could *try* FieldSelector (aka Lazy Loading) to make document
+> > fetching more efficient in your collect method. If you try this be sure
+> > that your user field is indexed. Again, depending upon your index
+> > characteristics this may or may not be viable.
+> >
+> > Instead of FieldSelector you could try using TermDocs/TermEnum in
+> > your collect method to see if a user was indexed for a particular
+> > document.
+> >
+> > You could also supply some more details about your index, e.g. number
+> > of documents, number of users, whether more than one user is allowed
+> > per document. What response times you require. What the larger problem
+> > you're trying to solve, that is, what use case are you trying to solve.
+> > Which
+> > is another way of asking if this is an XY problem.
+> >
+> > Perhaps wiser heads than mine can come up with something clever with
+> > enough details.
+> >
+> > Best
+> > Erick
+> >
+> > On Tue, Feb 17, 2009 at 6:47 AM, AmigoProgrammer <mgr@papaecho.com>
+> wrote:
+> >
+> >>
+> >> A relevant client is one that is related to one or more documents found
+> >> by
+> >> a
+> >> search.
+> >>
+> >> I would store client as a keyword with a document and I would like the
+> >> query
+> >> to return clients with the sum of relevant documents score. A client
+> with
+> >> many low scoring documents could be as relevant as a client with few
+> high
+> >> scoring documents. Basically I am looking for a 'group by'-like
+> >> functionality.
+> >>
+> >> Best,
+> >>
+> >> Michael
+> >>
+> >>
+> >> Erick Erickson wrote:
+> >> >
+> >> > What constitutes a "relevant client"? If you want
+> >> > to restrict the returned documents to a particular client
+> >> > (or even a set of clients) a simple +client:<client name>
+> >> > would do the trick.....
+> >> >
+> >> > Or you could create a Filter for "relevant clients".
+> >> >
+> >> > If neither of these helps, could you clarify your
+> >> > definition of a relevant client?
+> >> >
+> >> > Best
+> >> > Erick
+> >> >
+> >> >
+> >> > On Mon, Feb 16, 2009 at 3:00 PM, AmigoProgrammer <mgr@papaecho.com>
+> >> wrote:
+> >> >
+> >> >>
+> >> >> Hi,
+> >> >>
+> >> >> I have a number of documents that each relate to a client. I would
+> >> like
+> >> >> to
+> >> >> use an index and queries to answer two question:
+> >> >> - Find relevant documents
+> >> >> - Find relevant clients
+> >> >>
+> >> >> The first one is straight forward.
+> >> >> For the second one, I am wondering. Should I iterate over the hits
+> and
+> >> >> compute the most relevant clients. Or is there a clever build-in way
+> >> of
+> >> >> answering the question?
+> >> >>
+> >> >> Anyone that can help me crack the nut?
+> >> >>
+> >> >> Best,
+> >> >>
+> >> >> Michael
+> >> >> --
+> >> >> View this message in context:
+> >> >>
+> http://www.nabble.com/Querying-for-a-catagory-tp22044596p22044596.html
+> >> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> >> >>
+> >> >>
+> >> >> ---------------------------------------------------------------------
+> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >>
+> >> >>
+> >> >
+> >> >
+> >>
+> >> --
+> >> View this message in context:
+> >> http://www.nabble.com/Querying-for-a-catagory-tp22044596p22055571.html
+> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> >
+>
+> --
+> View this message in context:
+> http://www.nabble.com/Querying-for-a-catagory-tp22044596p22066404.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,1814 @@
+FROM: Karthik K <oss....@gmail.com>
+SUBJECT: Re: Garbage Collection performance on 2.9.2
+DATE: 29 Mar 2010
+
+Which version of jdk are you using ? We are seeing some problems (with GC)
+with jdk6 u18 , and reverted back to u14 (similar problems reported by
+hadoop / hbase community as well).
+
+
+On Fri, Mar 26, 2010 at 1:45 PM, Siraj Haider <siraj@jobdiva.com> wrote:
+
+> I am sorry for replying many time, but I just thought it might be a good
+> idea to show you the code I have to open an index.  I know it might not be a
+> very clean and efficient piece of code, so I am open to suggestions on how
+> to improve it.
+>
+> /  public void openIndex() throws Exception {
+>    try {
+>      if (which_is==0) {
+>        // first time
+>
+>        // unlock the index, if its locked
+>        if (IndexReader.indexExists(fsDir) && (IndexWriter.isLocked(fsDir)))
+> IndexWriter.unlock(fsDir);
+>        is_1 = new IndexSearcher(fsDir, true);
+>
+>        is_1.setSimilarity(new JobdivaSimilarity());
+>        is_1 = warmUp(is_1);
+>        which_is=1;
+>
+>      } else if (which_is==1) {
+>        try {
+>          // is_1 is the current is, now need to change to is_2
+>          if (is_2!=null) is_2.close();
+>          is_2=null;
+>        } catch (Exception e) { }
+>        //System.gc();
+>
+>        // unlock the index, if its locked
+>        if (IndexReader.indexExists(fsDir) && (IndexWriter.isLocked(fsDir)))
+> IndexWriter.unlock(fsDir);
+>        is_2 = new IndexSearcher(fsDir, true);
+>        is_2.setSimilarity(new JobdivaSimilarity());
+>        is_2 = warmUp(is_2);
+>        which_is=2;
+>
+>        //give some time to LuceneResults (searches already ran against
+> is_1) to finish before closing IndexSearcher
+>        Thread.sleep(_indexReOpeningWait*1000);
+>        try {
+>          if (is_1!=null) is_1.close();
+>          is_1=null;
+>        } catch (Exception e) { }
+>
+>      } else if (which_is==2) {
+>        try {
+>          // is_2 is the current is, now need to change to is_1
+>          if (is_1!=null) is_1.close();
+>          is_1=null;
+>        } catch (Exception e) { }
+>        //System.gc();
+>
+>        // unlock the index, if its locked
+>        if (IndexReader.indexExists(fsDir) && (IndexWriter.isLocked(fsDir)))
+> IndexWriter.unlock(fsDir);
+>        is_1 = new IndexSearcher(fsDir, true);
+>        is_1.setSimilarity(new JobdivaSimilarity());
+>        is_1 = warmUp(is_1);
+>        which_is=1;
+>
+>        //give some time to LuceneResults (searches already ran against
+> is_2) to finish before closing IndexSearcher
+>        Thread.sleep(_indexReOpeningWait*1000);
+>        try {
+>          if (is_2!=null) is_2.close();
+>          is_2=null;
+>        } catch (Exception e) { }
+>
+>      }
+>      //System.gc();
+>      print("INDEX OPENED");
+>    } catch (Exception e) {
+>      e.printStackTrace(System.out);
+>    }
+>  }/
+>
+>
+> On 3/26/2010 4:42 PM, Siraj Haider wrote:
+>
+>> I have one question regardning reopening the index.  Currently I have
+>> two index searchers that I switch back and forth whenever I need to open
+>> an index again.  Keep in mind that my searchers are opened from
+>> FSDirectory.  Now if I want to introduce IndexReader in the mix, do I
+>> need to keep two IndexesReaders for each of my IndexSearcher? And if I
+>> am keeping two readers, will it make a difference in garbage collection?
+>> because now I will have two readers open all the time.
+>>
+>> -siraj
+>>
+>> On 3/26/2010 4:34 PM, Michael McCandless wrote:
+>>
+>>
+>>> OK but please first switch to IndexReader.reopen :)
+>>>
+>>> Mike
+>>>
+>>> On Fri, Mar 26, 2010 at 4:06 PM, Siraj Haider<siraj@jobdiva.com>
+>>> wrote:
+>>>
+>>>
+>>>
+>>>> Mike,
+>>>> I just found out another problem that was recently introduced.  We do a
+>>>> radius search based on the zipcode and we do it on the results we have
+>>>> received from the query.  I recently tried to change it to a filter and
+>>>> that
+>>>> was causing a lot of slowness in the search and may be generating more
+>>>> garbage.  I switched it back to the post-search filtering and now
+>>>> searching
+>>>> is back to the regular speed and the machines seem to be stable and
+>>>> generating similar garbage.  But we still have this problem of frequent
+>>>> full
+>>>> gc cycles even on 2.3.2 indexes occasionally.  I will try to get a dump
+>>>> from
+>>>> a machine if it faces this problem again.  Thanks again for your help.
+>>>>
+>>>> regards
+>>>> -siraj
+>>>>
+>>>>
+>>>> On 3/26/2010 3:53 PM, Michael McCandless wrote:
+>>>>
+>>>>
+>>>>
+>>>>> OK.
+>>>>>
+>>>>> Doing a full open every time will create more garbage than necessary...
+>>>>>
+>>>>> But, that should've also been the case with 2.3 as well.
+>>>>>
+>>>>> Mike
+>>>>>
+>>>>> On Fri, Mar 26, 2010 at 3:35 PM, Siraj Haider<siraj@jobdiva.com>
+>>>>>  wrote:
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> Right now I dont reopen the reader.  Infact, I am opening my searcher
+>>>>>> from
+>>>>>> FSDirectory.  I will try to get the dump when the machine is thrashing
+>>>>>> and
+>>>>>> will provide you with that.  Thanks so much for helping me on this.
+>>>>>>
+>>>>>> -siraj
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> On 3/26/2010 2:39 PM, Michael McCandless wrote:
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>> Are you using IndexReader.reopen?
+>>>>>>>
+>>>>>>> Looks like your heap is dominated by ~6 million String and their
+>>>>>>> char[]s.
+>>>>>>>
+>>>>>>> The terms index (~2.8 million terms, so almost half of the String
+>>>>>>> instances) is also taking up a fair amount of RAM, but that should be
+>>>>>>> relatively static (assuming you're using reopen).
+>>>>>>>
+>>>>>>> Are you loading many stored fields per doc, for many hits per query?
+>>>>>>> That'd generate garbage, but shouldn't be moreso than in 2.3.x.
+>>>>>>>
+>>>>>>> If you can get a heap dump on the "thrashing" machine maybe
+>>>>>>> that'll prove more telling ... but nothing obvious stands out in
+>>>>>>> this one.
+>>>>>>>
+>>>>>>> Mike
+>>>>>>>
+>>>>>>> On Fri, Mar 26, 2010 at 11:03 AM, Siraj Haider<siraj@jobdiva.com>
+>>>>>>> wrote:
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>> Here is some more information to what my settings are:
+>>>>>>>>
+>>>>>>>> *JVM Options*
+>>>>>>>> /-server -verbose:gc -XX:+PrintClassHistogram
+>>>>>>>> -XX:MaxGCPauseMillis=1500
+>>>>>>>> -XX:+UseConcMarkSweepGC -XX:+UseParNewGC -XX:+DisableExplicitGC
+>>>>>>>> -XX:+PrintTenuringDistribution -XX:+PrintGCDetails
+>>>>>>>> -XX:+PrintGCTimeStamps
+>>>>>>>> -Xms2048m -Xmx2048m -Dsun.rmi.dgc.client.gcInterval=3600000
+>>>>>>>> -Dsun.rmi.dgc.server.gcInterval=3600000 /
+>>>>>>>>
+>>>>>>>> *And I see the following gc output very frequently in my tomcat
+>>>>>>>> output:*
+>>>>>>>>
+>>>>>>>> 1841.600: [GC 1841.600: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     616576 bytes,     616576 total
+>>>>>>>> - age   2:     595192 bytes,    1211768 total
+>>>>>>>> - age   3:    4029632 bytes,    5241400 total
+>>>>>>>> - age   4:     213960 bytes,    5455360 total
+>>>>>>>> : 109370K->5554K(118016K), 0.0077710 secs]
+>>>>>>>> 1518434K->1414720K(2084096K),
+>>>>>>>> 0.0078990 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1842.067: [GC 1842.067: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     118968 bytes,     118968 total
+>>>>>>>> - age   2:    1091472 bytes,    1210440 total
+>>>>>>>> - age   3:     595192 bytes,    1805632 total
+>>>>>>>> - age   4:    4029632 bytes,    5835264 total
+>>>>>>>> : 110514K->5946K(118016K), 0.0084010 secs]
+>>>>>>>> 1519680K->1415321K(2084096K),
+>>>>>>>> 0.0085220 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1842.535: [GC 1842.536: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     513960 bytes,     513960 total
+>>>>>>>> - age   2:     113608 bytes,     627568 total
+>>>>>>>> - age   3:     613008 bytes,    1240576 total
+>>>>>>>> - age   4:     595192 bytes,    1835768 total
+>>>>>>>> : 110906K->2102K(118016K), 0.0080120 secs]
+>>>>>>>> 1520281K->1414435K(2084096K),
+>>>>>>>> 0.0081330 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1842.812: [CMS-concurrent-mark: 7.065/7.811 secs] [Times: user=24.12
+>>>>>>>> sys=4.06, real=7.82 secs]
+>>>>>>>> 1842.812: [CMS-concurrent-preclean-start]
+>>>>>>>> 1843.004: [GC 1843.004: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      16280 bytes,      16280 total
+>>>>>>>> - age   2:     990336 bytes,    1006616 total
+>>>>>>>> - age   3:     113608 bytes,    1120224 total
+>>>>>>>> - age   4:     613008 bytes,    1733232 total
+>>>>>>>> : 107062K->1909K(118016K), 0.0065890 secs]
+>>>>>>>> 1519395K->1414823K(2084096K),
+>>>>>>>> 0.0067090 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1843.392: [CMS-concurrent-preclean: 0.509/0.580 secs] [Times:
+>>>>>>>> user=1.09
+>>>>>>>> sys=0.15, real=0.58 secs]
+>>>>>>>> 1843.392: [CMS-concurrent-abortable-preclean-start]
+>>>>>>>> 1843.455: [GC 1843.455: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     149928 bytes,     149928 total
+>>>>>>>> - age   2:       9440 bytes,     159368 total
+>>>>>>>> - age   3:     990336 bytes,    1149704 total
+>>>>>>>> - age   4:     113608 bytes,    1263312 total
+>>>>>>>> : 106869K->1323K(118016K), 0.0066280 secs]
+>>>>>>>> 1519783K->1414836K(2084096K),
+>>>>>>>> 0.0067490 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1843.461: [CMS-concurrent-abortable-preclean: 0.006/0.069 secs]
+>>>>>>>> [Times:
+>>>>>>>> user=0.11 sys=0.01, real=0.07 secs]
+>>>>>>>> 1843.462: [GC[YG occupancy: 3354 K (118016 K)]1843.462: [Rescan
+>>>>>>>> (parallel) ,
+>>>>>>>> 0.0023630 secs]1843.464: [weak refs processing, 0.0005650 secs] [1
+>>>>>>>> CMS-remark: 1413512K(1966080K)] 1416867K(2084096K), 0.0031210 secs]
+>>>>>>>> [Times:
+>>>>>>>> user=0.02 sys=0.00, real=0.00 secs]
+>>>>>>>> 1843.465: [CMS-concurrent-sweep-start]
+>>>>>>>> 1843.916: [GC 1843.916: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    2107208 bytes,    2107208 total
+>>>>>>>> - age   2:     118624 bytes,    2225832 total
+>>>>>>>> - age   3:       9440 bytes,    2235272 total
+>>>>>>>> - age   4:     511920 bytes,    2747192 total
+>>>>>>>> : 106283K->2844K(118016K), 0.0070550 secs]
+>>>>>>>> 1472611K->1369283K(2084096K),
+>>>>>>>> 0.0071890 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1844.380: [GC 1844.380: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      45232 bytes,      45232 total
+>>>>>>>> - age   2:    2094312 bytes,    2139544 total
+>>>>>>>> - age   3:     118624 bytes,    2258168 total
+>>>>>>>> - age   4:       9440 bytes,    2267608 total
+>>>>>>>> : 107804K->2308K(118016K), 0.0090090 secs]
+>>>>>>>> 1417654K->1312657K(2084096K),
+>>>>>>>> 0.0091320 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1844.829: [GC 1844.829: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     104808 bytes,     104808 total
+>>>>>>>> - age   2:      41984 bytes,     146792 total
+>>>>>>>> - age   3:    2094152 bytes,    2240944 total
+>>>>>>>> - age   4:     118624 bytes,    2359568 total
+>>>>>>>> : 107268K->2403K(118016K), 0.0092200 secs]
+>>>>>>>> 1349534K->1244678K(2084096K),
+>>>>>>>> 0.0093420 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1845.304: [GC 1845.304: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1665184 bytes,    1665184 total
+>>>>>>>> - age   2:     103592 bytes,    1768776 total
+>>>>>>>> - age   3:      41984 bytes,    1810760 total
+>>>>>>>> - age   4:    1593816 bytes,    3404576 total
+>>>>>>>> : 107363K->3481K(118016K), 0.0081660 secs]
+>>>>>>>> 1305631K->1201864K(2084096K),
+>>>>>>>> 0.0082860 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1845.856: [GC 1845.856: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      85520 bytes,      85520 total
+>>>>>>>> - age   2:    1662552 bytes,    1748072 total
+>>>>>>>> - age   3:     103592 bytes,    1851664 total
+>>>>>>>> - age   4:      41984 bytes,    1893648 total
+>>>>>>>> : 108441K->2020K(118016K), 0.0083700 secs]
+>>>>>>>> 1213393K->1108529K(2084096K),
+>>>>>>>> 0.0084880 secs] [Times: user=0.06 sys=0.00, real=0.01 secs]
+>>>>>>>> 1846.395: [GC 1846.395: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      28824 bytes,      28824 total
+>>>>>>>> - age   2:      83384 bytes,     112208 total
+>>>>>>>> - age   3:    1662504 bytes,    1774712 total
+>>>>>>>> - age   4:     103496 bytes,    1878208 total
+>>>>>>>> : 106980K->1999K(118016K), 0.0067460 secs]
+>>>>>>>> 1105216K->1000276K(2084096K),
+>>>>>>>> 0.0068650 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1846.445: [CMS-concurrent-sweep: 2.921/2.979 secs] [Times: user=5.97
+>>>>>>>> sys=0.37, real=2.98 secs]
+>>>>>>>> 1846.445: [CMS-concurrent-reset-start]
+>>>>>>>> 1846.486: [CMS-concurrent-reset: 0.041/0.041 secs] [Times: user=0.09
+>>>>>>>> sys=0.01, real=0.04 secs]
+>>>>>>>> 1846.951: [GC 1846.951: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      81680 bytes,      81680 total
+>>>>>>>> - age   2:      15944 bytes,      97624 total
+>>>>>>>> - age   3:      83328 bytes,     180952 total
+>>>>>>>> - age   4:    1662504 bytes,    1843456 total
+>>>>>>>> : 106959K->1882K(118016K), 0.0074460 secs]
+>>>>>>>> 1103481K->998505K(2084096K),
+>>>>>>>> 0.0075870 secs] [Times: user=0.05 sys=0.01, real=0.00 secs]
+>>>>>>>> 1847.409: [GC 1847.409: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      39184 bytes,      39184 total
+>>>>>>>> - age   2:      80024 bytes,     119208 total
+>>>>>>>> - age   3:      15824 bytes,     135032 total
+>>>>>>>> - age   4:      83264 bytes,     218296 total
+>>>>>>>> : 106842K->337K(118016K), 0.0066910 secs]
+>>>>>>>> 1103465K->998584K(2084096K),
+>>>>>>>> 0.0067920 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1847.863: [GC 1847.863: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        752 bytes,        752 total
+>>>>>>>> - age   2:      35624 bytes,      36376 total
+>>>>>>>> - age   3:      80024 bytes,     116400 total
+>>>>>>>> - age   4:      15824 bytes,     132224 total
+>>>>>>>> : 105297K->198K(118016K), 0.0055200 secs]
+>>>>>>>> 1103544K->998527K(2084096K),
+>>>>>>>> 0.0056140 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1848.326: [GC 1848.326: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     599496 bytes,     599496 total
+>>>>>>>> - age   3:      35272 bytes,     634768 total
+>>>>>>>> - age   4:      80024 bytes,     714792 total
+>>>>>>>> : 105158K->725K(118016K), 0.0059760 secs]
+>>>>>>>> 1103487K->999069K(2084096K),
+>>>>>>>> 0.0060730 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1848.677: [GC 1848.677: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1457672 bytes,    1457672 total
+>>>>>>>> - age   2:     597560 bytes,    2055232 total
+>>>>>>>> - age   4:      35120 bytes,    2090352 total
+>>>>>>>> : 105685K->2097K(118016K), 0.0061090 secs]
+>>>>>>>> 1104029K->1000519K(2084096K),
+>>>>>>>> 0.0062260 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1848.892: [GC 1848.892: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4072 bytes,       4072 total
+>>>>>>>> - age   2:    1446824 bytes,    1450896 total
+>>>>>>>> - age   3:     597560 bytes,    2048456 total
+>>>>>>>> : 107057K->2093K(118016K), 0.0056390 secs]
+>>>>>>>> 1105479K->1000550K(2084096K),
+>>>>>>>> 0.0057550 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1849.102: [GC 1849.102: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4168 bytes,       4168 total
+>>>>>>>> - age   2:        160 bytes,       4328 total
+>>>>>>>> - age   3:    1446824 bytes,    1451152 total
+>>>>>>>> - age   4:     597560 bytes,    2048712 total
+>>>>>>>> : 107053K->2151K(118016K), 0.0057770 secs]
+>>>>>>>> 1105510K->1000607K(2084096K),
+>>>>>>>> 0.0058840 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1849.312: [GC 1849.312: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3512 bytes,       3512 total
+>>>>>>>> - age   3:        160 bytes,       3672 total
+>>>>>>>> - age   4:    1446824 bytes,    1450496 total
+>>>>>>>> : 107111K->1629K(118016K), 0.0057300 secs]
+>>>>>>>> 1105567K->1000669K(2084096K),
+>>>>>>>> 0.0058430 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1849.523: [GC 1849.523: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5432 bytes,       5432 total
+>>>>>>>> - age   4:        160 bytes,       5592 total
+>>>>>>>> : 106589K->132K(118016K), 0.0062260 secs]
+>>>>>>>> 1105629K->1000014K(2084096K),
+>>>>>>>> 0.0063410 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1849.734: [GC 1849.734: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2504 bytes,       2504 total
+>>>>>>>> - age   2:        864 bytes,       3368 total
+>>>>>>>> : 105092K->15K(118016K), 0.0072610 secs]
+>>>>>>>> 1104974K->999897K(2084096K),
+>>>>>>>> 0.0073600 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1849.958: [GC 1849.958: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1823840 bytes,    1823840 total
+>>>>>>>> - age   3:        864 bytes,    1824704 total
+>>>>>>>> : 104975K->1788K(118016K), 0.0066770 secs]
+>>>>>>>> 1104857K->1001670K(2084096K),
+>>>>>>>> 0.0067790 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1850.151: [GC 1850.151: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    2437560 bytes,    2437560 total
+>>>>>>>> - age   2:    1818240 bytes,    4255800 total
+>>>>>>>> - age   4:        864 bytes,    4256664 total
+>>>>>>>> : 106748K->4189K(118016K), 0.0085440 secs]
+>>>>>>>> 1106630K->1004070K(2084096K),
+>>>>>>>> 0.0086730 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1850.303: [GC 1850.303: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2408 bytes,       2408 total
+>>>>>>>> - age   2:    1848744 bytes,    1851152 total
+>>>>>>>> - age   3:    1818208 bytes,    3669360 total
+>>>>>>>> : 109149K->3644K(118016K), 0.0072780 secs]
+>>>>>>>> 1109030K->1003527K(2084096K),
+>>>>>>>> 0.0073990 secs] [Times: user=0.05 sys=0.00, real=0.00 secs]
+>>>>>>>> 1850.459: [GC 1850.459: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6760 bytes,       6760 total
+>>>>>>>> - age   3:    1848744 bytes,    1855504 total
+>>>>>>>> - age   4:    1818208 bytes,    3673712 total
+>>>>>>>> : 108604K->3663K(118016K), 0.0080060 secs]
+>>>>>>>> 1108487K->1003546K(2084096K),
+>>>>>>>> 0.0081320 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1850.468: [GC 1850.468: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        296 bytes,        296 total
+>>>>>>>> - age   2:       5048 bytes,       5344 total
+>>>>>>>> - age   4:    1848744 bytes,    1854088 total
+>>>>>>>> : 4093K->1921K(118016K), 0.0078440 secs]
+>>>>>>>> 1003976K->1003579K(2084096K),
+>>>>>>>> 0.0079560 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1850.620: [GC 1850.620: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4088 bytes,       4088 total
+>>>>>>>> : 106881K->17K(118016K), 0.0087130 secs]
+>>>>>>>> 1108539K->1002911K(2084096K),
+>>>>>>>> 0.0088300 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1850.777: [GC 1850.777: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7160 bytes,       7160 total
+>>>>>>>> : 104977K->14K(118016K), 0.0077920 secs]
+>>>>>>>> 1107871K->1002907K(2084096K),
+>>>>>>>> 0.0079110 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1850.928: [GC 1850.928: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6216 bytes,       6216 total
+>>>>>>>> - age   2:       1056 bytes,       7272 total
+>>>>>>>> : 104974K->17K(118016K), 0.0062780 secs]
+>>>>>>>> 1107867K->1002910K(2084096K),
+>>>>>>>> 0.0064020 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1851.078: [GC 1851.078: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      12168 bytes,      12168 total
+>>>>>>>> - age   3:       1056 bytes,      13224 total
+>>>>>>>> : 104977K->20K(118016K), 0.0071340 secs]
+>>>>>>>> 1107870K->1002913K(2084096K),
+>>>>>>>> 0.0072520 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1851.229: [GC 1851.229: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6128 bytes,       6128 total
+>>>>>>>> - age   4:       1056 bytes,       7184 total
+>>>>>>>> : 104980K->18K(118016K), 0.0071200 secs]
+>>>>>>>> 1107873K->1002911K(2084096K),
+>>>>>>>> 0.0072370 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1851.385: [GC 1851.385: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3920 bytes,       3920 total
+>>>>>>>> : 104978K->14K(118016K), 0.0071250 secs]
+>>>>>>>> 1107871K->1002908K(2084096K),
+>>>>>>>> 0.0072340 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1851.535: [GC 1851.535: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2928 bytes,       2928 total
+>>>>>>>> : 104974K->12K(118016K), 0.0069450 secs]
+>>>>>>>> 1107868K->1002906K(2084096K),
+>>>>>>>> 0.0070570 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1851.685: [GC 1851.685: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4080 bytes,       4080 total
+>>>>>>>> : 104972K->12K(118016K), 0.0068070 secs]
+>>>>>>>> 1107866K->1002906K(2084096K),
+>>>>>>>> 0.0069140 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1851.835: [GC 1851.835: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6600 bytes,       6600 total
+>>>>>>>> : 104972K->12K(118016K), 0.0050100 secs]
+>>>>>>>> 1107866K->1002906K(2084096K),
+>>>>>>>> 0.0051180 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1851.989: [GC 1851.989: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4952 bytes,       4952 total
+>>>>>>>> : 104972K->18K(118016K), 0.0069940 secs]
+>>>>>>>> 1107866K->1002912K(2084096K),
+>>>>>>>> 0.0071040 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1852.139: [GC 1852.139: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5416 bytes,       5416 total
+>>>>>>>> : 104978K->13K(118016K), 0.0073640 secs]
+>>>>>>>> 1107872K->1002907K(2084096K),
+>>>>>>>> 0.0074720 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1852.289: [GC 1852.289: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5512 bytes,       5512 total
+>>>>>>>> - age   2:       1072 bytes,       6584 total
+>>>>>>>> : 104973K->16K(118016K), 0.0069670 secs]
+>>>>>>>> 1107867K->1002910K(2084096K),
+>>>>>>>> 0.0070760 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1852.439: [GC 1852.439: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1928 bytes,       1928 total
+>>>>>>>> - age   3:       1072 bytes,       3000 total
+>>>>>>>> : 104976K->9K(118016K), 0.0068990 secs]
+>>>>>>>> 1107870K->1002903K(2084096K),
+>>>>>>>> 0.0070040 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1852.446: [GC 1852.446: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2440 bytes,       2440 total
+>>>>>>>> - age   2:       1672 bytes,       4112 total
+>>>>>>>> - age   4:       1072 bytes,       5184 total
+>>>>>>>> : 665K->10K(118016K), 0.0064950 secs] 1003560K->1002904K(2084096K),
+>>>>>>>> 0.0065840 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1852.596: [GC 1852.596: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7960 bytes,       7960 total
+>>>>>>>> : 104970K->14K(118016K), 0.0069390 secs]
+>>>>>>>> 1107864K->1002909K(2084096K),
+>>>>>>>> 0.0070450 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1852.746: [GC 1852.746: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6192 bytes,       6192 total
+>>>>>>>> : 104974K->14K(118016K), 0.0070190 secs]
+>>>>>>>> 1107869K->1002909K(2084096K),
+>>>>>>>> 0.0071270 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1852.896: [GC 1852.896: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4744 bytes,       4744 total
+>>>>>>>> : 104974K->12K(118016K), 0.0068960 secs]
+>>>>>>>> 1107869K->1002907K(2084096K),
+>>>>>>>> 0.0070030 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1853.045: [GC 1853.045: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6448 bytes,       6448 total
+>>>>>>>> : 104972K->16K(118016K), 0.0070700 secs]
+>>>>>>>> 1107867K->1002911K(2084096K),
+>>>>>>>> 0.0071760 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1853.194: [GC 1853.195: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5152 bytes,       5152 total
+>>>>>>>> : 104976K->15K(118016K), 0.0073300 secs]
+>>>>>>>> 1107871K->1002910K(2084096K),
+>>>>>>>> 0.0074770 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1853.343: [GC 1853.343: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7288 bytes,       7288 total
+>>>>>>>> - age   2:       2336 bytes,       9624 total
+>>>>>>>> : 104975K->15K(118016K), 0.0076530 secs]
+>>>>>>>> 1107870K->1002910K(2084096K),
+>>>>>>>> 0.0077630 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1853.495: [GC 1853.495: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       9192 bytes,       9192 total
+>>>>>>>> - age   3:       2336 bytes,      11528 total
+>>>>>>>> : 104975K->21K(118016K), 0.0073360 secs]
+>>>>>>>> 1107870K->1002916K(2084096K),
+>>>>>>>> 0.0074490 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1853.648: [GC 1853.648: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7248 bytes,       7248 total
+>>>>>>>> - age   2:       2088 bytes,       9336 total
+>>>>>>>> - age   4:       2336 bytes,      11672 total
+>>>>>>>> : 104981K->20K(118016K), 0.0050230 secs]
+>>>>>>>> 1107876K->1002915K(2084096K),
+>>>>>>>> 0.0051340 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1853.795: [GC 1853.795: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      16744 bytes,      16744 total
+>>>>>>>> : 104980K->23K(118016K), 0.0070790 secs]
+>>>>>>>> 1107875K->1002921K(2084096K),
+>>>>>>>> 0.0071890 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1853.946: [GC 1853.946: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      10768 bytes,      10768 total
+>>>>>>>> - age   2:       5648 bytes,      16416 total
+>>>>>>>> : 104983K->25K(118016K), 0.0078080 secs]
+>>>>>>>> 1107881K->1002923K(2084096K),
+>>>>>>>> 0.0079190 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1854.100: [GC 1854.100: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4288 bytes,       4288 total
+>>>>>>>> - age   3:       5648 bytes,       9936 total
+>>>>>>>> : 104985K->15K(118016K), 0.0074630 secs]
+>>>>>>>> 1107883K->1002913K(2084096K),
+>>>>>>>> 0.0075730 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1854.262: [GC 1854.262: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4864 bytes,       4864 total
+>>>>>>>> - age   4:       5648 bytes,      10512 total
+>>>>>>>> : 104975K->19K(118016K), 0.0066560 secs]
+>>>>>>>> 1107873K->1002917K(2084096K),
+>>>>>>>> 0.0067630 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1854.472: [GC 1854.472: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      44472 bytes,      44472 total
+>>>>>>>> - age   2:         40 bytes,      44512 total
+>>>>>>>> : 104979K->53K(118016K), 0.0077930 secs]
+>>>>>>>> 1107877K->1002956K(2084096K),
+>>>>>>>> 0.0079010 secs] [Times: user=0.04 sys=0.01, real=0.00 secs]
+>>>>>>>> 1854.681: [GC 1854.681: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      22872 bytes,      22872 total
+>>>>>>>> - age   2:       3392 bytes,      26264 total
+>>>>>>>> - age   3:         40 bytes,      26304 total
+>>>>>>>> : 105013K->43K(118016K), 0.0076690 secs]
+>>>>>>>> 1107916K->1002946K(2084096K),
+>>>>>>>> 0.0077780 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1854.893: [GC 1854.893: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3912 bytes,       3912 total
+>>>>>>>> - age   2:      19648 bytes,      23560 total
+>>>>>>>> - age   3:       3392 bytes,      26952 total
+>>>>>>>> - age   4:         40 bytes,      26992 total
+>>>>>>>> : 105003K->37K(118016K), 0.0073320 secs]
+>>>>>>>> 1107906K->1002940K(2084096K),
+>>>>>>>> 0.0074370 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1855.105: [GC 1855.105: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4120 bytes,       4120 total
+>>>>>>>> - age   3:      19648 bytes,      23768 total
+>>>>>>>> - age   4:       3392 bytes,      27160 total
+>>>>>>>> : 104997K->37K(118016K), 0.0067290 secs]
+>>>>>>>> 1107900K->1002940K(2084096K),
+>>>>>>>> 0.0068370 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1855.316: [GC 1855.316: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4280 bytes,       4280 total
+>>>>>>>> - age   4:      19648 bytes,      23928 total
+>>>>>>>> : 104997K->33K(118016K), 0.0069810 secs]
+>>>>>>>> 1107900K->1002940K(2084096K),
+>>>>>>>> 0.0070890 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1855.527: [GC 1855.527: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3992 bytes,       3992 total
+>>>>>>>> : 104993K->6K(118016K), 0.0050780 secs]
+>>>>>>>> 1107900K->1002932K(2084096K),
+>>>>>>>> 0.0051890 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1855.738: [GC 1855.738: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       9648 bytes,       9648 total
+>>>>>>>> : 104966K->18K(118016K), 0.0066190 secs]
+>>>>>>>> 1107892K->1002943K(2084096K),
+>>>>>>>> 0.0067290 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1855.948: [GC 1855.949: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7208 bytes,       7208 total
+>>>>>>>> : 104978K->15K(118016K), 0.0067150 secs]
+>>>>>>>> 1107903K->1002941K(2084096K),
+>>>>>>>> 0.0068250 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1856.160: [GC 1856.160: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5816 bytes,       5816 total
+>>>>>>>> - age   2:       1584 bytes,       7400 total
+>>>>>>>> : 104975K->13K(118016K), 0.0070440 secs]
+>>>>>>>> 1107901K->1002939K(2084096K),
+>>>>>>>> 0.0071540 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1856.372: [GC 1856.372: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        888 bytes,        888 total
+>>>>>>>> - age   3:       1584 bytes,       2472 total
+>>>>>>>> : 104973K->13K(118016K), 0.0071500 secs]
+>>>>>>>> 1107899K->1002939K(2084096K),
+>>>>>>>> 0.0072580 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1856.584: [GC 1856.584: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2960 bytes,       2960 total
+>>>>>>>> - age   4:       1584 bytes,       4544 total
+>>>>>>>> : 104973K->11K(118016K), 0.0061030 secs]
+>>>>>>>> 1107899K->1002937K(2084096K),
+>>>>>>>> 0.0062140 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1856.794: [GC 1856.795: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2592 bytes,       2592 total
+>>>>>>>> : 104971K->8K(118016K), 0.0066810 secs]
+>>>>>>>> 1107897K->1002935K(2084096K),
+>>>>>>>> 0.0067900 secs] [Times: user=0.02 sys=0.00, real=0.00 secs]
+>>>>>>>> 1857.008: [GC 1857.008: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3400 bytes,       3400 total
+>>>>>>>> : 104968K->10K(118016K), 0.0062730 secs]
+>>>>>>>> 1107895K->1002937K(2084096K),
+>>>>>>>> 0.0063790 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1857.219: [GC 1857.219: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2336 bytes,       2336 total
+>>>>>>>> : 104970K->8K(118016K), 0.0064340 secs]
+>>>>>>>> 1107897K->1002935K(2084096K),
+>>>>>>>> 0.0065380 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1857.432: [GC 1857.432: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1920 bytes,       1920 total
+>>>>>>>> : 104968K->8K(118016K), 0.0069200 secs]
+>>>>>>>> 1107895K->1002935K(2084096K),
+>>>>>>>> 0.0070300 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1857.646: [GC 1857.646: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6064 bytes,       6064 total
+>>>>>>>> : 104968K->14K(118016K), 0.0060630 secs]
+>>>>>>>> 1107895K->1002941K(2084096K),
+>>>>>>>> 0.0061700 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1857.868: [GC 1857.868: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5392 bytes,       5392 total
+>>>>>>>> - age   2:       2064 bytes,       7456 total
+>>>>>>>> : 104974K->14K(118016K), 0.0074520 secs]
+>>>>>>>> 1107901K->1002941K(2084096K),
+>>>>>>>> 0.0075600 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1858.090: [GC 1858.090: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7456 bytes,       7456 total
+>>>>>>>> - age   3:       2064 bytes,       9520 total
+>>>>>>>> : 104974K->18K(118016K), 0.0048920 secs]
+>>>>>>>> 1107901K->1002945K(2084096K),
+>>>>>>>> 0.0050280 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1858.314: [GC 1858.314: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      13152 bytes,      13152 total
+>>>>>>>> - age   4:       2064 bytes,      15216 total
+>>>>>>>> : 104978K->23K(118016K), 0.0060380 secs]
+>>>>>>>> 1107905K->1002950K(2084096K),
+>>>>>>>> 0.0061430 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1858.539: [GC 1858.539: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       9632 bytes,       9632 total
+>>>>>>>> - age   2:       5648 bytes,      15280 total
+>>>>>>>> : 104983K->19K(118016K), 0.0068210 secs]
+>>>>>>>> 1107910K->1002948K(2084096K),
+>>>>>>>> 0.0069270 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1864.962: [GC 1864.962: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    2905592 bytes,    2905592 total
+>>>>>>>> - age   3:       5648 bytes,    2911240 total
+>>>>>>>> : 104979K->2850K(118016K), 0.0075130 secs]
+>>>>>>>> 1107908K->1005779K(2084096K),
+>>>>>>>> 0.0076360 secs] [Times: user=0.04 sys=0.01, real=0.00 secs]
+>>>>>>>> 1865.422: [GC 1865.422: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4040 bytes,       4040 total
+>>>>>>>> - age   2:    2902672 bytes,    2906712 total
+>>>>>>>> - age   4:       5648 bytes,    2912360 total
+>>>>>>>> : 107810K->2901K(118016K), 0.0069870 secs]
+>>>>>>>> 1110739K->1005830K(2084096K),
+>>>>>>>> 0.0070950 secs] [Times: user=0.04 sys=0.01, real=0.00 secs]
+>>>>>>>> 1865.878: [GC 1865.878: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        416 bytes,        416 total
+>>>>>>>> - age   2:       3512 bytes,       3928 total
+>>>>>>>> - age   3:    2902672 bytes,    2906600 total
+>>>>>>>> : 107861K->2932K(118016K), 0.0066050 secs]
+>>>>>>>> 1110790K->1005867K(2084096K),
+>>>>>>>> 0.0067270 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1866.328: [GC 1866.328: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        640 bytes,        640 total
+>>>>>>>> - age   3:       3512 bytes,       4152 total
+>>>>>>>> - age   4:    2902672 bytes,    2906824 total
+>>>>>>>> : 107892K->2976K(118016K), 0.0069830 secs]
+>>>>>>>> 1110827K->1005911K(2084096K),
+>>>>>>>> 0.0070990 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1866.799: [GC 1866.799: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:         72 bytes,         72 total
+>>>>>>>> - age   4:       3512 bytes,       3584 total
+>>>>>>>> : 107936K->32K(118016K), 0.0077140 secs]
+>>>>>>>> 1110871K->1005802K(2084096K),
+>>>>>>>> 0.0078210 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1867.253: [GC 1867.253: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2032 bytes,       2032 total
+>>>>>>>> : 104992K->7K(118016K), 0.0067320 secs]
+>>>>>>>> 1110762K->1005780K(2084096K),
+>>>>>>>> 0.0068360 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1867.726: [GC 1867.726: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        640 bytes,        640 total
+>>>>>>>> : 104967K->4K(118016K), 0.0067880 secs]
+>>>>>>>> 1110740K->1005777K(2084096K),
+>>>>>>>> 0.0068990 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1868.197: [GC 1868.198: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1704 bytes,       1704 total
+>>>>>>>> : 104964K->8K(118016K), 0.0058240 secs]
+>>>>>>>> 1110737K->1005781K(2084096K),
+>>>>>>>> 0.0059360 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1868.689: [GC 1868.689: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2360 bytes,       2360 total
+>>>>>>>> : 104968K->8K(118016K), 0.0058100 secs]
+>>>>>>>> 1110741K->1005781K(2084096K),
+>>>>>>>> 0.0059260 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1869.160: [GC 1869.160: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1400 bytes,       1400 total
+>>>>>>>> : 104968K->6K(118016K), 0.0068580 secs]
+>>>>>>>> 1110741K->1005779K(2084096K),
+>>>>>>>> 0.0069720 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1869.633: [GC 1869.633: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2944 bytes,       2944 total
+>>>>>>>> : 104966K->8K(118016K), 0.0066850 secs]
+>>>>>>>> 1110739K->1005781K(2084096K),
+>>>>>>>> 0.0067980 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1870.106: [GC 1870.106: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2144 bytes,       2144 total
+>>>>>>>> : 104968K->6K(118016K), 0.0073740 secs]
+>>>>>>>> 1110741K->1005779K(2084096K),
+>>>>>>>> 0.0074960 secs] [Times: user=0.02 sys=0.01, real=0.01 secs]
+>>>>>>>> 1870.578: [GC 1870.578: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1128 bytes,       1128 total
+>>>>>>>> : 104966K->8K(118016K), 0.0066560 secs]
+>>>>>>>> 1110739K->1005781K(2084096K),
+>>>>>>>> 0.0067600 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1871.049: [GC 1871.049: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        640 bytes,        640 total
+>>>>>>>> : 104968K->6K(118016K), 0.0060350 secs]
+>>>>>>>> 1110741K->1005779K(2084096K),
+>>>>>>>> 0.0061360 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1871.528: [GC 1871.528: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      10336 bytes,      10336 total
+>>>>>>>> : 104966K->15K(118016K), 0.0064930 secs]
+>>>>>>>> 1110739K->1005788K(2084096K),
+>>>>>>>> 0.0066020 secs] [Times: user=0.02 sys=0.01, real=0.01 secs]
+>>>>>>>> 1873.405: [GC 1873.406: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    3680280 bytes,    3680280 total
+>>>>>>>> - age   2:       5248 bytes,    3685528 total
+>>>>>>>> : 104881K->3608K(118016K), 0.0073650 secs]
+>>>>>>>> 1110654K->1009381K(2084096K),
+>>>>>>>> 0.0074970 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1873.760: [GC 1873.761: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1586848 bytes,    1586848 total
+>>>>>>>> - age   2:    3679432 bytes,    5266280 total
+>>>>>>>> - age   3:       5248 bytes,    5271528 total
+>>>>>>>> : 108568K->5210K(118016K), 0.0079460 secs]
+>>>>>>>> 1114341K->1010983K(2084096K),
+>>>>>>>> 0.0080830 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1874.004: [GC 1874.004: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4312 bytes,       4312 total
+>>>>>>>> - age   2:    1582528 bytes,    1586840 total
+>>>>>>>> - age   3:    3679432 bytes,    5266272 total
+>>>>>>>> - age   4:       5248 bytes,    5271520 total
+>>>>>>>> : 110170K->5385K(118016K), 0.0084690 secs]
+>>>>>>>> 1115943K->1011158K(2084096K),
+>>>>>>>> 0.0086300 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1874.240: [GC 1874.240: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3344 bytes,       3344 total
+>>>>>>>> - age   2:       3512 bytes,       6856 total
+>>>>>>>> - age   3:    1582528 bytes,    1589384 total
+>>>>>>>> - age   4:    3679432 bytes,    5268816 total
+>>>>>>>> : 110345K->5388K(118016K), 0.0092950 secs]
+>>>>>>>> 1116118K->1011167K(2084096K),
+>>>>>>>> 0.0094130 secs] [Times: user=0.06 sys=0.01, real=0.01 secs]
+>>>>>>>> 1874.479: [GC 1874.479: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5536 bytes,       5536 total
+>>>>>>>> - age   3:       3512 bytes,       9048 total
+>>>>>>>> - age   4:    1581112 bytes,    1590160 total
+>>>>>>>> : 110348K->1843K(118016K), 0.0130380 secs]
+>>>>>>>> 1116127K->1011214K(2084096K),
+>>>>>>>> 0.0131610 secs] [Times: user=0.06 sys=0.01, real=0.02 secs]
+>>>>>>>> 1874.720: [GC 1874.720: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3744 bytes,       3744 total
+>>>>>>>> - age   2:       1600 bytes,       5344 total
+>>>>>>>> - age   4:       3512 bytes,       8856 total
+>>>>>>>> : 106803K->56K(118016K), 0.0063140 secs]
+>>>>>>>> 1116174K->1010972K(2084096K),
+>>>>>>>> 0.0064280 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1874.955: [GC 1874.955: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3096 bytes,       3096 total
+>>>>>>>> - age   3:       1600 bytes,       4696 total
+>>>>>>>> : 105016K->16K(118016K), 0.0073310 secs]
+>>>>>>>> 1115932K->1010935K(2084096K),
+>>>>>>>> 0.0074390 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1875.191: [GC 1875.191: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1472 bytes,       1472 total
+>>>>>>>> - age   4:       1600 bytes,       3072 total
+>>>>>>>> : 104976K->9K(118016K), 0.0059430 secs]
+>>>>>>>> 1115895K->1010928K(2084096K),
+>>>>>>>> 0.0060450 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1875.427: [GC 1875.427: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1376 bytes,       1376 total
+>>>>>>>> : 104969K->8K(118016K), 0.0065520 secs]
+>>>>>>>> 1115888K->1010928K(2084096K),
+>>>>>>>> 0.0066600 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1875.664: [GC 1875.664: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1424 bytes,       1424 total
+>>>>>>>> : 104968K->10K(118016K), 0.0063910 secs]
+>>>>>>>> 1115888K->1010930K(2084096K),
+>>>>>>>> 0.0064950 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1875.900: [GC 1875.900: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6824 bytes,       6824 total
+>>>>>>>> : 104970K->18K(118016K), 0.0057500 secs]
+>>>>>>>> 1115890K->1010938K(2084096K),
+>>>>>>>> 0.0058550 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1876.135: [GC 1876.135: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2200 bytes,       2200 total
+>>>>>>>> : 104978K->8K(118016K), 0.0069470 secs]
+>>>>>>>> 1115898K->1010928K(2084096K),
+>>>>>>>> 0.0070510 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1876.372: [GC 1876.372: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2192 bytes,       2192 total
+>>>>>>>> : 104968K->10K(118016K), 0.0070880 secs]
+>>>>>>>> 1115888K->1010930K(2084096K),
+>>>>>>>> 0.0071870 secs] [Times: user=0.02 sys=0.00, real=0.00 secs]
+>>>>>>>> 1876.609: [GC 1876.609: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1104 bytes,       1104 total
+>>>>>>>> : 104970K->10K(118016K), 0.0066470 secs]
+>>>>>>>> 1115890K->1010930K(2084096K),
+>>>>>>>> 0.0067550 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1876.845: [GC 1876.845: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5312 bytes,       5312 total
+>>>>>>>> : 104970K->14K(118016K), 0.0062250 secs]
+>>>>>>>> 1115890K->1010934K(2084096K),
+>>>>>>>> 0.0063320 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1877.080: [GC 1877.080: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1736 bytes,       1736 total
+>>>>>>>> : 104974K->10K(118016K), 0.0056870 secs]
+>>>>>>>> 1115894K->1010930K(2084096K),
+>>>>>>>> 0.0057890 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1877.315: [GC 1877.315: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4440 bytes,       4440 total
+>>>>>>>> : 104970K->10K(118016K), 0.0066800 secs]
+>>>>>>>> 1115890K->1010930K(2084096K),
+>>>>>>>> 0.0067890 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1877.552: [GC 1877.552: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       7456 bytes,       7456 total
+>>>>>>>> : 104970K->12K(118016K), 0.0071600 secs]
+>>>>>>>> 1115890K->1010932K(2084096K),
+>>>>>>>> 0.0072620 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1877.788: [GC 1877.788: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1928 bytes,       1928 total
+>>>>>>>> : 104972K->8K(118016K), 0.0065670 secs]
+>>>>>>>> 1115892K->1010928K(2084096K),
+>>>>>>>> 0.0066730 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1878.024: [GC 1878.024: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3000 bytes,       3000 total
+>>>>>>>> : 104968K->10K(118016K), 0.0067640 secs]
+>>>>>>>> 1115888K->1010930K(2084096K),
+>>>>>>>> 0.0068670 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1878.259: [GC 1878.259: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6656 bytes,       6656 total
+>>>>>>>> : 104970K->14K(118016K), 0.0072400 secs]
+>>>>>>>> 1115890K->1010934K(2084096K),
+>>>>>>>> 0.0073450 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1878.497: [GC 1878.497: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3088 bytes,       3088 total
+>>>>>>>> : 104974K->12K(118016K), 0.0066530 secs]
+>>>>>>>> 1115894K->1010932K(2084096K),
+>>>>>>>> 0.0067550 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1878.734: [GC 1878.734: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      10048 bytes,      10048 total
+>>>>>>>> : 104972K->16K(118016K), 0.0065520 secs]
+>>>>>>>> 1115892K->1010936K(2084096K),
+>>>>>>>> 0.0066680 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1878.971: [GC 1878.971: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       9688 bytes,       9688 total
+>>>>>>>> : 104976K->18K(118016K), 0.0056070 secs]
+>>>>>>>> 1115896K->1010938K(2084096K),
+>>>>>>>> 0.0057230 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1879.207: [GC 1879.207: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3208 bytes,       3208 total
+>>>>>>>> : 104978K->10K(118016K), 0.0057250 secs]
+>>>>>>>> 1115898K->1010930K(2084096K),
+>>>>>>>> 0.0058360 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1879.442: [GC 1879.442: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3272 bytes,       3272 total
+>>>>>>>> : 104970K->8K(118016K), 0.0062510 secs]
+>>>>>>>> 1115890K->1010928K(2084096K),
+>>>>>>>> 0.0063680 secs] [Times: user=0.02 sys=0.01, real=0.00 secs]
+>>>>>>>> 1879.678: [GC 1879.679: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3224 bytes,       3224 total
+>>>>>>>> : 104968K->10K(118016K), 0.0057810 secs]
+>>>>>>>> 1115888K->1010930K(2084096K),
+>>>>>>>> 0.0058990 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1879.914: [GC 1879.914: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3160 bytes,       3160 total
+>>>>>>>> : 104970K->8K(118016K), 0.0064760 secs]
+>>>>>>>> 1115890K->1010928K(2084096K),
+>>>>>>>> 0.0065950 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1880.148: [GC 1880.148: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3080 bytes,       3080 total
+>>>>>>>> : 104968K->12K(118016K), 0.0063810 secs]
+>>>>>>>> 1115888K->1010932K(2084096K),
+>>>>>>>> 0.0064960 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1880.390: [GC 1880.390: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      17512 bytes,      17512 total
+>>>>>>>> : 104972K->24K(118016K), 0.0056060 secs]
+>>>>>>>> 1115892K->1010944K(2084096K),
+>>>>>>>> 0.0057250 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1880.634: [GC 1880.634: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      14640 bytes,      14640 total
+>>>>>>>> : 104984K->22K(118016K), 0.0062140 secs]
+>>>>>>>> 1115904K->1010943K(2084096K),
+>>>>>>>> 0.0063360 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1880.880: [GC 1880.880: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2072 bytes,       2072 total
+>>>>>>>> - age   2:      10896 bytes,      12968 total
+>>>>>>>> : 104982K->23K(118016K), 0.0048630 secs]
+>>>>>>>> 1115903K->1010943K(2084096K),
+>>>>>>>> 0.0050290 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1888.172: [GC 1888.172: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    2445208 bytes,    2445208 total
+>>>>>>>> - age   2:        272 bytes,    2445480 total
+>>>>>>>> - age   3:      10896 bytes,    2456376 total
+>>>>>>>> : 104983K->2405K(118016K), 0.0073800 secs]
+>>>>>>>> 1115903K->1013325K(2084096K),
+>>>>>>>> 0.0074960 secs] [Times: user=0.05 sys=0.01, real=0.00 secs]
+>>>>>>>> 1888.643: [GC 1888.643: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3784 bytes,       3784 total
+>>>>>>>> - age   2:    2439992 bytes,    2443776 total
+>>>>>>>> - age   3:        272 bytes,    2444048 total
+>>>>>>>> - age   4:      10896 bytes,    2454944 total
+>>>>>>>> : 107365K->2457K(118016K), 0.0071510 secs]
+>>>>>>>> 1118285K->1013377K(2084096K),
+>>>>>>>> 0.0072550 secs] [Times: user=0.05 sys=0.00, real=0.00 secs]
+>>>>>>>> 1889.109: [GC 1889.109: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       8016 bytes,       8016 total
+>>>>>>>> - age   3:    2439992 bytes,    2448008 total
+>>>>>>>> - age   4:        272 bytes,    2448280 total
+>>>>>>>> : 107417K->2560K(118016K), 0.0070890 secs]
+>>>>>>>> 1118337K->1013491K(2084096K),
+>>>>>>>> 0.0071980 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1889.579: [GC 1889.579: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2384 bytes,       2384 total
+>>>>>>>> - age   2:       1600 bytes,       3984 total
+>>>>>>>> - age   4:    2439992 bytes,    2443976 total
+>>>>>>>> : 107520K->2545K(118016K), 0.0071830 secs]
+>>>>>>>> 1118451K->1013476K(2084096K),
+>>>>>>>> 0.0072940 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1890.045: [GC 1890.045: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        880 bytes,        880 total
+>>>>>>>> - age   3:       1600 bytes,       2480 total
+>>>>>>>> : 107505K->166K(118016K), 0.0074170 secs]
+>>>>>>>> 1118436K->1013480K(2084096K),
+>>>>>>>> 0.0075280 secs] [Times: user=0.04 sys=0.01, real=0.01 secs]
+>>>>>>>> 1890.515: [GC 1890.515: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        128 bytes,        128 total
+>>>>>>>> - age   2:         96 bytes,        224 total
+>>>>>>>> - age   4:       1600 bytes,       1824 total
+>>>>>>>> : 105126K->33K(118016K), 0.0066310 secs]
+>>>>>>>> 1118440K->1013347K(2084096K),
+>>>>>>>> 0.0067340 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1890.984: [GC 1890.984: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1176 bytes,       1176 total
+>>>>>>>> - age   3:         96 bytes,       1272 total
+>>>>>>>> : 104993K->8K(118016K), 0.0069150 secs]
+>>>>>>>> 1118307K->1013324K(2084096K),
+>>>>>>>> 0.0070120 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1891.452: [GC 1891.452: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:        320 bytes,        320 total
+>>>>>>>> - age   4:         96 bytes,        416 total
+>>>>>>>> : 104968K->6K(118016K), 0.0061500 secs]
+>>>>>>>> 1118284K->1013321K(2084096K),
+>>>>>>>> 0.0062530 secs] [Times: user=0.02 sys=0.01, real=0.00 secs]
+>>>>>>>> 1891.922: [GC 1891.922: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1264 bytes,       1264 total
+>>>>>>>> : 104966K->6K(118016K), 0.0065900 secs]
+>>>>>>>> 1118281K->1013321K(2084096K),
+>>>>>>>> 0.0066900 secs] [Times: user=0.02 sys=0.00, real=0.00 secs]
+>>>>>>>> 1892.390: [GC 1892.390: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2984 bytes,       2984 total
+>>>>>>>> : 104966K->8K(118016K), 0.0062690 secs]
+>>>>>>>> 1118281K->1013323K(2084096K),
+>>>>>>>> 0.0063680 secs] [Times: user=0.02 sys=0.01, real=0.01 secs]
+>>>>>>>> 1892.859: [GC 1892.859: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1520 bytes,       1520 total
+>>>>>>>> : 104968K->8K(118016K), 0.0060840 secs]
+>>>>>>>> 1118283K->1013323K(2084096K),
+>>>>>>>> 0.0061810 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1893.328: [GC 1893.328: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1040 bytes,       1040 total
+>>>>>>>> : 104968K->4K(118016K), 0.0062090 secs]
+>>>>>>>> 1118283K->1013319K(2084096K),
+>>>>>>>> 0.0063120 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1893.795: [GC 1893.795: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1224 bytes,       1224 total
+>>>>>>>> : 104964K->6K(118016K), 0.0061420 secs]
+>>>>>>>> 1118279K->1013321K(2084096K),
+>>>>>>>> 0.0062410 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>> 1894.265: [GC 1894.265: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2080 bytes,       2080 total
+>>>>>>>> : 104966K->4K(118016K), 0.0062520 secs]
+>>>>>>>> 1118281K->1013319K(2084096K),
+>>>>>>>> 0.0063550 secs] [Times: user=0.02 sys=0.00, real=0.00 secs]
+>>>>>>>> 1894.731: [GC 1894.731: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1936 bytes,       1936 total
+>>>>>>>> : 104964K->6K(118016K), 0.0058280 secs]
+>>>>>>>> 1118279K->1013321K(2084096K),
+>>>>>>>> 0.0059240 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1895.227: [GC 1895.227: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       6928 bytes,       6928 total
+>>>>>>>> : 104966K->9K(118016K), 0.0046570 secs]
+>>>>>>>> 1118281K->1013325K(2084096K),
+>>>>>>>> 0.0047560 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1898.054: [GC 1898.054: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    3115424 bytes,    3115424 total
+>>>>>>>> - age   2:       5648 bytes,    3121072 total
+>>>>>>>> : 104969K->3055K(118016K), 0.0073760 secs]
+>>>>>>>> 1118285K->1016371K(2084096K),
+>>>>>>>> 0.0074910 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1898.529: [GC 1898.529: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     169472 bytes,     169472 total
+>>>>>>>> - age   2:    3113760 bytes,    3283232 total
+>>>>>>>> - age   3:       5648 bytes,    3288880 total
+>>>>>>>> : 108015K->3293K(118016K), 0.0079730 secs]
+>>>>>>>> 1121331K->1016609K(2084096K),
+>>>>>>>> 0.0080760 secs] [Times: user=0.06 sys=0.00, real=0.01 secs]
+>>>>>>>> 1898.987: [GC 1898.987: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1784824 bytes,    1784824 total
+>>>>>>>> - age   2:     165616 bytes,    1950440 total
+>>>>>>>> - age   3:    3113728 bytes,    5064168 total
+>>>>>>>> - age   4:       5648 bytes,    5069816 total
+>>>>>>>> : 108253K->5156K(118016K), 0.0079720 secs]
+>>>>>>>> 1121569K->1018471K(2084096K),
+>>>>>>>> 0.0080790 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1899.456: [GC 1899.456: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     632184 bytes,     632184 total
+>>>>>>>> - age   2:    1774984 bytes,    2407168 total
+>>>>>>>> - age   3:     165616 bytes,    2572784 total
+>>>>>>>> - age   4:    2529728 bytes,    5102512 total
+>>>>>>>> : 110116K->5223K(118016K), 0.0083540 secs]
+>>>>>>>> 1123431K->1018544K(2084096K),
+>>>>>>>> 0.0084690 secs] [Times: user=0.06 sys=0.00, real=0.01 secs]
+>>>>>>>> 1899.928: [GC 1899.928: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      17040 bytes,      17040 total
+>>>>>>>> - age   2:     632016 bytes,     649056 total
+>>>>>>>> - age   3:    1774968 bytes,    2424024 total
+>>>>>>>> - age   4:     165616 bytes,    2589640 total
+>>>>>>>> : 110183K->2879K(118016K), 0.0081040 secs]
+>>>>>>>> 1123504K->1018671K(2084096K),
+>>>>>>>> 0.0082020 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1900.405: [GC 1900.405: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      56064 bytes,      56064 total
+>>>>>>>> - age   2:      14376 bytes,      70440 total
+>>>>>>>> - age   3:     631968 bytes,     702408 total
+>>>>>>>> - age   4:    1774968 bytes,    2477376 total
+>>>>>>>> : 107839K->2611K(118016K), 0.0078230 secs]
+>>>>>>>> 1123631K->1018564K(2084096K),
+>>>>>>>> 0.0079320 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1900.897: [GC 1900.897: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      40456 bytes,      40456 total
+>>>>>>>> - age   2:      51056 bytes,      91512 total
+>>>>>>>> - age   3:      14376 bytes,     105888 total
+>>>>>>>> - age   4:     631968 bytes,     737856 total
+>>>>>>>> : 107571K->942K(118016K), 0.0072930 secs]
+>>>>>>>> 1123524K->1018629K(2084096K),
+>>>>>>>> 0.0074000 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1901.364: [GC 1901.364: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      67120 bytes,      67120 total
+>>>>>>>> - age   2:      31192 bytes,      98312 total
+>>>>>>>> - age   3:      51056 bytes,     149368 total
+>>>>>>>> - age   4:      14328 bytes,     163696 total
+>>>>>>>> : 105902K->293K(118016K), 0.0057690 secs]
+>>>>>>>> 1123589K->1018597K(2084096K),
+>>>>>>>> 0.0058800 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1901.831: [GC 1901.831: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      37280 bytes,      37280 total
+>>>>>>>> - age   2:      66384 bytes,     103664 total
+>>>>>>>> - age   3:      31192 bytes,     134856 total
+>>>>>>>> - age   4:      51056 bytes,     185912 total
+>>>>>>>> : 105253K->223K(118016K), 0.0050510 secs]
+>>>>>>>> 1123557K->1018541K(2084096K),
+>>>>>>>> 0.0051540 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1902.294: [GC 1902.294: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     105720 bytes,     105720 total
+>>>>>>>> - age   2:      36544 bytes,     142264 total
+>>>>>>>> - age   3:      66336 bytes,     208600 total
+>>>>>>>> - age   4:      31192 bytes,     239792 total
+>>>>>>>> : 105183K->324K(118016K), 0.0056210 secs]
+>>>>>>>> 1123501K->1018692K(2084096K),
+>>>>>>>> 0.0057240 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1902.753: [GC 1902.753: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    1567200 bytes,    1567200 total
+>>>>>>>> - age   2:     105632 bytes,    1672832 total
+>>>>>>>> - age   3:      36544 bytes,    1709376 total
+>>>>>>>> - age   4:      66336 bytes,    1775712 total
+>>>>>>>> : 105284K->1882K(118016K), 0.0082650 secs]
+>>>>>>>> 1123652K->1020280K(2084096K),
+>>>>>>>> 0.0083680 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1903.223: [GC 1903.223: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      30040 bytes,      30040 total
+>>>>>>>> - age   2:    1566096 bytes,    1596136 total
+>>>>>>>> - age   3:     105632 bytes,    1701768 total
+>>>>>>>> - age   4:      36544 bytes,    1738312 total
+>>>>>>>> : 106842K->1884K(118016K), 0.0059610 secs]
+>>>>>>>> 1125240K->1020347K(2084096K),
+>>>>>>>> 0.0060690 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1903.693: [GC 1903.693: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       8240 bytes,       8240 total
+>>>>>>>> - age   2:      28048 bytes,      36288 total
+>>>>>>>> - age   3:    1566096 bytes,    1602384 total
+>>>>>>>> - age   4:     105632 bytes,    1708016 total
+>>>>>>>> : 106844K->1789K(118016K), 0.0059920 secs]
+>>>>>>>> 1125307K->1020288K(2084096K),
+>>>>>>>> 0.0060920 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1904.164: [GC 1904.164: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     460872 bytes,     460872 total
+>>>>>>>> - age   2:       6264 bytes,     467136 total
+>>>>>>>> - age   3:      27960 bytes,     495096 total
+>>>>>>>> - age   4:    1566096 bytes,    2061192 total
+>>>>>>>> : 106749K->2165K(118016K), 0.0062860 secs]
+>>>>>>>> 1125248K->1020767K(2084096K),
+>>>>>>>> 0.0063890 secs] [Times: user=0.04 sys=0.01, real=0.00 secs]
+>>>>>>>> 1904.624: [GC 1904.624: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:    2709336 bytes,    2709336 total
+>>>>>>>> - age   2:     458392 bytes,    3167728 total
+>>>>>>>> - age   3:       6168 bytes,    3173896 total
+>>>>>>>> - age   4:      27960 bytes,    3201856 total
+>>>>>>>> : 107125K->3170K(118016K), 0.0083420 secs]
+>>>>>>>> 1125727K->1023301K(2084096K),
+>>>>>>>> 0.0084480 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1905.094: [GC 1905.094: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     659712 bytes,     659712 total
+>>>>>>>> - age   2:    2228256 bytes,    2887968 total
+>>>>>>>> - age   3:     458392 bytes,    3346360 total
+>>>>>>>> - age   4:       6168 bytes,    3352528 total
+>>>>>>>> : 108130K->3375K(118016K), 0.0085350 secs]
+>>>>>>>> 1128261K->1023534K(2084096K),
+>>>>>>>> 0.0086420 secs] [Times: user=0.05 sys=0.01, real=0.01 secs]
+>>>>>>>> 1905.505: [GC 1905.505: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     807096 bytes,     807096 total
+>>>>>>>> - age   2:     657808 bytes,    1464904 total
+>>>>>>>> - age   3:    2227512 bytes,    3692416 total
+>>>>>>>> - age   4:     458392 bytes,    4150808 total
+>>>>>>>> : 108335K->4146K(118016K), 0.0082600 secs]
+>>>>>>>> 1128494K->1024310K(2084096K),
+>>>>>>>> 0.0083750 secs] [Times: user=0.05 sys=0.00, real=0.01 secs]
+>>>>>>>> 1905.749: [GC 1905.749: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3712 bytes,       3712 total
+>>>>>>>> - age   2:     802912 bytes,     806624 total
+>>>>>>>> - age   3:     657808 bytes,    1464432 total
+>>>>>>>> - age   4:    2227512 bytes,    3691944 total
+>>>>>>>> : 109106K->3774K(118016K), 0.0088880 secs]
+>>>>>>>> 1129270K->1024387K(2084096K),
+>>>>>>>> 0.0090000 secs] [Times: user=0.06 sys=0.01, real=0.01 secs]
+>>>>>>>> tfd.totalHits=0, records wanted=290
+>>>>>>>> qryStr=( S000:"MILTARY SYTEMS ENGINEER" ) AND
+>>>>>>>> (TEAMID0000000022:0000000022
+>>>>>>>> OR TEAMID0000000000:0000000000)
+>>>>>>>> LI [380 at /lucene1/index/]-26-Mar 06:34:25-Found hits=0, rset=0,
+>>>>>>>> has
+>>>>>>>> more=false
+>>>>>>>> LI [380 at /lucene1/index/]-26-Mar 06:34:25-Time--Total=1010,
+>>>>>>>> query=1010,
+>>>>>>>> fetch=0
+>>>>>>>> 1905.993: [GC 1905.993: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3232 bytes,       3232 total
+>>>>>>>> - age   3:     792792 bytes,     796024 total
+>>>>>>>> - age   4:     638624 bytes,    1434648 total
+>>>>>>>> : 108734K->1734K(118016K), 0.0087890 secs]
+>>>>>>>> 1129347K->1024522K(2084096K),
+>>>>>>>> 0.0089000 secs] [Times: user=0.06 sys=0.00, real=0.01 secs]
+>>>>>>>> 1906.249: [GC 1906.249: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2984 bytes,       2984 total
+>>>>>>>> - age   2:       1424 bytes,       4408 total
+>>>>>>>> - age   4:     792792 bytes,     797200 total
+>>>>>>>> : 106694K->947K(118016K), 0.0062530 secs]
+>>>>>>>> 1129482K->1024358K(2084096K),
+>>>>>>>> 0.0063540 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     602304 bytes,     602304 total
+>>>>>>>> - age   2:       1992 bytes,     604296 total
+>>>>>>>> - age   3:       1392 bytes,     605688 total
+>>>>>>>> : 105907K->706K(118016K), 0.0064420 secs]
+>>>>>>>> 1129318K->1024892K(2084096K),
+>>>>>>>> 0.0065540 secs] [Times: user=0.03 sys=0.00, real=0.00 secs]
+>>>>>>>> 1906.757: [GC 1906.757: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       9480 bytes,       9480 total
+>>>>>>>> - age   2:     598512 bytes,     607992 total
+>>>>>>>> - age   3:       1992 bytes,     609984 total
+>>>>>>>> - age   4:       1392 bytes,     611376 total
+>>>>>>>> : 105666K->633K(118016K), 0.0060690 secs]
+>>>>>>>> 1129852K->1024818K(2084096K),
+>>>>>>>> 0.0061710 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1907.134: [GC 1907.134: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       5192 bytes,       5192 total
+>>>>>>>> - age   2:       4072 bytes,       9264 total
+>>>>>>>> - age   3:     598512 bytes,     607776 total
+>>>>>>>> - age   4:       1992 bytes,     609768 total
+>>>>>>>> : 105593K->614K(118016K), 0.0078790 secs]
+>>>>>>>> 1129778K->1024801K(2084096K),
+>>>>>>>> 0.0079830 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1907.618: [GC 1907.619: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:      89488 bytes,      89488 total
+>>>>>>>> - age   2:       2248 bytes,      91736 total
+>>>>>>>> - age   3:       4024 bytes,      95760 total
+>>>>>>>> - age   4:     598512 bytes,     694272 total
+>>>>>>>> : 105574K->699K(118016K), 0.0082250 secs]
+>>>>>>>> 1129761K->1024888K(2084096K),
+>>>>>>>> 0.0083310 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1908.089: [GC 1908.089: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     105448 bytes,     105448 total
+>>>>>>>> - age   2:       2088 bytes,     107536 total
+>>>>>>>> - age   3:       2152 bytes,     109688 total
+>>>>>>>> - age   4:       4024 bytes,     113712 total
+>>>>>>>> : 105659K->185K(118016K), 0.0078770 secs]
+>>>>>>>> 1129848K->1024958K(2084096K),
+>>>>>>>> 0.0079850 secs] [Times: user=0.04 sys=0.00, real=0.01 secs]
+>>>>>>>> 1908.563: [GC 1908.563: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     678656 bytes,     678656 total
+>>>>>>>> - age   2:     103096 bytes,     781752 total
+>>>>>>>> - age   3:       2088 bytes,     783840 total
+>>>>>>>> - age   4:       2104 bytes,     785944 total
+>>>>>>>> : 105145K->798K(118016K), 0.0058960 secs]
+>>>>>>>> 1129918K->1025575K(2084096K),
+>>>>>>>> 0.0060010 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1909.482: [GC 1909.482: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:     609888 bytes,     609888 total
+>>>>>>>> - age   2:      27312 bytes,     637200 total
+>>>>>>>> - age   3:     629728 bytes,    1266928 total
+>>>>>>>> - age   4:     102952 bytes,    1369880 total
+>>>>>>>> : 105766K->1414K(118016K), 0.0059090 secs]
+>>>>>>>> 1130545K->1026195K(2084096K),
+>>>>>>>> 0.0060130 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1909.953: [GC 1909.953: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:         72 bytes,         72 total
+>>>>>>>> - age   2:     606424 bytes,     606496 total
+>>>>>>>> - age   3:      27312 bytes,     633808 total
+>>>>>>>> - age   4:     629728 bytes,    1263536 total
+>>>>>>>> : 106374K->1338K(118016K), 0.0058170 secs]
+>>>>>>>> 1131155K->1026220K(2084096K),
+>>>>>>>> 0.0059100 secs] [Times: user=0.04 sys=0.00, real=0.00 secs]
+>>>>>>>> 1910.418: [GC 1910.418: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       1584 bytes,       1584 total
+>>>>>>>> - age   3:     606424 bytes,     608008 total
+>>>>>>>> - age   4:      27312 bytes,     635320 total
+>>>>>>>> : 106298K->752K(118016K), 0.0055870 secs]
+>>>>>>>> 1131180K->1026248K(2084096K),
+>>>>>>>> 0.0056800 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1910.885: [GC 1910.885: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       4488 bytes,       4488 total
+>>>>>>>> - age   4:     606440 bytes,     610928 total
+>>>>>>>> : 105712K->666K(118016K), 0.0054040 secs]
+>>>>>>>> 1131208K->1026190K(2084096K),
+>>>>>>>> 0.0055050 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1911.354: [GC 1911.354: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2976 bytes,       2976 total
+>>>>>>>> : 105626K->26K(118016K), 0.0075400 secs]
+>>>>>>>> 1131150K->1026142K(2084096K),
+>>>>>>>> 0.0076410 secs] [Times: user=0.03 sys=0.01, real=0.01 secs]
+>>>>>>>> 1911.823: [GC 1911.823: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2160 bytes,       2160 total
+>>>>>>>> : 104986K->6K(118016K), 0.0073880 secs]
+>>>>>>>> 1131102K->1026121K(2084096K),
+>>>>>>>> 0.0074760 secs] [Times: user=0.03 sys=0.01, real=0.00 secs]
+>>>>>>>> 1912.290: [GC 1912.290: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       2176 bytes,       2176 total
+>>>>>>>> : 104966K->8K(118016K), 0.0069440 secs]
+>>>>>>>> 1131081K->1026123K(2084096K),
+>>>>>>>> 0.0070370 secs] [Times: user=0.03 sys=0.00, real=0.01 secs]
+>>>>>>>> 1912.771: [GC 1912.771: [ParNew
+>>>>>>>> Desired survivor size 6684672 bytes, new threshold 4 (max 4)
+>>>>>>>> - age   1:       3056 bytes,       3056 total
+>>>>>>>> : 104968K->10K(118016K), 0.0071230 secs]
+>>>>>>>> 1131083K->1026125K(2084096K),
+>>>>>>>> 0.0072150 secs] [Times: user=0.02 sys=0.00, real=0.01 secs]
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> On 3/26/2010 10:33 AM, Siraj Haider wrote:
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>> Hi Mike,
+>>>>>>>>> I am attaching the dump that I created by putting
+>>>>>>>>> -XX:+PrintClassHistogram in catalina options and by issuing a kill
+>>>>>>>>> -3
+>>>>>>>>> command.  The machine was not in a bad state (i.e. it was not doing
+>>>>>>>>> frequent Full GC cycles yet) but the kill -3 forced it to do a Full
+>>>>>>>>> GC.
+>>>>>>>>> If you want I will wait for the machine doing frequent gc cycle and
+>>>>>>>>> will
+>>>>>>>>> send you another another dump.
+>>>>>>>>>
+>>>>>>>>> thanks
+>>>>>>>>> -siraj
+>>>>>>>>>
+>>>>>>>>> On 3/26/2010 9:29 AM, Michael McCandless wrote:
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>> I think there are various ways....
+>>>>>>>>>>
+>>>>>>>>>> jmap would be great.
+>>>>>>>>>>
+>>>>>>>>>> Hmm looks like this may be relevant:
+>>>>>>>>>>
+>>>>>>>>>>       http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6797870
+>>>>>>>>>>
+>>>>>>>>>> I also use YourKit and watch the allocations...
+>>>>>>>>>>
+>>>>>>>>>> Mike
+>>>>>>>>>>
+>>>>>>>>>> On Thu, Mar 25, 2010 at 5:26 PM, Siraj Haider<siraj@jobdiva.com>
+>>>>>>>>>>   wrote:
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>> how should I get that memory dump? using jmap?
+>>>>>>>>>>>
+>>>>>>>>>>> -siraj
+>>>>>>>>>>>
+>>>>>>>>>>> On 3/25/2010 4:32 PM, Michael McCandless wrote:
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>> Are you using IndexReader.reopen to open those new searchers?
+>>>>>>>>>>>>
+>>>>>>>>>>>> Can you capture a memory dump when GC kicks in?  I'd be curious
+>>>>>>>>>>>> to
+>>>>>>>>>>>> see
+>>>>>>>>>>>> where all the "new" garbage is coming from... I don't think
+>>>>>>>>>>>> 2.3.2
+>>>>>>>>>>>> ->
+>>>>>>>>>>>> 2.9.2 should be generating more garbage.
+>>>>>>>>>>>>
+>>>>>>>>>>>> Mike
+>>>>>>>>>>>>
+>>>>>>>>>>>> On Thu, Mar 25, 2010 at 3:55 PM, Siraj Haider<siraj@jobdiva.com
+>>>>>>>>>>>> >
+>>>>>>>>>>>> wrote:
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>>> Indexing happens in a different thread on intervals.  I open a
+>>>>>>>>>>>>> new
+>>>>>>>>>>>>> IndexWriter for each indexing session.  After indexing session
+>>>>>>>>>>>>> if
+>>>>>>>>>>>>> there
+>>>>>>>>>>>>> is a
+>>>>>>>>>>>>> modification in the index I close the searcher and open a new
+>>>>>>>>>>>>> one.
+>>>>>>>>>>>>>   I
+>>>>>>>>>>>>> have
+>>>>>>>>>>>>> two searchers that I flip flop when opening an index.
+>>>>>>>>>>>>>
+>>>>>>>>>>>>> On 3/25/2010 3:26 PM, Michael McCandless wrote:
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>> How do you reopen your searchers after indexing?
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> Do you keep a single IW open for all time?
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> On Thu, Mar 25, 2010 at 3:11 PM, Siraj Haider<
+>>>>>>>>>>>>>> siraj@jobdiva.com>
+>>>>>>>>>>>>>>    wrote:
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> Indexing happen with frequent intervals on our indexes, but I
+>>>>>>>>>>>>>>> think
+>>>>>>>>>>>>>>> searching is the cause of the issue, because as soon as the
+>>>>>>>>>>>>>>> indexes
+>>>>>>>>>>>>>>> are
+>>>>>>>>>>>>>>> hit
+>>>>>>>>>>>>>>> with a lot of searches, the gc cycles become more frequent.
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> -siraj
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> On 3/24/2010 5:19 PM, Michael McCandless wrote:
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> Is this during indexing or searching?
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> Mike
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> On Wed, Mar 24, 2010 at 3:45 PM, Grant
+>>>>>>>>>>>>>>>> Ingersoll<gsingers@apache.org>
+>>>>>>>>>>>>>>>>    wrote:
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> On Mar 24, 2010, at 2:13 PM, Siraj Haider wrote:
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> We upgraded to 2.9.2 from 2.3.2 and the garbage collection
+>>>>>>>>>>>>>>>>>> performance
+>>>>>>>>>>>>>>>>>> deteriorated drastically.  The system is going to Full GC
+>>>>>>>>>>>>>>>>>> cycles
+>>>>>>>>>>>>>>>>>> with
+>>>>>>>>>>>>>>>>>> long
+>>>>>>>>>>>>>>>>>> pauses very frequently.  Did something got changed that we
+>>>>>>>>>>>>>>>>>> need
+>>>>>>>>>>>>>>>>>> to
+>>>>>>>>>>>>>>>>>> account
+>>>>>>>>>>>>>>>>>> for?
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Yes, quite a bit has changed under the hood between those
+>>>>>>>>>>>>>>>>> two
+>>>>>>>>>>>>>>>>> versions.
+>>>>>>>>>>>>>>>>>    CHANGES.txt is probably the best place to start.
+>>>>>>>>>>>>>>>>>  Otherwise,
+>>>>>>>>>>>>>>>>> more
+>>>>>>>>>>>>>>>>> info
+>>>>>>>>>>>>>>>>> is
+>>>>>>>>>>>>>>>>> needed to figure out what is going on.
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> thanks in advance
+>>>>>>>>>>>>>>>>>> -siraj
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> --------------------------
+>>>>>>>>>>>>>>>>> Grant Ingersoll
+>>>>>>>>>>>>>>>>> http://www.lucidimagination.com/
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> Search the Lucene ecosystem using Solr/Lucene:
+>>>>>>>>>>>>>>>>> http://www.lucidimagination.com/search
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>>>>> To unsubscribe, e-mail:
+>>>>>>>>>>>>>> java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>>>>> For additional commands, e-mail:
+>>>>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>>
+>>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>
+>>>>
+>>>>
+>>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>
+>
+

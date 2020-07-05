@@ -1,0 +1,82 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Phrase Highlighting
+DATE: 21 May 2009
+
+On Thu, May 21, 2009 at 3:09 PM, Max Lynch <ihasmax@gmail.com> wrote:
+> Sorry, the following code is in python, but I can hack a Java thing together
+> if necessary.
+
+I'm a big Python fan :)
+
+> HighlighterSpanScorer is the SpanScorer from the highlight
+> package just renamed to avoid conflict with the other SpanScorer object.
+>
+> Well what happens is if I use a SpanScorer instead, and allocate it like
+> such:
+>
+>            analyzer = StandardAnalyzer([])
+>            tokenStream = analyzer.tokenStream("contents",
+> lucene.StringReader(text))
+>            ctokenStream = lucene.CachingTokenFilter(tokenStream)
+>            highlighter = lucene.Highlighter(formatter,
+> lucene.HighlighterSpanScorer(self.query, "contents", ctokenStream))
+>            ctokenStream.reset()
+>
+>            result = highlighter.getBestFragments(ctokenStream, text,
+>                    2, "...")
+>
+>  My highlighter is still breaking up words inside of a span.  For example,
+> if I search for \"John Smith\", instead of the highlighter being called for
+> the whole "John Smith", it gets called for "John" and then "Smith".
+
+I think you need to use SimpleSpanFragmenter (vs SimpleFragmenter,
+which is the default used by Highlighter) to ensure that each fragment
+contains a full match for the query.  EG something like this (copied
+from LIA 2nd edition):
+
+    TermQuery query = new TermQuery(new Term("field", "fox"));
+
+    TokenStream tokenStream =
+        new SimpleAnalyzer().tokenStream("field",
+            new StringReader(text));
+
+    SpanScorer scorer = new SpanScorer(query, "field",
+                                       new CachingTokenFilter(tokenStream));
+    Fragmenter fragmenter = new SimpleSpanFragmenter(scorer);
+    Highlighter highlighter = new Highlighter(scorer);
+    highlighter.setTextFragmenter(fragmenter);
+
+
+>> > In the mean time, If I am interested in finding out exactly how many
+>> times a
+>> > term was found in a document, what is the best way to go about this?  The
+>> > way I am doing it right now is using a highlighter and just incrementing
+>> > counters when a word is found that I'm interested.  I just came across
+>> > FieldSortedTermVectorMapper that could do something similar.  Is
+>> > FieldSortedTermVectorMapper something I could use for this?  Is there a
+>> > better option?
+>>
+>>
+>> Is it really just single terms you need to measure?  (eg, not "how
+>> many times did phrase XYZ occur in the doc").  If so, then getting the
+>> term vectors and locating your term in there, should work.  This is
+>> probably OK if you just do it for each of the hits on the page (like
+>> 10 hits), but will be way too slow if you try to do it for say all
+>> docs that matched the query.
+>>
+>
+> I see how the term vector might be used.  I can't really tell if there is a
+> way for me to do a Span check on the words as easily as the highlighter
+> would do.
+
+TermVectors won't let you do a span check -- they just return the
+terms & their frequencies (and optionally positions & offsets, if you
+indexed them).
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

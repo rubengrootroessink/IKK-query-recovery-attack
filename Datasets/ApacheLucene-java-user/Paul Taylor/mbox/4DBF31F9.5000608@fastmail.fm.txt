@@ -1,0 +1,67 @@
+FROM: Paul Taylor <paul_t...@fastmail.fm>
+SUBJECT: Lucene spending alot of time in BooleanScorer2
+DATE: 2 May 2011
+
+Hi
+
+Nearing completion on a new version of a lucene search component for the 
+http://www.musicbrainz.org music database and having a problem with 
+performance. There are a number of indexes each built from data in a 
+database, there is one index for albums, another for artists, and 
+another for tracks (individual songs on albums). Testing search 
+performance on every index they all perform well except for the tracks 
+index which is considerably slower than before.
+
+The code is similar, though there are changes sin all areas, and I have 
+checked with a profiler that it is the lucene search that is taking the 
+time. It is spending most of its time in BooleanScorer2, you can see a 
+breakdown  at http://imagebin.org/151368, is this normal ? I profiled a 
+well performing index and this method didn't even show up.
+
+One thought I had is that some of the test queries are a little silly 
+IMO and contain alot of OR queries both on terms within field and over 
+multiple fields. We only ever return 25 results, but I guess Lucene has 
+to sort all the results and in some cases there are over a million 
+matches, could this be the reason ? However these queries still perform 
+better with the old code base and Im using TopScoreDocsCollecter so I 
+can't see how to improve it, and all queries not just the silly ones 
+appear slower.
+
+Code Extract:
+     public Results searchLucene(String query, int offset, int limit) 
+throws IOException, ParseException {
+         IndexSearcher searcher = getIndexSearcher();
+         QueryParser parser = getParser();
+         TopScoreDocCollector collector = 
+TopScoreDocCollector.create(offset + limit, true);
+         searcher.search(parser.parse(query), collector);
+         searchCount.incrementAndGet();
+         return processResults(searcher, collector, offset);
+     }
+     private Results processResults(IndexSearcher searcher, 
+TopScoreDocCollector collector, int offset) throws IOException {
+         Results results = new Results();
+         TopDocs topDocs = collector.topDocs();
+         results.offset = offset;
+         results.totalHits = topDocs.totalHits;
+         ScoreDoc docs[] = topDocs.scoreDocs;
+         float maxScore = topDocs.getMaxScore();
+         for (int i = offset; i < docs.length; i++) {
+             Result result = new Result();
+             result.score = docs[i].score / maxScore;
+             result.doc = new MbDocument(searcher.doc(docs[i].doc));
+             results.results.add(result);
+         }
+         return results;
+     }
+
+I'm using Lucene 3.0.3, old code base is using 2.9.2, any help 
+appreciated on what the problem could be, on on how I should proceed.
+
+thanks Paul
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

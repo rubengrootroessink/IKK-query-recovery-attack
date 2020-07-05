@@ -1,0 +1,278 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Spans, appended fields, and term positions
+DATE: 21 Nov 2005
+
+
+On 21 Nov 2005, at 04:26, Erik Hatcher wrote:
+> What about adding an offset to Field, setPositionOffset(int  
+> offset)?  Looking at DocumentWriter, it looks like this would be  
+> the simplest thing that could work, without precluding the  
+> interesting option of modifying Analyzer to allow with flags on  
+> tokenStream.
+
+I've made the few lines of code change to implement this idea.  The  
+patch is attached.  I added tests to TestPhraseQuery and  
+TestDocumentWriter that show this working as desired.  I reformatted  
+TestDocumentWriter to eliminate an unnecessary try/catch, so the diff  
+looks larger than it really is, sorry (and for now the test is just  
+println diagnostic, but I'll turn those into asserts).   
+TestPhraseQuery demonstrates two "repeated" fields being indexed,  
+with a position offset of 100 for the second instance.  The test  
+fails without the offset, as the phrase matches across the field  
+instance boundaries, and even fails with a phrase slop of >= 100.   
+The test shows that with the offset and a slop of 99 the match still  
+isn't made.
+
+Would this be an acceptable change to commit?
+
+Thanks,
+	Erik
+
+
+$ svn diff src/
+Index: src/test/org/apache/lucene/search/TestPhraseQuery.java
+===================================================================
+--- src/test/org/apache/lucene/search/TestPhraseQuery.java       
+(revision 345677)
++++ src/test/org/apache/lucene/search/TestPhraseQuery.java       
+(working copy)
+@@ -45,6 +45,10 @@
+
+      Document doc = new Document();
+      doc.add(new Field("field", "one two three four five",  
+Field.Store.YES, Field.Index.TOKENIZED));
++    doc.add(new Field("repeated", "this is a repeated field - first  
+part", Field.Store.YES, Field.Index.TOKENIZED));
++    Field repeatedField = new Field("repeated", "second part of a  
+repeated field", Field.Store.YES, Field.Index.TOKENIZED);
++    repeatedField.setPositionOffset(100);
++    doc.add(repeatedField);
+      writer.addDocument(doc);
+
+      writer.optimize();
+@@ -294,4 +298,15 @@
+      assertEquals(2, hits.id(2));
+    }
++  public void testWrappedPhrase() throws IOException {
++    query.add(new Term("repeated", "first"));
++    query.add(new Term("repeated", "part"));
++    query.add(new Term("repeated", "second"));
++    query.add(new Term("repeated", "part"));
++    query.setSlop(99);
++
++    Hits hits = searcher.search(query);
++    assertEquals(0, hits.length());
++  }
++
+}
+Index: src/test/org/apache/lucene/index/DocHelper.java
+===================================================================
+--- src/test/org/apache/lucene/index/DocHelper.java     (revision  
+345677)
++++ src/test/org/apache/lucene/index/DocHelper.java     (working copy)
+@@ -68,6 +68,14 @@
+    public static Field unStoredField2 = new Field 
+(UNSTORED_FIELD_2_KEY, UNSTORED_2_FIELD_TEXT,
+        Field.Store.NO, Field.Index.TOKENIZED, Field.TermVector.YES);
++  public static final String REPEATED_1_TEXT = "repeated one";
++  public static final String REPEATED_KEY = "repeated";
++  public static Field repeatedField1 = new Field(REPEATED_KEY,  
+REPEATED_1_TEXT,
++      Field.Store.YES, Field.Index.TOKENIZED, Field.TermVector.NO);
++  public static final String REPEATED_2_TEXT = "repeated two";
++  public static Field repeatedField2 = new Field(REPEATED_KEY,  
+REPEATED_2_TEXT,
++      Field.Store.YES, Field.Index.TOKENIZED, Field.TermVector.NO);
++
+    public static Map nameValues = null;
+    // ordered list of all the fields...
+@@ -81,6 +89,8 @@
+      unIndField,
+      unStoredField1,
+      unStoredField2,
++    repeatedField1,
++    repeatedField2
+    };
+    // Map<String fieldName, Field field>
+@@ -94,6 +104,7 @@
+    public static Map noNorms=new HashMap();
+    static {
++    repeatedField2.setPositionOffset(500);
+      for (int i=0; i<fields.length; i++) {
+        Field f = fields[i];
+        add(all,f);
+Index: src/test/org/apache/lucene/index/TestDocumentWriter.java
+===================================================================
+--- src/test/org/apache/lucene/index/TestDocumentWriter.java     
+(revision 345677)
++++ src/test/org/apache/lucene/index/TestDocumentWriter.java     
+(working copy)
+@@ -17,15 +17,13 @@
+   */
+import junit.framework.TestCase;
+-import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+-import org.apache.lucene.search.Similarity;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
++import org.apache.lucene.search.Similarity;
++import org.apache.lucene.store.RAMDirectory;
+-import java.io.IOException;
+-
+public class TestDocumentWriter extends TestCase {
+    private RAMDirectory dir = new RAMDirectory();
+    private Document testDoc = new Document();
+@@ -48,54 +46,56 @@
+    }
+-  public void testAddDocument() {
++  public void testAddDocument() throws Exception {
+      Analyzer analyzer = new WhitespaceAnalyzer();
+      Similarity similarity = Similarity.getDefault();
+      DocumentWriter writer = new DocumentWriter(dir, analyzer,  
+similarity, 50);
+      assertTrue(writer != null);
+-    try {
+-      String segName="test";
+-      writer.addDocument(segName, testDoc);
+-      //After adding the document, we should be able to read it back in
+-      SegmentReader reader = SegmentReader.get(new SegmentInfo 
+(segName, 1, dir));
+-      assertTrue(reader != null);
+-      Document doc = reader.document(0);
+-      assertTrue(doc != null);
+-
+-      //System.out.println("Document: " + doc);
+-      Field [] fields = doc.getFields("textField2");
+-      assertTrue(fields != null && fields.length == 1);
+-      assertTrue(fields[0].stringValue().equals 
+(DocHelper.FIELD_2_TEXT));
+-      assertTrue(fields[0].isTermVectorStored() == true);
+-
+-      fields = doc.getFields("textField1");
+-      assertTrue(fields != null && fields.length == 1);
+-      assertTrue(fields[0].stringValue().equals 
+(DocHelper.FIELD_1_TEXT));
+-      assertTrue(fields[0].isTermVectorStored() == false);
+-
+-      fields = doc.getFields("keyField");
+-      assertTrue(fields != null && fields.length == 1);
+-      assertTrue(fields[0].stringValue().equals 
+(DocHelper.KEYWORD_TEXT));
++    String segName = "test";
++    writer.addDocument(segName, testDoc);
++    //After adding the document, we should be able to read it back in
++    SegmentReader reader = SegmentReader.get(new SegmentInfo 
+(segName, 1, dir));
++    assertTrue(reader != null);
++    Document doc = reader.document(0);
++    assertTrue(doc != null);
+-      fields = doc.getFields(DocHelper.NO_NORMS_KEY);
+-      assertTrue(fields != null && fields.length == 1);
+-      assertTrue(fields[0].stringValue().equals 
+(DocHelper.NO_NORMS_TEXT));
++    //System.out.println("Document: " + doc);
++    Field [] fields = doc.getFields("textField2");
++    assertTrue(fields != null && fields.length == 1);
++    assertTrue(fields[0].stringValue().equals(DocHelper.FIELD_2_TEXT));
++    assertTrue(fields[0].isTermVectorStored() == true);
+-      fields = doc.getFields(DocHelper.TEXT_FIELD_3_KEY);
+-      assertTrue(fields != null && fields.length == 1);
+-      assertTrue(fields[0].stringValue().equals 
+(DocHelper.FIELD_3_TEXT));
++    fields = doc.getFields("textField1");
++    assertTrue(fields != null && fields.length == 1);
++    assertTrue(fields[0].stringValue().equals(DocHelper.FIELD_1_TEXT));
++    assertTrue(fields[0].isTermVectorStored() == false);
+-      // test that the norm file is not present if omitNorms is true
+-      for (int i=0; i<reader.fieldInfos.size(); i++) {
+-        FieldInfo fi = reader.fieldInfos.fieldInfo(i);
+-        if (fi.isIndexed) {
+-          assertTrue(fi.omitNorms == !dir.fileExists(segName + ".f"  
++ i));
+-        }
++    fields = doc.getFields("keyField");
++    assertTrue(fields != null && fields.length == 1);
++    assertTrue(fields[0].stringValue().equals(DocHelper.KEYWORD_TEXT));
++
++    fields = doc.getFields(DocHelper.NO_NORMS_KEY);
++    assertTrue(fields != null && fields.length == 1);
++    assertTrue(fields[0].stringValue().equals 
+(DocHelper.NO_NORMS_TEXT));
++
++    fields = doc.getFields(DocHelper.TEXT_FIELD_3_KEY);
++    assertTrue(fields != null && fields.length == 1);
++    assertTrue(fields[0].stringValue().equals(DocHelper.FIELD_3_TEXT));
++
++    // test that the norm file is not present if omitNorms is true
++    for (int i = 0; i < reader.fieldInfos.size(); i++) {
++      FieldInfo fi = reader.fieldInfos.fieldInfo(i);
++      if (fi.isIndexed) {
++        assertTrue(fi.omitNorms == !dir.fileExists(segName + ".f" +  
+i));
+        }
++    }
+-    } catch (IOException e) {
+-      e.printStackTrace();
+-      assertTrue(false);
++    TermPositions termPositions = reader.termPositions(new Term 
+(DocHelper.REPEATED_KEY, "repeated"));
++    assertTrue(termPositions.next());
++    int freq = termPositions.freq();
++    for (int i=0; i < freq; i++) {
++      int pos = termPositions.nextPosition();
++      System.out.println("pos = " + pos);
+      }
+    }
+}
+Index: src/java/org/apache/lucene/index/DocumentWriter.java
+===================================================================
+--- src/java/org/apache/lucene/index/DocumentWriter.java         
+(revision 345677)
++++ src/java/org/apache/lucene/index/DocumentWriter.java         
+(working copy)
+@@ -134,7 +134,7 @@
+        int fieldNumber = fieldInfos.fieldNumber(fieldName);
+        int length = fieldLengths[fieldNumber];     // length of field
+-      int position = fieldPositions[fieldNumber]; // position in field
++      int position = fieldPositions[fieldNumber] +  
+field.getPositionOffset(); // position in field
+        int offset = fieldOffsets[fieldNumber];       // offset field
+        if (field.isIndexed()) {
+Index: src/java/org/apache/lucene/document/Field.java
+===================================================================
+--- src/java/org/apache/lucene/document/Field.java      (revision  
+345677)
++++ src/java/org/apache/lucene/document/Field.java      (working copy)
+@@ -50,6 +50,8 @@
+    private boolean isCompressed = false;
+
+    private float boost = 1.0f;
++
++  private int positionOffset = 0;
+
+    public static final class Store extends Parameter implements  
+Serializable {
+
+@@ -179,6 +181,14 @@
+      return boost;
+    }
++  public void setPositionOffset(int offset) {
++    positionOffset = offset;
++  }
++
++  public int getPositionOffset() {
++    return positionOffset;
++  }
++
+    /** Constructs a String-valued Field that is not tokenized, but  
+is indexed
+      and stored.  Useful for non-text fields, e.g. date or url.
+      @deprecated use {@link #Field(String, String, Field.Store,  
+Field.Index)
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

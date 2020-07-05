@@ -1,0 +1,185 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: solution for parent-child relationship
+DATE: 23 Dec 2009
+
+First, if you don't need to distinguish between posts and comments,
+you don't care about the increment gap. But if you do...
+
+It's kind of arcane, but here's the general idea. You override your Analyzer
+of choice and implement getPositionIncrementGap. Say your
+getPositionIncrementGap
+returns 100. When you do something like this:
+
+doc.add(new Field("text", "post text here", Field.Store.NO,
+Field.Index.ANALYZED);
+doc.add(new Field("text", "commentone one", Field.Store.NO,
+Field.Index.ANALYZED);
+doc.add(new Field("text", "commenttwo two", Field.Store.NO,
+Field.Index.ANALYZED);
+
+then the offsets of your tokens in the field "text" are as follows (note,
+may be off by one or so).
+1 - post
+2 - text
+3 - here
+104 - commentone
+105 - one
+206 - commenttwo
+207 - two
+
+
+If your getPositionIncrementGap returned 1, the positions would be 1, 2, 3,
+4, 5, 6, 7....
+
+Now, you can use the offsets of the tokens to determine what comment you go
+the hit
+in. By putting an increment of, say,  100 you have the advantage of NOT
+hitting on any
+phrase query across post/comment/comment boundaries (i.e. "here commentone"
+would NOT hit) and when executing any of the "near" queries anything < 100
+won't
+match either. But all of your posts and comments are in the same document,
+so you
+can search/display them in one query.
+
+You can get creative with this. Say you implemented your
+getPositionIncrementGap
+to always return an even, say, 10,000 boundary (assuming no comment was more
+than, 10,000 words). Then the offset tells you exactly which comment you're
+in,
+or whether it's the original post, it's just a modulo operation.
+
+Another possibility is to *store* (but not index) meta data with each
+document that
+contains information about your doc, like the offset of each comment. This
+could
+even be a POJO with the necessary serialization. You'd still want to put an
+increment
+gap in there to keep from inappropriately matching across boundaries.....
+
+Another thing that's hard to feel good about is that documents do NOT have
+to have the same fields. It's really tempting to think of "documents" as
+being
+"just like tables", but they're not. There's no penalty that I know of for
+having
+different documents have different fields. Theoretically, you could have a
+Lucene
+index in which no document had any field in common with any other document.
+So putting meta-data in your index is do-able, although do NOT use Lucene
+document IDs in your meta-data, they can change on you.....
+
+But do remember that a hybrid solution may be best if you absolutely require
+database-like capabilities and can't think of a way to use a Lucene index
+efficiently. My personal tendency is to use a hybrid solution last, when
+neither
+a Lucene index nor a database is adequate just on a "less complex is better"
+perspective...
+
+HTH
+Erick
+
+On Wed, Dec 23, 2009 at 11:41 AM, Deve <developer.inbox@gmail.com> wrote:
+
+> @Erick, you are right i will have to stop thinking in terms of databases,
+> thats why i wanted to discuss this.
+>
+> i don't get how can i use getPositionIncrementGap, could you provide little
+> more details.
+>
+> thanks,
+>
+> On Wed, Dec 23, 2009 at 8:45 PM, Erick Erickson <erickerickson@gmail.com
+> >wrote:
+>
+> > Ya just gotta stop thinking like a database guy, man <G>. Lucene searches
+> > lots and lots of text very well. It doesn't do joins worth a darn. The
+> > moment
+> > you star thinking in terms of sub-queries, you're probably starting down
+> > the
+> > wrong track.
+> >
+> > Here's a possibility. Index each post and all associated comments as a
+> > single
+> > document, with the post and all comments put in the same field. Something
+> > like
+> > doc.add("text", <original post text>);
+> > doc.add("text", <first comment>);
+> > doc.add("text", <second comment>);
+> > add the document to the index.....
+> >
+> > Now, all you need to do is search the "text" field and you get
+> everything.
+> > If
+> > you set the position increment gap to something other than 1 (see the
+> > docs),
+> > you can distinguish between the individual calls to doc.add(), see
+> > getPositionIncrementGap.
+> >
+> > In general, when indexing anything database-related, the advice is to
+> > flatten
+> > then data as you put it into a Lucene index. Think about making all the
+> > data
+> > available as the result of a single query. This leads to data
+> replication,
+> > which
+> > goes against all your database instincts, but....
+> >
+> > HTH
+> > Erick
+> >
+> >
+> > On Wed, Dec 23, 2009 at 8:35 AM, Shahid Faiz <developer.inbox@gmail.com
+> > >wrote:
+> >
+> > > Hi,
+> > >
+> > > Following are details of my problem and possible solutions which I can
+> > > think
+> > > of. Please suggest which should I choose, or is there any other
+> approach
+> > > better than these.
+> > >
+> > > I want to index blog posts and their comments, in my database posts and
+> > > comments are stored in two different tables. Currently I am indexing
+> > posts
+> > > only and search works perfectly fine, but now I want to index comments
+> as
+> > > well. From now on when user will search any word, all posts will be
+> > > displayed which meet search criteria including posts and only those
+> > > comments
+> > > which meet the specified criteria along with posts. All paging is done
+> on
+> > > posts, comments are not considered while calculating page contents.
+> > >
+> > > e.g.
+> > >
+> > > POST =>          Google launched Chrome Browser
+> > > COMMENT =>  Microsoft IE also has tab browsing.
+> > >
+> > > Now searching (microsoft AND IE), should also display this post with
+> > along
+> > > with above comment.
+> > >
+> > > One solution is: I should index both posts+comments in one lucene index
+> > and
+> > > search that index. But as i have to display 10 posts (not including
+> > > comments) per page so it gets complicated while finding records to be
+> > > displayed on any given page. I think, I can solve this problem by
+> > creating
+> > > two queries one to search posts and one to search comments only and
+> then
+> > > can
+> > > join them using OR operator.
+> > >
+> > > Second solution could be: I can store comments in different index, and
+> on
+> > > search first I will execute query on comments index and use result of
+> > > comments search to search blog posts.
+> > >
+> > > Thanks in advance.
+> > >
+> > > - deve
+> > >
+> >
+>
+

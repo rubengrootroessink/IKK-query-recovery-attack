@@ -1,0 +1,91 @@
+FROM: Luke Francl <luke.fra...@stellent.com>
+SUBJECT: Multi-threading problem: couldn't delete segments
+DATE: 6 Jan 2005
+
+We are having a problem with Lucene in a high concurrency
+create/delete/search situation. I thought I fixed all these problems,
+but I guess not.
+
+Here's what's happening.
+
+We are conducting load testing on our application.
+
+On a Windows 2000 server using lucene-1.3-final with compound file
+enabled, a worker thread is creating new Documents as it ingests
+content. Meanwhile, a test script is going that is hitting the search
+part of our application (I think the script also updates and deletes
+Documents, but I am not sure. My colleague who wrote it has left for the
+day so I can't ask him.).
+
+The scripted test passes with 1, 5, and 10 users hitting the
+application. At 20 users, we get this exception:
+
+[Task Worker1] ERROR com.ancept.ams.search.lucene.LuceneIndexer  -
+Caught exception closing IndexReader in finally block
+java.io.IOException: couldn't delete segments
+        at
+org.apache.lucene.store.FSDirectory.renameFile(FSDirectory.java:236)
+        at
+org.apache.lucene.index.SegmentInfos.write(SegmentInfos.java(Compiled
+ Code))
+        at
+org.apache.lucene.index.SegmentReader$1.doBody(SegmentReader.java:179
+)
+        at org.apache.lucene.store.Lock$With.run(Lock.java:148)
+        at
+org.apache.lucene.index.SegmentReader.doClose(SegmentReader.java(Comp
+iled Code))
+        at
+org.apache.lucene.index.IndexReader.close(IndexReader.java(Inlined Co
+mpiled Code))
+        at
+org.apache.lucene.index.SegmentsReader.doClose(SegmentsReader.java(Co
+mpiled Code))
+        at
+org.apache.lucene.index.IndexReader.close(IndexReader.java(Compiled C
+ode))
+        at
+com.ancept.ams.search.lucene.LuceneIndexer.delete(LuceneIndexer.java:
+266)
+
+All write access to the index is controlled in that LuceneIndexer class
+by synchronizing on a static lock object. 
+
+Searching is handled in another part of the code, which creates new
+IndexSearchers as necessary when the index changes. I do not rely on
+finalization to clean up these searchers because we found it to be
+unreliable. I keep track of threads using each searcher and then close
+it when that number drops to 0 if the searcher is outdated. 
+
+My problem seems similar to what Robert Leftwich asked about on this
+mailing list in January 2001.  
+
+Google Cache:
+http://64.233.179.104/search?q=cache:1D4h1vSh5AQJ:www.geocrawler.com/mail/msg.php3%3Fmsg_id%3D5020057++lucene+multithreading+problems+site:geocrawler.com&hl=en
+
+Doug Cutting replied to him saying that he should synchronize calls to
+IndexReader.open() and IndexReader.close():
+
+Google Cache:
+http://64.233.179.104/search?q=cache:arztiytQ42QJ:www.geocrawler.com/archives/3/2624/2001/1/0/5020870/++lucene+multithreading+problems+site:geocrawler.com&hl=en
+
+Robert Leftwich then found a problem with his code and eliminated a
+second IndexReader that was messing stuff up:
+
+Google Cache:
+http://64.233.179.104/search?q=cache:jSIsi6t9KH8J:www.geocrawler.com/mail/msg.php3%3Fmsg_id%3D5037517++lucene+multithreading+problems+site:geocrawler.com&hl=en
+
+However, there are differences between Leftwich's design and mine, and
+besides, that thread is four years old. (Are there even exisiting
+archives for lucene-user throughout 2001 anywhere?)
+
+So any advice would be appreciated.
+
+Do I need to synchronize _all_ IndexReader.open() and
+IndexReader.close() calls? Or is it more likely that I'm missing
+something in my class that modifies the index? The code is attached.
+
+Thank you,
+
+Luke Francl
+

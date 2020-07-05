@@ -1,0 +1,124 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: How to deal with Token in the new TS API
+DATE: 22 Nov 2009
+
+To add to my previous email, If I do the following:
+
+StringReader sr = new StringReader("hello world");
+TokenStream ts = new WhitespaceTokenizer(Token.TOKEN_ATTRIBUTE_FACTORY, sr);
+
+for (Iterator<Class<? extends Attribute>> iter =
+ts.getAttributeClassesIterator(); iter.hasNext();) {
+  Class< ? extends Attribute> type = iter.next();
+  System.out.println(type);
+}
+
+TermAttribute ta = ts.getAttribute(TermAttribute.class);
+OffsetAttribute oa = ts.getAttribute(OffsetAttribute.class);
+
+while (ts.incrementToken()) {
+  System.out.println(ta + " " + oa);
+}
+
+Then it prints:
+
+interface org.apache.lucene.analysis.tokenattributes.TermAttribute
+interface org.apache.lucene.analysis.tokenattributes.TypeAttribute
+interface
+org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute
+interface org.apache.lucene.analysis.tokenattributes.FlagsAttribute
+interface org.apache.lucene.analysis.tokenattributes.OffsetAttribute
+interface org.apache.lucene.analysis.tokenattributes.PayloadAttribute
+(hello,0,5) (hello,0,5)
+(world,6,11) (world,6,11)
+
+Reason for all the attributes - I use Token.TOKEN_ATTRIBUTE_FACTORY.
+WhitespaceTokenizer, through CharTokenizer, adds just Term and Offset
+attributes. However, TokenAttributeFactory's createAttributeInstance code
+adds Token itself every time. That's because the code:
+
+return attClass.isAssignableFrom(Token.class) ? new Token() :
+delegate.createAttributeInstance(attClass);
+
+always returns new Token(), since every Token can be assigned to
+TermAttribute or OffsetAttribute. Shouldn't it be the other way around?
+I.e., we want to add Tokens, not classes Token implements. So I thin it
+should be Token.class.isAssignableFrom(attCls), and so only sub-classes on
+Token will get added by this factory, otherwise it'll call the delegate?
+
+Reason for the double printing ... the actual instance that gets added to
+the map is of Token. Therefore regardless if I call
+getAttribute(TermAttribute) or getAttribute(OffsetAttribute), I get the
+Token instance. And when I print it, it calls Token.toString().
+
+It's strange ... I can't "addA(Token) -- hasA(Token)" but I can "addA(Token)
+-- hasA(Term) -- getA(Term) -- cast to Token" ...
+
+I don't know if this is a bug or not, but it's strange.
+
+Shai
+
+On Sun, Nov 22, 2009 at 1:12 PM, Shai Erera <serera@gmail.com> wrote:
+
+> Hi
+>
+> I started to migrate my Analyzers, Tokenizer, TokenStreams and TokenFilters
+> to the new API. Since the entire set of classes handled Token before, I
+> decided to not change it for now, and was happy to discover that Token
+> extends AttributeImpl, which makes the migration easier.
+>
+> So I started w/ my Tokenizer. I had a "private final Token token =
+> addAttribute(Token.class);" line. I got startled when I received
+> "java.lang.IllegalArgumentException: Could not find implementing class for
+> org.apache.lucene.analysis.Token". I checked my classpath, tried to run from
+> eclipse and cmd-line, nada. I then checked the source code, and discovered
+> that the default attribute factory adds an "Impl" to the class name. So:
+>
+> 1) Phew ... nothing's wrong w/ my classpath.
+> 2) Mental note - read the documentation more closely: in package.html it's
+> said that if you implement an Attribute, make sure to add Impl to its class
+> name, or otherwise you'll need to provide your own AttributeFactory.
+> 3) But, why is the exception so vague? If Lucene adds "Impl" to the class
+> name that I pass, shouldn't it also say that "... class for ....NameImpl"?
+> That way, I'd see TokenImpl and immediately figure out that I should read
+> the documentation.
+>
+> I then went on to read about AttributeFactory, and was wondering in the
+> process why the hell do I need to implement one which is marked EXPERT
+> whereas I use a "basic" Lucene class, when I discovered that Token includes
+> a TokenAttributeFactory. So:
+>
+> 1) Good ! I don't need to implement an AttributeFactory.
+> 2) Why isn't it mentioned in the documentation? If Token was kept for easy
+> migration from pre-2.9 API, I'd expect this to appear very clearly in
+> package.html. Something like "if you're migrating from pre-2.9 API and would
+> like to keep using Token, MAKE SURE TO CALL
+> super(Token.TOKEN_ATTRIBUTE_FACTORY) IN YOUR TOKENIZER". Something like
+> that, maybe with less upper-casing.
+>
+> I went on and moved the addAttribute line to inside the ctor, after I call
+> super(...). But then something else hit me. In my TokenFilters I call
+> input.hasAttribute(Token.class) to ensure the input TS will process Token. I
+> was surprised to find out this method returns 'false'. Debug-tracing the
+> code I discovered that when I call addAttribute, all the Attribute classes
+> Token implements are added to the map, but not Token itself. So:
+>
+> 1) Hmmm ... not so easy to migrate my Token-based API to the new API ...
+> 2) I assume getAttribute(Token.class) won't work either ... so what benefit
+> did I get from calling addAttribute(Token.class) in the first place? Now I
+> need, in my consumer API, to rebuild a Token on every incrementToken call?
+> 3) Isn't that a crime? I added X and called has(X) and got false ... again
+> documentation could help, but I get a sense that this is buggy behavior.
+>
+> Before you answer that I can call getAttribute(TermAttribute.class),
+> remember that I started this email as a user that wants to migrate to a new
+> API, and the documentation says I can use Token for easier migration. So
+> using all the other attributes is a less preferred option now, especially as
+> I'm not going to introduce, at the moment, new attributes, but just continue
+> to work with the 'default' ones.
+>
+> Any help will be appreciated. I really hope I'm missing something basic ...
+>
+> Shai
+>
+

@@ -1,0 +1,102 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: Aggregating category hits
+DATE: 9 Jun 2006
+
+I compared Solr's DocSetHitCollector and counting bitset intersections to
+get facet counts with a different approach that uses a custom hit collector
+that tests each docid hit (bit) with each facets' bitset and increments a
+count in a histogram. My assumption was that for queries with few hits, this
+would be much faster than always doing bitset intersections/cardinality for
+every facet all the time.
+
+However, my throughput testing shows that the Solr method is at least 50%
+faster than mine. I'm seeing a big win with the use of the HashDocSet for
+lower hit counts. On my 64-bit platform, a MAX_SIZE value of 10K-20K seems
+to provide optimal performance. I'm looking forward to trying this with
+OpenBitSet.
+
+Peter
+
+
+
+
+On 5/29/06, zzzzz shalev <zzzzz_shalev@yahoo.com> wrote:
+>
+> i know im a little late replying to this thread, but, in my humble opinion
+> the best way to aggregate values (not necessarily terms, but whole values in
+> fields) is as follows:
+>
+>   startup stage:
+>
+>   for each field you would like to aggregate create a hashmap
+>
+>   open an index reader and run through all the docs
+>
+>   get the values to be aggregated from the fields of each doc
+>
+>   create a hashcode for each value from each field collected, the hashcode
+> should have some sort of prefix indicating which field its from (for exampe:
+> 1 = author, 2 = ....) and hence which hash it is stored in (at retrieval
+> time, this prefix can be used to easily retrieve the value from the correct
+> hash)
+>
+>   place the hashcode/value in the appropriate hash
+>
+>   create an arraylist
+>
+>   at index X in the arraylist place an int array of all the hashcodes
+> associated with doc id X
+>
+>   so for example: if i have doc id 0 which contains the values: william
+> shakespeare and the value 1797 the array list at index 0 will have an int
+> array containing 2 values (the 2 hashcodes of shaklespeare and 1797)
+>
+>   run time:
+>
+>   at run time receive the hits and iterate through the doc ids , aggregate
+> the values with direct access into the arraylist (for doc id 10 go to index
+> 10 in the arraylist to retrieve the array of hashcodes) and lookups into the
+> hashmaps
+>
+>   i tested this today on a small index approx 400,000 docs (1GB of data)
+> but i ran queries returning over 100,000 results
+>
+>   my response time was about 550 milliseconds on large (over 100,000)
+> result sets
+>
+>   another point, this method should be scalable for much larger indexes as
+> well, as it is linear to the result set size and not the index size (which
+> is a HUGE bonus)
+>
+>   if anyone wants the code let me know,
+>
+>
+>
+>
+> Marvin Humphrey <marvin@rectangular.com> wrote:
+>
+> Thanks, all.
+>
+> The field cache and the bitsets both seem like good options until the
+> collection grows too large, provided that the index does not need to
+> be updated very frequently. Then for large collections, there's
+> statistical sampling. Any of those options seems preferable to
+> retrieving all docs all the time.
+>
+> Marvin Humphrey
+> Rectangular Research
+> http://www.rectangular.com/
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+> ---------------------------------
+> Feel free to call! Free PC-to-PC calls. Low rates on PC-to-Phone.  Get
+> Yahoo! Messenger with Voice
+>
+

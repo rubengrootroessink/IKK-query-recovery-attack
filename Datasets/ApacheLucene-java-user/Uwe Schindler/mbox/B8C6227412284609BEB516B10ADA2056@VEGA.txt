@@ -1,0 +1,148 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: How to deal with Token in the new TS API
+DATE: 22 Nov 2009
+
+> I started to migrate my Analyzers, Tokenizer, TokenStreams and
+> TokenFilters
+> to the new API. Since the entire set of classes handled Token before, I
+> decided to not change it for now, and was happy to discover that Token
+> extends AttributeImpl, which makes the migration easier.
+> 
+> So I started w/ my Tokenizer. I had a "private final Token token =
+> addAttribute(Token.class);" line. I got startled when I received
+> "java.lang.IllegalArgumentException: Could not find implementing class for
+> org.apache.lucene.analysis.Token". I checked my classpath, tried to run
+> from
+> eclipse and cmd-line, nada. I then checked the source code, and discovered
+> that the default attribute factory adds an "Impl" to the class name. So:
+
+That's a problem of 2.9 using Java 1.4. addAttribute on accepts Class<T>,
+where T extends Attribute not AttributeImpl (the problem is that Token also
+extends this interface, but you should only pass attributes as interfaces!).
+The problem is that generics cannot prevent passing Token.class because it
+extends Attribute. The method should only get attribute interfaces as
+parameter, I have no idea how to enforce this by generics.
+
+Maybe we should add an extra check to the input parameter like if
+(!clazz.isInterface()) throw new IAE with a good explanation instead of
+trying to load  a class.
+
+> 1) Phew ... nothing's wrong w/ my classpath.
+> 2) Mental note - read the documentation more closely: in package.html it's
+> said that if you implement an Attribute, make sure to add Impl to its
+> class
+> name, or otherwise you'll need to provide your own AttributeFactory.
+
+All six default attributes habe an corresponding Impl that is loaded by the
+default AttributeFactory. Token is *not* an attribute, it is an Impl as a
+replacement for the 6 basic Impl classes.
+
+> 3) But, why is the exception so vague? If Lucene adds "Impl" to the class
+> name that I pass, shouldn't it also say that "... class for ....NameImpl"?
+> That way, I'd see TokenImpl and immediately figure out that I should read
+> the documentation.
+
+The Exception say exactly whats happening.
+
+> I then went on to read about AttributeFactory, and was wondering in the
+> process why the hell do I need to implement one which is marked EXPERT
+> whereas I use a "basic" Lucene class, when I discovered that Token
+> includes
+> a TokenAttributeFactory. So:
+> 
+> 1) Good ! I don't need to implement an AttributeFactory.
+
+This was a fault in 2.9, the Token.TOKEN_ATTRIBUTE_FACTORY was not
+available, so you had to implement it yourself. In 3.0 it's available.
+
+> 2) Why isn't it mentioned in the documentation? If Token was kept for easy
+> migration from pre-2.9 API, I'd expect this to appear very clearly in
+> package.html. Something like "if you're migrating from pre-2.9 API and
+> would
+> like to keep using Token, MAKE SURE TO CALL
+> super(Token.TOKEN_ATTRIBUTE_FACTORY) IN YOUR TOKENIZER". Something like
+> that, maybe with less upper-casing.
+
+Token is *not* kept for easy migration, it is kept for two reasons:
+a) For supporting the old next() API
+b) as a class behind the implementation. Using the new API, you always have
+to write your code using *interfaces* not the impls. So if you call
+addAttribute, you get the interface impl reference back and you should only
+use it as the interface (never cast it, in 2.9 you have to, but in 3.0 it
+should keep T extends Attribute, as addAttribute(Class<T>) enforces. Never
+do:
+
+Token tok = (Token) addAttribute(TermAttribute.class)
+
+Because you can not rely on the fact that the return value is Token, even if
+you use AttributeFactory (in 2.9, with old API support enabled, the returned
+class is TokenWrapper, also implementing the attributes).
+
+Always do:
+TermAttribute tok = addAttribute(TermAttribute.class)
+
+So all your Tokenstream impls should never rely on implementations, only use
+the interfaces. And as the interfaces do not support toString, clone,
+copyTo,... do not use it. Use captureState and so on. Everything else could
+easy break if you not have control over the whole Tokenizer chain!!!
+
+> I went on and moved the addAttribute line to inside the ctor, after I call
+> super(...). But then something else hit me. In my TokenFilters I call
+> input.hasAttribute(Token.class) to ensure the input TS will process Token.
+> I
+> was surprised to find out this method returns 'false'.
+
+Attribute accepts only Class<? extends Attribute> and ? must be an interface
+not a implementation.
+
+> Debug-tracing the
+> code I discovered that when I call addAttribute, all the Attribute classes
+> Token implements are added to the map, but not Token itself. So:
+
+That cannot happen, as addAttribute(Token.class) does not work. Do you mean
+addAttributeImpl() or are you using the factory?
+
+> 1) Hmmm ... not so easy to migrate my Token-based API to the new API ...
+
+Token is no interface that extends Attribute.
+
+> 2) I assume getAttribute(Token.class) won't work either ... so what
+> benefit
+> did I get from calling addAttribute(Token.class) in the first place? Now I
+> need, in my consumer API, to rebuild a Token on every incrementToken call?
+
+It will never work. You have to use a factory.
+
+> 3) Isn't that a crime? I added X and called has(X) and got false ... again
+> documentation could help, but I get a sense that this is buggy behavior.
+
+As said before, the check for attributes avaialble or not is not
+recommended. Always use addAttribute and register your attributes using
+addAttribute. If its there, it is returned, if not it is created with
+default content.
+
+> Before you answer that I can call getAttribute(TermAttribute.class),
+> remember that I started this email as a user that wants to migrate to a
+> new
+> API, and the documentation says I can use Token for easier migration. So
+> using all the other attributes is a less preferred option now, especially
+> as
+> I'm not going to introduce, at the moment, new attributes, but just
+> continue
+> to work with the 'default' ones.
+> 
+> Any help will be appreciated. I really hope I'm missing something basic
+> ...
+
+All to say is: You cannot use Token inside your implementations of
+TokenStreams. You can only back all basic attributes using Token for speed
+efficiency.
+
+Uwe
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

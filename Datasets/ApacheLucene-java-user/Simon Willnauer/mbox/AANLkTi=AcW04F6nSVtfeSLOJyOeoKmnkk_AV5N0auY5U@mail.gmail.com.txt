@@ -1,0 +1,154 @@
+FROM: Simon Willnauer <simon.willna...@googlemail.com>
+SUBJECT: Re: ArrayIndexOutOfBoundsException when iterating over TermDocs
+DATE: 24 Sep 2010
+
+Cool thanks!
+
+On Fri, Sep 24, 2010 at 11:07 AM, Shay Banon <kimchy@gmail.com> wrote:
+> Sure, opened https://issues.apache.org/jira/browse/LUCENE-2666, wanted to
+> ping the list first to see if someone knows about it.
+>
+> On Fri, Sep 24, 2010 at 7:12 AM, Simon Willnauer
+> <simon.willnauer@googlemail.com> wrote:
+>>
+>> Shay,
+>>
+>> would you mind open a jira issue for that?
+>>
+>> simon
+>>
+>> On Fri, Sep 24, 2010 at 2:53 AM, Shay Banon <kimchy@gmail.com> wrote:
+>> > Hi,
+>> >
+>> >    A user got this very strange exception, and I managed to get the
+>> > index
+>> > that it happens on. Basically, iterating over the TermDocs causes an
+>> > AAOIB
+>> > exception. I easily reproduced it using the FieldCache which does
+>> > exactly
+>> > that (the field in question is indexed as numeric). Here is the
+>> > exception:
+>> >
+>> > Exception in thread "main" java.lang.ArrayIndexOutOfBoundsException: 114
+>> > at org.apache.lucene.util.BitVector.get(BitVector.java:104)
+>> >  at
+>> > org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java:127)
+>> > at
+>> >
+>> > org.apache.lucene.search.FieldCacheImpl$LongCache.createValue(FieldCacheImpl.java:501)
+>> >  at
+>> >
+>> > org.apache.lucene.search.FieldCacheImpl$Cache.get(FieldCacheImpl.java:183)
+>> > at
+>> > org.apache.lucene.search.FieldCacheImpl.getLongs(FieldCacheImpl.java:470)
+>> >  at TestMe.main(TestMe.java:56)
+>> >
+>> > It happens on the following segment: _26t docCount: 914 delCount: 1
+>> > delFileName: _26t_1.del
+>> >
+>> > And as you can see, it smells like a corner case (it fails for document
+>> > number 912, the AIOOB happens from the deleted docs). The code to
+>> > recreate
+>> > it is simple:
+>> >
+>> >        FSDirectory dir = FSDirectory.open(new File("index"));
+>> >        IndexReader reader = IndexReader.open(dir, true);
+>> >
+>> >        IndexReader[] subReaders = reader.getSequentialSubReaders();
+>> >        for (IndexReader subReader : subReaders) {
+>> >            Field field =
+>> > subReader.getClass().getSuperclass().getDeclaredField("si");
+>> >            field.setAccessible(true);
+>> >            SegmentInfo si = (SegmentInfo) field.get(subReader);
+>> >            System.out.println("--> " + si);
+>> >            if (si.getDocStoreSegment().contains("_26t")) {
+>> >                // this is the probleatic one...
+>> >                System.out.println("problematic one...");
+>> >                FieldCache.DEFAULT.getLongs(subReader, "__documentdate",
+>> > FieldCache.NUMERIC_UTILS_LONG_PARSER);
+>> >            }
+>> >        }
+>> >
+>> > Here is the result of a check index on that segment:
+>> >
+>> >  8 of 10: name=_26t docCount=914
+>> >    compound=true
+>> >    hasProx=true
+>> >    numFiles=2
+>> >    size (MB)=1.641
+>> >    diagnostics = {optimize=false, mergeFactor=10,
+>> > os.version=2.6.18-194.11.1.el5.centos.plus, os=Linux,
+>> > mergeDocStores=true,
+>> > lucene.version=3.0.2 953716 - 2010-06-11 17:13:53, source=merge,
+>> > os.arch=amd64, java.version=1.6.0, java.vendor=Sun Microsystems Inc.}
+>> >    has deletions [delFileName=_26t_1.del]
+>> >    test: open reader.........OK [1 deleted docs]
+>> >    test: fields..............OK [32 fields]
+>> >    test: field norms.........OK [32 fields]
+>> >    test: terms, freq, prox...ERROR [114]
+>> > java.lang.ArrayIndexOutOfBoundsException: 114
+>> > at org.apache.lucene.util.BitVector.get(BitVector.java:104)
+>> >  at
+>> > org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java:127)
+>> > at
+>> >
+>> > org.apache.lucene.index.SegmentTermPositions.next(SegmentTermPositions.java:102)
+>> >  at
+>> > org.apache.lucene.index.CheckIndex.testTermIndex(CheckIndex.java:616)
+>> > at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:509)
+>> >  at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:299)
+>> > at TestMe.main(TestMe.java:47)
+>> >    test: stored fields.......ERROR [114]
+>> > java.lang.ArrayIndexOutOfBoundsException: 114
+>> > at org.apache.lucene.util.BitVector.get(BitVector.java:104)
+>> >  at
+>> >
+>> > org.apache.lucene.index.ReadOnlySegmentReader.isDeleted(ReadOnlySegmentReader.java:34)
+>> > at
+>> > org.apache.lucene.index.CheckIndex.testStoredFields(CheckIndex.java:684)
+>> >  at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:512)
+>> > at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:299)
+>> >  at TestMe.main(TestMe.java:47)
+>> >    test: term vectors........ERROR [114]
+>> > java.lang.ArrayIndexOutOfBoundsException: 114
+>> > at org.apache.lucene.util.BitVector.get(BitVector.java:104)
+>> >  at
+>> >
+>> > org.apache.lucene.index.ReadOnlySegmentReader.isDeleted(ReadOnlySegmentReader.java:34)
+>> > at
+>> > org.apache.lucene.index.CheckIndex.testTermVectors(CheckIndex.java:721)
+>> >  at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:515)
+>> > at org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:299)
+>> >  at TestMe.main(TestMe.java:47)
+>> >
+>> >
+>> >
+>> > The creation of the index does not do something fancy (all defaults),
+>> > though
+>> > there is usage of the near real time aspect (IndexWriter#getReader)
+>> > which
+>> > does complicate deleted docs handling. Seems like the deleted docs got
+>> > written without matching the number of docs?. Sadly, I don't have
+>> > something
+>> > that recreates it from scratch, but I do have the index if someone want
+>> > to
+>> > have a look at it (mail me directly and I will provide a download link).
+>> >
+>> > I will continue to investigate why this might happen, just wondering if
+>> > someone stumbled on this exception before. Lucene 3.0.2 is used.
+>> >
+>> > -shay.banon
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,105 @@
+FROM: "J.J. Larrea" <...@panix.com>
+SUBJECT: Re: html parsers and numers of terms
+DATE: 13 Dec 2005
+
+Beware of HTML/XML entities in your input stream!  The Lucene analyzers (including StandardAnalyzer)
+do not interpret these representation-specific encodings, and assume the & and ; delimiters
+are punctuation.  How they deal with punctuation depends on the specific Analyzer logic.
+
+For example, here is the output from running the (horribly useful) Lucene In Action class
+lia.analyzer.AnalyzerDemo on the strings "Nausée", "Naus&eacute;e", and "Naus&#233;e",
+all of which are equivalent in an HTML encoding:
+
+Analyzing "Naus?e"
+  WhitespaceAnalyzer:
+    [Naus?e]
+
+  SimpleAnalyzer:
+    [naus?e]
+
+  StopAnalyzer:
+    [naus?e]
+
+  StandardAnalyzer:
+    [naus?e]
+
+(The ? is an artifact of seeing the Unicode output on a text terminal)
+
+Analyzing "Naus&eacute;e"
+  WhitespaceAnalyzer:
+    [Naus&eacute;e]
+
+  SimpleAnalyzer:
+    [naus] [eacute] [e]
+
+  StopAnalyzer:
+    [naus] [eacute] [e]
+
+  StandardAnalyzer:
+    [naus&eacute] [e]
+
+Analyzing "Naus&#233;e"
+  WhitespaceAnalyzer:
+    [Naus&#233;e]
+
+  SimpleAnalyzer:
+    [naus] [e]
+
+  StopAnalyzer:
+    [naus] [e]
+
+  StandardAnalyzer:
+    [naus] [233] [e]
+
+Nasty! Obviously indexing these tokens as shown will give a GIGO result.
+
+So you must decode symbolic and numeric character references before they hit the analyzer,
+either in your XML/HTML parser or externally.
+
+- J.J.
+
+PS: Also note that when using Luke to see what is indexed, it uses NCRs eg. &#233; to
+display non-ASCII characters, allowing one to be easily confused as to whether the NCRs were
+indexed or the Unicode characters were indexed.
+
+At 7:33 AM -0500 12/13/05, Robert Watkins wrote:
+>I have been experimenting with a couple of HTML parsers, primarily to
+>compare performance, but have discovered a difference in the index for
+>which I haven't, with assurance discovered the cause.
+>
+>The difference is in the number of terms reported by Luke. The indexes
+>created with the content parsed using JTidy generally have about 30%
+>fewer terms than those created with content parsed using HTMLParser
+>(htmlparser.org).
+>
+>The only difference I can discern (using debug logs and diff) is with
+>the way entities are handled by the two parsers. Using JTidy, any HTML
+>entities are converted to the literal character; using HTMLParser they
+>are left as an entity (named or numeric). In the fields that are
+>tokenized, entities not already converted are done so in the index, which
+>leaves only the fields not tokenized. It does not seem likely to me that
+>this could account for 30% of the terms indexed.
+>
+>Is it possible to use Luke (or some other tool) to make a more detailed
+>comparison of the two indexes? I have tried to find a difference in the
+>top terms indexed, and while the order of the top terms does change, the
+>numbers do not. Am I missing something obvious?
+>
+>Thanks,
+>-- Robert
+>
+>--------------------
+>Robert Watkins
+>rwatkins@foo-bar.org
+>--------------------
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

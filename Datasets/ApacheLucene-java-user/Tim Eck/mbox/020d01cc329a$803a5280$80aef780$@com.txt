@@ -1,0 +1,137 @@
+FROM: "Tim Eck" <tim...@gmail.com>
+SUBJECT: RE: field sorted searches with unbounded hit count
+DATE: 24 Jun 2011
+
+> if you use the same IndexReader / Searcher for both queries nothing
+> changes. How frequently do you open your index?
+
+I'm currently using the "real-time" readers from IndexWriter.getReader() and never closing
+my IndexWriter. I was (perhaps wrongly) assuming that those readers can observe mutations
+that have occurred after creating them. If my assumption is wrong then I guess I don't have
+a race and I'll try the approach of using a hit-count only query first and then the real sorted
+search. 
+
+With regards to a collector -- it isn't immediately clear to me how I go about just using/writing
+my own collector if I want to use an arbitrary org.apache.lucene.search.Sort. There is no
+IndexSearcher.search() method that takes a Sort and Collector as far as I can tell.
+
+p.s. Thanks Simon and Toke for the responses! 
+
+-----Original Message-----
+From: Simon Willnauer [mailto:simon.willnauer@googlemail.com] 
+Sent: Thursday, June 23, 2011 10:15 PM
+To: java-user@lucene.apache.org
+Subject: Re: field sorted searches with unbounded hit count
+
+On Thu, Jun 23, 2011 at 10:41 PM, Tim Eck <timeck@gmail.com> wrote:
+> Thanks for the idea Ian. I still need to think about it, but the race between running
+the total count search and then the sorted search worries me. I have very pretty specific
+visibility guarantees I must provide on this data (with respect to concurrent updates). It'd
+be a bummer to have to block all concurrent updates to get these two searches to operate on
+an unchanging index.
+
+if you use the same IndexReader / Searcher for both queries nothing
+changes. How frequently do you open your index?
+>
+> I don't want to accuse anyone of bad code but always preallocating a potentially large
+array in org.apache.lucene.util.PriorityQueue seems non-ideal for the search I want to run.
+I'll have to dig into some more lucene code :-)
+
+the common usecase for this is a fixed size queue (top k retrieval)
+and allocating memory takes time so this is a very specialized class
+for exactly this. You can still write your own collector to make this
+more efficient for you.
+
+simon
+>
+> FYI: TotalHitCountCollector looks like it was added in 3.1.0
+>
+>
+>
+> -----Original Message-----
+> From: Ian Lea [mailto:ian.lea@gmail.com]
+> Sent: Thursday, June 23, 2011 3:12 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: field sorted searches with unbounded hit count
+>
+> One possibility would be to execute the search first just to get the
+> number of hits - see TotalHitCountCollector in recent versions of
+> lucene, not sure when it was added - and use the hit count from that
+> as the max docs to return.  The counting only search would typically
+> be very quick, certainly much quicker than sorting a large number of
+> hits.
+>
+>
+> --
+> Ian.
+>
+>
+> On Wed, Jun 22, 2011 at 10:13 PM, Tim Eck <teck@terracottatech.com> wrote:
+>> For the searches I want to run on my index I want to return all matching
+>> documents (as opposed to N top hits).
+>>
+>>
+>>
+>> My first naļve approach was just to use Searcher.search(query, filter,
+>> Integer.MAX_VALUE, sort) – that is, pass Integer.MAX_VALUE for the number
+>> of possible docs to return. That unfortunately seems to have huge heap
+>> requirements in org.apache.lucene.util.PriorityQueue.heap as the max docID
+>> in my index gets large. Multiply that per search heap requirement by a
+>> handful of concurrent threads and I OOME my server.
+>>
+>>
+>>
+>> When I don’t need to do any sorting it pretty easy to just use my own
+>> collector to gather the doc ids.  Of course depending on the number of
+>> hits I might still need a good amount of heap but at least it a factor of
+>> the number of matches (not the index size).
+>>
+>>
+>>
+>> I’m struggling to figure out how to do the same search but with sorting.
+>> I’m looking for a method like Searcher.search(Query, Filter, Sort,
+>> Collector), but perhaps that isn’t a reasonable thing to have, please
+>> enlighten me if so :-)
+>>
+>>
+>>
+>> I’m using 3.0.3 lucene-core at the moment but I don’t see that this aspect
+>> is any different in 3.2.0.
+>>
+>>
+>>
+>> Hopefully this made sense, any help you can provide is appreciated.
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

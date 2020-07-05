@@ -1,0 +1,81 @@
+FROM: "Alex Murzaku" <li...@lissus.com>
+SUBJECT: RE: Problems with exact matces on non-tokenized fields...
+DATE: 26 Sep 2002
+
+I was trying this as well but now I get something I can't understand:
+My query (Query: +element:POST +nr:3) is supposed to match only one
+record. Indeed Lucene returns that record with the highest score but it
+also returns others that shouldn't be there at all even if it was an OR
+query. Another observation: it returns all records where "nr" >= 3.
+Notice the last record returned doesn't contain neither "POST" nor "3".
+I am attaching a self contained running example with this problem and
+would appreciate any comment.
+ 
+0.6869936 Keyword<nr:3> Keyword<element:POST>
+0.63916886 Keyword<nr:4> Keyword<element:POST>
+0.6044586 Keyword<nr:6> Keyword<element:POST>
+0.5773442 Keyword<nr:5> Keyword<element:POST>
+0.56318253 Keyword<nr:9> Keyword<element:POST>
+0.54449975 Keyword<nr:8> Keyword<element:POST>
+0.5247468 Keyword<nr:7> Keyword<element:POST>
+0.45054603 Keyword<nr:10> Keyword<element:GET>
+
+
+-----Original Message-----
+From: Doug Cutting [mailto:cutting@lucene.com] 
+Sent: Thursday, September 26, 2002 12:44 PM
+To: Lucene Users List
+Subject: Re: Problems with exact matces on non-tokenized fields...
+
+
+karl øie wrote:
+> I have a Lucene Document with a field named "element" which is stored
+> and indexed but not tokenized. The value of the field is "POST" 
+> (uppercase). But the only way i can match the field is by entering 
+> "element:POST?" or "element:POST*" in the QueryParser class.
+
+There are two ways to do this.
+
+If this must be entered by users in the query string, then you need to 
+use a non-lowercasing analyzer for this field.  The way to do this if 
+you're currently using StandardAnalyzer, is to do something like:
+
+   public class MyAnalyzer extends Analyzer {
+     private Analyzer standard = new StandardAnalyzer();
+     public TokenStream tokenStream(String field, final Reader reader) {
+       if ("element".equals(field)) {        // don't tokenize
+         return new CharTokenizer(reader) {
+           protected boolean isTokenChar(char c) { return true; }
+         };
+       } else {                              // use standard analyzer
+         return standard.tokenStream(field, reader);
+       }
+     }
+   }
+
+   Analyzer analyzer = new MyAnalyzer();
+   Query query = queryParser.parse("... +element:POST", analyzer);
+
+Alternately, if this query field is added by a program, then this can be
+
+done by bypassing the analyzer for this class, building this clause 
+directly instead:
+
+   Analyzer analyzer = new StandardAnalyzer();
+   BooleanQuery query = (BooleanQuery)queryParser.parse("...",
+analyzer);
+
+   // now add the element clause
+   query.add(new TermQuery(new Term("element", "POST"))), true, false);
+
+Perhaps this should become an FAQ...
+
+Doug
+
+
+--
+To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+

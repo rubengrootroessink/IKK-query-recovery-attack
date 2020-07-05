@@ -1,0 +1,133 @@
+FROM: Paul Smith <psm...@aconex.com>
+SUBJECT: Index Partitioning ( was Re: Search deadlocking under load)
+DATE: 9 Jul 2005
+
+Nathan, first apologies for somewhat hijacking your thread, but I  
+believe my question to be very related.
+
+Nathan's Scenario 1 is the one we're effectively employing (or in the  
+process of setting up).  Rather than 1 Index To Rule Them All, I have  
+decided to partition the index structure.  Users tend to focus on a  
+Project concept at a time, and within each Project, they have  
+Documents and Mail (and some other types we'll eventually index, we  
+call them 'entities' to be generic).  So I am creating an Index for  
+each Project-Entity.  We should still be able to search across all  
+entities  for a given project (or even for all) by using  
+MultiSearcher.  However I believed it would be faster to have  
+separate indices (much smaller index to search).
+
+Otis (and anyone else), are you suggesting this design is not  
+something we should employ?
+
+Nathan's point about pooling Searchers is something that we also  
+addressed by a LRU cache mechanism.  In testing we also found that  
+there was an upper limit on the number of IndexSearchers that can be  
+open at one time, and so I can see why he suffered OOM with creating  
+temporary searchers for those requests outside the current pool-set.   
+However his 2nd point is interesting that creating a new index each  
+time eventually suffered OutOfMemory (even though he's closing them)  
+is a worry.   Is this because an IndexSearcher can be closed, but the  
+underlying IndexReader is not automatically closed?
+
+Appreciate any thoughts on this.  I'd rather know now while I have  
+the opportunity to change the design than later when in production..  :)
+
+cheers,
+
+Paul Smith
+
+On 09/07/2005, at 5:39 AM, Otis Gospodnetic wrote:
+
+> Nathan,
+>
+> 3) is the recommended usage.
+> Your index is on an NFS share, which means you are searching it over
+> the network.  Make it local, and you should see performance
+> improvements.  Local or remove, it makes sense that searches take
+> longer to execute, and the load goes up.  Yes, it shouldn't deadlock.
+> You shouldn't need to synchronize access to IndexSearcher.
+> When your JVM locks up next time, kill it, get the thread dump, and
+> send it to the list, so we can try to remove the bottleneck, if that's
+> possible.
+>
+> How many queries/second do you run, and what kinds of queries are  
+> they,
+> how big is your index and what kind of hardware (disks, RAM, CPU) are
+> you using?
+>
+> Otis
+>
+> --- Nathan Brackett <nbrackett@net-temps.com> wrote:
+>
+>
+>> Hey all,
+>>
+>> We're looking to use Lucene as the back end to our website and we're
+>> running
+>> into an unusual deadlocking problem.
+>>
+>> For testing purposes, we're just running one web server (threaded
+>> environment) against an index mounted on an NFS share. This machine
+>> performs
+>> searches only against this index so it's not being touched. We have
+>> tried a
+>> few different models so far:
+>>
+>> 1) Pooling IndexSearcher objects: Occasionally we would run into
+>> OutOfMemory
+>> problems as we would not block if a request came through and all
+>> IndexSearchers were already checked out, we would just create a
+>> temporary
+>> one and then dispose of it once it was returned to the pool.
+>>
+>> 2) Create a new IndexSearcher each time: Every request to search
+>> would
+>> create an IndexSearcher object. This quickly gave OutOfMemory errors,
+>> even
+>> when we would close them out directly after.
+>>
+>> 3) Use a global IndexSearcher: This is the model we're working with
+>> now. The
+>> model holds up fine under low-moderate load and is, in fact, much
+>> faster at
+>> searching (probably due to some caching mechanism). Under heavy load
+>> though,
+>> the CPU will spike up to 99% and never come back down until we kill
+>> -9 the
+>> process. Also, as you ramp the load, we've discovered that search
+>> times go
+>> up as well. Searches will generally come back after 40ms, but as the
+>> load
+>> goes up the searches don't come back for up to 20 seconds.
+>>
+>> We've been attempting to find where the problem is for the last week
+>> with no
+>> luck. Our index is optimized, so there is only one file. Do we need
+>> to
+>> synchronize access to the global IndexSearcher so that only one
+>> search can
+>> run at a time? That poses a bit of a problem as if a particular
+>> search takes
+>> a long time, all others will wait. This problem does not look like an
+>> OutOrMemory error because the memory usage when the spike occurs is
+>> usually
+>> in the range of 150meg used with a ceiling of 650meg. Anyone else
+>> experiencing any problems like this or have any idea where we should
+>> be
+>> looking? Thanks.
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,85 @@
+FROM: Darren Govoni <dar...@ontrenet.com>
+SUBJECT: Re: Indexing Scalability, Multiwriter?
+DATE: 11 Oct 2008
+
+Glen,
+   Thank you for the details there. Its really great what you've done
+and I will study it some more! I too though about using multiple writers
+into separate indexes and then combining them into one and optimizing,
+but haven't tried it yet.
+
+Darren
+
+On Fri, 2008-10-10 at 22:17 -0400, Glen Newton wrote:
+> IndexWriter is thread-safe and has been for a while
+> (http://www.mail-archive.com/lucene-dev@jakarta.apache.org/msg00157.html)
+> so you don't have to worry about that.
+> 
+> As reported in my blog in April
+> (http://zzzoot.blogspot.com/2008/04/lucene-indexing-performance-benchmarks.html)
+> but perhaps not explicitly enough: in indexing 6.4M full-text articles
+> generating an index of 83GB, I used a pipeline architecture consisting
+> of a several ThreadPoolExecutors:
+> 
+> 1 - A main program that gets the article metadata (author, title,
+> abstract, etc) from JDBC + creates Article object + adds it to #2
+> queue;
+> 
+> 2 - A pool with a queue of 100 Article objects; the Runnable reads the
+> full-text for the article from the file system. The files are GZiped,
+> so this is also done. Full-text is added to Article object & Article
+> object added to queue #3. 4 threads (as more causes major performance
+> degradation through IO waits).
+> 
+> 3 - A pool with a queue of 1000 Article objects; the Runnable creates
+> a Lucene Document from the Article object fields and adds the Document
+> to queue #4. 64 threads are running in this pool.
+> 
+> 4 - A pool with a queue of 100 Documents; the Runnable adds the
+> Document to one of
+> 8 IndexWriters, sent roundrobin. 16 threads running in this queue.
+> 
+> When all documents are processed, all 8 IndexWriters are merged into a
+> single index and optimized. From the blog entry: 20.5 hours to process
+> 6.4M articles, 143GB text. See the entry for software/VM/hardware
+> details.
+> 
+> I tried all combinations of threads/pool size/#IndexWriters and the
+> above was the 'sweet point' for my particular index and hardware.
+> 
+> I hope this is helpful. If you have any questions, please let me know.
+> 
+> Related:
+> http://zzzoot.blogspot.com/2008/06/lucene-concurrent-searcher-performance.html
+> 
+> -Glen
+> 
+> 
+> 
+> 2008/10/10 Darren Govoni <darren@ontrenet.com>:
+> > Hi gang,
+> >  Wondering how folks have address scaled up indexing. I saw old threads
+> > about using clustered webapp with JNDI singleton index writer due to the
+> > Lucene single writer limitation. Is this limitation lifted in 3 maybe?
+> > Is there a best strategy for parallel writing to an index by many
+> > threads?
+> >
+> > thanks for any tips! You guys rock.
+> > Darren
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

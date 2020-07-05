@@ -1,0 +1,467 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Lucene 2.3.1 Index Corruption?
+DATE: 18 Mar 2008
+
+OK, opening two writers at once is definitely a recipe for disaster.
+
+Please post back on whether this does or doesn't resolve it.
+
+Previous versions of Lucene didn't write the fdt/fdx files until a  
+segment is flushed, so it's possible you escaped index corruption  
+(but, lost documents) before.  But with 2.3, Lucene has become more  
+sensitive to two writers at once.
+
+Mike
+
+Jamie wrote:
+
+> Michael McCandless wrote:
+>>
+>> Yes fdt/fdx hold stored fields.  When the first buffered document  
+>> is added these files are created.
+>>
+>> The only way they disappear (through Lucene's APIs) is if a writer  
+>> is opened on that directory, and, those files are not referenced  
+>> by the current segments file.  This is why I'm concerned about the  
+>> "two writers at a time" risk.  If a 2nd writer is opened while 1st  
+>> one is still open that would easily cause this issue, so triple  
+>> check that the messages you send to your logger on having to  
+>> remove the write.lock are definitely not happening when you hit  
+>> this corruption.
+> I think you could be right.  I am going to try the following change:
+>
+>      public void indexMessage(Email email) throws  
+> MessageSearchException {
+>          VolumeIndex volumeIndex = null;
+>          synchronized (volumeIndexLock) { // note here
+>              Volume volume = email.getEmailId().getVolume();
+>              volumeIndex = volumeIndexes.get(volume);
+>              if (volumeIndex!=null) {
+>                  volumeIndex.indexMessage(email);
+>              } else {
+>                  volumeIndex = new VolumeIndex(volume);
+>                  volumeIndexes.put(volume,volumeIndex);
+>              }
+>          }
+>          volumeIndex.indexMessage(email);
+>      }
+>
+>>
+>> Can you post the output of "ls -l" on the corrupted index directory?
+>>
+>> One more possibility is that this file failed to be created in the  
+>> first place, yet, IndexWriter flushed the remaining _0.* files.  I  
+>> can see one code path that causes this, however, it only happens  
+>> if you open a new writer, you call addDocument, you hit an  
+>> exception specifically in the code trying to create the fdt file  
+>> (eg something like "too many open files"), then you close the  
+>> writer.  I have a unit test showing this particular exception  
+>> would result in the _0.* files you see in your index with fdt/fdx  
+>> missing.  Are you really sure you don't see any exceptions,  
+>> perhaps from very long ago, against this index, when calling  
+>> addDocument?  If you are hitting this case, it's already been  
+>> fixed (this is LUCENE-1198) and backported to the 2.3 branch.  Are  
+>> you able to checkout the current 2.3 branch and run your test  
+>> using the JAR from there?
+>>
+>> Since your index has much later segment files (_1.cfs, _j.cfs),  
+>> these exceptions could have happened quite a while back (many  
+>> writers ago) but then only detected when you finally opened a  
+>> searcher.  So if possible, look way back in your error logs...
+>>
+>> Mike
+>>
+>> Jamie wrote:
+>>
+>>> Hi Michael
+>>>
+>>> I've tried to reindex the index several times and no such luck.  
+>>> I've enabled lucene debugging as you suggested and will let you  
+>>> know as soon as I have more information. From what I've read, fdt  
+>>> files are used to hold field data. Could there be any reason why  
+>>> this file is not being written? Does Lucene recreate this file  
+>>> every time from scratch? Why would the file completely disappear?
+>>>
+>>> Jamie
+>>>
+>>>
+>>>
+>>> Michael McCandless wrote:
+>>>>
+>>>> One more thing: try running with asserts enabled (java -ea).   
+>>>> Lucene has a number of assertions that may catch something sooner.
+>>>>
+>>>> Also: how often do you try to open a searcher?  Can you try  
+>>>> opening and then closing a searcher right after you close your  
+>>>> writer?  (Just so we detect the corruption the moment it happens).
+>>>>
+>>>> Mike
+>>>>
+>>>> Jamie wrote:
+>>>>
+>>>>> Hi Michael
+>>>>>
+>>>>> Michael McCandless wrote:
+>>>>>>
+>>>>>> It looks like you ignore any IOException coming out of  
+>>>>>> IndexWriter.close?  Can you put some code in the catch clause  
+>>>>>> around writer.close to see if you are hitting some exception  
+>>>>>> there?
+>>>>> Sure. I'll do that.
+>>>>>>
+>>>>>> Also, you forcefully remove the write lock if it's present.   
+>>>>>> But are you absolutely certain there isn't another writer  
+>>>>>> actually writing to that index directory?
+>>>>> Yes. There is only ever one writer writing.
+>>>>>>
+>>>>>> Do you copy the index or alter it in some way?
+>>>>> No. absoutely not.
+>>>>>>   One strange thing in your directory listing was the file  
+>>>>>> "indexinfo", which isn't a Lucene index file.  Something else  
+>>>>>> must be writing that file.
+>>>>> Yes. I neglected to mentioned.... its used by my application to  
+>>>>> deal with multiple indexes.
+>>>>>>
+>>>>>> Mike
+>>>>>>
+>>>>>> Jamie wrote:
+>>>>>>
+>>>>>>> Hi Michael
+>>>>>>>
+>>>>>>> Sorry for the late reply. As you guessed, it missed my  
+>>>>>>> attention.
+>>>>>>>
+>>>>>>> Michael McCandless wrote:
+>>>>>>>>
+>>>>>>>> Hi,
+>>>>>>>>
+>>>>>>>> Can you describe what led up to this?
+>>>>>>>
+>>>>>>> My application indexes emails. In this particular instance, I
+ 
+>>>>>>> had reindexed all emails from their original sources. The  
+>>>>>>> error occurred while I was using a search to search through 
+
+>>>>>>> the index.
+>>>>>>>> Were there any exceptions when adding documents to the index?
+>>>>>>> I had a look through all my application debug logs and there
+ 
+>>>>>>> were no exceptions outputted.
+>>>>>>>
+>>>>>>>>   Was the index newly created with 2.3.1 or created on 2.3.0
+ 
+>>>>>>>> or 2.2?
+>>>>>>> This index was created by v2.3.1
+>>>>>>>>
+>>>>>>>> What options are you using in your IndexWriter?
+>>>>>>>  See source code below:
+>>>>>>>
+>>>>>>>      public void indexMessage(Email email) throws  
+>>>>>>> MessageSearchException {
+>>>>>>>          Volume volume = email.getEmailId().getVolume();
+>>>>>>>          VolumeIndex volumeIndex = volumeIndexes.get(volume);
+>>>>>>>          if (volumeIndex!=null) {
+>>>>>>>              volumeIndex.indexMessage(email);
+>>>>>>>          } else {
+>>>>>>>              volumeIndex = new VolumeIndex(volume);
+>>>>>>>              volumeIndex.indexMessage(email);
+>>>>>>>              volumeIndexes.put(volume,volumeIndex);
+>>>>>>>          }
+>>>>>>>      }
+>>>>>>>          public class VolumeIndex {
+>>>>>>>                        IndexWriter writer;
+>>>>>>>                Volume volume;
+>>>>>>>                Timer closeIndexTimer = new Timer();
+>>>>>>>             AccessStatus volumeOpened = AccessStatus.CLOSED;
+>>>>>>>             Object indexLock = new Object();
+>>>>>>>                          public synchronized AccessStatus  
+>>>>>>> getAccessStatus() { return volumeOpened;}
+>>>>>>>
+>>>>>>>              public synchronized void setAccessStatus 
+>>>>>>> (AccessStatus volumeOpened) {
+>>>>>>>                  this.volumeOpened = volumeOpened;
+>>>>>>>             }
+>>>>>>>                            public VolumeIndex(Volume volume)
+{
+>>>>>>>                        this.volume = volume;
+>>>>>>>                      closeIndexTimer.scheduleAtFixedRate(new
+ 
+>>>>>>> TimerTask() {
+>>>>>>>                        public void run() {
+>>>>>>>                             closeIndex(writer);
+>>>>>>>                        }
+>>>>>>>                    }, indexOpenTime, indexOpenTime);
+>>>>>>>                        }
+>>>>>>>
+>>>>>>>              protected void openIndex() throws  
+>>>>>>> MessageSearchException {
+>>>>>>>                  synchronized(indexLock) {
+>>>>>>>                        if (getAccessStatus() 
+>>>>>>> ==AccessStatus.CLOSED) {
+>>>>>>>                            logger.debug("openIndex() index  
+>>>>>>> will be opened. it is currently closed.");
+>>>>>>>                            openIndex(false);
+>>>>>>>                            setAccessStatus(AccessStatus.OPEN);
+>>>>>>>                        } else
+>>>>>>>                            logger.debug("openIndex() did not
+ 
+>>>>>>> bother opening index. it is already open.");
+>>>>>>>                  }
+>>>>>>>                              }
+>>>>>>>                          protected void openIndex(boolean  
+>>>>>>> retry) throws MessageSearchException {
+>>>>>>>                    if (volume == null)
+>>>>>>>                        throw new MessageSearchException 
+>>>>>>> ("assertion failure: null volume",logger);
+>>>>>>>                    logger.debug("opening index for write  
+>>>>>>> {"+volume+"}");
+>>>>>>>                    prepareIndex(volume);
+>>>>>>>                    Index activeIndex = volume.getActiveIndex();
+>>>>>>>                    logger.debug("opening search index for  
+>>>>>>> write {indexpath='"+activeIndex.getPath()+"'}");
+>>>>>>>                    try {
+>>>>>>>                            writer = new IndexWriter 
+>>>>>>> (activeIndex.getPath(), analyzer);
+>>>>>>>                    } catch (IOException io)
+>>>>>>>                    {
+>>>>>>>                        if (!retry) {
+>>>>>>>                            // most obvious reason for error 
+
+>>>>>>> is that there is a lock on the index, due hard shutdown
+>>>>>>>                            // resolution delete the lock, and
+ 
+>>>>>>> try again
+>>>>>>>                            logger.warn("failed to open search
+ 
+>>>>>>> index for write. possible write lock due to hard system  
+>>>>>>> shutdown.",io);
+>>>>>>>                            logger.info("attempting recovery.
+ 
+>>>>>>> deleting index lock file and retrying..");
+>>>>>>>                            File lockFile = new File 
+>>>>>>> (activeIndex.getPath()+File.separatorChar + "write.lock");
+>>>>>>>                            lockFile.delete();
+>>>>>>>                            try {
+>>>>>>>                                openIndex(true);
+>>>>>>>                            } catch (MessageSearchException  
+>>>>>>> mse) {
+>>>>>>>                                throw mse;
+>>>>>>>                            }
+>>>>>>>                        }
+>>>>>>>                        throw new MessageSearchException 
+>>>>>>> ("failed to open/ index writer  
+>>>>>>> {location='"+activeIndex.getPath()+"'}",io,logger);
+>>>>>>>                    }
+>>>>>>>            }
+>>>>>>>
+>>>>>>>              public void prepareIndex(Volume volume) throws 
+
+>>>>>>> MessageSearchException {
+>>>>>>>                                if (volume==null)
+>>>>>>>                            throw new MessageSearchException 
+>>>>>>> ("assertion failure: null volume",logger);
+>>>>>>>                                if (volume.getIndexPath 
+>>>>>>> ().startsWith("rmi://"))
+>>>>>>>                          return;
+>>>>>>>                                          File indexDir = new
+ 
+>>>>>>> File(volume.getIndexPath());
+>>>>>>>                  if (!indexDir.exists()) {
+>>>>>>>                    logger.info("index directory does not  
+>>>>>>> exist. will proceed with creation {location='" +  
+>>>>>>> volume.getIndexPath() + "'}");
+>>>>>>>                    boolean success = indexDir.mkdir();
+>>>>>>>                    if (!success)
+>>>>>>>                            throw new MessageSearchException 
+>>>>>>> ("failed to create index directory {location='" +  
+>>>>>>> volume.getIndexPath() + "'}",logger);
+>>>>>>>                    logger.info("index directory successfully
+ 
+>>>>>>> created {location='" + volume.getIndexPath() + "'}");
+>>>>>>>                  }
+>>>>>>>                        }
+>>>>>>>                        public void indexMessage(Email  
+>>>>>>> message) throws MessageSearchException  {
+>>>>>>>                long s = (new Date()).getTime();
+>>>>>>>                if (message == null)
+>>>>>>>                    throw new MessageSearchException 
+>>>>>>> ("assertion failure: null message",logger);
+>>>>>>>                logger.debug("indexing message {"+message+"}");
+>>>>>>>                              Document doc = new Document();
+>>>>>>>                try {
+>>>>>>>                   writeMessageToDocument 
+>>>>>>> (message,doc);                   String language = doc.get 
+>>>>>>> ("lang");
+>>>>>>>                   if (language==null)
+>>>>>>>                       language = getIndexLanguage();
+>>>>>>>                           synchronized (indexLock) {
+>>>>>>>                               openIndex();
+>>>>>>>                               writer.addDocument 
+>>>>>>> (doc,AnalyzerFactory.getAnalyzer 
+>>>>>>> (language,AnalyzerFactory.Operation.INDEX));
+>>>>>>>                           }
+>>>>>>>                   logger.debug("message indexed successfully
+ 
+>>>>>>> {"+message+",language='"+language+"'}");
+>>>>>>>                } catch (MessagingException me)
+>>>>>>>                {
+>>>>>>>                   throw new MessageSearchException("failed to
+ 
+>>>>>>> decode message during indexing",me,logger);
+>>>>>>>                } catch (IOException me) {
+>>>>>>>                    throw new MessageSearchException("failed 
+
+>>>>>>> to index message {"+message+"}",me,logger);
+>>>>>>>                } catch (ExtractionException ee)
+>>>>>>>                {
+>>>>>>>                   throw new MessageSearchException("failed to
+ 
+>>>>>>> decode attachments in message {"+message+"}",ee,logger);
+>>>>>>>                } catch (Exception e) {
+>>>>>>>                    throw new MessageSearchException("failed 
+
+>>>>>>> to index message",e,logger);
+>>>>>>>                }
+>>>>>>>                logger.debug("indexing message end {"+message
+
+>>>>>>> +"}");
+>>>>>>>                              long e = (new Date()).getTime();
+>>>>>>>                logger.debug("indexing time {time='"+(e-s)+"'}");
+>>>>>>>            }
+>>>>>>>                          protected void closeIndex 
+>>>>>>> (IndexWriter writer) {
+>>>>>>>
+>>>>>>>                       synchronized(indexLock) {
+>>>>>>>                                                 if  
+>>>>>>> (getAccessStatus()==AccessStatus.CLOSED)
+>>>>>>>                                return;
+>>>>>>>                                              try {
+>>>>>>>                                if (writer!=null)
+>>>>>>>                                    writer.close();
+>>>>>>>                                try { Thread.sleep(50); }  
+>>>>>>> catch (Exception e) {}
+>>>>>>>                        } catch (Exception io) {}
+>>>>>>>                        setAccessStatus(AccessStatus.CLOSED);
+>>>>>>>                       }
+>>>>>>>               }
+>>>>>>>                      protected void finalize() throws  
+>>>>>>> Throwable {
+>>>>>>>                logger.debug("volumeindex class is shutting  
+>>>>>>> down");
+>>>>>>>                try {
+>>>>>>>                    closeIndexTimer.cancel();
+>>>>>>>                } finally {
+>>>>>>>                super.finalize();
+>>>>>>>                }
+>>>>>>>            }
+>>>>>>>                }
+>>>>>>>
+>>>>>>>>
+>>>>>>>> Is it easy to reproduce?
+>>>>>>> Its difficult to reproduce since the problem seems  
+>>>>>>> intermittant..
+>>>>>>>> If so, can you call setInfoStream on your IndexWriter when
+ 
+>>>>>>>> creating this index and post the resulting output?
+>>>>>>> I'll try this but I cannot guarantee anything. Do you see  
+>>>>>>> anything obvious from the above?
+>>>>>>>>
+>>>>>>>> Mike
+>>>>>>>>
+>>>>>>>> Jamie wrote:
+>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> Hi There
+>>>>>>>>>
+>>>>>>>>> I am getting the following error while searching a given
+ 
+>>>>>>>>> index:
+>>>>>>>>>
+>>>>>>>>> java.io.FileNotFoundException: /usr/local/index/_0.fdt
+(No  
+>>>>>>>>> such file or directory)
+>>>>>>>>>        at java.io.RandomAccessFile.open(Native Method)
+>>>>>>>>>        at java.io.RandomAccessFile.<init>(Unknown
+Source)
+>>>>>>>>>        at org.apache.lucene.store.FSDirectory$FSIndexInput
+
+>>>>>>>>> $Descriptor.<init>(FSDirectory.java:506)
+>>>>>>>>>        at org.apache.lucene.store.FSDirectory 
+>>>>>>>>> $FSIndexInput.<init>(FSDirectory.java:536)
+>>>>>>>>>        at org.apache.lucene.store.FSDirectory.openInput
+
+>>>>>>>>> (FSDirectory.java:445)
+>>>>>>>>>        at org.apache.lucene.index.FieldsReader.<init>
+
+>>>>>>>>> (FieldsReader.java:75)
+>>>>>>>>>        at org.apache.lucene.index.SegmentReader.initialize
+
+>>>>>>>>> (SegmentReader.java:308)
+>>>>>>>>>        at org.apache.lucene.index.SegmentReader.get 
+>>>>>>>>> (SegmentReader.java:262)
+>>>>>>>>>        at org.apache.lucene.index.SegmentReader.get 
+>>>>>>>>> (SegmentReader.java:197)
+>>>>>>>>>        at org.apache.lucene.index.MultiSegmentReader.<init>
+
+>>>>>>>>> (MultiSegmentReader.java:55)
+>>>>>>>>>        at org.apache.lucene.index.DirectoryIndexReader
+
+>>>>>>>>> $1.doBody(DirectoryIndexReader.java:75)
+>>>>>>>>>        at org.apache.lucene.index.SegmentInfos 
+>>>>>>>>> $FindSegmentsFile.run(SegmentInfos.java:636)
+>>>>>>>>>        at org.apache.lucene.index.DirectoryIndexReader.open
+
+>>>>>>>>> (DirectoryIndexReader.java:63)
+>>>>>>>>>        at org.apache.lucene.index.IndexReader.open 
+>>>>>>>>> (IndexReader.java:209)
+>>>>>>>>>        at org.apache.lucene.index.IndexReader.open 
+>>>>>>>>> (IndexReader.java:173)
+>>>>>>>>>        at org.apache.lucene.search.IndexSearcher.<init>
+
+>>>>>>>>> (IndexSearcher.java:48)
+>>>>>>>>>
+>>>>>>>>> My software used to work perfectly under earlier versions
+ 
+>>>>>>>>> of Lucene. Since I upgraded to 2.3.1, this problem has
+arisen.
+>>>>>>>>>
+>>>>>>>>> I seriously worried my customer's indexes will be  
+>>>>>>>>> corrupted. Lucene expects to find a file that does not
+exist.
+>>>>>>>>>
+>>>>>>>>> Any ideas on what might be happening and how to rectify
+this?
+>>>>>>>>>
+>>>>>>>>> Jamie
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>> --------------------------------------------------------------
+
+>>>>>>>>> -------
+>>>>>>>>> To unsubscribe, e-mail: java-user- 
+>>>>>>>>> unsubscribe@lucene.apache.org
+>>>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>>>> help@lucene.apache.org
+>>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> ---------------------------------------------------------------
+
+>>>>>>>> ------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>>> help@lucene.apache.org
+>>>>>>>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

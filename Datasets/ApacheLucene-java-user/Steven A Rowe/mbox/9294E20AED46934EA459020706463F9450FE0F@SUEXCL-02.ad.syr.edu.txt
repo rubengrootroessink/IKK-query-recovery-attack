@@ -1,0 +1,80 @@
+FROM: "Steven A Rowe" <sar...@syr.edu>
+SUBJECT: RE: Chinese Segmentation with Phase Query
+DATE: 9 Nov 2007
+
+Hi Cedric,
+
+On 11/08/2007, Cedric Ho wrote:
+> a sentence containing characters ABC, it may be segmented into AB, C or A, BC.
+[snip]
+> In this cases we would like to index both segmentation into the index:
+> 
+> AB offset (0,1) position 0		A offset (0,0) position 0
+> C offset (2,2) position 1		BC offset (1,2) position 1
+> 
+> Now the problem is, when someone search using a PhraseQuery (AC) it
+> will find this line ABC because it match A (position 0) and C
+> (position 1).
+> 
+> Are there any ways to search for exact match using the offset
+> information instead of the position information ?
+
+Since you are writing the tokenizer (the Lucene term for the module that performs the segmentation),
+you yourself can substitute the beginning offset for the position.  But I think that without
+the end offset, it won't get you what you want.
+
+For example, if your above example were indexed with beginning offsets as positions, a phrase
+query for "AB, C" will fail to match -- even though it should match -- because the segments'
+beginning offsets (0 and 2) are not contiguous.
+
+The new Payloads feature could provide the basis for storing beginning and ending offsets
+required to determine contiguity when matching phrases, but you would have to write matching
+and scoring for this representation, and that may not be the quickest route available to you.
+
+Solution #1: Create multiple fields, one for each full alternative segmentation, and then
+query against all of them.
+
+Solution #2: Store the alternative segmentations in the same field, but instead of interleaving
+the segments' positions, as in your example, make the position ranges of the alternatives
+non-contiguous.  Recasting your example:
+
+	lternative #1	Alternative #2	Alternative #3
+	-------------	--------------	--------------
+	AB position 0	A position 100	A position 200
+	C position 1	BC position 101	B position 201
+							C position 202
+
+There is a problem with both of the above-described solutions: in my limited experience with
+Chinese segmentation, substantially less than half the text has alternative segmentations.
+ As a result, the segments on which all of alternatives agree (call them "uncontested segments")
+will have higher term frequencies than those segments which differ among the alternatives
+("contested segments").  This means that document scores will be influenced by the variable
+density of the contested segments they contain.
+
+However, if you were to use my above-described Solution #1 along with a DisjunctionMaxQuery[1]
+as a wrapper around one query per alternative segmentation field, the term frequency problem
+would no longer be an issue.  From the API doc for DisjunctionMaxQuery:
+
+    A query that generates the union of documents produced by its
+    subqueries, and that scores each document with the maximum
+    score for that document as produced by any subquery, plus a 
+    tie breaking increment for any additional matching subqueries. 
+    This is useful when searching for a word in multiple fields 
+    with different boost factors (so that the fields cannot be 
+    combined equivalently into a single search field).  We want
+    the primary score to be the one associated with the highest
+    boost, not the sum of the field scores (as BooleanQuery would
+    give).
+
+Unlike the use-case mentioned above, where each field will be boosted differently, you probably
+don't have any information about the relative probability of the alternative segmentations,
+so you'll want to use the same boost for each sub-query.
+
+Steve
+
+[1] <http://lucene.apache.org/java/2_2_0/api/org/apache/lucene/search/DisjunctionMaxQuery.html>
+
+-- 
+Steve Rowe
+Center for Natural Language Processing
+http://www.cnlp.org/tech/lucene.asp 

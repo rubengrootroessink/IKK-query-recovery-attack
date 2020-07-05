@@ -1,0 +1,74 @@
+FROM: Eric Jain <Eric.J...@isb-sib.ch>
+SUBJECT: Re: Weighted queries
+DATE: 6 Aug 2004
+
+>>   (title:foo^4 OR abstract:foo^2 OR content:foo) AND
+>>   (title:bar^4 OR abstract:bar^2 OR content:bar)
+
+> That's not the way MultiFieldQueryParser will rewrite your query.
+
+You are right - what happens is this:
+
+   (title:foo OR title:bar) OR
+   (abstract:foo OR abstract:bar) OR
+   (content:foo OR content:bar) OR
+
+Looks like a dead end... On the other hand I just realize I could 
+subclass the QueryParser, e.g.:
+
+import java.util.Vector;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.queryParser.ParseException;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.Query;
+
+public class CustomQueryParser
+   extends QueryParser
+{
+   private String[] fields;
+
+   public CustomQueryParser(String[] fields, Analyzer analyzer)
+   {
+     super(null, analyzer);
+     this.fields = fields;
+   }
+
+
+   protected Query getFieldQuery(String field, Analyzer analyzer, String 
+queryText)
+     throws ParseException
+   {
+     if (field == null)
+     {
+       Vector clauses = new Vector();
+       for (int i = 0; i < fields.length; i++)
+         clauses.add(new BooleanClause(super.getFieldQuery(fields[i], 
+analyzer, queryText), false, false));
+       return getBooleanQuery(clauses);
+     }
+
+     return super.getFieldQuery(field, analyzer, queryText);
+   }
+}
+
+Now:
+
+String[] fields = new String[] { "title", "abstract", "content" };
+QueryParser parser = new CustomQueryParser(fields, new SimpleAnalyzer());
+parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+Query query = parser.parse("foo -bar (baz OR title:bla)");
+System.out.println("? " + query);
+
+Produces:
+
+? +(title:foo abstract:foo content:foo) -(title:bar abstract:bar 
+content:bar) +((title:baz abstract:baz content:baz) title:bla)
+
+Perfect!
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

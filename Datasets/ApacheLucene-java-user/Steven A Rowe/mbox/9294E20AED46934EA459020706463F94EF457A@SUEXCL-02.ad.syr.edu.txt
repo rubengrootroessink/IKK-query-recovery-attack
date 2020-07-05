@@ -1,0 +1,90 @@
+FROM: Steven A Rowe <sar...@syr.edu>
+SUBJECT: RE: BigDecimal values
+DATE: 21 Nov 2008
+
+Hi Sergey,
+
+On 11/20/2008 at 9:30 AM, Sergey Kabashnyuk wrote:
+> How can I convert java.math.BigDecimal numbers in to string
+> for its storing in lexicographical order
+
+Here's a thoroughly untested idea, cribbing some from o.a.l.document.NumberTools[1]: convert
+BigDecimals into strings of the following form:
+
+   <significand-sign> <exponent-sign> <exponent> <significand>
+
+As in NumberTools, the signs consist of either the '-' or the '0' character; '-' < '0'.
+
+The exponent must be fixed length, and serialized as in NumberTools, with left-zero-padding
+and using the negative inversion trick.  The exponent could be expressed in any base that
+will fit into Java's 16-bit char - Lucene's NumberTools uses base 36; see Solr's NumberUtils[2]
+or LUCENE-1434[3] for base 0x8000 implementations.
+
+The exponent can be calculated from the number of digits in the serialized base 10 form of
+the significand (BigDecimal's "unscaled value") and the "scale" (the number of digits after
+the decimal): exponent = (number of significand digits) - scale - 1.
+
+The significand field can be variable length, though it can't contain any left-zero-padding,
+and could be expressed in any base; again, see [2] or [3].
+
+Some examples (base 10 and 4-char-width exponent used for purposes of exposition), in sorted
+order:
+
+   +5.E-3     => 0 - 9996 5
+   +1.E-2     => 0 - 9997 1
+   +1.0E-2    => 0 - 9997 10
+   +1.0000E-2 => 0 - 9997 10000
+   +1.1E-2    => 0 - 9997 11
+   +1.11E-2   => 0 - 9997 111
+   +1.2E-2    => 0 - 9997 12
+   +5.E-2     => 0 - 9997 5
+   +7.3E+2    => 0 0 0002 73
+   +7.4E+2    => 0 0 0002 74
+   +7.45E+2   => 0 0 0002 745
+   +8.7654E+3 => 0 0 0003 87654
+
+Negative numbers are a problem for the significand, though, since NumberTools' negative inversion
+trick assumes a fixed-precision minimum value - you'd need to use a different technique here
+in order to enable variable length significands.  
+
+Another entirely untested idea, to handle variable length negative significands: substitute
+(base - digit - 1) for each digit of the serialized representation (e.g. in base 10, 4 =>
+5 & 0 => 9), then append a sentinal digit that is greater than all other digits used
+to represent the significand.  The format for negative BigDecimals, then, would be:
+
+   '-' <reversed-exponent-sign> <negated-exponent> <significand> <sentinel>
+
+where the exponent and its sign are negated before serialization, so that their sense is reversed.
+
+Some negative examples (base 10 and 4-char-width exponent used for purposes of exposition),
+in sorted order:
+
+   -8.7654E+3 => - - 9996 12345 A
+   -7.45E+2   => - - 9997 254 A
+   -7.4E+2    => - - 9997 25 A
+   -7.3E+2    => - - 9997 26 A
+   -5.E-2     => - 0 0002 4 A
+   -1.2E-2    => - 0 0002 87 A
+   -1.11E-2   => - 0 0002 888 A
+   -1.1E-2    => - 0 0002 88 A
+   -1.0000E-2 => - 0 0002 89999 A
+   -1.0E-2    => - 0 0002 89 A
+   -1.E-2     => - 0 0002 8 A
+   -5.E-3     => - 0 0003 4 A
+
+The use of the sentinel digit 'A', which is greater than all of the other digits [0-9], ensures
+that negative values with greater precision are ordered before those that share significand
+prefixes but have lesser precision.
+
+Although BigDecimal claims to support arbitrary precision, its scale representation is an
+int (32 bits), and its significand ("unscaled value") can have at most Integer.MAX_VALUE bits
+(c.f. java.math.BigInteger.bitLength():int[4]).  If the width of the exponent field is made
+so that it can express all long values (64 bits), I *think* this scheme can handle all BigDecimal
+values.
+
+Steve
+
+[1] o.a.l.document.NumberTools: <http://svn.apache.org/viewvc/lucene/java/tags/lucene_2_4_0/src/java/org/apache/lucene/document/NumberTools.java?view=markup>
+[2] o.a.s.util.NumberUtils: <http://svn.apache.org/viewvc/lucene/solr/tags/release-1.3.0/src/java/org/apache/solr/util/NumberUtils.java?view=markup>
+[3] IndexableBinaryStringTools JIRA issue: https://issues.apache.org/jira/browse/LUCENE-1434
+[4] BigInteger.bitLength(): <http://java.sun.com/j2se/1.4.2/docs/api/java/math/BigInteger.html#bitLength()>

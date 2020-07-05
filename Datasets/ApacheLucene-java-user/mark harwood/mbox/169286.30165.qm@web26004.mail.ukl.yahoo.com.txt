@@ -1,0 +1,229 @@
+FROM: mark harwood <markharw...@yahoo.co.uk>
+SUBJECT: Re: Question regarding sorting and memory consumption in lucene
+DATE: 15 Oct 2008
+
+
+
+Further to our discussion - see below a class that measures the added construction cost and
+memory savings for an optimised field value cache for a given index.
+The optimisation here being initial use of byte arrays, then shorts, then ints as more unique
+terms emerge.
+I imagine the majority of "faceting" fields and, to a lesser extent sorting fields (e.g. dates)
+have <= 65k  unique terms and therefore can stand to benefit from this.
+
+
+Cheers
+Mark
+
+
+===========
+Begin code.......
+
+
+
+package lucene.sort;
+
+import java.io.IOException;
+import java.text.NumberFormat;
+import java.util.Collection;
+import java.util.Iterator;
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.index.TermEnum;
+import org.apache.lucene.index.IndexReader.FieldOption;
+
+/**
+ * 
+ * Test to measure cost of dynamically upgrading fieldcache from byte array to
+ * short to int depending on index content term distribution.
+ * Currently tests all fields in an index but probably better to measure a sensible subset
+ * of fields ie those that are likely to be cached.
+ * 
+ * @author MAHarwood
+ * 
+ */
+public class BenchmarkOptimisedFieldCacheConstruction
+{
+static long totalExtraCachingCostMilliseconds = 0;
+static long totalRamBytesSaving = 0;
+private static int shortRange = ((int) Short.MAX_VALUE + (int) Math
+.abs(Short.MIN_VALUE));
+private static int byteRange = ((int) Byte.MAX_VALUE + (int) Math
+.abs(Byte.MIN_VALUE));
+static NumberFormat nf = NumberFormat.getIntegerInstance();
+
+public static void main(String[] args) throws Exception
+{
+nf.setGroupingUsed(true);
+
+//! Change this to analyse your choice of index
+IndexReader reader = IndexReader.open("/indexes/myTestIndex");
+int numDocs = reader.maxDoc();
+// Change the above value to fake the number of docs in the index (thereby
+// increasing size of arrays manipulated in this test)
+// int numDocs=30*1000*1000;
+
+Collection fields = reader.getFieldNames(FieldOption.INDEXED);
+for (Iterator iterator = fields.iterator(); iterator.hasNext();)
+{
+String fieldName = (String) iterator.next();
+measureOptimisedCachingCost(reader, fieldName, numDocs);
+}
+System.out
+.println("Caching all terms in this index in an optimised form would cost an extra "
++ totalExtraCachingCostMilliseconds
++ " millis "
++ "but save "
++ nf.format(totalRamBytesSaving)
++ " bytes RAM");
+}
+
+private static void measureOptimisedCachingCost(IndexReader reader,String field, int numDocs)
+throws IOException
+{
+TermDocs termDocs = reader.termDocs();
+TermEnum termEnum = reader.terms(new Term(field, ""));
+int t = 0; // current term number
+
+String[] mterms = new String[reader.maxDoc() + 1];
+
+// an entry for documents that have no terms in this field
+// should a document with no terms be at top or bottom?
+// this puts them at the top - if it is changed, FieldDocSortedHitQueue
+// needs to change as well.
+mterms[t++] = null;
+
+byte byteRefs[] = new byte[numDocs]; // up to 32 bits used to refer
+// into term pool
+short shortRefs[] = null;
+int intRefs[] = null;
+long totalConvertTimeForField = 0;
+
+try
+{
+do
+{
+Term term = termEnum.term();
+if (term == null || term.field() != field)
+break;
+// store term text
+// we expect that there is at most one term per document
+if (t >= mterms.length)
+throw new RuntimeException("there are more terms than "
++ "documents in field \"" + field
++ "\", but it's impossible to sort on "
++ "tokenized fields");
+mterms[t] = term.text();
+
+termDocs.seek(termEnum);
+while (termDocs.next())
+{
+int doc = termDocs.doc();
+if (intRefs != null)
+{
+intRefs[doc] = t;
+} else if (shortRefs != null)
+{
+// adjust number to make optimal use of negative range
+// of values that can be stored
+shortRefs[doc] = (short) ((short) t - Short.MAX_VALUE);
+int storedT = shortRefs[doc] + Short.MAX_VALUE;
+if (storedT != t)
+{
+System.err.println(storedT + "!=" + t);
+}
+
+} else
+{
+// adjust number to make optimal use of negative range
+// of values that can be stored
+byteRefs[doc] = (byte) ((byte) t - Byte.MAX_VALUE);
+}
+
+}
+t++;
+if ((byteRefs != null) && (shortRefs == null))
+{
+// More terms than can be accessed using a byte - move to shorts
+if (t >= byteRange)
+{
+long millis = System.currentTimeMillis();
+shortRefs = new short[numDocs];
+short adjust = (Short.MAX_VALUE - (short) Byte.MAX_VALUE);
+for (int i = 0; i < byteRefs.length; i++)
+{
+shortRefs[i] = (short) ((short) ((short) byteRefs[i]) - adjust);
+}
+long millisDiff = System.currentTimeMillis() - millis;
+byteRefs = null;
+totalConvertTimeForField += millisDiff;
+}
+} else
+{
+if (intRefs == null)
+{
+if (t >= shortRange)
+{
+//more terms than can be accessed using shorts - move to ints
+long millis = System.currentTimeMillis();
+intRefs = new int[numDocs];
+int adjust = Short.MAX_VALUE;
+for (int i = 0; i < shortRefs.length; i++)
+{
+intRefs[i] = (int) shortRefs[i] + adjust;
+}
+long millisDiff = System.currentTimeMillis()
+- millis;
+totalConvertTimeForField += millisDiff;
+shortRefs = null;
+}
+}
+}
+} while (termEnum.next());
+} finally
+{
+termDocs.close();
+termEnum.close();
+}
+if (intRefs != null)
+{
+long ramBytesSaving = 0;
+totalRamBytesSaving += ramBytesSaving;
+System.out.println("Field " +field + " added cache load cost of "
++ totalConvertTimeForField
++ " millis with no RAM saving over current FieldCacheImpl");
+} else
+{
+if (shortRefs != null)
+{
+long ramBytesSaving = numDocs * 2;
+totalRamBytesSaving += ramBytesSaving;
+System.out.println("Field " +field + " added cache load cost of "
++ totalConvertTimeForField + " millis but saved "
++ nf.format(ramBytesSaving)
++ " bytes RAM over current FieldCacheImpl");
+} else
+{
+long ramBytesSaving = numDocs * 3;
+totalRamBytesSaving += ramBytesSaving;
+System.out.println("Field " +field + " added cache load cost of "
++ totalConvertTimeForField + " millis but saved "
++ nf.format(ramBytesSaving)
++ " bytes RAM over current FieldCacheImpl");
+}
+}
+totalExtraCachingCostMilliseconds += totalConvertTimeForField;
+}
+}
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

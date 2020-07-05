@@ -1,0 +1,110 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: File Handle Leaks During Lucene 3.0.2 Merge
+DATE: 30 Sep 2010
+
+Opening an NRT reader per-search can be too costly if you have a high
+search rate.
+
+It's better to rate-limit for that case, eg to at most 10X per second
+(every 100 msec) reopens.  There's a useful class in the Lucene in
+Action 2 source code (NOTE: I am a co-author), SearcherManager, which
+simplifies this for you.  You can download the source code from
+http://manning.com/lucene, but we are also in the process of donating
+this source code to Lucene....
+
+Also note that you need not worry about when Lucene does merges
+under-the-hood.  Ie, Lucene takes care of this, and there's nothing
+the app needs to "do" to handle merges & NRT readers, unless you want
+to install a segment warmer that pre-warms newly merged segments
+before making them visible to the next NRT reader (the SearcherManager
+also makes this easy -- subclass it and override the warm method).
+
+Mike
+
+On Thu, Sep 30, 2010 at 4:55 AM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> The finalize() thing does not work correctly, as the reader holds still
+> references to other stuff when not explicitely closed. As it references
+> them, the finalizer() is never called, as it is not to be gc'd.
+>
+> You must close the reader explicit, that's all. So just close it afterusing.
+> With Near Realtime Search, you normally get an IR, then wrap it with
+> IndexSearcher, do your search, and close it after that. You can even call
+> writer.getReader() from different threads, refcounting will close the
+> readers correctly. So for each request, take a new one and close after
+> usage.
+>
+> Uwe
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+>
+>> -----Original Message-----
+>> From: Jamie [mailto:jamie@stimulussoft.com]
+>> Sent: Wednesday, September 29, 2010 11:50 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: File Handle Leaks During Lucene 3.0.2 Merge
+>>
+>>   Hi Uwe
+>>
+>> Thanks in advance for your help. Well, I just tried searching again and it
+> made
+>> no difference. My LuceneIndex getReader() function will call
+>> writer.getReader() on occasion or return a cached copy. To make sure that
+>> IndexReader's are closed when they are no longer needed, I wrap the
+>> IndexReader as follows:
+>>
+>> public class VolumeIndexReader extends FilterIndexReader {
+>>
+>>      public VolumeIndexReader(IndexReader in) {
+>>          super(in);
+>>      }
+>>
+>>      public void finalize() {
+>>          try { in.close(); } catch (Exception e) {}
+>>      }
+>>
+>>      public IndexReader reopen(boolean readonly) throws IOException {
+>>          return super.reopen(readonly);
+>>      }
+>> }
+>>
+>> You'll notice finalizer calls IndexReader.close(). After users conduct
+> multiple
+>> searches, the index reader should be closed in time. Therefore, its
+> confusing to
+>> me to see that open handles are still present. Clearly, I am doing
+> something
+>> wrong, but what?
+>>
+>> Jamie
+>>
+>>
+>>
+>> On 2010/09/29 8:21 PM, Uwe Schindler wrote:
+>> > The "deleted" files are only freed by OS kernel if no longer an
+>> > IndexReader accesses them. Did you get a new realtime reader after
+>> > merging and*closed* the old one?
+>> >
+>> > -----
+>> > Uwe Schindler
+>> > H.-H.-Meier-Allee 63, D-28213 Bremen
+>> > http://www.thetaphi.de
+>> > eMail:uwe@thetaphi.de
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,157 @@
+FROM: "Colin Young" <Colin.Yo...@tembizi.com>
+SUBJECT: RE: Help with indexing and query strategy
+DATE: 28 Jan 2006
+
+1) Yes. One location per document.
+
+2) Using the SimpleAnalyzer (for now). I have city, state and country as
+separate fields, so I could tokenize each as a single token if that
+would work better. I think that avoids the need for a delimiter at index
+time.
+
+3) I am not making any assumptions now at query time, but the goal is
+that we should support commas and spaces (i.e. "London, Ontario, Canada"
+or "London Ontario Canada" are equivalent). My unit tests are supplying
+the query assuming it's been tokenized already (i.e. I'm sending in
+String[] for the query terms).
+
+4) We don't want to return Albany unless the user has Albany in the
+query.
+
+Thanks again for looking at this.
+
+Colin
+
+-----Original Message-----
+From: Rajesh Munavalli [mailto:findmath@gmail.com] 
+Sent: 27 January, 2006 17:04
+To: java-user@lucene.apache.org
+Subject: Re: Help with indexing and query strategy
+
+Few questions.
+(1) Does each document contain only one geographical location?
+
+(2) Given a document, how are you tokenizing it into city, state and
+country? I am assuming "," as the delimiter here. Otherwise determining
+the boundary for names like "St. Louis du Ha Ha" would be difficult.
+
+(3) Are these delimiters true even at query time? Is it possible that
+user might enter "ontario ca" and not "ontario, ca"?
+
+(4) How do you deal with a unique example like "NY, NY"?
+Example:
+Doc1: NY, NY, USA
+Doc2: NY, USA
+Doc3: Albany, NY, USA
+
+For query "NY, USA" you should be able to retrieve 1, 2 and 3 eventhough
+the primary information for Doc3 is "Albany".
+
+--
+Rajesh Munavalli
+
+On 1/27/06, Colin Young <Colin.Young@tembizi.com> wrote:
+>
+> The reason I only want 2 hits is because [2] is more "specific" in my 
+> domain -- I could also have Toronto, Ontario; Kingston, Ontario etc.
+> which would take the hits up to 5 now.
+>
+> What I'm really after is finding a way to index and search that would 
+> make [2] an invalid retrieval.
+>
+> My latest attempt is like this (field name: value):
+>
+> Type: city
+> Name: london ontario canada
+> Name: london on canada
+> Name: london ontario ca
+> Name: london on ca
+> Primary-name: london
+>
+> So the new list of documents is something like this (<type>: <name
+> entries> {<primary-name>}):
+>
+> [1] city: London, United Kingdom {london} [2] city: London, Ontario, 
+> Canada {london} [3] city: Ontario, California, United States {ontario}
+
+> [4] state: Ontario, Canada  {ontario} [5] city: Vancouver, Washington,
+
+> United States {vancouver} [6] city: Vancouver, British Columbia, 
+> Canada {vancouver} [7] city: Washington, DC, United States 
+> {washington} [8] state: Washington, United States {washington}
+>
+> I realize that I'm adding a lot of duplicate info -- I haven't got to 
+> the refactoring stage yet, so I'm trying to keep my unit test setup 
+> very explicit. The final analysis process will be pulling the 
+> geographic entities from a database so I'll have all the synonyms, 
+> types (city, state, country), etc. at that point and can write custom 
+> routines for documents of each type (city, state, country).
+>
+> The idea here is to filter the results so that only documents where 
+> the primary-name appears in the user's query string come back. i.e. if
+
+> the user typed "Ontario, CA", so only [3, 4] are valid results now 
+> since [2] has a primary-name of "london" which does not appear in the 
+> user's query, while [3, 4] both have a primary-name of "ontario". Now 
+> I'm just having some trouble creating a filter (I've managed so far to
+
+> filter out _everything_). I can't quite sort out how to do a 
+> (displaying my SQL background here) "where <term> in <query string>". 
+> I'm including my current search code at the end of this response.
+>
+> Unfortunately I can't just assume the first term in the user's query 
+> is the primary-name since it could be more than one word (e.g. for
+"St.
+> Louis du Ha Ha Quebec", "St. Louis du Ha Ha" is the primary-name).
+>
+> Thanks
+>
+> Colin
+>
+> // sample call:
+> // Hits hits = GeographySearch.Search(searcher, "any", new String[] 
+> {"Ontario", "CA"});
+>
+> public static Hits Search(Searcher searcher, String typeToFind, 
+> String[]
+> queryString)
+>         throws IOException, ParseException {
+>         TermQuery entityType = new TermQuery(new Term("class", 
+> typeToFind));
+>         BooleanQuery filterQuery = new BooleanQuery();
+>                 PhraseQuery query = new PhraseQuery();
+>         query.setSlop(1);
+>
+>         for (int i = 0; i < queryString.length; i++)
+>         {
+>                 query.add(new Term("name", 
+> queryString[i].toLowerCase()));
+>                 filterQuery.add(
+>                         new TermQuery(new Term("primary-name", 
+> queryString[i])),
+>                         BooleanClause.Occur.SHOULD);
+>         }
+>
+>         BooleanQuery geographyQuery = new BooleanQuery();
+>         if (typeToFind != "any") geographyQuery.add(entityType, 
+> BooleanClause.Occur.MUST);
+>         geographyQuery.add(query, BooleanClause.Occur.MUST);
+>
+>         QueryFilter filter = new QueryFilter(filterQuery);
+>
+>         Hits hits = searcher.search(geographyQuery, filter);
+>         return hits;
+> }
+>
+
+Notice: This email message is for the sole use of the intended recipient(s) and may contain
+confidential and privileged information. Any unauthorized review, use, disclosure or distribution
+is prohibited. If you are not the intended recipient, please contact the sender by reply email
+and destroy all copies of the original message.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

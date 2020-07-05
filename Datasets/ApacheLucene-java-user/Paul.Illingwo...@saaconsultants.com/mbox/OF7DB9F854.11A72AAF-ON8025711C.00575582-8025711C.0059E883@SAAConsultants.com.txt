@@ -1,0 +1,114 @@
+FROM: Paul.Illingwo...@saaconsultants.com
+SUBJECT: Re: Open an IndexWriter in parallel with an IndexReader on the same index.
+DATE: 21 Feb 2006
+
+
+
+
+
+
+I have a set of classes similar in function to IndexModifier but a little
+more advanced. The idea is  to keep the IndexReaders and IndexWriters open
+as long as possible only closing them when absolutely necessary. Using the
+concurrency package allows for me to have multiple readers and a single
+writer. I use a watchdog timer to flush the index if the index is idle for
+a while (closes the index flushes unwritten writes on a writer and
+unwritten deletes on a reader). The downside to this approach is you lose
+all the benefits of any caching that Lucene does of sorted results and of
+any filters that are weakly cached on IndexReaders which can have a massive
+impact on searching (I sometimes take a several seconds hit after the index
+is reopened on the first sorted query).
+
+In addition to this index management code I have a queue onto which I place
+new documents/updates/deletes. Every time a document is added the tasks on
+the queue are reordered to batch up similar actions. The downside here is
+that this is effectively single threaded which arguably affects the
+performance. In addition for this to work well (and to prevent to
+equivalent of a databases "dirty read") I also have to queue up the
+querying of the index until all previous updates have been carried out -
+not ideal but not causing too significant a problem in my situation.
+
+My experience is that producing something to manage the indexes swapping
+between readers and writers is relatively straightforward.  The task of
+batching up updates/deletes and the like may be too application specific -
+my code relies on my own unique document ids being in the index and so is
+quite specific.
+
+Regards
+
+Paul I.
+
+
+
+
+                                                                           
+             "Nadav Har'El"                                                
+             <NYH@il.ibm.com>                                              
+                                                                        To 
+             21/02/2006 15:35          java-user@lucene.apache.org         
+                                                                        cc 
+                                                                           
+             Please respond to                                     Subject 
+             java-user@lucene.         Re: Open an IndexWriter in parallel 
+                apache.org             with an IndexReader on the same     
+                                       index.                              
+                                                                           
+                                                                           
+                                                                           
+                                                                           
+                                                                           
+                                                                           
+
+
+
+
+"Yonik Seeley" <yseeley@gmail.com> wrote on 21/02/2006 05:13:52 PM:
+> On 2/21/06, Pierre Luc Dupont <PLDupont@mediagrif.com> wrote:
+> >     is it possible to open an IndexWriter and an IndexReader on the
+same
+> > index, at the same time,
+> > to do deleteTerm and addDocument?
+>
+> No, it's not possible.  You should batch things: do all your
+> deletions, close the IndexReader, then open an IndexWriter and do all
+> the addDocument calls.
+
+For some applications, the seperation of indexWriter (which can add a
+document) and indexReader (which can delete a document) is very
+inconvenient.
+For example, consider a case where documents are often updated, and we
+often need to find and remove the old document and add the new version
+of the document. the "indexModifier" class nicely hides the complexity
+from us and allows both addition and deletion, but the documentation
+says its performance sucks (when used in the way I just outlined):
+imagine 1000 documents being modified, and now we start deleting and
+adding each one, one after another.
+
+It would have been nice if someone wrote something like indexModifier,
+but with a cache, similar to what Yonik suggested above: deletions will
+not be done immediately, but rather cached and later done in batches.
+Of course, batched deletions should not remember the term to delete,
+but rather the matching document numbers at the time of the deletion -
+because after the addition of the modified document if we search for
+the term again we'll find two documents.
+
+What about this idea? Does an implementation of something similar
+already exist?
+
+--
+
+Nadav Har'El
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

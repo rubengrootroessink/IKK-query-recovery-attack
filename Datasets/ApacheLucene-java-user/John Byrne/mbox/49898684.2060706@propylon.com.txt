@@ -1,0 +1,154 @@
+FROM: John Byrne <john.by...@propylon.com>
+SUBJECT: Re: waaaay too many files in the index!
+DATE: 4 Feb 2009
+
+No I'm not messing with the delete or merge policy - but  I think I know 
+what went wrong though...
+
+We have 2 instances of the application, for failover. They are never 
+supposed to be active at the same time, but I just discovered a 
+condition that can cause exactly that to happen. When we detect a 
+failure and switch to the second instance, it was assumed that the first 
+instance was dead - but it looks like it still had an open writer on the 
+index, leading to...concurrent write access.
+
+Logs confirmed that fail over happened minutes before these files 
+started appearing. Mystery solved!
+
+Thanks everyone.
+
+Michael McCandless wrote:
+>
+> These files are normal Lucene segment files (in compound file 
+> format).  What's odd is that Lucene is not merging them down to a 
+> smaller set of segments.
+>
+> Have you done any advanced things, like customize the deletion or 
+> merge policy?
+>
+> When you close you writer, are you using just close() or close(false)?
+>
+> If you can set the InfoStream on the writer for one of your 
+> incremental update sessions and post the results, maybe that will shed 
+> some light one what's going on.
+>
+> Are you sure there are no exceptions being logged somewhere?  Lucene 
+> runs merges with background threads (by default), and if those threads 
+> hit unhandled exceptions it's possible they are logged somewhere you 
+> wouldn't normally look?
+>
+> Mike
+>
+> John Byrne wrote:
+>
+>> MergeFactor and MergeDocs are left at default values. The indexing is 
+>> incremental, i.e. whenever someone adds or modifys a file to in svn 
+>> repository, the lucene index is updated, and the 
+>> writer/reader/searcher are refreshed (closed and opened again).,
+>>
+>> According to the svn logs for the time the files were created, a few 
+>> hundred files were added that day.
+>>
+>> Overall, the index would have started out with around 150,000 to 
+>> 200,000 documents, with anything from 100 to 1000 being added per day.
+>>
+>> I don't optimize the index at any point, but I've never seen it get 
+>> like this before.
+>>
+>> Thanks,
+>> John
+>>
+>> Erick Erickson wrote:
+>>> What are your IndexWriter MergFactor and MergeDocs set to? Also, are
+>>> the dates on all these files indicative of all being create during 
+>>> the same
+>>> indexing run?
+>>>
+>>> Finally, how many documents are you indexing?
+>>>
+>>> Best
+>>> Erick
+>>>
+>>> On Tue, Feb 3, 2009 at 10:26 AM, John Byrne 
+>>> <john.byrne@propylon.com> wrote:
+>>>
+>>>
+>>>> Hi,
+>>>>
+>>>> I've got a weird problem with a lucene index, using 2.3.1. The index
+>>>> contains 6660 files. I don't know how this happened.Maybe somone 
+>>>> can tell me
+>>>> something about the files themselves? (examples below)
+>>>>
+>>>> On one day, between 10 and 40 of these files were being created every
+>>>> minute. The index updates are triggered by updates to an SVN 
+>>>> repository, but
+>>>> I can't find any corresponding activity in the SVN logs.
+>>>>
+>>>> The lucene files all have names like this:
+>>>>
+>>>> _1qsw.cfs
+>>>> _1qsx.cfs
+>>>> _1qsy.cfs
+>>>> _1qsz.cfs
+>>>> _1qt0.cfs
+>>>>
+>>>> and are mostly < 5K in size.
+>>>>
+>>>> My application uses just one instance each of
+>>>> IndexReader/IndexWriter/IndexSearcher. From looking at
+>>>>
+>>>> Can anyone shed any light on these files? I'm not too hopeful about 
+>>>> fixing
+>>>> this index because we are getting "too many open files", even with an
+>>>> unlimited ulimit, but any info/suggestions would be great. Thanks.
+>>>>
+>>>> -John
+>>>>
+>>>>
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>>
+>>>  ------------------------------------------------------------------------ 
+>>>
+>>>
+>>>
+>>> No virus found in this incoming message.
+>>> Checked by AVG - http://www.avg.com Version: 8.0.233 / Virus 
+>>> Database: 270.10.17/1933 - Release Date: 2/3/2009 5:48 PM
+>>>
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> ------------------------------------------------------------------------
+>
+>
+> No virus found in this incoming message.
+> Checked by AVG - http://www.avg.com 
+> Version: 8.0.233 / Virus Database: 270.10.17/1933 - Release Date: 2/3/2009 5:48 PM
+>
+>   
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,231 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: more on isDeleted
+DATE: 15 Sep 2008
+
+
+Sorry, I was talking about the future (when we can get realtime search  
+working with Lucene).
+
+You have to change your code below to open a new reader (or reopen the  
+reader from your IndexSearcher) call isDeleted on the new reader, to  
+see the deletion you did with the writer.
+
+Or, you have to keep track of the deletions yourself, eg separately  
+recording you had deleted the document matching word=a (and, running a  
+search to resolve that to its docID(s) if necessary).
+
+Mike
+
+Cam Bazz wrote:
+
+> Well,
+>
+>        Document da = new Document();
+>        da.add(new Field("word", "a", Field.Store.YES,
+> Field.Index.NOT_ANALYZED_NO_NORMS));
+>
+>        writer.addDocument(da);
+>        writer.commit();
+>        searcher = new IndexSearcher(dir);
+>        IndexReader reader = searcher.getIndexReader();
+>        writer.deleteDocuments(new Term("word", "a"));
+>        writer.commit();
+>        System.out.println(reader.isDeleted(0));
+>
+>
+> I could not - I am getting something wrong. What do you mean by prior
+> to asking indexwriter giving me a realtime reader?
+>
+>
+> Best
+>
+> On Mon, Sep 15, 2008 at 11:09 PM, Michael McCandless
+> <lucene@mikemccandless.com> wrote:
+>>
+>> It will return true if the provided docID was deleted, by term or  
+>> query or
+>> docID (due to exception, privately) prior to when you asked  
+>> IndexWriter to
+>> give you a "realtime" IndexReader.
+>>
+>> Mike
+>>
+>> Cam Bazz wrote:
+>>
+>>> ok. but then under what circumstances isDeleted() will return true?
+>>>
+>>> Best.
+>>>
+>>> On Mon, Sep 15, 2008 at 10:57 PM, Michael McCandless
+>>> <lucene@mikemccandless.com> wrote:
+>>>>
+>>>> Until we can get realtime search integrated into Lucene (which I'm
+>>>> gradually
+>>>> trying to working on) I think the answer is no -- for now you  
+>>>> have to
+>>>> keep
+>>>> your own record of which docIDs you've deleted.
+>>>>
+>>>> Because IndexWriter allows deletes by query and term (and also by  
+>>>> docID,
+>>>> privately, when a document hits a non-aborting exception) it's  
+>>>> tricky to
+>>>> give real-time isDeleted for a docID.
+>>>>
+>>>> My current thinking on how to do this (once we add realtime  
+>>>> search) is
+>>>> when
+>>>> you ask IndexWriter for a new IndexReader, which searches the  
+>>>> full index
+>>>> in
+>>>> the Directory plus all adds/deletes buffered in IndexWriter's RAM  
+>>>> buffer,
+>>>> it
+>>>> must "materialize" all such buffered deletes down to docID.  Those
+>>>> deletes
+>>>> that are against existing segments in the index will be flushed  
+>>>> at that
+>>>> point to those segments; the deletes that apply only to buffered  
+>>>> docs
+>>>> will
+>>>> be held in RAM and used by the RAMIndexSearcher that searches
+>>>> IndexWriter's
+>>>> buffer.
+>>>>
+>>>> Mike
+>>>>
+>>>> Cam Bazz wrote:
+>>>>
+>>>>> So, apart from the searcher, is there anyway to access the  
+>>>>> deletion
+>>>>> marks in an indexWriter.
+>>>>>
+>>>>> I have a live cache - and I was keeping two caches, ones for new  
+>>>>> adds,
+>>>>> other for deletes.
+>>>>> I am trying to get rid of deleted cache, and ask the index if a
+>>>>> fetched document is marked deleted.
+>>>>>
+>>>>> Best.
+>>>>>
+>>>>> -C.B.
+>>>>>
+>>>>> On Mon, Sep 15, 2008 at 10:20 PM, Michael McCandless
+>>>>> <lucene@mikemccandless.com> wrote:
+>>>>>>
+>>>>>> You'll have to open a new IndexReader after the delete is  
+>>>>>> committed.
+>>>>>>
+>>>>>> An IndexReader (or IndexSearcher) only searches the point-in-time
+>>>>>> snapshot
+>>>>>> of the index as of when it was opened.
+>>>>>>
+>>>>>> Mike
+>>>>>>
+>>>>>> Cam Bazz wrote:
+>>>>>>
+>>>>>>> Hello,
+>>>>>>>
+>>>>>>> Here is what I am trying to do:
+>>>>>>>
+>>>>>>>  dir = FSDirectory.getDirectory("/test");
+>>>>>>>  writer = new IndexWriter(dir, analyzer, true, new
+>>>>>>> IndexWriter.MaxFieldLength(2));
+>>>>>>>  writer.setMaxBufferedDocs(IndexWriter.DISABLE_AUTO_FLUSH);
+>>>>>>>
+>>>>>>>  Document da = new Document();
+>>>>>>>  da.add(new Field("word", "a", Field.Store.YES,
+>>>>>>> Field.Index.NOT_ANALYZED_NO_NORMS));
+>>>>>>>
+>>>>>>>  Document db = new Document();
+>>>>>>>  db.add(new Field("word", "b", Field.Store.YES,
+>>>>>>> Field.Index.NOT_ANALYZED_NO_NORMS));
+>>>>>>>
+>>>>>>>  writer.addDocument(da);
+>>>>>>>  writer.addDocument(db);
+>>>>>>>
+>>>>>>>  writer.commit();
+>>>>>>>
+>>>>>>>  searcher = new IndexSearcher(dir);
+>>>>>>>
+>>>>>>>  writer.deleteDocuments(new Term("word", "a"));
+>>>>>>>  writer.commit();
+>>>>>>>
+>>>>>>>  TopDocCollector collector = new TopDocCollector(10);
+>>>>>>>  searcher.search(new TermQuery(new Term("word","a")),  
+>>>>>>> collector);
+>>>>>>>  ScoreDoc[] hits = collector.topDocs().scoreDocs;
+>>>>>>>  for (int i = 0; i < hits.length; i++) {
+>>>>>>>      int docId = hits[i].doc;
+>>>>>>>      Document d = searcher.doc(docId);
+>>>>>>>      System.out.println(writer.hasDeletions());
+>>>>>>>       
+>>>>>>> System.out.println(searcher.getIndexReader().isDeleted(docId));
+>>>>>>>      System.out.println(d.get("word"));
+>>>>>>>  }
+>>>>>>>
+>>>>>>>  searcher.close();
+>>>>>>>  writer.close();
+>>>>>>>  dir.close();
+>>>>>>>
+>>>>>>>
+>>>>>>> well I am trying to check if an document has been deleted  
+>>>>>>> without
+>>>>>>> refreshing the searcher. maybe i should access indexreader in
+a
+>>>>>>> different way?
+>>>>>>> the isDeleted() always returns false. that is the problem  
+>>>>>>> right now.
+>>>>>>>
+>>>>>>> Best.
+>>>>>>>
+>>>>>>> -C.B.
+>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>> help@lucene.apache.org
+>>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> ---------------------------------------------------------------------
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

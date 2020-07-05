@@ -1,0 +1,621 @@
+FROM: "Chuck Williams" <ch...@manawiz.com>
+SUBJECT: RE: lucene Scorers
+DATE: 12 Nov 2004
+
+I had a similar need and wrote MaxDisjunctionQuery and
+MaxDisjunctionScorer.  Unfortunately these are not available as a patch
+but I've included the original message below that has the code (modulo
+line breaks added by simple text email format).
+
+This code is functional -- I use it in my app.  It is optimized for its
+stated use, which involves a small number of clauses.  You'd want to
+improve the incremental sorting (e.g., using the bucket technique of
+BooleanQuery) if you need it for large numbers of clauses.
+
+Re. Paul's suggested steps below, I did not integrate this with query
+parser as I didn't need that functionality (since I'm generating the
+multi-field expansions for which max is a much better scoring choice
+than sum).
+
+Chuck
+
+Included message:
+
+-----Original Message-----
+From: Chuck Williams [mailto:chuck@manawiz.com] 
+Sent: Monday, October 11, 2004 9:55 PM
+To: lucene-dev@jakarta.apache.org
+Subject: Contribution: better multi-field searching
+
+The files included below (MaxDisjunctionQuery.java and
+MaxDisjunctionScorer.java) provide a new mechanism for searching across
+multiple fields.
+
+The issue is this.  Imagine you have two fields, title and document,
+both of which you want to search with simple queries like:  albino
+elephant.  There are two general approaches, either a) create a combined
+field that concatenates the two individual fields, or b) expand the
+simple query into a BooleanQuery that searches for each term in both
+fields.
+
+With approach a), you lose the flexibility to set separate boost factors
+on the individual fields.  I wanted title to be much more important than
+description for ranking results, and wanted to control this explicitly,
+as length norm was not always doing the right thing; e.g., descriptions
+are not always long.
+
+With approach b) you run into another problem.  Suppose the example
+query is expanded into (title:albino description:albino title:elephant
+description:elephant).  Then, assuming tf/idf doesn't affect ranking, a
+document with albino in both title and description will score the same
+as a document with albino in title and elephant in description.  The
+latter document for most applications is much better since it matches
+both query terms.  If albino is the more important term according to
+idf, then the less desirable documents (albino in both fields) will rank
+consistently ahead of the albino elephants (which is what was happening
+to me, yielding horrible results).
+
+MaxDisjunctionQuery solves this problem.  The MaxDisjunctionQuery pretty
+prints as:  (q1 | q2 | ... | qn)~tiebreaker
+
+The qi's are any subqueries.  This generates the same results as an
+OR-type BooleanQuery but scores them differently.  The score for any
+document d is the maximum value of the score that d receives for any
+subquery, plus the tiebreaker times the sum of the scores it receives
+for any other retrieving subqueries.  In the simplest case, tiebreaker
+is 0.0f, and the score is simply the maximum score for any retrieving
+subquery.  If tiebreaker is nonzero, it should be much smaller than the
+boosts being used (0.1 is working very well for me  with title boost at
+4.0 and description boost at 1.0).
+
+With this mechanism, the albino elephant query is expanded like this:
+
+    ( (title^4.0:albino | description:albino)~0.1
+      (title^4.0:elephant | description:elephant)~0.1
+    )
+
+I.e., a BooleanQuery is used to cover the distinct terms, while a
+MaxDisjunctionQuery is used to expand the fields.
+
+This query has the following properties:
+  1.  Documents with two distinct terms score higher than documents with
+the same term in the two different fields.
+  2.  Documents that contain a title match for a term score higher than
+documents containing only a description match for the same term.
+  3.  If two documents contain the same query terms, and yet one of them
+contains one of the query terms in multiple fields while the other does
+not, the document containing the term in multiple fields scores higher
+(this is the purpose of the tiebreaker -- it breaks ties among documents
+that match the same terms in the same highest-scoring fields).
+
+Sorry if this is redundant, but I didn't find anything in Lucene already
+to do this.  It has helped me considerably, so I'd like to submit it in
+case others are facing the same issues.
+
+As an aside, is there a reason that idf is squared in each Term and
+Phrase match (it is multiplied both into the query component and the
+field component)?  To compensate for this, I'm taking the square root of
+the idf I really want in my Similarity, which seems strange.
+
+Thanks for any info on that and any feedback on the utility of
+MaxDisjunctionQuery.
+
+NOTE:  The java files use generics and so require the 1.5 jdk, although
+it would be straightforward to back-port them to earlier jdk's.
+
+Chuck Williams
+
+*********************************** MaxDisjunctionQuery.java
+
+/*
+ * MaxDisjunctionQuery.java
+ *
+ * Created on October 9, 2004, 3:17 PM
+ */
+
+package org.apache.lucene.search;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import org.apache.lucene.index.IndexReader;
+
+/**
+ * A query that generates the union of the documents produced by its
+subqueries, and that scores each document as the maximum
+ * score for that document produced by any subquery plus a tie breaking
+increment for any additional matching subqueries.
+ * This is useful to search for a word in multiple fields with different
+boost factors (so that the fields cannot be
+ * combined equivalently into a single search field).  We want the
+primary score to be the one associated with the highest boost,
+ * not the sum of the field scores (as BooleanQuery would give).
+ * If the query is "albino elephant" this ensures that "albino" matching
+one field and "elephant" matching
+ * another gets a higher score than "albino" matching both fields.
+ * To get this result, use both BooleanQuery and MaxDisjunctionQuery:
+for each term a MaxDisjunctionQuery searches for it in
+ * each field, while the set of these MaxDisjunctionQuery's is combined
+into a BooleanQuery.
+ * The tie breaker capability allows results that include the same term
+in multiple fields to be judged better than results that
+ * include this term in only the best of those multiple fields, without
+confusing this with the better case of two different terms
+ * in the multiple fields.
+ * @author Chuck Williams
+ */
+public class MaxDisjunctionQuery extends Query {
+    
+    /* The subqueries */
+    private ArrayList<Query> disjuncts = new ArrayList<Query>();
+    
+    /* Multiple of the non-max disjunct scores added into our final
+score.  Non-zero values support tie-breaking. */
+    private float tieBreakerMultiplier = 0.0f;
+    
+    /** Creates a new empty MaxDisjunctionQuery.  Use add() to add the
+subqueries.
+     * @param tieBreakerMultiplier this score of each non-maximum
+disjunct for a document is multiplied by this weight
+     *        and added into the final score.  If non-zero, the value
+should be small, on the order of 0.1, which says that
+     *        10 occurrences of word in a lower-scored field that is
+also in a higher scored field is just as good as a unique
+     *        word in the lower scored field (i.e., one that is not in
+any higher scored field.
+     */
+    public MaxDisjunctionQuery(float tieBreakerMultiplier) {
+        this.tieBreakerMultiplier = tieBreakerMultiplier;
+    }
+    
+    /** Add a subquery to this disjunction
+     * @param query the disjunct added
+     */
+    public void add(Query query) {
+        disjuncts.add(query);
+    }
+    
+    /* The Weight for MaxDisjunctionQuery's, used to normalize, score
+and explain these queries */
+    private class MaxDisjunctionWeight implements Weight {
+        
+        private Searcher searcher;       // The searcher with which we
+are associated.
+        private ArrayList<Weight> weights = new ArrayList<Weight>();  //
+The Weight's for our subqueries, in 1-1 correspondence with disjuncts
+
+        /* Construct the Weight for this Query searched by searcher.
+Recursively construct subquery weights. */
+        public MaxDisjunctionWeight(Searcher searcher) {
+            this.searcher = searcher;
+            for (int i = 0; i < disjuncts.size(); i++)
+                weights.add(disjuncts.get(i).createWeight(searcher));
+        }
+
+        /* Return our associated MaxDisjunctionQuery */
+        public Query getQuery() { return MaxDisjunctionQuery.this; }
+        
+        /* Return our boost */
+        public float getValue() { return getBoost(); }
+
+        /* Compute the sub of squared weights of us applied to our
+subqueries.  Used for normalization. */
+        public float sumOfSquaredWeights() throws IOException {
+            float max = 0.0f, sum = 0.0f;
+            for (int i = 0; i < weights.size(); i++) {
+                float sub = weights.get(i).sumOfSquaredWeights();
+                sum += sub;
+                max = Math.max(max, sub);
+            }
+            return (((sum - max) * tieBreakerMultiplier *
+tieBreakerMultiplier) + max) * getBoost() * getBoost();
+        }
+
+        /* Apply the computed normalization factor to our subqueries */
+        public void normalize(float norm) {
+            norm *= getBoost();  // Incorporate our boost
+            for (int i = 0 ; i < weights.size(); i++)
+                weights.get(i).normalize(norm);
+        }
+
+        /* Create the scorer used to score our associated
+MaxDisjunctionQuery */
+        public Scorer scorer(IndexReader reader) throws IOException {
+            MaxDisjunctionScorer result = new
+MaxDisjunctionScorer(tieBreakerMultiplier, getSimilarity(searcher));
+            for (int i = 0 ; i < weights.size(); i++) {
+                Weight w = weights.get(i);
+                Scorer subScorer = w.scorer(reader);
+                if (subScorer == null) return null;
+                result.add(subScorer);
+            }
+            return result;
+        }
+
+        /* Explain the score we computed for doc */
+        public Explanation explain(IndexReader reader, int doc) throws
+IOException {
+            if ( disjuncts.size() == 1) return
+weights.get(0).explain(reader,doc);
+            Explanation result = new Explanation();
+            float max = 0.0f, sum = 0.0f;
+            result.setDescription(tieBreakerMultiplier == 0.0f ? "max
+of:" : "max plus " + tieBreakerMultiplier + " times others of:");
+            for (int i = 0 ; i < weights.size(); i++) {
+                Explanation e = weights.get(i).explain(reader, doc);
+                if (e.getValue() > 0) {
+                    result.addDetail(e);
+                    sum += e.getValue();
+                    max = Math.max(max, e.getValue());
+                }
+            }
+            result.setValue(max + (sum - max)*tieBreakerMultiplier);
+            return result;
+        }
+        
+    }  // end of MaxDisjunctionWeight inner class
+  
+    /* Create the Weight used to score us */
+    protected Weight createWeight(Searcher searcher) {
+        return new MaxDisjunctionWeight(searcher);
+    }
+    
+    /** Optimize our representation and our subqueries representations
+     * @param reader the IndexReader we query
+     * @return an optimized copy of us (which may not be a copy if there
+is nothing to optimize) */
+    public Query rewrite(IndexReader reader) throws IOException {
+        if (disjuncts.size() == 1) {
+            Query singleton = disjuncts.get(0);
+            Query result = singleton.rewrite(reader);
+            if (getBoost() != 1.0f) {
+                if (result == singleton) result = (Query)result.clone();
+                result.setBoost(getBoost() * result.getBoost());
+            }
+            return result;
+        }
+        MaxDisjunctionQuery clone = null;
+        for (int i = 0 ; i < disjuncts.size(); i++) {
+            Query clause = disjuncts.get(i);
+            Query rewrite = clause.rewrite(reader);
+            if (rewrite != clause) {
+                if (clone == null) clone =
+(MaxDisjunctionQuery)this.clone();
+                clone.disjuncts.set(i, rewrite);
+            }
+        }
+        if (clone != null) return clone;
+        else return this;
+    }
+    
+    /* Create a shallow copy of us -- used in rewriting if necessary
+     * @return a copy of us (but reuse, don't copy, our subqueries) */
+    public Object clone() {
+        MaxDisjunctionQuery clone = (MaxDisjunctionQuery)super.clone();
+        clone.disjuncts = (ArrayList<Query>)this.disjuncts.clone();
+        return clone;
+    }
+    
+    /** Prettyprint us.
+     * @param field the field to which we are applied
+     * @return a string that shows what we do, of the form "(disjunct1 |
+disjunct2 | ... | disjunctn)^boost"
+     */
+    public String toString(String field) {
+        StringBuffer buffer = new StringBuffer();
+        buffer.append("(");
+        for (int i = 0 ; i < disjuncts.size(); i++) {
+            Query subquery = disjuncts.get(i);
+            if (subquery instanceof BooleanQuery) {	  // wrap
+sub-bools in parens
+                buffer.append("(");
+                buffer.append(subquery.toString(field));
+                buffer.append(")");
+            }
+            else buffer.append(subquery.toString(field));
+            if (i != disjuncts.size()-1) buffer.append(" | ");
+        }
+        buffer.append(")");
+        if (tieBreakerMultiplier != 0.0f) {
+            buffer.append("~");
+            buffer.append(tieBreakerMultiplier);
+        }
+        if (getBoost() != 1.0) {
+            buffer.append("^");
+            buffer.append(getBoost());
+        }
+        return buffer.toString();
+    }
+    
+    /** Return true iff we represent the same query as o
+     * @param o another object
+     * @return true iff o is a MaxDisjunctionQuery with the same boost
+and the same subqueries, in the same order, as us
+     */
+    public boolean equals(Object o) {
+        if (! (o instanceof MaxDisjunctionQuery) ) return false;
+        MaxDisjunctionQuery other = (MaxDisjunctionQuery)o;
+        return (this.getBoost() == other.getBoost()) &&
+this.disjuncts.equals(other.disjuncts);
+    }
+    
+    /** Compute a hash code for hashing us
+     * @return the hash code
+     */
+    public int hashCode() {
+        return Float.floatToIntBits(getBoost()) ^ disjuncts.hashCode();
+    }
+  
+}
+
+*********************************** MaxDisjunctionScorer.java
+
+/*
+ * MaxDisjunctionScorer.java
+ *
+ * Created on October 9, 2004, 5:03 PM
+ */
+
+package org.apache.lucene.search;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+
+/**
+ * The Scorer for MaxDisjunctionQuery's.  The union of all documents
+generated by the the subquery scorers
+ * is generated in document number order.  The score for each document
+is the maximum of the scores computed
+ * by the subquery scorers that generate that document, plus
+tieBreakerMultiplier times the sum of the scores
+ * for the other subqueries that generate the document.
+ * @author Chuck Williams
+ */
+public class MaxDisjunctionScorer extends Scorer {
+    
+    /* The scorers for subqueries that have remaining docs, kept sorted
+by number of next doc. */
+    private ArrayList<Scorer> subScorers = new ArrayList<Scorer>();
+    
+    /* Multiplier applied to non-maximum-scoring subqueries for a
+document as they are summed into the result. */
+    private float tieBreakerMultiplier;
+    
+    private boolean more = false;          // True iff there is a next
+document
+    private boolean firstTime = true;      // True iff next() has not
+yet been called
+    
+    /* Comparator to sort subScorers according to the document number of
+next document */
+    private static class MaxDisjunctionClauseComparator implements
+Comparator<Scorer> {
+        
+        /* Scorers have all been positioned at their next document
+already */
+        public int compare(Scorer s1, Scorer s2) {
+            return s1.doc() - s2.doc();
+        }
+        
+        /* Compatible equality */
+        public boolean equals(Scorer s1, Scorer s2) {
+            return s1.doc() == s2.doc();
+        }
+        
+     }
+    
+    /* Fixed instance of the comparator to reuse */
+    private static MaxDisjunctionClauseComparator subScorerComparator =
+new MaxDisjunctionClauseComparator();
+    
+    /** Creates a new instance of MaxDisjunctionScorer
+     * @param similarity -- not used since our definition involves
+neither coord nor terms directly */
+    public MaxDisjunctionScorer(float tieBreakerMultiplier, Similarity
+similarity) {
+        super(similarity);
+        this.tieBreakerMultiplier = tieBreakerMultiplier;
+    }
+    
+    /** Add the scorer for a subquery
+     * @param scorer the scorer of a subquery of our associated
+MaxDisjunctionQuery
+     */
+    public void add(Scorer scorer) throws IOException {
+        if ( scorer.next() ) {       // Initialize and retain only if it
+produces docs
+            subScorers.add(scorer);
+            more = true;
+        }
+    }
+    
+    /* First time initialization.  Sort subScorers. */
+    private void init() {
+        sortSubScorers();
+        firstTime = false;
+    }
+    
+    /* Sort subScorers in order of document number of next document to
+be generated */
+    private void sortSubScorers() {
+        Scorer[] sorted = subScorers.toArray(new
+Scorer[subScorers.size()]);
+        Arrays.sort(sorted, subScorerComparator);
+        for (int i=0; i<sorted.length; i++) subScorers.set(i,
+sorted[i]);        
+    }
+    
+    /** Generate the next document matching our associated
+MaxDisjunctionQuery.
+     * @return true iff there is a next document
+     */
+    public boolean next() throws IOException {
+        if ( !more ) return false;
+        if ( firstTime ) {
+            init();
+            return true;   // more would have been false if no
+subScorers had any docs
+        }
+        // Increment all generators that generated the last doc and
+incrementally re-sort.
+        int lastdoc = subScorers.get(0).doc();
+        do {
+            if ( subScorers.get(0).next() ) {
+                Scorer s = subScorers.get(0);
+                int snextdoc = s.doc(), i=1;
+                for (; i<subScorers.size() && snextdoc >
+subScorers.get(i).doc(); i++)
+                    subScorers.set(i-1, subScorers.get(i));
+                if ( i!=1 ) subScorers.set(i-1, s);                
+            } else {
+                subScorers.remove(0);
+                if ( subScorers.isEmpty() ) return (more = false);
+            }
+        } while ( subScorers.get(0).doc()==lastdoc );
+        return true;
+    }
+
+    /** Determine the current document number.  Initially invalid, until
+{@link #next()} is called the first time.
+     * @return the document number of the currently generated document
+     */
+    public int doc() {
+        return subScorers.get(0).doc();
+    }
+
+    /** Determine the current document score.  Initially invalid, until
+{@link #next()} is called the first time.
+     * @return the score of the current generated document
+     */
+    public float score() throws IOException {
+        float max = subScorers.get(0).score(), sum = max;
+        for (int i = 1, doc = subScorers.get(0).doc(); i <
+subScorers.size() && subScorers.get(i).doc() == doc; i++) {
+            float sub = subScorers.get(i).score();
+            sum += sub;
+            max = Math.max(max, sub);
+        }
+        return max + (sum - max)*tieBreakerMultiplier;
+    }
+
+    /** Advance to the first document whose number is greater than or
+equal to target.
+     * @param target the minimum number of the next desired document
+     * @return true iff there is a document to be generated whose number
+is at least target
+     */
+    public boolean skipTo(int target) throws IOException {
+        int i=0;
+        while (i<subScorers.size()) {
+            if (subScorers.get(i).skipTo(target)) i++;
+            else subScorers.remove(i);
+        }
+        if (i == 0) return false;
+        sortSubScorers();
+        return true;
+    }
+
+    /** Explain a score that we computed.  UNSUPPORTED -- see
+explanation capability in MaxDisjunctionQuery.
+     * @param doc the number of a document we scored
+     * @return the Explanation for our score
+     */
+    public Explanation explain(int doc) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+    
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-dev-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-dev-help@jakarta.apache.org
+
+
+  > -----Original Message-----
+  > From: Paul Elschot [mailto:paul.elschot@xs4all.nl]
+  > Sent: Friday, November 12, 2004 12:02 PM
+  > To: lucene-user@jakarta.apache.org
+  > Subject: Re: lucene Scorers
+  > 
+  > On Friday 12 November 2004 20:48, Ken McCracken wrote:
+  > > Hi,
+  > >
+  > > I am looking at the Similarity class overview, and wondering if I
+can
+  > > replace the SUM operator with a MAX operator, or any other
+operator
+  > > (across the terms in a query).
+  > >
+  > > For example, if I search for "car OR automobile", a BooleanScorer
+is
+  > > used to add the values from each subexpression together.  In the
+  > > BooleanScorer from lucene_1_4_final, in the inner class Collector,
+we
+  > > have in the collect(...) method, the line
+  > >
+  > >      bucket.score += score;			  // increment
+score
+  > >
+  > > that I may want replace with a MAX operator such as
+  > >
+  > >      if (score > bucket.score) bucket.score = score;        //
+take
+  > the max
+  > >
+  > > I may also want to keep track of both the max and the sum, by
+  > > extending the inner class Bucket.
+  > >
+  > > Do you have any suggestions on how to implement such a change?
+  > > Ideally, I would like to have the ability to define my choice of
+  > > scoring algorithm at search time (at run time), and use the Lucene
+SUM
+  > > scorer for some searches, and the MAX scorer for other searches.
+  > >
+  > > Thanks for you help.
+  > >
+  > > -Ken
+  > >
+  > > PS.  The code I'm talking about falls in the follwoing area, for
+my
+  > > example search "car OR automobile".  If I walk the code during
+search,
+  > > I see that the BooleanScorer$Collector is created by the Weight
+that
+  > > was just created, in BooleanQuery$BooleanWeight.scorer(...), as it
+  > > adds the subscorers for each of the terms in the BooleanScorer.
+When
+  > > that collector is asked to collect(...), its bucketTable is filled
+in.
+  > >  Since the collectors for each of the terms use the same
+bucketTable,
+  > > if the document already appears in the bucketTable, then it's
+score is
+  > > added to implement a SUM operator.
+  > 
+  > SInce you are that far already, you can (in reverse order):
+  > - replace the BooleanScorer by another one that takes the max
+  >  instead of summing.
+  > - replace the weight to return that scorer.
+  > - replace the BooleanQuery to return that weight.
+  > - override QueryParser.getBooleanQuery() to return that query
+  >  in the cases you want, that is when all clauses are optional.
+  > 
+  > "replace" usually means "inherit from" in new code.
+  > When you need more info on this, try lucene-dev.
+  > 
+  > Regards,
+  > Paul Elschot.
+  > 
+  > 
+  >
+---------------------------------------------------------------------
+  > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+  > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

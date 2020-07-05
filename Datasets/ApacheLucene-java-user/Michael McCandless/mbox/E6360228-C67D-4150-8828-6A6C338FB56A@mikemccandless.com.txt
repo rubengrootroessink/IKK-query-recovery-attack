@@ -1,0 +1,99 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Instantiating a RAMDirectory from a mutating directory
+DATE: 6 Mar 2009
+
+
+This is an interesting challenge!  Responses below...
+
+Kieran Topping wrote:
+
+> Hello,
+>
+> I would like to be able to instantiate a RAMDirectory from a  
+> directory that an IndexWriter in another process might currently be  
+> modifying.
+>
+> Ideally, I would like to do this without any synchronizing or  
+> locking. Kind-of like the way in which an IndexReader can open an  
+> index in a directory, even if it's currently being modified by an  
+> IndexWriter.
+>
+> However, simply calling:
+> RAMDirectory rd = new RAMDirectory("/path/to/index");
+> Will not work. It will periodically fail with a  
+> FileNotFoundException. It's fairly obvious why this happens:  
+> Directory.copy() gets a list of the files it needs to copy, and then  
+> copies them into the RAMDirectory instance one-by-one. If, in the  
+> meantime, the IndexWriter deletes one of these files, a  
+> FileNotFoundException occurs.
+>
+> One thought that I had was that I would take advantage of the fact  
+> that it's possible to open an IndexReader on the mutating directory,  
+> and then use the "addIndexes()" method, as follows:
+>
+>  // 1. create RAMDirectory.
+>  RAMDirectory ramDirectory = new RAMDirectory();
+>  // 2. create an index in the RAMDirectory.
+>  IndexWriter writer = new IndexWriter(ramDirectory, null/ 
+> *analyzer*/, true /*create*/) ;
+>  // 3. open the (possibly mutating) source index.
+>  IndexReader reader = IndexReader.open("/path/to/index");
+>  // 4. copy the source index into the RAMDirectory index.
+>  writer.addIndexes(new IndexReader [] {reader});
+>
+> However ... there is a fairly unambiguous warning in  
+> IndexWriter.addIndexes()'s documentation:
+>
+> >>   NOTE: the index in each Directory must not be changed (opened  
+> by a writer) while this method is running. This method does not  
+> acquire a write lock in each input Directory, so it is up to the  
+> caller to enforce this.
+>
+> I'm slightly confused by this warning though, as IndexReader's  
+> documentation implies that it is OK to open an IndexReader in this  
+> fashion.
+
+Actually, I believe that NOTE only applies to the two addIndexes  
+methods that take Directory.  So I think this approach will work fine  
+in general.  Have you hit any problems in testing it?  I'll update the  
+javadocs.
+
+The one big downside to this approach is performance: it's a rather  
+slow way to copy an index into RAM.  But maybe your indexes are small  
+enough that this doesn't matter.
+
+> I'm wondering whether anyone knows the internals of  
+> IndexWriter.addIndexes() well enough to know whether my proposed  
+> solution will work reliably?
+>
+> Or, indeed, whether there might be another way of instantiating a  
+> RAMDirectory from a directory which might currently be being  
+> modified by an IndexWriter?
+
+If you could communicate w/ the separate process doing the writing,  
+you could use SnapshotDeletionPolicy (in the writer process) to  
+protect a particular point-in-time commit.  This is exactly how a hot  
+backup of a Lucene index is done; you would have to  then communicate  
+the filenames that IndexCommit (in the writer process) exposes over to  
+your 2nd reader process, and copy those files, and then release the  
+snapshot back in the writer process.
+
+Alternatively, you could simply use SegmentInfos class (NOTE: it's  
+package private, so you'd need code in org.apache.lucene.index  
+package, and these APIs can change release-to-release) to open the  
+current commit, and then simply copy the files directly (this is the  
+API that IndexReader.open does).  To do this, you should subclass the  
+FindSegmentsFile class, and override run() to open all referenced  
+files, and probably return these open file handles to the code that  
+actually does the copying.  You'd need to take some care to handle a  
+FileNotFoundException (meaning you need to retry on the next segments  
+file), to close any files you had succeeded in opening, else you'll  
+leak file descriptors...
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

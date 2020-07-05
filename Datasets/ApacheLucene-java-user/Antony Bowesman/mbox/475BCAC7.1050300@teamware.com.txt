@@ -1,0 +1,75 @@
+FROM: Antony Bowesman <...@teamware.com>
+SUBJECT: Concurrency between IndexReader and IndexWriter
+DATE: 9 Dec 2007
+
+My application batch adds documents to the index using IndexWriter.addDocument. 
+  Another thread handles searchers, creating new ones as needed, based on a 
+policy.  These searchers open a new IndexReader and there is currently no 
+synchronisation between this action and any being performed by my writer threads.
+
+I wanted to use the new writer.deleteDocuments and writer.updateDocument in the 
+same phase as the addDocument, so I wrote some test cases to check the behaviour 
+of using these in the same phase and found that an IndexReader opened on the 
+index during this phase gives some odd values and this has upset my 
+understanding of the concurrency issue...
+
+For example, the following
+
+------------------------------------
+Create IndexWriter
+Loop IndexWriter.addDocument * count
+
+Create IndexReader
+Check numDocs
+Check maxDoc
+Close reader
+
+Loop IndexWriter.deleteDocuments * count
+
+Create IndexReader
+Check numDocs
+Check maxDoc
+Close reader
+
+Close IndexWriter
+------------------------------------
+
+However, the numDocs shows interesting numbers with different values of count.
+
+count = 2, numDocs = 0 after add, 0 after delete
+count = 100, numDocs = 100 after add and 100 after delete
+count = 127, numDocs = 120 after add, 120 after delete
+count = 150, numDocs = 150 after add and 150 after delete
+count = 1000, numDocs = 1000 after add and 0 after delete
+
+I then checked how terms returned via a TermEnum were affected and these too 
+also do not reflect the current state of a deleted document.
+
+I know these numbers are affected by the DEFAULT_MAX_BUFFERED_DELETE_TERMS and 
+DEFAULT_MERGE_FACTOR.
+
+My question is therefore: how can actions by a reader determine the real state 
+of a Document or Term if a writer is currently updating the index.  Using 
+reader.isDeleted(docNum) shows an item is not deleted even though it has been, 
+but not flushed.  reader.hasDeletions() also shows false.
+
+My index app never actually uses reader.document() as it collects and caches Id 
+terms using TermEnum when opening a reader and stale Ids are handled elsewhere, 
+however, as it stands, the following logic
+
+if (!reader.isDeleted(n))
+     doc = reader.document(n)
+
+can fail with an IllegalArgumentException if the concurrent writer flushes in 
+between the test and read.
+
+Thanks
+Antony
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

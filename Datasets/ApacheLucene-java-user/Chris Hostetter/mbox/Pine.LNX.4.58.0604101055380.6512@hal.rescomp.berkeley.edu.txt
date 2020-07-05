@@ -1,0 +1,85 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: I just don't get wildcards at all.
+DATE: 10 Apr 2006
+
+
+: Let's claim that all my clauses contain wildcards. What I *think* that means
+: is that I can't very well use a filter "the normal way" since seachers
+: require a query. And I don't want a query with a wildcard term.
+
+the bueaty of ConstantScoreQuery is that it can wrap any filter ... so you
+can execute your Filter as a normal search, even without any other
+"scoring" clauses to your query.
+
+
+: a filter that aggregates the three clauses using WildcardTermEnum. I found
+: the MatchAllQuery, and tried using that and passing it the filter I
+: constructed to the searcher, something like...
+:
+: searcher.search(new MatchAllDocsQuery(), mynewfilter);
+:
+: This is painfully slow. So I got clever and just iterated through the bitset
+
+that method returns a Hits obejct correct? ... as mentioned many times
+before, using the Hits class is not recommended when you are dealing with
+more then then just the first 100 or so results of a search... i seem to
+recall that you said your searches typically result in thousands of
+documents, nad you need data from all of them correct?
+
+use one of the methods that returns TopDocs (or TopFieldDocs).
+
+: 1> Did I misuse/misunderstand MatchAllDocs? What's it for anyway if not
+: this?
+
+you understood it, i just don't think you need it in this case.  I also
+dont' think it's really the cause of the speed differneces you saw, that's
+most likely caused by the way the Hits class works (reexecuting your
+search over and over as you iterate through the results)
+
+: 2> Since all the terms have wildcards, I don't get ranking etc. anyway.
+: right? So I'm not losing anything by messing with the bitset myself, right?
+
+That's true.  in fact if you know that you are never going to want
+ranking/scoring info, and if you know that you are allways going to be
+using Filter classes (and never Query classes) then there's no reason not
+to just call the Filter.bits(IndexReader) and then use the BitSet anyway
+you see fit.
+
+: 3> I should create a BooleanQuery (or equivalent) on any terms that do NOT
+: have wildcards and pass the filter to the searcher in order to get some
+: rankings/relevance. And one expects that to perform substantially better
+: than using MatchAllDocs. Yes? No?
+
+Hard to say ... the way Filters are currently implimented, they have no
+means of 'skipping' documents that don't match the query.  so the amount
+of time spent executing your Filter.bits method will be the same.  but the
+other clauses will help eliminate documents during hte search (using
+indexed fields which are fast), which will save you from ever seeing them
+when you iterate over your TopDocs (so you'll never call the doc(i) method
+on them, and never waste anytime with their stored fields which are slow)
+
+: 4> In my specific case, I don't believe caching filters helps me because the
+: chances of any of my search terms being the same across requests is small.
+: Given that, is there anything but convenience to using a ChainedFilter? In
+: my crude testing, I just declared another bitset, populated it and then
+: anded/ored/andnoted it to the bitset returned from my filter. Don't worry,
+: I'm going to chain them, I'm just checking my understanding.
+
+ChainedFilter is certainly there for convincience.  if there is
+notadvantage to you (caching or otherwise) to keeping the various bits of
+logic you've got in seperate Filters, then there's no reason to use
+ChainedFilter ... jsut combine all of hte logic into one Filter.
+
+(this has hte added bonus of only ever needing to allocate one huge
+BitSet, instead of anding/oring multiple big BitSets.)
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

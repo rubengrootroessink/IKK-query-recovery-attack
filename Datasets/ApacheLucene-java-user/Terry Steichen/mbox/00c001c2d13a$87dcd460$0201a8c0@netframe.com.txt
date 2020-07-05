@@ -1,0 +1,116 @@
+FROM: "Terry Steichen" <te...@net-frame.com>
+SUBJECT: Re: Computing Relevancy Differently
+DATE: 10 Feb 2003
+
+Doug,
+
+That's excellent.  Just what I've been looking for.  I'll start
+experimenting shortly.
+
+Regards,
+
+Terry
+
+----- Original Message -----
+From: "Doug Cutting" <cutting@lucene.com>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Monday, February 10, 2003 1:57 PM
+Subject: Re: Computing Relevancy Differently
+
+
+> Terry Steichen wrote:
+> > Can you give me an idea of what to replace the lengthNorm() method with
+to,
+> > for example, remove any special weight given to shorter matching
+documents?
+>
+> The goal of the default implementation is not to give any special weight
+> to shorter documents, but rather to remove the advantage longer
+> documents have.  Longer documents are likely to have more matches simply
+> because they contain more terms.  Also, for the query "foo", a document
+> containing just "foo" is a better match than a longer one containing
+> "foo bar baz", since the match is more exact.
+>
+> However, one problem with this approach can be that very short documents
+> are in fact not very informative.  Thus a bias against very short
+> documents is sometimes useful.
+>
+> > I can certainly go through a bunch of trial-and-error efforts, but it
+would
+> > help if I had some grasp of the logic initially.
+> >
+> > For example, from DefaultSimilarity, here's the lengthNorm() method:
+> >
+> >   public float lengthNorm(String fieldName, int numTerms) {
+> >     return (float)(1.0 / Math.sqrt(numTerms));
+> >   }
+> >
+> > Should I (for the purpose of eliminating any size bias) override it to
+> > always return a 1?
+>
+> That's something to try, although, as mentioned above, I suspect your
+> top hits will be dominated by long documents.  Try it.  It's really not
+> a difficult experiment!
+>
+> One trick I've used to keep very short documents from dominating
+> results, that, while good matches, are not informative documents, is to
+> override this with something like:
+>
+>     public float lengthNorm(String fieldName, int numTerms) {
+>       super.lengthNorm(fieldName, Math.max(numTerms, 100));
+>     }
+>
+> This way all fields shorter than 100 terms are scored like fields
+> containing 100 terms.  Long documents are still normalized, but search
+> is biased a bit against very short documents.
+>
+> > How would I boost the headline field here? Is that how you are supposed
+to
+> > use the (presently unused) fieldName parameter?  If that's the case, I
+> > assume I would logically (to do what I'm trying to do) make this factor
+> > greater than 1 for the 'headline' field, and 1 for all other fields?
+>
+> You could do that here too.  So, for example, you could do something like:
+>
+>     public float lengthNorm(String fieldName, int numTerms) {
+>       float n = super.lengthNorm(fieldName, Math.max(numTerms, 100));
+>       if (fieldName.equals("headline"))
+>         n *= 4.0f;
+>       return n;
+>     }
+>
+> Equivalently, you could create your documents with something like:
+>
+>    Document d = new Document();
+>    Field f = new Field.Text("headline", headline);
+>    f.setBoost(4.0f);
+>    ...
+>
+> But headlines tend to be short, and naturally benefit from the default
+> lengthNorm implementation.  So what you really might want is something
+like:
+>
+>     public float lengthNorm(String fieldName, int numTerms) {
+>       if (fieldName.equals("headline"))
+>         return 4.0f * super.lengthNorm(fieldName, numTerms);
+>       else
+>         return super.lengthNorm(fieldName, Math.max(numTerms, 100));
+>     }
+>
+> This is probably what I'd try first.
+>
+> Doug
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

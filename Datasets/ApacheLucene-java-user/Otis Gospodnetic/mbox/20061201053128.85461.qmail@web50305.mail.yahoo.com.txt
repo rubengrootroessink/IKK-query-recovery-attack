@@ -1,0 +1,85 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: 2.1-dev memory leak?
+DATE: 1 Dec 2006
+
+Hi Mike,
+
+Thanks for looking into this.  I think your stress test may match my production environment.
+I think System.gc() never guarantees anything will happen, it's just a hint.
+
+I've got the following in one of my classes now.  Maybe you can stick it in your stress test
+and look at that last number at the bottom of this snippet.
+
+    private static final MemoryMXBean bean = ManagementFactory.getMemoryMXBean();
+...
+        LOG.info("Bean: " + bean);
+        LOG.info("Heap memory usage: " + bean.getHeapMemoryUsage());
+        LOG.info("Non-heap memory usage: " + bean.getNonHeapMemoryUsage());
+        LOG.info("Objects pending finalization: " + bean.getObjectPendingFinalizationCount());
+        long freeMemBefore = Runtime.getRuntime().freeMemory();
+        LOG.info("Running garbage collector via bean...");
+        bean.gc();
+        long freeMemAfter = Runtime.getRuntime().freeMemory();
+        LOG.info("Total Memory      : " + Runtime.getRuntime().totalMemory());
+        LOG.info("Max Memory        : " + Runtime.getRuntime().maxMemory());
+        LOG.info("Free Memory Before: " + freeMemBefore);
+        LOG.info("Free Memory After : " + freeMemAfter);
+        long memDelta = freeMemAfter-freeMemBefore;
+        LOG.info("Free Memory Now   : " + memDelta);
+        LOG.info("Heap memory usage: " + bean.getHeapMemoryUsage());
+        LOG.info("Non-heap memory usage: " + bean.getNonHeapMemoryUsage());
+        LOG.info("Objects pending finalization: " + bean.getObjectPendingFinalizationCount());
+
+Otis
+
+
+----- Original Message ----
+From: Michael McCandless <lucene@mikemccandless.com>
+To: java-user@lucene.apache.org
+Sent: Thursday, November 30, 2006 6:25:56 PM
+Subject: Re: 2.1-dev memory leak?
+
+Yonik Seeley wrote:
+> On 11/30/06, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+>> : IndexSearchers open.  The other ones I "let go" without an explicit
+>> : close() call.  The assumption is that the old IndexSearchers "expire",
+>> : that they get garbage collected, as I'm no longer holding references to
+>> : them.
+>>
+>> yeah ... that just seems really bad in general, i would try to explicitly
+>> close any searcher your purge from your cache.
+> 
+> Yeah, GC may kick off when memory gets low, but the GC system
+> unfortunately doesn't know anything about when file descriptors get
+> low.
+
+I actually ran some stress tests to explore this.  Admittedly, they
+are very stressful tests (open searcher, do 10 searches, don't close
+it, repeat).  And I definitely found GC would not kick in "often"
+enough because I would quickly exhaust file descriptors.
+
+Then, the scary thing is, when I called System.gc explicitly after
+creating each searcher, I still exhausted descriptors, which is really
+weird!  I think System.gc is not guaranteed to have called all
+finalizers before returning, but, I expected the explicit calls to
+at least close enough of them to stay under the limit.
+
+I tested this in 1.9.1, 1.9.2, 2.0.0, and trunk, and all of these
+versions would run out of descriptors.  So I'm at a loss so far on
+where the regression is here ...
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,315 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Indexing large files? - No answers yet...
+DATE: 11 Sep 2009
+
+To minimize Lucene's RAM usage during indexing, you should flush after
+every document, eg by setting the ramBufferSizeMB to something tiny
+(or maxBufferedDocs to 1).
+
+But, unfortunately, Lucene cannot flush partway through indexing one
+document.  Ie, the full document must be indexed into RAM before being
+flushed.  So the worst case for Lucene will always be a single large
+document.
+
+Worse, documents with an unusually high number of unique terms will
+then consume even more memory, because there is a certain RAM cost for
+each unique term that's seen.
+
+So the absolute worst case is a single large document, all of whose
+terms are unique, which seems to be what's being tested here.
+
+In theory one could make a custom indexing chain that knows it will
+only hold a single document in ram at once, and could therefore trim
+some of the data that we now must store per term, or maybe reduce the
+size of the data types (we now use int for most fields per term, but
+you could reduce them to shorts and force a flush whenever the shorts
+might overflow), etc.
+
+One possible workaround would be to pre-divide such large documents,
+before indexing them, though this'd require coalescing at search time.
+
+Mike
+
+On Fri, Sep 11, 2009 at 11:02 AM,  <Paul_Murdoch@emainc.com> wrote:
+> Glen,
+>
+> Absolutely. I think a RMFC Lucene would great, especially for reduced memory or low bandwidth
+client/server scenarios.
+>
+> I just looked at your LuSql tool and it just what I needed about 9 months ago :-).  I
+wrote a simple re-indexer that interfaces to an SQL Server 2005 database and Lucene, but I
+could have saved some time if I knew about LuSql.  Unfortunately we're too far down the road
+in development to test and possibly integrate it into our system now, but I will put it on
+the R&D list for the next iteration.
+>
+> Thanks again,
+>
+> Paul
+>
+>
+> -----Original Message-----
+> From: java-user-return-42277-Paul_Murdoch=emainc.com@lucene.apache.org [mailto:java-user-return-42277-Paul_Murdoch=emainc.com@lucene.apache.org]
+On Behalf Of Glen Newton
+> Sent: Friday, September 11, 2009 10:44 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: Indexing large files? - No answers yet...
+>
+> Paul,
+>
+> I saw your last post and now understand the issues you face.
+>
+> I don't think there has been any effort to produce a
+> reduced-memory-footprint configurable (RMFC) Lucene. With the many
+> mobile devices, embedded and other reduced memory devices, should this
+> perhaps be one of the areas the Lucene community looks in to?
+>
+> -Glen
+>
+> 2009/9/11  <Paul_Murdoch@emainc.com>:
+>> Thanks Glen!
+>>
+>> I will take at your project.  Unfortunately I will only have 512 MB to 1024 MB to
+work with as Lucene is only one component in a larger software system running on one machine.
+ I agree with you on the C\C++ comment.  That is what I would normally use for memory intense
+software.  It turns out that the larger file you want to index is the larger the heap space
+you will need.  What I would like to see is a way to "throttle" the indexing process to control
+the memory footprint.  I understand that this will take longer, but if I perform the task
+during off hours it shouldn't matter. At least the file will be indexed correctly.
+>>
+>> Thanks,
+>> Paul
+>>
+>>
+>> -----Original Message-----
+>> From: java-user-return-42272-Paul_Murdoch=emainc.com@lucene.apache.org [mailto:java-user-return-42272-Paul_Murdoch=emainc.com@lucene.apache.org]
+On Behalf Of Glen Newton
+>> Sent: Friday, September 11, 2009 9:53 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Indexing large files? - No answers yet...
+>>
+>> In this project:
+>>  http://zzzoot.blogspot.com/2009/07/project-torngat-building-large-scale.html
+>>
+>> I concatenate all the text of all of articles of a single journal into
+>> a single text file.
+>> This can create a text file that is 500MB in size.
+>> Lucene is OK in indexing files this size (in parallel even), but I
+>> have a heap size of 8GB.
+>>
+>> I would suggest increasing your heap to as large as your machine can
+>> reasonably take.
+>> The reality is that Java programs (like Lucene) take up more memory
+>> than a similar C or even C++ program.
+>> Java may approach C/C++ in speed, but not memory.
+>>
+>> We don't use Java because of its memory footprint!  ;-)
+>>
+>> See:
+>>  Programming language shootout: speed:
+>> http://shootout.alioth.debian.org/u32q/benchmark.php?test=all&lang=all&d=ndata&calc=calculate&xfullcpu=1&xmem=0&xloc=0&binarytrees=1&chameneosredux=1&fannkuch=1&fasta=1&knucleotide=1&mandelbrot=1&meteor=0&nbody=1&pidigits=1&regexdna=1&revcomp=1&spectralnorm=1&threadring=0
+>>  Programming language shootout: memory:
+>> http://shootout.alioth.debian.org/u32q/benchmark.php?test=all&lang=all&d=ndata&calc=calculate&xfullcpu=0&xmem=1&xloc=0&binarytrees=1&chameneosredux=1&fannkuch=1&fasta=1&knucleotide=1&mandelbrot=1&meteor=0&nbody=1&pidigits=1&regexdna=1&revcomp=1&spectralnorm=1&threadring=0
+>>
+>> -glen
+>>
+>> 2009/9/11 Dan OConnor <doconnor@acquiremedia.com>:
+>>> Paul:
+>>>
+>>> My first suggestion would be to update your JVM to the latest version (or at
+least .14). There were several garbage collection related issues resolved in version 10 -
+13 (especially dealing with large heaps).
+>>>
+>>> Next, your IndexWriter parameters would help figure out why you are using so
+much RAM
+>>>        getMaxFieldLength()
+>>>        getMaxBufferedDocs()
+>>>        getMaxMergeDocs()
+>>>        getRAMBufferSizeMB()
+>>>
+>>> How often are you calling commit?
+>>> Do you close your IndexWriter after every document?
+>>> How many documents of this size are you indexing?
+>>> Have you used luke to look at your index?
+>>> If this is a large index, have you optimized it recently?
+>>> Are there any searches going on while you are indexing?
+>>>
+>>>
+>>> Regards,
+>>> Dan
+>>>
+>>>
+>>> -----Original Message-----
+>>> From: Paul_Murdoch@emainc.com [mailto:Paul_Murdoch@emainc.com]
+>>> Sent: Friday, September 11, 2009 7:57 AM
+>>> To: java-user@lucene.apache.org
+>>> Subject: RE: Indexing large files? - No answers yet...
+>>>
+>>> This issue is still open.  Any suggestions/help with this would be
+>>> greatly appreciated.
+>>>
+>>> Thanks,
+>>>
+>>> Paul
+>>>
+>>>
+>>> -----Original Message-----
+>>> From: java-user-return-42080-Paul_Murdoch=emainc.com@lucene.apache.org
+>>> [mailto:java-user-return-42080-Paul_Murdoch=emainc.com@lucene.apache.org
+>>> ] On Behalf Of Paul_Murdoch@emainc.com
+>>> Sent: Monday, August 31, 2009 10:28 AM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Indexing large files?
+>>>
+>>> Hi,
+>>>
+>>>
+>>>
+>>> I'm working with Lucene 2.4.0 and the JVM (JDK 1.6.0_07).  I'm
+>>> consistently receiving "OutOfMemoryError: Java heap space", when trying
+>>> to index large text files.
+>>>
+>>>
+>>>
+>>> Example 1: Indexing a 5 MB text file runs out of memory with a 16 MB
+>>> max. heap size.  So I increased the max. heap size to 512 MB.  This
+>>> worked for the 5 MB text file, but Lucene still used 84 MB of heap space
+>>> to do this.  Why so much?
+>>>
+>>>
+>>>
+>>> The class FreqProxTermsWriterPerField appears to be the biggest memory
+>>> consumer by far according to JConsole and the TPTP Memory Profiling
+>>> plugin for Eclipse Ganymede.
+>>>
+>>>
+>>>
+>>> Example 2: Indexing a 62 MB text file runs out of memory with a 512 MB
+>>> max. heap size.  Increasing the max. heap size to 1024 MB works but
+>>> Lucene uses 826 MB of heap space while performing this.  Still seems
+>>> like way too much memory is being used to do this.  I'm sure larger
+>>> files would cause the error as it seems correlative.
+>>>
+>>>
+>>>
+>>> I'm on a Windows XP SP2 platform with 2 GB of RAM.  So what is the best
+>>> practice for indexing large files?  Here is a code snippet that I'm
+>>> using:
+>>>
+>>>
+>>>
+>>> // Index the content of a text file.
+>>>
+>>>      private Boolean saveTXTFile(File textFile, Document textDocument)
+>>> throws CIDBException {
+>>>
+>>>
+>>>
+>>>            try {
+>>>
+>>>
+>>>
+>>>                  Boolean isFile = textFile.isFile();
+>>>
+>>>                  Boolean hasTextExtension =
+>>> textFile.getName().endsWith(".txt");
+>>>
+>>>
+>>>
+>>>                  if (isFile && hasTextExtension) {
+>>>
+>>>
+>>>
+>>>                        System.out.println("File " +
+>>> textFile.getCanonicalPath() + " is being indexed");
+>>>
+>>>                        Reader textFileReader = new
+>>> FileReader(textFile);
+>>>
+>>>                        if (textDocument == null)
+>>>
+>>>                              textDocument = new Document();
+>>>
+>>>                        textDocument.add(new Field("content",
+>>> textFileReader));
+>>>
+>>>                        indexWriter.addDocument(textDocument);
+>>> // BREAKS HERE!!!!
+>>>
+>>>                  }
+>>>
+>>>            } catch (FileNotFoundException fnfe) {
+>>>
+>>>                  System.out.println(fnfe.getMessage());
+>>>
+>>>                  return false;
+>>>
+>>>            } catch (CorruptIndexException cie) {
+>>>
+>>>                  throw new CIDBException("The index has become
+>>> corrupt.");
+>>>
+>>>            } catch (IOException ioe) {
+>>>
+>>>                  System.out.println(ioe.getMessage());
+>>>
+>>>                  return false;
+>>>
+>>>            }
+>>>
+>>>            return true;
+>>>
+>>>      }
+>>>
+>>>
+>>>
+>>>
+>>>
+>>> Thanks much,
+>>>
+>>>
+>>>
+>>> Paul
+>>>
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>>
+>>
+>> --
+>>
+>> -
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+>
+>
+> --
+>
+> -
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

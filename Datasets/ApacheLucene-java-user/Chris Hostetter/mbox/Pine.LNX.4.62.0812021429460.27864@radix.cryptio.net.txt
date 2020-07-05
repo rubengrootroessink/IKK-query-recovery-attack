@@ -1,0 +1,63 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Query time document group boosting
+DATE: 2 Dec 2008
+
+
+: > "foo AND (
+: >  groupboost_A:dummy^10 OR
+: >  groupboost_B:dummy OR
+: >  groupboost_C:dummy^0.1 OR
+: >  ...
+: >  groupboost_Z:dummy
+: > )"
+: > 
+: > With that query, it seems that only documents matching foo will result
+: > in a hit and be scored?
+: 
+: Someone else than me needs to answer this. I know there is no optimization of
+: boolean clauses, that is why I'm saying this: it is possible that the boolean
+: query weight actually will be visiting all the inner clauses even though "foo"
+: was not matched, i.e. all documents in the index are visited but might not all
+: be scored.
+
+No, skipTo in the Scorer (ConjunctionScorer i believe) should ensure that 
+none of the groupboost clauses will be visited for any doc that doesn't 
+already match foo.
+
+i believe the pathological case you are talking about would be something 
+like this...
+
+   (docnum_is_odd AND foo) AND (docnum_is_even AND bar)
+
+assuming every doc matches either docnum_is_even or docnum_is_odd, but no 
+doc matches both, then this query will match no documents, but every 
+document will be visted by the scorer.
+
+: A cosmetic remark, I would personally choose a single field for the boosts and
+: then one token per source. (groupboost:A^10 groupboost:B^1 groupboost:C^0.1).
+
+that's a key improvement, as it helps keep the number of unique fields 
+down, even if the number of sources grows without bounds.  make sure you 
+omitNorms on your groupboost field, and when buiding your various boolean 
+queries, consider disabling the coord (check the docs to understand why 
+that might make sense)
+
+: > > I think you are looking for CustomScoreQuery.
+
+not neccessarily ... CustomScoreQueries make a lot of sense when you want 
+the score to be a function of the field value, but for simple "exists or 
+not" fields a BooleanQuery works just as well.
+
+(if you wanted to index a weight per source field in each doc, then a 
+CustomScoreQuery would certianly make more sense)
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

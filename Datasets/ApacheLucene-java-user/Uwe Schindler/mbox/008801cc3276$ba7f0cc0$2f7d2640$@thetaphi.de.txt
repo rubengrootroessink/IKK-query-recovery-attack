@@ -1,0 +1,85 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Lucene sort performance roots?
+DATE: 24 Jun 2011
+
+ 
+> Lucene is a great toolkit for search applications. And it's so fast in
+most of
+> cases. I think I am understand why it's faster than relational databases
+for
+> information retrieval. For example, Lucene use very efficient index than
+> allows to retrieve posting list in constant time and do intersect between
+> them.
+> 
+> But there is one aspect which I couldn't understand for a long time now.
+In
+> our test cases Lucene perform sorting blazingly fast. This one is freaking
+me
+> out. I have no explanation why Lucene should do sorting faster than
+> relational database. Let me put it another way -- I have no explanation
+why
+> SQL databases should not do it as fast as Lucene.
+
+This is easy to explain by seeing the main difference between RDBMS and
+Lucene:
+
+RDBMS do sorting (because of transactions and other reasons) after
+retrieving the data. Especially for lots of results this can take lots of
+time. RDBMS are also slower on retrieving the data, as they are always
+retrieving *all* data (unless you use limit clauses) from the underlying
+store, to be at least also able to sort them. All this data (sorted or
+unsorted) is then transferred to the application (with cursors that may be
+optimized, but in general the result set is already in memory).
+
+Lucene  has some differences in doing this:
+
+Lucene never returns all stored fields for all documents that hit the query.
+This would take lots of time and in fact Lucene would even be much slower
+than RDBMS databases. The trick, that all full text search engines use, is
+to never touch the actual data during query execution, you only touch the
+unique term list and the posting lists. When the query executes, Lucene
+simply collects all result ids from the posting lists and returns them. No
+data document data is transferred or touched at all. One step further, in
+general full text engines only return the most relevant documents, that are
+then displayed in e.g. pages on the web (like Google).
+
+To do this score sorting, all collected document ids are inserted into a
+Priority Queue to be sorted by score. Documents with too low score will
+immediately fall out of this queue if their score is not competitive.
+
+The same applies if you manually sort: In general you only return the
+beginning of the list to the user (the top-n documents), so the sorting
+algorithm does the same like for scores, all ids are inserted using the
+requested sort key into a priority queue and all ids, not competitive fall
+out and are not touched at all. Important to know is, that in constrast to a
+relational database the sort keys are completely in memory and are currently
+never materialized on disk (we have now column stride fields in trunk, but
+that's just a materialization as a column - relational databases need to
+scan each row to sort. Some databases [like Sybase IQ] use column oriented
+storage, those are also faster on sorting, as the sort keys are not stored
+row-by-row, they are stored as a single column like Lucene's column-stride
+fields [called DocValues, only in Lucene 4.0]).
+
+Back to Lucene: Once the top-n document ids are collected (which also
+returns the total result count, as at least all results are counted), you
+have a list of those top-n document ids in the order requested. And after
+that the stored fields are retrieved from the underlying index for display
+only, so it fetches only the really required stored fields from the index
+for the few documents in top-n.
+
+Because of this top-n behavior, its generally slow with Lucene to scan
+deeply into the result set. If you want to go on page 100 of your search
+results, the priority queue must at least have a size of n=docsPerPage*100.
+Because of this, most full text search engines (e.g. Google does this, too)
+prevent you from going to deep into the result set, as it would get slower
+and slower, because the PQ gets bigger and bigger. E.g. Google prevents you
+to go as far as I know beyond page 50 or like that.
+
+Uwe
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

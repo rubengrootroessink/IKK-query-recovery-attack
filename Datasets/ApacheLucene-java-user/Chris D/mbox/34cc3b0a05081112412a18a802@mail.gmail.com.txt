@@ -1,0 +1,109 @@
+FROM: Chris D <bro...@gmail.com>
+SUBJECT: Re: Indexing document instances and retrieving instance attributes
+DATE: 11 Aug 2005
+
+On 8/11/05, Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote:
+> 
+> > So I've decided I'm going to simply have empty fields, and that
+> > brought up several other questions.
+> >
+> > First, is there a limit on the number of fields per document?
+> 
+> I don't think so.
+> 
+> > Secondly why are fields in Document implemented with a Vector instead
+> > of a HashSet or similar? Wouldn't retrieval be faster without
+> > iterating through a list?
+> 
+> Field order may be important.  Maybe it could be done with Lists
+> instead of Vectors, though.
+
+> > Lastly how difficult (or possible) is it to do something like extend
+> > the Document class to have the functionality I want?
+> 
+> I'm not sure, I never had to do it.  I see the class is final, so you
+> won't be able to extend it.  Maybe the final modifier could be removed,
+> if you present a good use case.
+
+Well in my case field order is important, but the order of the
+individual fields isn't. So I can speed up getFields to roughly O(1)
+by implementing Document as follows. (I think add() takes a bit of a
+hit as a result)
+
+  Hashtable fields = new Hashtable();
+  private float boost = 1.0f;
+
+  public final void add(Field field) {
+    if(fields.contains(field.name)){
+    	((LinkedList)(fields.get(field.name))).addLast(field);
+    } else {
+    	LinkedList al = new LinkedList();
+    	al.add(field);
+    	fields.add(al);
+    }
+  }
+
+  public final void removeField(String name) {
+    if(fields.contains(name)){
+    	((LinkedList)(fields.get(name))).removeFirst();
+    }
+  }
+  
+  public final void removeFields(String name) {
+	    if(fields.contains(name)){
+	    	fields.remove(name);
+	    }
+   }
+
+  public final Field getField(String name) {
+    if(fields.contains(name)){
+    	return ((LinkedList)(fields.get(name))).getFirst();
+    }
+    return null;
+  }
+
+  public final String get(String name) {
+	if(fields.contains(name)){
+		return ((Field)((LinkedList)(fields.get(name))).getFirst()).stringValue();
+	}
+    return null;
+  }
+
+  /** Returns an Enumeration of all the fields in a document. */
+  public final Enumeration fields() {
+	//This one is a little harder.
+    return ((Vector)fields).elements();
+  }
+
+   public final Field[] getFields(String name) {
+     List result = (LinkedList)(fields.get(name));
+     if (result.size() == 0)
+       return null;
+     return (Field[])result.toArray(new Field[result.size()]);
+   }
+
+  public final String[] getValues(String name) {
+    List result = new ArrayList();
+	Field[] arr = getFields(name);
+    for (int i = 0; i < arr.length; i++) {
+      Field field = arr[i];
+      if (!field.isBinary())
+        result.add(field.stringValue());
+    }
+    if (result.size() == 0)
+      return null;
+    return (String[])result.toArray(new String[result.size()]);
+  }
+
+(I missed some functions because I got tired and it's nearing the end
+of the day.) This doesn't solve the original problem of having to have
+empty string playing placeholder but at least it would lessen the pain
+a bit.
+
+Chris
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

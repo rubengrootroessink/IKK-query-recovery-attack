@@ -1,0 +1,227 @@
+FROM: "Oliver Hutchison" <ohutchi...@aconex.com>
+SUBJECT: RE: index architectures
+DATE: 18 Oct 2006
+
+I can certainly vouch for the benefits of partitioning, we've seen a very
+big improvement in searcher refresh times (our main pain point) since we
+implemented such an architecture.
+
+Our application has 1000's of indexes, ranging in size from a few meg up
+several gigabytes, updates occur very frequently and can effect any document
+so we don't have the luxury you have of being able to partition our docs
+into a read-only set and a writable set, however we have developed an
+architecture that gives us very good performance even with these
+constraints.
+
+What we have is 2 FSDirectories, 1 we call the "archive" which is where most
+of our docs are stored and 1 called "work" which is where all updated and
+new documents are added. We keep the work index as small as possible by
+regularly merging its documents into the archive. Searching is done using a
+MultiSearcher across the 2 indexes and to keep search results up to date we
+need only refresh the work index searcher. We have considered using a
+RAMDirectory in addition to the work directory, which would basically mirror
+Erick's suggestion, but so far we have found that, as long as we keep the
+work FSDirectory small, performance is very good and also given the number
+of separate indexes we have there would be quite a bit of additional
+complexity managing the memory footprint of all the RAMDirectories we'd
+need.
+
+The main (only to be honest) complication with our scheme arises because
+deletes/updates can effect any documents, which means we need to apply any
+deletes to both the archive and the work partitions. We can do the archive
+index deletes using the same Reader that we are searching against and
+because deletes immediately effect search results we don't have to throw out
+the archive searcher (which is very expensive). However the Reader does not
+commit the deletes to disk until you close it, so if we want a consistent
+index we do need to close the Reader immediately or risk loosing the
+deletes. Catch-22.
+
+Luckily we've found a way around this problem, we have 2 Readers open
+against the archive index - the 1st Reader is used for all searching and is
+never closed the 2nd Reader is used to keep the index files up to date and
+as such is closed then recreated after each update transaction, all deletes
+are applied to both readers. There's some trickery needed to allow 2 Readers
+to both think they are updating the same FSDirectory when technically only
+the 2nd one is, but this is not that difficult to resolve and is well worth
+the effort as we never incur the penalty of recreating the archive index
+Searcher to keep the search results up to date. Something that used to take
+over 10 seconds, mainly because most of our searches are sorted and
+therefore a Searcher refresh also requires the FieldCache to be refreshed as
+well.
+
+Cheers,
+
+Ollie
+
+> -----Original Message-----
+> From: Erick Erickson [mailto:erickerickson@gmail.com] 
+> Sent: Wednesday, 18 October 2006 6:29 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: index architectures
+> 
+> I've been curious for a while about this scheme, and I'm 
+> hoping you implement it and tell me if it works <G>. In 
+> truth, my data is pretty static so I haven't had to worry 
+> about it much. That said...
+> 
+> Would it do (and, perhaps, be less complex) to have a 
+> FSDirectory and a RAMDirectory that you search? And another 
+> FSDirectory that gets updated in the background? Here's the 
+> scheme as I see it.
+> 
+> FSDirectorySearch. Holds the bulk of your index. Everything 
+> up until, say, midnight the night before.
+> FSDirectoryBack.  starts out as a copy of FSDirectorySearch, 
+> but is where you add your new stories. NOTE: you don't search this.
+> RAMDirectory. Where you stash your new documents dating from 
+> the time your two FSDirectories were identical. It contains 
+> the delta between your two FSDirectories.
+> 
+> Your searcher opens FSDirectorySearch for searching.
+> 
+> A new document comes in. You add it to your FSDirectoryBack 
+> and your RAMDirectory.
+> 
+> A search request comes in. Use a MultiSearcher (or variant) 
+> to search FSDirectorySearch and RAMDirectory. You probably 
+> have to re-open your RAMDirectory for search each time to 
+> pick up the most recent additions.
+> NOTE: you might want to search the archives for performance 
+> data on multi-searchers, I'm not all that familiar with them....
+> 
+> At some interval (daily? hourly? at some pre-determined number of new
+> stories?) you close up everything, copy your FSDirectoryBack 
+> to FSDirectorySearch, and re-start things. I'm wondering if 
+> this kind of scheme allows you to keep the speed and memory 
+> requirements down by processing requests faster. You might 
+> also be able to get some advantage with caching.
+> 
+> Don't know if this is actually a viable scheme, but thought 
+> I'd mention it.
+> And I'm sure you can see several variations on it that might 
+> fit your problem space better.
+> 
+> On a side note: I ran some tests at one point throwing a 
+> variable number of searches (sorted) at my searcher using 
+> XmlRpc. I never had out of memory errors. The index was on 
+> the order of 1.4G, 870K documents. What I did see was the 
+> speed take a dive eventually, but at least it was graceful. I 
+> have no idea what was going on in the background, 
+> specifically how XmlRpc was handling memory issues, so I'm 
+> not sure how much that helps. I was servicing 100 
+> simultaneous threads as fast as I could spawn them....
+> 
+> So, I wonder if your out of memory issue is really related to 
+> the number of requests you're servicing. But only you will be 
+> able to figure that out <G>.
+> These problems are...er...unpleasant to track down...
+> 
+> I guess I wonder a bit about what large result sets is all 
+> about. That is, do your users really care about results 
+> 100-10,000 or do they just want to page through them on 
+> demand? I'm sure you see where this is going, and if you're 
+> already returning, say, 100 documents out of N and letting 
+> them page, ignore this part. If you don't already know all 
+> about the inefficiency inherent in iterating over a Hits 
+> object, you might want to search the archives and/or look at 
+> TopDocs and HitCollector....
+> 
+> Best
+> Erick
+> 
+> 
+> On 10/17/06, Paul Waite <paul@waite.net.nz> wrote:
+> >
+> > Hi chaps,
+> >
+> > Just looking for some ideas/experience as to how to improve our 
+> > current architecture.
+> >
+> > We have a single-index system containing approx. 2.5 
+> million docs of 
+> > about 1-3k each.
+> >
+> > The Lucene implementation is a daemon and it services requests on a 
+> > port in multi-threaded manner, and it runs on a fairly new dual cpu 
+> > box with 2G of ram. Although I have the jvm using ~1.5G, 
+> this system 
+> > does fairly regularly crash with 'out of memory' errors. 
+> It's hard to 
+> > see the exact conditions at that point as to cause, but I'm 
+> guessing 
+> > it's simply a number of users executing queries which return large 
+> > resultsets, and then require sorting (just about all queries are 
+> > sorted by reverse date, using a field), so chewing up too 
+> much memory.
+> >
+> > This index is updated frequently, since it is a news site, so this 
+> > makes the use of cacheing filters problematic. Typically about 1500 
+> > articles come in per day, and during working hours you'd see them 
+> > popping in maybe every few seconds, with longer periods 
+> interspersed 
+> > fairly randomly. Access to these new articles is expected 
+> to be 'immediate'
+> > for folks doing searches.
+> >
+> > The nature of this area is such that a great deal of 
+> activity focusses 
+> > on 'recent' news, in particular the last 24 hours, then the 
+> last week, 
+> > and perhaps the last month in that order.
+> >
+> > With that in mind I had the idea of creating a dual-index 
+> architecture 
+> > "recent" and "archive", where the "recent" index holds approx. the 
+> > most recent 30 days and the "archive" holds the rest.
+> >
+> > But there are several refinements on this, and I wondered if anyone 
+> > else out there has already solved or at least tackled this 
+> problem and 
+> > has any suggestions.
+> >
+> >
+> > For example, here is one idea for how the above might operate:
+> >
+> > At a defined point in time, the 30-day index is generated. 
+> For us this 
+> > is easy. Our article bodies are all stored out on disk, 
+> timestamped, 
+> > and we can simply generate a list newer than a certain date 
+> and index 
+> > these to a brand new index.
+> >
+> > At the same time, the "archive" index is merged with the existing 
+> > 30-day index, to make an updated "archive index.
+> >
+> > The system then operates by indexing to the 30-day index 
+> and directing 
+> > searches to it where date-range is appropriate, otherwise to the 
+> > archive index. We would then operate in this mode for a week or so 
+> > before refreshing the indexes again.
+> >
+> > So searching and sorting would then mostly be done on an 
+> index which 
+> > has around 45,000 docs in it rather than 2.5 million. I'm supposing 
+> > that this will be massively faster to operate with both 
+> indexing and 
+> > searching/sorting.
+> >
+> > Any comments from anyone on this would be very much appreciated.
+> >
+> > Cheers,
+> > Paul.
+> >
+> > 
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

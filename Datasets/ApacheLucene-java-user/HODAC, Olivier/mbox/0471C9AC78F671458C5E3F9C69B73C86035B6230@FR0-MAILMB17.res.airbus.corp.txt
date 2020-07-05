@@ -1,0 +1,101 @@
+FROM: "HODAC, Olivier" <olivier.ho...@airbus.com>
+SUBJECT: RE: Indexer large file and hi performance indexing
+DATE: 7 Sep 2006
+
+
+Actually, latency is not possible.
+
+Do you think it is possible to tune the fswriter to flush into the file system each N elements
+(using the maxMergeDocs and co) and use "for each docs of the RAMindexer (addDocument to the
+FSindexer)"? What about performances?
+
+-----Message d'origine-----
+De : Doron Cohen [mailto:DORONC@il.ibm.com]
+Envoyé : mercredi 6 septembre 2006 21:00
+À : java-user@lucene.apache.org
+Objet : Re: Indexer large file and hi performance indexing
+
+
+
+"HODAC, Olivier" <olivier.hodac@airbus.com> wrote on 06/09/2006 03:04:15:
+>
+> hello,
+>
+> I design an application which bottleneck concerns the indexing
+> process. Objects indexation blocks the user's action. Furthermore, I
+> need to index a large maount of documents (30000 per day) and save
+> them on the file system.
+>
+> The first developments have been initiate with lucene 1.4.3 and I
+> had to create a cachedIndexer which uses a RAMDirectory and a FS
+> directory. For the searches, the cached indexer searches in RAM and
+> FS indexes. For deletion, the delete is done in the RAM and FS.
+>
+> Each N documents to index in the cache (RAMDirectory), a thread
+> dumps them to the FSDirectory, with a synchronize.
+>
+> In 1 month, I reached an index cfs file of 2.5Go, and the merge
+> process (addIndexes) takes 5 minutes approx (solaris 5.9).!!!! =>
+> synchronize...
+>
+> Questions:
+> * Is it a good way of doing things?
+
+I am guessing that you implemented "searching in the RAM segments held by
+the writer" for making the search results as fresh as possible - i.e.
+reflecting in search every last document that was added.
+
+If this is not the case - i.e. if you could tolerate a latency of N
+documents (say 1000) and T minutes (say 15), whichever happens first, you
+could define maxBefferredDocs = N, this way letting Lucene manage the index
+on its own, and open the searcher(s) against the FSDirectory, as usual.
+This way you would be able to search while the index gets updated, even
+during merges. You would of course need to create a new searcher after
+flushes, in order for search to reflect recent index modifications. (The
+'flush after T' logic is not in Lucene, so if desired it would need to be
+implemented above it.)
+
+If such latency is not possible, and search must include every recent
+document added, I would assume that a more fine synchronization could work
+- for instance - do not sync on the entire merge, but only on the deletion
+of merged segments from the queue (keep 'old=to-be-deleted' segments aside
+as long as existing searchers still use them). This is much more
+complicated though, it would take more memory, and would most possibly
+break when the source of Lucene evolves, so better do not take this path
+unless must.
+
+> * Does maxMergeDocs is a solution for the merge process to be lower?
+> * If I call addIndexes on the 2.5Go index file with a maxMergeDocs,
+> it calls optimize. the javadoc says that it calls optimize, which
+> gathers to 1 file the indexdir. is it true whatever the maxMergeDocs?
+
+maxMergeDocs only affect merge decisions during addDocument(), so it would
+have no effect during optimize() nor during addIndexes() that calls
+optimize() - there the index would be merged into a single segment.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+ 
+This mail has originated outside your organization,
+either from an external partner or the Global Internet.
+Keep this in mind if you answer this message.
+
+ 
+This e-mail is intended only for the above addressee. It may contain
+privileged information. If you are not the addressee you must not copy,
+distribute, disclose or use any of the information in it. If you have
+received it in error please delete it and immediately notify the sender.
+Security Notice: all e-mail, sent to or from this address, may be
+accessed by someone other than the recipient, for system management and
+security reasons. This access is controlled under Regulation of
+Investigatory Powers Act 2000, Lawful Business Practises.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

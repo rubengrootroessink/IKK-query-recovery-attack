@@ -1,0 +1,96 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: FunctionQuery example request
+DATE: 15 Mar 2006
+
+
+: I have implemented the DistanceComparatorSource
+: example from Lucene In Action (my Bible) and it works
+: great. We are now in the situation where we have
+: nearly a million documents in our index and the
+: performance of this implementation has degraded.
+
+: Can someone please spare a couple of minutes to give
+: me an example of how I would implement a FunctionQuery
+: to score each of the documents matched in my boolean
+: query?
+
+First off...
+
+I'm not sure if replacing your DistanceComparatorSource with a
+FunctionQuery that conputes the distance will result in a performance
+improvment -- either way you'r computing the distance for every match.
+Where using a FunctionQuery has it's greatest benefits is when you want
+the order of results to be based not just on an equation (like you can
+impliment with a SortComparatorSource) but by a score that is heavily
+influenced using that equation.
+
+That said, one approach using FunctionQuery that should improve the
+performance over a SortComparatorSource that performs the same function,
+would be to determine a "bounding box" and wrap your FunctionQuery
+in a BooleanQuery with ConstantScoreRangeQueries that would enfoce this
+bounding box -- that way your Function will only be asked to perform it's
+computation on the items that are "near by" and you wont spend a lot of
+time computing the distance on the less important (farther out) results.
+
+For example, if you had a DistanceFunctionQuery, instead of using it like
+this (psuedocode)
+
+  Query mainQuery = ...
+  BooleanQuery wrapper = new BooleanQuery()
+  wrapper.add(mainQuery, MANDATORY)
+  wrapper.add(new FunctionQuery(...), OPTIONAL)
+
+...use something like this...
+
+  Query mainQuery = ...
+  BooleanQuery wrapper = new BooleanQuery()
+  wrapper.add(mainQuery, MANDATORY)
+  BooleanQuery sub = new BooleanQuery()
+  sub.add(new FunctionQuery(...), OPTIONAL)
+  sub.add(new ConstantScoreRangeQuery(lonField, currentLon-buf, currentLon+buf))
+  sub.add(new ConstantScoreRangeQuery(latField, currentLat-buf, currentLat+buf))
+  wrapper.add(sub, OPTIONAL)
+
+Okay .. all of that said, the best way to understand how to impliment your
+own function, is to start by looking at an existing Function that does
+some numeric calculation. I would suggest starting with
+LinearFloatFunction.
+
+FunctionQueries work by dealing with ValueSources that determine the value
+for a document.  LinearFloatFunction is a type of ValueSource that works
+by computing a simple calculation on the results of another ValueSource.
+ValueSources could be nested pretty much indefinitely, but eventually you
+want to deal with acctaul data from the index -- which is where
+IntFieldSource or FloatFieldSource come in -- they are very simple
+ValueSource implimentations that just returns the value of an indexed
+numeric field using the FieldCache.
+
+If you look at the source for LinearFloatFunction. you'll see that it
+takes one ValueSource in it's constructor, and then in it's
+getValues(IndexReader) method it uses the values from that ValueSource in
+a linear equation.
+
+to achieve similar results with a distance equation, you would want your
+DistanceFunction to take in two ValueSources (one for the longitude field,
+and one for the latitude field) and your range.  then just override the
+getValues(IndexReader) function to do the calculation you want.
+
+you would then use it soemthing like this...
+
+   FunctionQuery fq = new FunctionQuery(
+          new DistanceFunction(
+             new FloatFieldSource("latFieldName"),
+             new FloatFieldSource("lonFieldName"),
+             currentLat,
+             currentLon));
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

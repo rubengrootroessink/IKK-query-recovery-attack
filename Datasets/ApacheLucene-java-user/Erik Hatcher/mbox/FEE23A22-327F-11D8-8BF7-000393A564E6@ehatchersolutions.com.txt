@@ -1,0 +1,324 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: DoubleMetaphoneQuery
+DATE: 20 Dec 2003
+
+Interestingly, I used a MetaphoneAnalyzer as an example in our book in  
+progress.  I'm curious if you have measured performance with doing it  
+at analysis time versus query time.  Enumerating all terms at query  
+time is basically the same as doing a WildcardQuery or FuzzyQuery and  
+involves a lot of work - although certainly on moderate size indexes it  
+is probably not too painful.
+
+Nice work on this!
+
+I'd be happy to add this to the sandbox, and will do so in the next few  
+days hopefully.
+
+	Erik
+
+
+On Friday, December 19, 2003, at 02:51  PM, David Spencer wrote:
+
+>
+> I've seen discussions about using the double metaphone algorithm with  
+> Lucene (basically: like soundex, used
+> to find works that sound similar in English at least) but couldn't  
+> find an implementation, so I spent
+> a few minutes and wrote a Query and TermEnum object for this. I may  
+> have missed the prior art so sorry if I did...
+>
+> [1] Here are some mail msgs that mention double metaphone wrt Lucene:
+>
+> http://www.geocrawler.com/archives/3/2626/2000/10/0/4566951/
+> http://www.geocrawler.com/archives/3/2626/2001/8/50/6382300/
+> http://www.mail-archive.com/lucene-user@jakarta.apache.org/ 
+> msg04648.html
+>
+> [2] And Phoenix has a double metaphone  Analyzer, but not a Query,  
+> which I guess is another angle on things:
+>
+> http://www.tangentum.biz/en/products/phonetix/api/com/tangentum/ 
+> phonetix/lucene/PhoneticAnalyzer.html
+>
+>
+> [3] Attached are 2 files (DoubleMetaPhoneQuery and  
+> DoubleMetaphoneTermEnum) that I think are valid contributions
+> to the Lucene Sandbox. Hopefully all that has to be done is change the  
+> package line if the powers that be accept this.
+>
+> Note: My impl uses the Jakarta CODEC package (  
+> http://jakarta.apache.org/commons/codec/ ) for the double metaphone  
+> algorithm implementation.
+>
+> Also, any query expansion such as this could exceed the bounds of a  
+> boolean query, thus BooleanQuery.setMaxClauseCount
+> may need to be used to avoid an exception.
+>
+> [4] I've updated my Lucene demo site which has the ~3500 RFCs indexed  
+> and searchable by Lucene. I added an "advanced query"
+> page to try out the DoubleMetaphoneQuery:
+>
+> It's a few lines down at this URL:
+>
+> http://www.hostmon.com/rfc/advanced.jsp
+>
+>
+> [5] Most of the above is redundantly stated here as a kind of  
+> perma-link:
+>
+> http://www.tropo.com/techno/java/lucene/metaphone.html
+>
+> [6]
+>
+> While it's easy to write additonal Query classes, I suspect they are a  
+> kind of dead end and won't really be
+> used unless they are integrated into the QueryParser - thus one  
+> concept is that the Lucene syntax should
+> have some extension mechanism so you can pass a query like  
+> "metaphone::protokal" to it and "metaphone::"
+> (note the double colons)  would mean to use DoubleMetaphoneQuery for  
+> this term. Maybe an extensible query parser
+> should be the subject of another email?
+>
+> So: let me know if this is useful and plz enter it into the sandbox...
+>
+> thx,
+> Dave Spencer
+>
+>
+>
+>
+>
+>
+>
+>
+>
+> package com.tropo.lucene;
+>
+> /* ====================================================================
+>  * The Apache Software License, Version 1.1
+>  *
+>  * Copyright (c) 2001 The Apache Software Foundation.  All rights
+>  * reserved.
+>  *
+>  * Redistribution and use in source and binary forms, with or without
+>  * modification, are permitted provided that the following conditions
+>  * are met:
+>  *
+>  * 1. Redistributions of source code must retain the above copyright
+>  *    notice, this list of conditions and the following disclaimer.
+>  *
+>  * 2. Redistributions in binary form must reproduce the above copyright
+>  *    notice, this list of conditions and the following disclaimer in
+>  *    the documentation and/or other materials provided with the
+>  *    distribution.
+>  *
+>  * 3. The end-user documentation included with the redistribution,
+>  *    if any, must include the following acknowledgment:
+>  *       "This product includes software developed by the
+>  *        Apache Software Foundation (http://www.apache.org/)."
+>  *    Alternately, this acknowledgment may appear in the software  
+> itself,
+>  *    if and wherever such third-party acknowledgments normally appear.
+>  *
+>  * 4. The names "Apache" and "Apache Software Foundation" and
+>  *    "Apache Lucene" must not be used to endorse or promote products
+>  *    derived from this software without prior written permission. For
+>  *    written permission, please contact apache@apache.org.
+>  *
+>  * 5. Products derived from this software may not be called "Apache",
+>  *    "Apache Lucene", nor may "Apache" appear in their name, without
+>  *    prior written permission of the Apache Software Foundation.
+>  *
+>  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+>  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+>  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+>  * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
+>  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+>  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+>  * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+>  * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+>  * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+>  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+>  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+>  * SUCH DAMAGE.
+>  * ====================================================================
+>  *
+>  * This software consists of voluntary contributions made by many
+>  * individuals on behalf of the Apache Software Foundation.  For more
+>  * information on the Apache Software Foundation, please see
+>  * <http://www.apache.org/>.
+>  */
+>
+> import java.io.IOException;
+> import org.apache.lucene.search.*;
+> import org.apache.lucene.index.*;
+> import org.apache.lucene.analysis.*;
+> import org.apache.lucene.document.*;
+>
+>
+> /** A Query that matches documents containing terms with a specified  
+> prefix. */
+> public final class DoubleMetaphoneQuery extends MultiTermQuery {
+>   public DoubleMetaphoneQuery(Term term) {
+>     super(term);
+>   }
+>
+>   protected FilteredTermEnum getEnum(IndexReader reader) throws  
+> IOException {
+>     return new DoubleMetaphoneTermEnum(reader, getTerm());
+>   }
+>
+>   public String toString(String field) {
+> 	  return super.toString(field); // FIXME: what to do here
+>   }
+> }
+> package com.tropo.lucene;
+>
+>
+> /* ====================================================================
+>  * The Apache Software License, Version 1.1
+>  *
+>  * Copyright (c) 2001 The Apache Software Foundation.  All rights
+>  * reserved.
+>  *
+>  * Redistribution and use in source and binary forms, with or without
+>  * modification, are permitted provided that the following conditions
+>  * are met:
+>  *
+>  * 1. Redistributions of source code must retain the above copyright
+>  *    notice, this list of conditions and the following disclaimer.
+>  *
+>  * 2. Redistributions in binary form must reproduce the above copyright
+>  *    notice, this list of conditions and the following disclaimer in
+>  *    the documentation and/or other materials provided with the
+>  *    distribution.
+>  *
+>  * 3. The end-user documentation included with the redistribution,
+>  *    if any, must include the following acknowledgment:
+>  *       "This product includes software developed by the
+>  *        Apache Software Foundation (http://www.apache.org/)."
+>  *    Alternately, this acknowledgment may appear in the software  
+> itself,
+>  *    if and wherever such third-party acknowledgments normally appear.
+>  *
+>  * 4. The names "Apache" and "Apache Software Foundation" and
+>  *    "Apache Lucene" must not be used to endorse or promote products
+>  *    derived from this software without prior written permission. For
+>  *    written permission, please contact apache@apache.org.
+>  *
+>  * 5. Products derived from this software may not be called "Apache",
+>  *    "Apache Lucene", nor may "Apache" appear in their name, without
+>  *    prior written permission of the Apache Software Foundation.
+>  *
+>  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+>  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+>  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+>  * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
+>  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+>  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+>  * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+>  * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+>  * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+>  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+>  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+>  * SUCH DAMAGE.
+>  * ====================================================================
+>  *
+>  * This software consists of voluntary contributions made by many
+>  * individuals on behalf of the Apache Software Foundation.  For more
+>  * information on the Apache Software Foundation, please see
+>  * <http://www.apache.org/>.
+>  */
+> import org.apache.lucene.search.*;
+> import java.io.IOException;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.Term;
+> import org.apache.commons.codec.language.*;
+>
+> /** Subclass of FilteredTermEnum for enumerating all terms that are  
+> similiar to the specified filter term.
+>
+>   <p>Term enumerations are always ordered by Term.compareTo().  Each  
+> term in
+>   the enumeration is greater than all that precede it.  */
+> public final class DoubleMetaphoneTermEnum extends FilteredTermEnum {
+>     private int del_len;
+>     boolean endEnum = false;
+>
+>     Term searchTerm = null;
+>     String field = "";
+>     String text = "";
+>     int textlen;
+> 	final DoubleMetaphone m = new DoubleMetaphone();
+> 	final String goal1;
+> 	String goal2;
+> 	
+>     public DoubleMetaphoneTermEnum(IndexReader reader, Term term)  
+> throws IOException {
+>         super(reader, term);
+>         searchTerm = term;
+>         field = searchTerm.field();
+>         text = searchTerm.text();
+>         textlen = text.length();
+> 		
+> 		goal1 = m.doubleMetaphone( text, true);
+> 		goal2 = m.doubleMetaphone( text, false);
+> 		if ( goal1.equals( goal2)) goal2 = null;
+>
+>         setEnum(reader.terms(new Term(searchTerm.field(), "")));
+>
+> 		
+>
+>     }
+>
+>     /**
+>      The termCompare method in DoubleMetaphoneTermEnum uses ...
+>      */
+>     protected final boolean termCompare(Term term) {
+>
+>         if (field == term.field()) {
+> 			String s = term.text();
+> 			String try1 = m.doubleMetaphone( s, true);
+> 			String try2 = m.doubleMetaphone( s, false);
+>
+> 			if ( try1.equals( goal1)) return true;
+> 			if ( try2.equals( goal1)) return true;
+> 			if ( goal2 != null)
+> 			{
+> 				if ( try1.equals( goal2)) return true;
+> 				if ( try2.equals( goal2)) return true;
+> 			}
+> 			return false;
+>         }
+>         endEnum = true;
+>         return false;
+>     }
+>
+>     protected final float difference() {
+>         return (float) 1.0; // assume all terms that sound alike are  
+> equally valuable...
+>     }
+>
+>     public final boolean endEnum() {
+>         return endEnum;
+>     }
+>
+> 	public void close() throws IOException {
+> 		super.close();
+> 		searchTerm = null;
+> 		field = null;
+> 		text = null;
+> 	}
+> }
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

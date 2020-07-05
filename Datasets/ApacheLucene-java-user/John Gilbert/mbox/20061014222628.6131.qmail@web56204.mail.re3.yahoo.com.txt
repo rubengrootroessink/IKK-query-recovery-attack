@@ -1,0 +1,98 @@
+FROM: John Gilbert <jgilber...@yahoo.com>
+SUBJECT: java.io.IOException: read past EOF
+DATE: 14 Oct 2006
+
+I am trying to write an Ejb3Directory. It seems to work for index writing but not for searching.
+I get the EOF exception. I assume this means that either my OutputStream or InputStream is
+doing
+something wrong. It fails because the CSInputStream has a length of zero when it reads the
+.fnm section 
+of the .cfs file.
+
+Does anyone have any suggestions? 
+Thanks!
+
+Here is more background info:
+
+- Using version 1.4.3
+- Stack trace
+java.io.IOException: read past EOF
+    at org.apache.lucene.store.InputStream.refill(InputStream.java:154)
+    at org.apache.lucene.store.InputStream.readByte(InputStream.java:43)
+    at org.apache.lucene.store.InputStream.readVInt(InputStream.java:83)
+    at org.apache.lucene.index.FieldInfos.read(FieldInfos.java:195)
+    at org.apache.lucene.index.FieldInfos.<init>(FieldInfos.java:55)
+    at org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java:109)
+    at org.apache.lucene.index.SegmentReader.<init>(SegmentReader.java:89)
+    at org.apache.lucene.index.IndexReader$1.doBody(IndexReader.java:118)
+    at org.apache.lucene.store.Lock$With.run(Lock.java:109)
+    at org.apache.lucene.index.IndexReader.open(IndexReader.java:111)
+    at org.apache.lucene.index.IndexReader.open(IndexReader.java:106)
+    at org.apache.lucene.search.IndexSearcher.<init>(IndexSearcher.java:43)
+
+
+- Entity Bean
+
+@Entity
+public class IndexBean implements Serializable {
+    @Id private String name;
+    @Lob private byte[] data;
+    @Version private Calendar timestamp;
+    ...
+}
+
+- InputStream
+
+public class Ejb3InputStream extends InputStream {
+    private java.io.InputStream is;
+
+    public Ejb3InputStream(IndexBean bean) {
+        this.is = new ByteArrayInputStream(bean.getData());
+        length = bean.getData().length;
+    }
+
+    public void close() throws IOException {
+        is.close();
+    }
+
+    protected void readInternal(byte[] b, int off, int len) throws IOException {
+        is.read(b, off, len);
+    }
+
+    protected void seekInternal(long n) throws IOException {
+        is.skip(n);
+    }
+}
+
+- OutputStream
+
+public class Ejb3OutputStream extends OutputStream {
+    private IndexBean bean;
+    private ByteArrayOutputStream os = new ByteArrayOutputStream();
+
+    public Ejb3OutputStream(IndexBean bean) {
+        this.bean = bean;
+    }
+
+    protected void flushBuffer(byte[] b, int len) throws IOException {
+        os.write(b);
+    }
+
+    public long length() throws IOException {
+        return os.size();
+    }
+
+    public final void close() throws IOException {
+        super.close();
+        bean.setData(os.toByteArray());
+    }
+}
+
+
+
+
+
+
+
+
+

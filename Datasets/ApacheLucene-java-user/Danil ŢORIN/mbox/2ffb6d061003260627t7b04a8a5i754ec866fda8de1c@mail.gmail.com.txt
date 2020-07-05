@@ -1,0 +1,164 @@
+FROM: Danil ŢORIN <torin...@gmail.com>
+SUBJECT: Re: custom low-level indexer (to speed things up) when fields, terms	and docids are in order
+DATE: 26 Mar 2010
+
+What will your search look like?
+
+If your document is:
+f1:"1"
+f2:"2"
+f3:"3"
+
+You could create a lucene document with a single field instead of 20k:
+fields:"f1/1 f2/2 f3/3"
+
+I replaced ":" with "/" and let assume you use whitespace analyzer on
+indexing.
+
+On search your old query "+f1:1 +f2:2" should be "+fields:f1/1 +fields:f2/2"
+
+Could this approach be applied to your usecase?
+
+Danil.
+
+
+On Fri, Mar 26, 2010 at 15:01, Michael McCandless <lucene@mikemccandless.com
+> wrote:
+
+> This sounds like fun :)
+>
+> So you've already created a custom indexing chain, and plugged this
+> into DocumentsWriter?  And this chain directly interacts with the low
+> level classes for writing a segment (FormatPostingsTerms/DocsConsumer,
+> etc.)?
+>
+> I'm not sure you're gonna do much better than that... these classes
+> already expect things "in order" and all they do (pretty much) is
+> write the index files.  I think they should be pretty lean...
+>
+> Also, once flex lands, soon (note that it moves these low level
+> interfaces/classes around)... since you're using these classes for
+> writing, it'll mean you can freely swap in different codecs.
+>
+> The only thing you can do further is to conflate your custom code with
+> the codec, ie, so that you make a single chain that directly writes
+> index files.  But I'm not sure you'll gain much performance by doing
+> so... (and then you can't [as easily] swap codecs).
+>
+> Have you profiled to see where the time is being spent?
+>
+> Mike
+>
+> On Thu, Mar 25, 2010 at 7:40 PM, britske <gbrits@gmail.com> wrote:
+> >
+> > Hi,
+> >
+> > perhaps first some background:
+> >
+> > I need to speed-up indexing for an particular application which has a
+> pretty
+> > unsual schema: besides the normal stored and indexed fields we have about
+> > 20.000 fields  per document which are all indexed/ non-stored sInts.
+> >
+> > Obviously indexing was really slow with such a number of fields. With
+> > indexing through Solr we got about 0.3 docs/ sec ( on a ec2 m1.large
+> > instance)
+> >
+> > Since these ~20.000 fields are all build/ calculated analogously, we
+> figured
+> > it would be possible to possibly build a low-level indexer for these
+> fields
+> > (of which we had domain knowledge which we could use to possibly speed
+> > indexing up) and later merge them with the other fields to construct the
+> > entire index. So we did and now achieve around 1.8 docs/ sec (6x
+> speedup).
+> > Not bad, but still not enough.
+> >
+> > As part of calculating these fields, we keep track of all fields, terms
+> per
+> > field, and docids per term ( per field) .
+> > all the stuff is then ordered: the fields, the terms available for each
+> > field, the docids per term and inserted in that order using lowel-level
+> > classes like: FormatPostingsFieldsWriter , FormatPostingsTermsConsumer,
+> > FormatPostingsDocsConsumer (pseudo-code below)
+> >
+> > This constructs the following files: .tis, .tii, .frq.  ( + some default
+> > values for the other required files, which don't need actual data bc.
+> these
+> > fields are not stored..)
+> >
+> > I should also mention that each call to the indexer writes all available
+> > fields, terms, docids to a new fsdirectory. So basically each call
+> results
+> > in a complete index. (containing about 100 docs each, bc. otherwise we
+> run
+> > into mem-problems keeping the  ordered maps)
+> >
+> > Since we already have all fields, terms, docids in order it seems (a lot
+> of
+> > ) overkill to me to be going through the methods that above-mentioned
+> > classes offer, which were meant for more 'non-sequential / non-ordered'
+> > inserts (AFAIK).
+> >
+> > What would be the best way to write .tis, .tii and .frq ni a more
+> sequential
+> > matter?
+> > I'm looking for something that would construct a byte-array for each file
+> > that conforms to the index-file definition of that particular file (or
+> > something) . I could try to do it myself and completely bypass all
+> > indexing-classes altogether and just write the files to disk. (Possible
+> bc.
+> > as mentioned we have all data needed to construct a complete index) .
+> >
+> > However, perhaps there are classes I'm not aware of that help in getting
+> the
+> > format right (it seems like a lot of trial-and-error coding otherwise)
+> >
+> > Thanks for any help, pointers, etc.
+> >
+> > Geert-Jan
+> >
+> >
+> >
+> > PSEUDO-CODE of the current low-level (not-so) sequential indexer:
+> >
+> >        foreach(String sField: fieldsInOrder){
+> >                --> add field to FieldInfos and grab newly created
+> fieldInfo
+> >                --> add fieldInfo to FormatPostingsFieldsWriter and grab
+> > formatPostingsTermsConsumer
+> >                List<String> termsInOrder =
+> termsInOrderForFieldMap(sField);
+> >                foreach(String sTerm: termsInOrder){
+> >                        FormatPostingsDocsConsumer frq =
+> formatPostingsTermsConsumer.add(sTerm);
+> >                        List<Integer> docidsInOrderPerFieldTerm =
+> > docidsInOrderPerFieldTermMap(sField+"-"+sTerm);
+> >                        for(Integer docid:docidsInOrderPerFieldTerm){
+> >                                frq.addDoc(docid);
+> >                        }
+> >                        //close relevant stuff
+> >                }
+> >                //close relevant stuff
+> >        }
+> >        //close relevant stuff
+> >
+> >
+> >
+> > --
+> > View this message in context:
+> http://n3.nabble.com/custom-low-level-indexer-to-speed-things-up-when-fields-terms-and-docids-are-in-order-tp576998p576998.html
+> > Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

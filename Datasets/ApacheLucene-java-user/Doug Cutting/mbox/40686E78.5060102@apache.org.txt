@@ -1,0 +1,45 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Lucene optimization with one large index and numerous small indexes.
+DATE: 29 Mar 2004
+
+Kevin A. Burton wrote:
+> We're using lucene with one large target index which right now is 5G.  
+> Every night we take sub-indexes which are about 500M and merging them 
+> into this main index.  This merge (done via 
+> IndexWriter.addIndexes(Directory[]) is taking way too much time.
+> 
+> Looking at the stats for the box we're essentially blocked on reads.  
+> The disk is blocked on read IO and CPU is at 5%.  If I'm right I think 
+> this could be minimized by continually picking the two smaller indexes, 
+> merging them, then picking the next two smallest, merging them, and then 
+> keep doing this until we're down to one index.
+> 
+> Does this sound about right?
+
+I don't think this will make things much faster.  You'll do somewhat 
+fewer seeks, but you'll have to make log(N) passes over all of the data, 
+about three or four in your case.  Merging ten indexes in a single pass 
+should be fastest, as all of the data is only processed once, but the 
+read-ahead on each file needs to be sufficient so that i/o is not 
+dominated by seeks.  Can you use iostat or somesuch to find how many 
+seeks/second you're seeing on the device?  Also, what's the average 
+transfer rate?  Is it anywhere near the disk's capacity?  Finally, if 
+possible, write the merged index to a different drive.  Reading the 
+inputs from different drives may help as well.
+
+One way to force larger read-aheads might be to pump up Lucene's input 
+buffer size.  As an experiment, try increasing InputStream.BUFFER_SIZE 
+to 1024*1024 or larger.  You'll want to do this just for the merge 
+process and not for searching and indexing.  That should help you spend 
+more time doing transfers with less wasted on seeks.  If that helps, 
+then perhaps we ought to make this settable via system property or somesuch.
+
+Cheers,
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

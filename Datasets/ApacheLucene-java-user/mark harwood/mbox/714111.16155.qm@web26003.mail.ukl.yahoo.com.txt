@@ -1,0 +1,77 @@
+FROM: mark harwood <markharw...@yahoo.co.uk>
+SUBJECT: PriorityQueue - something to watch for when using paging
+DATE: 18 Mar 2008
+
+I came across an interesting quirk when using Lucene's PriorityQueue. 
+It's not a bug per se but I thought it might be worth logging here if anyone else experiences
+it.
+
+I was using a PriorityQueue to support a GUI that pages through the top terms in an index.
+It was observed that terms were often duplicated from one page to the next.
+I can imagine other PriorityQueue usage scenarios where this could be a problem e.g. a document
+is seen to be shown on more than one page of search results.
+
+
+In my scenario the PriorityQueue was sized to be (pageNumber x pageSize) so given a pageSize
+of ten results the PriorityQueue size used to serve pages 1, 2 and 3 would be 10, 20 and 30
+respectively.
+Having accumulated the PriorityQueue only the last 10 results are shown i.e. 1 to 10, 11 to
+20 and 21 to 30.
+In order to avoid excessive object allocation an "if currentValue > lowestValue" check
+was used where lowest value is maintained after each insertion.
+
+So far, so familiar. This practice is used all over.
+
+Why then, was this leading to results moving position and why don't we see this problem elsewhere?
+
+Why this happens I'll come to in a minute but I suspect the reason we don't often see this
+elsewhere is because it only occurs when the score values are duplicated. The score value
+used in query results is typically different for each document so is not usually a problem
+but if you are unlucky enough to have a query that produces similar scoresI would anticipate
+you may see this. Unfortunately in my dataset the values are often duplicated e.g. several
+"top" terms that have a document frequency of 8. 
+
+The reason this happens is that the PriorityQueue size is different for each page request.
+For the first page request the queue size is small and therefore the "quality" of results
+in the set is high and because we use the "if currentValue>lowestValue" check not all items
+will be passed to the insert method to be ranked. This means a duplicate scored term towards
+the end of the list of terms may not make it into the selected set because by then the queue
+is fully populated with higher quality items. When the page number increases, so does the
+required PriorityQueue size. This larger queue size now means that by the time we get to our
+duplicate scored term it now passes the (if currentValue>lowestValue) check and an insert
+is performed running the associated ranking logic.  
+What this means is that the exact ranking order of the same set of entries will vary dependent
+on the PriorityQueue size used to analyse them.
+
+I changed my code to make the "if currentValue > lowestValue" check to be ">=" which
+I hoped would force a consistent ranking, independent of queue size. This removed some of
+the duplication but did not completely eliminate it so I can only guess there is still some
+peculiarity to the ranking logic given changing queue sizes and the sequence of inserts/ranks.
+My current thinking is to increase the PriorityQueue size used to more than is strictly required
+for a page to allow enough "space" for the queue to rank things more consistently when there
+are duplicates. 
+This is probably OK because I suspect I can live with the odd discrepancy that might squeak
+through. Others may have more critical requirements for eliminating duplicates and will need
+a more robust strategy (e.g. removing the "lowestValue" check and inserting absolutely everything.
+
+
+Cheers,
+Mark
+
+
+
+
+
+
+
+
+      ___________________________________________________________ 
+Rise to the challenge for Sport Relief with Yahoo! For Good  
+
+http://uk.promotions.yahoo.com/forgood/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

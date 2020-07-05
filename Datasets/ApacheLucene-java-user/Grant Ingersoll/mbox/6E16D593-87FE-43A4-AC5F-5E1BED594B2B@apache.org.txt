@@ -1,0 +1,231 @@
+FROM: Grant Ingersoll <gsing...@apache.org>
+SUBJECT: Re: FileNotFoundException in ConcurrentMergeScheduler
+DATE: 10 Jun 2008
+
+
+On Jun 10, 2008, at 3:35 PM, Michael McCandless wrote:
+
+>
+> Grant,
+>
+> Can you describe any details on how this app is using Lucene?
+
+It's in Solr using the trunk.
+
+> EG are you using autoCommit=false or true?
+
+ac=false
+
+>  Is more than one thread adding documents to the index?
+
+I don't believe so, but I am trying to reproduce.  I've only seen it  
+once, and don't have a lot of details, other than I noticed it was on  
+a specific file (.fdt) and was wondering if that was a factor or not.   
+That is, maybe Paul could reproduce it.
+
+>  Any changes to the defaults in IndexWriter?
+
+It's the SolrIndexWriter.
+
+>
+>
+> After seeing that exception, does IndexReader.open also hit that  
+> exception (ie, is/was the index corrupt)?  Or does it only happen  
+> with BG merges?
+
+Not sure, unfortunately, I don't have a lot of info yet.  The  
+background exception happened during an optimize, if that matters at all
+
+>
+>
+> Mike
+>
+> Grant Ingersoll wrote:
+>
+>> Hi Paul,
+>>
+>> Not sure if this was resolved, but I don't think it was.  Can you  
+>> try reproducing this with setCompoundFile(false)?  That is, turn of  
+>> compound files.  I have an intermittent report of an exception that  
+>> looks eerily similar that I am trying to track down and I am not  
+>> using CFS and the exception is reporting the error in the .fdt  
+>> (stored fields info) file.  Unfortunately, I don't have any more  
+>> specifics at this time as it hasn't been reproduced since, but  
+>> thought that you might be able to get to it quicker since you seem  
+>> to be able to somewhat reproduce it.
+>>
+>> Exception is:
+>> java.io.FileNotFoundException: ..../index/_1l5.fdt (No such file or  
+>> directory)
+>> 	at java.io.RandomAccessFile.open(Native Method)
+>> 	at java.io.RandomAccessFile.<init>(Unknown Source)
+>> 	at org.apache.lucene.store.FSDirectory$FSIndexInput 
+>> $Descriptor.<init>(FSDirectory.java:506)
+>> 	at org.apache.lucene.store.FSDirectory 
+>> $FSIndexInput.<init>(FSDirectory.java:536)
+>> 	at org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java: 
+>> 445)
+>> 	at org.apache.lucene.index.FieldsReader.<init>(FieldsReader.java:75)
+>> 	at  
+>> org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java: 
+>> 308)
+>> 	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java:262)
+>> 	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java:221)
+>> 	at  
+>> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java: 
+>> 3263)
+>> 	at org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:2968)
+>> 	at org.apache.lucene.index.ConcurrentMergeScheduler 
+>> $MergeThread.run(ConcurrentMergeScheduler.java:240)
+>>
+>> Of course, this may just be a red herring, since it is a background  
+>> thread running and it may just be a timing thing, but it might be  
+>> interesting if it consistently occurred in the same spot.
+>>
+>>
+>> Thanks,
+>> Grant
+>>
+>> On May 29, 2008, at 7:43 PM, Paul J. Lucas wrote:
+>>
+>>> I occasionally get a FileNotFoundException like:
+>>>
+>>> Exception in thread "Thread-44" org.apache.lucene.index.MergePolicy 
+>>> $MergeException: java.io.FileNotFoundException: /Stuff/Caches/ 
+>>> AuroraSupport/IM_IndexCache/INDEX/_27.cfs (No such file or  
+>>> directory)
+>>> 	at org.apache.lucene.index.ConcurrentMergeScheduler 
+>>> $MergeThread.run(ConcurrentMergeScheduler.java:271)
+>>> Caused by: java.io.FileNotFoundException: /Stuff/Caches/ 
+>>> AuroraSupport/IM_IndexCache/INDEX/_27.cfs (No such file or  
+>>> directory)
+>>> 	at java.io.RandomAccessFile.open(Native Method)
+>>> 	at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+>>> 	at org.apache.lucene.store.FSDirectory$FSIndexInput 
+>>> $Descriptor.<init>(FSDirectory.java:506)
+>>> 	at org.apache.lucene.store.FSDirectory 
+>>> $FSIndexInput.<init>(FSDirectory.java:536)
+>>> 	at org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java: 
+>>> 445)
+>>> 	at  
+>>> org 
+>>> .apache 
+>>> .lucene.index.CompoundFileReader.<init>(CompoundFileReader.java:70)
+>>> 	at  
+>>> org 
+>>> .apache.lucene.index.SegmentReader.initialize(SegmentReader.java: 
+>>> 277)
+>>> 	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java: 
+>>> 262)
+>>> 	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java: 
+>>> 221)
+>>> 	at  
+>>> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java: 
+>>> 3263)
+>>> 	at org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:2968)
+>>> 	at org.apache.lucene.index.ConcurrentMergeScheduler 
+>>> $MergeThread.run(ConcurrentMergeScheduler.java:240)
+>>>
+>>> I'm currently using the 2.3.2 version of Lucene.  The exception  
+>>> frequency has decreased since upgrading from 2.3.1.
+>>>
+>>> My code runs in a server that monitors the filesystem.  Whenever  
+>>> the contents of a directory change, my code unindexes all the  
+>>> files in the changed directory, then reindexes all the files in  
+>>> the directory.
+>>>
+>>> I'm not doing anything complicated in my code.  To create/open the  
+>>> index, I do:
+>>>
+>>> 	INDEX_DIR = new File( INDEX_CACHE_DIR, "INDEX" );
+>>> 	INDEX = FSDirectory.getDirectory( INDEX_DIR );
+>>> 	if ( IndexReader.isLocked( INDEX ) )
+>>> 	    IndexReader.unlock( INDEX );
+>>>
+>>> The isLocked()/unlock() is because sometimes the server process  
+>>> gets killed and leaves teh indexed locked.
+>>>
+>>> I have a thread than handles the unindexing/reindexing.  It gets  
+>>> changed from a BlockingQueue.  My unindex code is like:
+>>>
+>>> 	IndexWriter writer = new IndexWriter( INDEX, INDEX_ANALYZER,  
+>>> false );
+>>> 	final Term t = new Term( DIR_FIELD, dir.getAbsolutePath() );
+>>> 	writer.deleteDocuments( t );
+>>> 	writer.close();
+>>>
+>>> My indexing code is like:
+>>>
+>>> 	IndexWriter writer = new IndexWriter( INDEX, INDEX_ANALYZER );
+>>> 	writer.setMergeFactor( INDEX_MERGE_FACTOR );
+>>> 	Document doc = new Document();
+>>> 	// ... add fields to doc ...
+>>> 	writer.addDocument( doc );
+>>> 	writer.close();
+>>>
+>>> While that thread is executing, other threads can search the index  
+>>> by doing:
+>>>
+>>> 	IndexSearcher searcher = new IndexSearcher( INDEX );
+>>> 	// ... prepare Query and Sort ...
+>>> 	Hits hits = searcher.search( query, sort );
+>>> 	Iterator hitIterator  hits.iterator();
+>>> 	// ... iterate over hitIterator ...
+>>> 	searcher.close();
+>>>
+>>> Any ideas?  Is this a bug in Lucene?
+>>>
+>>> - Paul
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>> --------------------------
+>> Grant Ingersoll
+>> http://www.lucidimagination.com
+>>
+>> Lucene Helpful Hints:
+>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+>> http://wiki.apache.org/lucene-java/LuceneFAQ
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+--------------------------
+Grant Ingersoll
+http://www.lucidimagination.com
+
+Lucene Helpful Hints:
+http://wiki.apache.org/lucene-java/BasicsOfPerformance
+http://wiki.apache.org/lucene-java/LuceneFAQ
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

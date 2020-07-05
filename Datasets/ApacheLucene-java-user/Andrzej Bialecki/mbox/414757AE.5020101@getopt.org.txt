@@ -1,0 +1,120 @@
+FROM: Andrzej Bialecki ...@getopt.org>
+SUBJECT: Re: NGramSpeller contribution -- Re: combining open office spellchecker with Lucene
+DATE: 14 Sep 2004
+
+David Spencer wrote:
+
+>> ...or prepare in advance a fast lookup index - split all existing
+>> terms to bi- or trigrams, create a separate lookup index, and then
+>> simply for each term ask a phrase query (phrase = all n-grams from
+>> an input term), with a slop > 0, to get similar existing terms.
+>> This should be fast, and you could provide a "did you mean"
+>> function too...
+>> 
+> 
+> Based on this mail I wrote a "ngram speller" for Lucene. It runs in 2
+> phases. First you build a "fast lookup index" as mentioned above.
+> Then to correct a word you do a query in this index based on the
+> ngrams in the misspelled word.
+> 
+
+The background for this suggestion was that I was playing some time ago 
+with a Luke plugin that builds various sorts of ancillary indexes, but 
+then I never finished it... Kudos for actually making it work ;-)
+
+> [1] Source is attached and I'd like to contribute it to the sandbox,
+> esp if someone can validate that what it's doing is reasonable and
+> useful.
+
+There have been many requests for this or similar functionality in the 
+past, I believe it should go into sandbox.
+
+I was wondering about the way you build the n-gram queries. You 
+basically don't care about their position in the input term. Originally 
+I thought about using PhraseQuery with a slop - however, after checking 
+the source of PhraseQuery I realized that this probably wouldn't be that 
+fast... You use BooleanQuery and start/end boosts instead, which may 
+give similar results in the end but much cheaper.
+
+I also wonder how this algorithm would behave for smaller values of 
+start/end lengths (e.g. 2,3,4). In a sense, the smaller the n-gram 
+length, the more "fuzziness" you introduce, which may or may not be 
+desirable (increased recall at the cost of precision - for small indexes 
+this may be useful from the user's perspective because you will always 
+get a plausible hit, for huge indexes it's a loss).
+
+> 
+> [2] Here's a demo page. I built an ngram index for ngrams of length 3
+>  and 4 based on the existing index I have of approx 100k 
+> javadoc-generated pages. You type in a misspelled word like
+> "recursixe" or whatnot to see what suggestions it returns. Note this
+> is not a normal search index query -- rather this is a test page for
+> spelling corrections.
+> 
+> http://www.searchmorph.com/kat/spell.jsp
+
+Very nice demo! I bet it's running way faster than the linear search 
+over terms :-), even though you have to build the index in advance. But 
+if you work with static or mostly static indexes this doesn't matter.
+
+> Based on a subsequent mail in this thread I set boosts for the words
+> in the ngram index. The background is each word (er..term for a given
+>  field) in the orig index is a separate Document in the ngram index.
+> This Doc contains all ngrams (in my test case, like #2 above, of
+> length 3 and 4) of the word. I also set a boost of
+> log(word_freq)/log(num_docs) so that more frequently words will tend
+> to be suggested more often.
+
+You may want to experiment with 2 <= n <= 5. Some n-gram based 
+techniques use all lengths together, some others use just single length, 
+results also vary depending on the language...
+
+> 
+> I think in "plain" English then the way a word is suggested as a 
+> spelling correction is: - frequently occuring words score higher -
+> words that share more ngrams with the orig word score higher - words
+> that share rare ngrams with the orig word score higher
+
+I think this is a reasonable heuristics. Reading the code I would 
+present it this way:
+
+- words that share more ngrams with the orig word score higher, and
+   words that share rare ngrams with the orig word score higher
+   (as a natural consequence of using BooleanQuery),
+
+- and, frequently occuring words score higher (as a consequence of using
+   per-Document boosts),
+
+- from reading the source code I see that you use Levenshtein distance
+   to prune the resultset of too long/too short results,
+
+I think also that because you don't use the positional information about 
+  the input n-grams you may be getting some really weird hits. You could 
+prune them by simply checking if you find a (threshold) of input ngrams 
+in the right sequence in the found terms. This shouldn't be too costly 
+because you operate on a small result set.
+
+> 
+> [6]
+> 
+> If people want to vote me in as a committer to the sandbox then I can
+
+Well, someone needs to maintain the code after all... ;-)
+
+-- 
+Best regards,
+Andrzej Bialecki
+
+-------------------------------------------------
+Software Architect, System Integration Specialist
+CEN/ISSS EC Workshop, ECIMF project chair
+EU FP6 E-Commerce Expert/Evaluator
+-------------------------------------------------
+FreeBSD developer (http://www.freebsd.org)
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

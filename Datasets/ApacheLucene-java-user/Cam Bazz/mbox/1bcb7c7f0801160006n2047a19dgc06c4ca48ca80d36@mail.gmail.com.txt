@@ -1,0 +1,266 @@
+FROM: "Cam Bazz" <camb...@gmail.com>
+SUBJECT: Re: lucene as a graph store
+DATE: 16 Jan 2008
+
+Hello,
+
+Not exactly, a document represents an edge, having src and dst node its.
+Nodes can be kept in another index or the same one. I can find number of
+edges by running a boolean term query.
+Currently I am looking for a way to distribute indexes, but in such a way
+that when querying you know which data store to look at.
+
+I am testing the % operator on edges.
+
+Consider the following.
+
+edge A: 001 to 002
+edge B: 002 to 005
+
+lets say I am using %2. (I have two indices)
+
+edge A is stored in index 1 (001%2=1) as well as index 0 (002%2=0)
+edge B is stored in index 0 and 1.
+
+in this scheme, when we are looking for an edge by its source node, we know
+which index to look at by %. (the data is replicated - pointless when using
+2 indexes, but for 4 it would work nicely)
+
+so instead of running the same query on all of the boxes, we know which
+boxes to run by the characteristics of the node.
+
+Any ideas?
+
+Best,
+-C.B.
+
+
+
+
+
+On Jan 15, 2008 6:54 PM, Otis Gospodnetic <otis_gospodnetic@yahoo.com>
+wrote:
+
+> Aha, I see, a Document represents a node and all other nodes connected to
+> it.  So you can really only find 2 nodes connected with an edge with a
+> single query, but not, say, the number of edges (degrees?) between any 2
+> nodes?
+>
+> Otis
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+> ----- Original Message ----
+> From: Cam Bazz <cambazz@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Tuesday, January 15, 2008 11:34:20 AM
+> Subject: Re: lucene as a graph store
+>
+> well lets say I have a list representation of a graph like
+>
+> src:1 dst:2
+> src:2 dst:3
+> src:1 dst 3
+>
+> outgoingEdgesOf(1) returns 2 and 3.
+> incomingEdgesOf(3) returns 1 and 2.
+>
+> in a lucene index it does work out nice with term queries. I can search
+>  for
+> incoming outgoing or edgeExist with a boolean term query.
+>
+> Best.
+>
+>
+> On Jan 15, 2008 6:22 PM, Otis Gospodnetic <otis_gospodnetic@yahoo.com>
+> wrote:
+>
+> > Hi,
+> >
+> >
+> > ----- Original Message ----
+> > From: Cam Bazz <cambazz@gmail.com>
+> > To: java-user@lucene.apache.org
+> > Sent: Tuesday, January 15, 2008 8:50:07 AM
+> > Subject: Re: lucene as a graph store
+> >
+> > Usually for implementing things like page rank, or doing centrality
+> >  metric
+> > calculations or maybe dijkstras shortest term, this kind of (list of
+> >  edges)
+> > graph is not best at performance.
+> > I like to use lucene for simple operations like neighboors of this
+> >  node, or
+> > 2 degree neighboors of this node.
+> >
+> > OG: Neighbours of a node?  Can you tell us more about what you use
+>  and how
+> > you use Lucene in this context?
+> >
+> > is updating an index costly operation in lucene? I dont think there
+> >  will too
+> > much updates, but rather deletes.
+> >
+> > when I delete documents from an index what things should I be careful
+> >  about.
+> >
+> > OG: Note that deletes are not removed from the index/disk
+>  immediately.
+> >  Rather, their doc IDs are stored and those docs are skipped during
+> > searches.  If you have a large number of deletes, you may want to
+>  optimize
+> > the index, so that this list of doc IDs to skip doesn't cost you.
+> >
+> > Otis
+> > --
+> > Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+> >
+> >
+> >
+> > On Jan 15, 2008 3:31 PM, Grant Ingersoll <gsingers@apache.org> wrote:
+> >
+> > > I guess the question comes down to what kind of things are you
+>  going
+> > > to do w/ this graph?  How often are you updating links, etc?  I
+>  can't
+> > > say Lucene was designed for this kind of thing, but I am constantly
+> > > amazed at what people use Lucene for, so I won't say it can't be
+> > > done.  I don't know how efficient it would be for doing things like
+> > > PageRank or other graph algorithms, but I would be interesting in
+> > > hearing more about what you have in mind.
+> > >
+> > > Lucene doesn't do much caching at the document level, but that is
+> > > fairly easy to implement, but it does bring some terms, etc. into
+> > > memory, and you may have a look at the FieldCache.
+> > >
+> > > -Grant
+> > >
+> > > On Jan 15, 2008, at 7:17 AM, Cam Bazz wrote:
+> > >
+> > > > Hello;
+> > > >
+> > > > I like to use lucene as a graph store. The graph representation
+>  is
+> >  a
+> > > > list of
+> > > > edges. Consider the code below:
+> > > >
+> > > >        final int commitCount = 16 * 1024;
+> > > >        final int numObj =  1024 * 1024;
+> > > >
+> > > >        Analyzer analyzer = new KeywordAnalyzer();
+> > > >        FSDirectory directory = FSDirectory.getDirectory("c:\
+> > > > \LuceneAdd");
+> > > >        IndexWriter writer = new IndexWriter(directory, analyzer,
+> > > > true);
+> > > >
+> > > >        Document doc;
+> > > >        long start = System.currentTimeMillis();
+> > > >
+> > > >        Random r = new Random(System.currentTimeMillis());
+> > > >
+> > > >        for(int i=0; i<numObj; i++) {
+> > > >            doc = new Document();
+> > > >            doc.add(new Field("srcKey",
+>  NumberTools.longToString(i),
+> > > > Field.Store.YES, Field.Index.UN_TOKENIZED));
+> > > >            doc.add(new Field("dstKey",
+> > > > NumberTools.longToString(r.nextInt(numObj)),
+> > > > Field.Store.YES, Field.Index.UN_TOKENIZED));
+> > > >            doc.add(new Field("linkKey",
+> > > > NumberTools.longToString(r.nextInt(16)),
+> > > > Field.Store.YES, Field.Index.UN_TOKENIZED));
+> > > >            doc.add(new Field("linkValue",
+>  NumberTools.longToString(
+> > > > r.nextInt(256)), Field.Store.YES, Field.Index.UN_TOKENIZED));
+> > > >
+> > > >           writer.addDocument(doc);
+> > > >
+> > > >            if(i%commitCount==0) {
+> > > >                 long now = System.currentTimeMillis();
+> > > >                 System.out.println(i + ":" + (now-start));
+> > > >                 start = now;
+> > > >            }
+> > > >
+> > > >        }
+> > > >
+> > > >        writer.optimize();
+> > > >        writer.close();
+> > > >        directory.close();
+> > > >
+> > > >
+> > > > Basically I am adding a large number of documents from srcKey = i
+> >  to
+> > > > dstKey
+> > > > = random and two other string fields - linkKey and linkValue.
+> > > >
+> > > > Compared to a normal database store, or an oodbms such as perst
+>  or
+> > > > db4o -
+> > > > lucene takes longer to index.
+> > > > However, it is much faster in searching, finding, retrieving
+> >  records.
+> > > >
+> > > > I can make 16384 random lookups over 1Million entries in 0.8
+> > > > seconds. This
+> > > > is excellent time. (I have been benchmarking for a long time)
+> > > >
+> > > > Typically, when number of objects in BTree based structure in an
+> > > > oodbms for
+> > > > example increase, the search and add times also increase.
+> > > >
+> > > > Will lucene have the same problem and how can I overcome it if it
+> > > > does.
+> > > > Looking at the above code - does anyone has any recomendations
+> > > > to improve index performance. (also what can I do to improve
+>  search
+> > > > performance)
+> > > >
+> > > > While searching with an indexsearcher - does lucene do any
+>  caching?
+> > > > usually
+> > > > MRU caches are used to accomplish this.
+> > > >
+> > > > Any ideas,help,recomendations greatly appreciated.
+> > > >
+> > > > Best,
+> > > > -C.B.
+> > >
+> > > --------------------------
+> > > Grant Ingersoll
+> > > http://lucene.grantingersoll.com
+> > > http://www.lucenebootcamp.com
+> > >
+> > > Lucene Helpful Hints:
+> > > http://wiki.apache.org/lucene-java/BasicsOfPerformance
+> > > http://wiki.apache.org/lucene-java/LuceneFAQ
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+>  ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

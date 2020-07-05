@@ -1,0 +1,112 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: Sorting Options for Query Results
+DATE: 16 Nov 2001
+
+This is not easy to do efficiently.  The efficiency of the search code
+depends on not constructing Document objects for every match.  Thus it is
+hard to efficiently perform calculations which require field values.
+
+Things are easy if you need date order, and you have added documents in date
+order.  In this case you can use the document number passed to the hit
+collector, since document numbers increase linearly as documents are added
+to an index.  Hits are in fact passed to the hit collector in
+document-number order, so you don't even have to sort.
+
+But if you need another ordering, besides by-score or by-addition-time, you
+will have to do more work.  The most efficient approach is to construct an
+array mapping document numbers to the value you wish to sort by.  Then use
+this array in your hit collector.  The array can be re-used by many queries,
+but must be re-constructed when documents are added or removed from the
+index.
+
+Such an array can be constructed with a TermEnum() and TermDocs(), as
+illustrated in some pseudo code I sent out earlier today.
+
+Note that, in a hit collector, it is more efficient to maintain a set of the
+top-N hits rather than collecting all hits, sorting, and then taking the
+top-N.  IndexSearcher.search() illustrates how this should be done when
+sorting by score.
+
+Probably this should be generalized into a HitsByField class:
+
+  public class HitsByField {
+    private String[] fieldValues;
+    private Searcher searcher;
+
+    public HitsByField(String field, IndexReader reader) {
+      ... construct fieldValues array per previous message ...
+      searcher = new IndexSearcher(reader);
+    }
+    
+    private class ByFieldCollector implements HitCollector {
+      String minValue = "";
+      TreeMap topHits = new TreeMap();
+      int maxHits;
+      int totalHits;
+      public ByFieldCollector(int maxHits) { this.maxHits = maxHits; }
+      public collect(int doc, float score) {
+        totalHits++;
+        String value = fieldValues[doc];
+        if (minValue.compareTo(value) < 0) {
+          topHits.put(value, new Integer(doc));
+          if (topHits.size() > maxHits) {
+            topHits.remove(topHits.firstKey());
+            minValue = (String)topHits.firstKey();
+          }
+        }
+      }
+      public int getHits(Document[] hits) {
+         ... put topHits in hits, using searcher.doc() ... 
+        return totalHits;
+      }
+    }
+
+    /** Returns the total number of hits.  Stores top hits in hits. */
+    public int search(Query query, Document[] hits) {
+      ByFieldCollector collector = new ByFieldCollector(hits.length);
+      searcher.search(query, collector);
+      return collector.getHits(hits);
+    }
+  }
+
+I leave it as an excercise for someone to fill in the blanks and post a
+complete, debugged version of this.  If it's useful, we can add it to
+Lucene.
+
+Doug
+
+> -----Original Message-----
+> From: Jeff Kunkle [mailto:Jeff.Kunkle@HERNDON-LAB.com]
+> Sent: Friday, November 16, 2001 2:01 PM
+> To: lucene-user@jakarta.apache.org
+> Subject: Sorting Options for Query Results
+> 
+> 
+> Hello.  Does anyone know of a way to sort search results other than by
+> score?  It seems like it would be very useful to be able to 
+> sort by date or
+> maybe even by any field that has been indexed (which I guess 
+> would include a
+> date).  From what I can tell, Lucene does not provide any way 
+> to do this
+> beyond writing your own HitCollector.  Is this correct?  If 
+> so, has anyone
+> had any luck implementing alternate sorting methods?  I have 
+> just started
+> experimenting with Lucene so any help is greatly appreciated.
+> 
+> Thanks,
+> Jeff
+> 
+> --
+> To unsubscribe, e-mail:   
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail: 
+> <mailto:lucene-user-help@jakarta.apache.org>
+> 
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

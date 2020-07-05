@@ -1,0 +1,83 @@
+FROM: Albert Vila <...@imente.com>
+SUBJECT: Best index architecture
+DATE: 14 Aug 2007
+
+Hi
+
+	We have a system like 'google news'. We currently parse and index  
+over 180.000 headlines per day. One month data is 10Gb and the  
+indexation process takes 2 hours +/-, the index size is 6Gb +/-  
+(We're using mergeFactor 40, setMaxBufferedDocs 100000,  
+setRAMBufferSizeMb 500 and useCompoundFile false, the computer has  
+2CPUs and 4Gb RAM).
+
+We have headlines since 2002, 130million headlines, and we need to be  
+able to search all these history. The most used indexes are the  
+recent ones.
+All indexed data never change. We have indexes per year and per  
+month, and we mantain a daily index incrementally. We always sort  
+results by date, using the internal lucene id.
+
+We also have users. Earch user has folders, the headlines are  
+automatically assigned to folders according to users preferences. The  
+users can add/delete the assigned headlines. Now, We want to  
+implement searches per folder.
+
+We discussed the same structure as the main index, but there is a  
+problem with add/delete actions. If we have indexes per month, or per  
+year, a single user action means we need to reindex the whole index,  
+because we use the internal lucene id as sort method.
+We thought to use a single index containing all folder data, but we  
+need to reindex the whole index as well.
+If we don't use the lucene internal id as sorting method, we can  
+index old documents with newer lucene's internal ids, and use a  
+timestamp field to sort results, but we will pay at searching time.
+To save index size, we thought to add all folder information in the  
+main index. For instance:
+	Headline 1, content, language, ...
+	Headline 2, content, language, ...
+	Headline 3, content, language, ...
+
+	Folder 1 contains headline 1 and 2
+	Folder 2 contains headline 2 and 3
+
+Using the firsts approaches, we will have these structure
+	main_index/year/month/
+	main_index/current/
+		headline 1
+		headline 2
+		headline 3
+
+	folders_index/folder1
+		headline 1
+		headline 2
+	folders_index/folder2
+		headline 2
+		headline 3
+	(the folder's index structure may change if we use year/month  
+indexes or all in the same index).
+
+On the other hand, we can also store the information like:
+	main_index/year/month
+	main_index/current
+		headline 1, content, language, folder:1
+		headline 2, content, language, folder:1,2
+		headline 3, content, language, folder:2
+The problem we see with these approach is we have to constantly  
+update the main index, adding, deleting and updating folder fields.  
+It is more problematic with failures, because we have all information  
+in the same index, but we save Gb becasuse we don't duplicate  
+headlines across indexes.
+
+Users add and delete actions are unusual, but headlines are  
+automatically assigned to folders earch minute.
+
+Anyone has a better approach to this problem?
+
+Thanks
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

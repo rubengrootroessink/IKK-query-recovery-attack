@@ -1,0 +1,264 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Custom FieldComparator and incorrect sort order
+DATE: 15 Jul 2009
+
+OK I opened & fixed https://issues.apache.org/jira/browse/LUCENE-1744.
+
+Thanks Shalin!
+
+Mike
+
+On Wed, Jul 15, 2009 at 7:04 AM, Michael
+McCandless<lucene@mikemccandless.com> wrote:
+> OK this is a bug in BooleanScorer2!  I'll open it shortly... thanks Shalin!
+>
+> Mike
+>
+> On Wed, Jul 15, 2009 at 6:32 AM, Michael
+> McCandless<lucene@mikemccandless.com> wrote:
+>> I'll look into this...
+>>
+>> Mike
+>>
+>> On Wed, Jul 15, 2009 at 3:55 AM, Shalin Shekhar
+>> Mangar<shalinmangar@gmail.com> wrote:
+>>> Hello,
+>>>
+>>> Over in Solr land, I'm facing a problem while upgrading the lucene version
+>>> to trunk. Solr has a QueryElevationComponent which is used to boost certain
+>>> documents to the top. It pre-processes the query to add a few boolean
+>>> clauses of its own and uses a FieldComparator for the sorting part. This
+>>> worked fine before the upgrade. There's a test which fixes the position of
+>>> two docs and then sorts on score ascending. After the upgrade, the score asc
+>>> does not seem to take effect and documents are sorted by score descending.
+>>>
+>>> I've tried to remove the solr baggage in the following code. Changing the
+>>> score sort to ascending/descending gives the exact same order of the
+>>> results. Any ideas on what may be the problem?
+>>>
+>>> package org.apache.solr;
+>>>
+>>> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+>>> import org.apache.lucene.document.Document;
+>>> import org.apache.lucene.document.Field;
+>>> import org.apache.lucene.index.IndexReader;
+>>> import org.apache.lucene.index.IndexWriter;
+>>> import org.apache.lucene.index.Term;
+>>> import org.apache.lucene.search.*;
+>>> import org.apache.lucene.store.RAMDirectory;
+>>> import org.junit.Test;
+>>>
+>>> import java.io.IOException;
+>>> import java.util.HashMap;
+>>> import java.util.Map;
+>>>
+>>> public class TestSort {
+>>>
+>>>  private final Map<String, Integer> priority = new HashMap<String,
+>>> Integer>();
+>>>
+>>>  @Test
+>>>  public void testSorting() throws IOException {
+>>>    RAMDirectory directory = new RAMDirectory();
+>>>    IndexWriter writer = new IndexWriter(directory, new
+>>> WhitespaceAnalyzer(), true, IndexWriter.MaxFieldLength.LIMITED);
+>>>    writer.setMaxBufferedDocs(2);
+>>>    writer.setMergeFactor(1000);
+>>>    writer.addDocument(adoc("id", "a", "title", "ipod", "str_s", "a"));
+>>>    writer.addDocument(adoc("id", "b", "title", "ipod ipod", "str_s", "b"));
+>>>    writer.addDocument(adoc("id", "c", "title", "ipod ipod ipod", "str_s",
+>>> "c"));
+>>>    writer.addDocument(adoc("id", "x", "title", "boosted", "str_s", "x"));
+>>>    writer.addDocument(adoc("id", "y", "title", "boosted boosted", "str_s",
+>>> "y"));
+>>>    writer.addDocument(adoc("id", "z", "title", "boosted boosted boosted",
+>>> "str_s", "z"));
+>>>    writer.close();
+>>>
+>>>    IndexSearcher searcher = new IndexSearcher(directory, true);
+>>>    BooleanQuery newq = new BooleanQuery(false);
+>>>    TermQuery query = new TermQuery(new Term("title", "ipod"));
+>>>
+>>>    newq.add(query, BooleanClause.Occur.SHOULD);
+>>>    newq.add(getElevatedQuery("id", "a", "id", "x"),
+>>> BooleanClause.Occur.SHOULD);
+>>>
+>>>    Sort sort = new Sort(new SortField[]{
+>>>            new SortField("id", new ElevationComparatorSource(priority),
+>>> false),
+>>>            new SortField(null, SortField.SCORE, true)
+>>>    });
+>>>    TopDocsCollector topCollector = TopFieldCollector.create(sort, 50,
+>>> false, true, true, true);
+>>>    searcher.search(newq, null, topCollector);
+>>>
+>>>    TopDocs topDocs = topCollector.topDocs(0, 10);
+>>>    int nDocsReturned = topDocs.scoreDocs.length;
+>>>
+>>>    int[] ids = new int[nDocsReturned];
+>>>    float[] scores = new float[nDocsReturned];
+>>>    Document[] documents = new Document[nDocsReturned];
+>>>    for (int i = 0; i < nDocsReturned; i++) {
+>>>      ScoreDoc scoreDoc = topDocs.scoreDocs[i];
+>>>      ids[i] = scoreDoc.doc;
+>>>      scores[i] = scoreDoc.score;
+>>>      documents[i] = searcher.doc(ids[i]);
+>>>      System.out.println("documents[i] = " + documents[i]);
+>>>      System.out.println("scores[i] = " + scores[i]);
+>>>    }
+>>>
+>>>    searcher.close();
+>>>  }
+>>>
+>>>  private Query getElevatedQuery(String... vals) {
+>>>    BooleanQuery q = new BooleanQuery(false);
+>>>    q.setBoost(0);
+>>>    int max = (vals.length / 2) + 5;
+>>>    for (int i = 0; i < vals.length - 1; i += 2) {
+>>>      q.add(new TermQuery(new Term(vals[i], vals[i + 1])),
+>>> BooleanClause.Occur.SHOULD);
+>>>      priority.put(vals[i + 1], max--);
+>>>    }
+>>>    return q;
+>>>  }
+>>>
+>>>  private Document adoc(String... vals) {
+>>>    Document doc = new Document();
+>>>    for (int i = 0; i < vals.length - 2; i += 2) {
+>>>      doc.add(new Field(vals[i], vals[i + 1], Field.Store.YES,
+>>> Field.Index.ANALYZED));
+>>>    }
+>>>    return doc;
+>>>  }
+>>> }
+>>>
+>>> class ElevationComparatorSource extends FieldComparatorSource {
+>>>  private final Map<String, Integer> priority;
+>>>
+>>>  public ElevationComparatorSource(final Map<String, Integer> boosts) {
+>>>    this.priority = boosts;
+>>>  }
+>>>
+>>>  public FieldComparator newComparator(final String fieldname, final int
+>>> numHits, int sortPos, boolean reversed) throws IOException {
+>>>    return new FieldComparator() {
+>>>
+>>>      FieldCache.StringIndex idIndex;
+>>>      private final int[] values = new int[numHits];
+>>>      int bottomVal;
+>>>
+>>>      public int compare(int slot1, int slot2) {
+>>>        return values[slot2] - values[slot1];  // values will be small
+>>> enough that there is no overflow concern
+>>>      }
+>>>
+>>>      public void setBottom(int slot) {
+>>>        bottomVal = values[slot];
+>>>      }
+>>>
+>>>      private int docVal(int doc) throws IOException {
+>>>        String id = idIndex.lookup[idIndex.order[doc]];
+>>>        Integer prio = priority.get(id);
+>>>        return prio == null ? 0 : prio.intValue();
+>>>      }
+>>>
+>>>      public int compareBottom(int doc) throws IOException {
+>>>        return docVal(doc) - bottomVal;
+>>>      }
+>>>
+>>>      public void copy(int slot, int doc) throws IOException {
+>>>        values[slot] = docVal(doc);
+>>>      }
+>>>
+>>>      public void setNextReader(IndexReader reader, int docBase, int
+>>> numSlotsFull) throws IOException {
+>>>        idIndex = FieldCache.DEFAULT.getStringIndex(reader, fieldname);
+>>>      }
+>>>
+>>>      public int sortType() {
+>>>        return SortField.CUSTOM;
+>>>      }
+>>>
+>>>      public Comparable value(int slot) {
+>>>        return values[slot];
+>>>      }
+>>>    };
+>>>  }
+>>> }
+>>>
+>>> With Lucene trunk:
+>>>
+>>> Sort: new SortField(null, SortField.SCORE, true)
+>>>
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:a>
+>>> stored/uncompressed,indexed,tokenized<title:ipod>>
+>>> scores[i] = 1.4054651
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:x>
+>>> stored/uncompressed,indexed,tokenized<title:boosted>>
+>>> scores[i] = 0.0
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:b>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod>>
+>>> scores[i] = 0.6211337
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:c>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod ipod>>
+>>> scores[i] = 0.6085842
+>>>
+>>> Sort: new SortField(null, SortField.SCORE, false)
+>>>
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:a>
+>>> stored/uncompressed,indexed,tokenized<title:ipod>>
+>>> scores[i] = 1.4054651
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:x>
+>>> stored/uncompressed,indexed,tokenized<title:boosted>>
+>>> scores[i] = 0.0
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:b>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod>>
+>>> scores[i] = 0.6211337
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:c>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod ipod>>
+>>> scores[i] = 0.6085842
+>>>
+>>> With Lucene r779312:
+>>>
+>>> Sort: new SortField(null, SortField.SCORE, true)
+>>>
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:a>
+>>> stored/uncompressed,indexed,tokenized<title:ipod>>
+>>> scores[i] = 1.4054651
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:x>
+>>> stored/uncompressed,indexed,tokenized<title:boosted>>
+>>> scores[i] = 0.0
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:c>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod ipod>>
+>>> scores[i] = 0.6085842
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:b>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod>>
+>>> scores[i] = 0.6211337
+>>>
+>>> Sort: new SortField(null, SortField.SCORE, false)
+>>>
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:a>
+>>> stored/uncompressed,indexed,tokenized<title:ipod>>
+>>> scores[i] = 1.4054651
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:x>
+>>> stored/uncompressed,indexed,tokenized<title:boosted>>
+>>> scores[i] = 0.0
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:b>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod>>
+>>> scores[i] = 0.6211337
+>>> documents[i] = Document<stored/uncompressed,indexed,tokenized<id:c>
+>>> stored/uncompressed,indexed,tokenized<title:ipod ipod ipod>>
+>>> scores[i] = 0.6085842
+>>>
+>>> --
+>>> Regards,
+>>> Shalin Shekhar Mangar.
+>>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

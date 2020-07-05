@@ -1,0 +1,349 @@
+FROM: "Phil Herold" <pher...@d-wise.com>
+SUBJECT: BooleanQuery / multiple indexes - Lucene 3.0.3
+DATE: 3 Feb 2011
+
+Hi,
+
+ 
+
+I'm getting incorrect search results when I use a MultiSearcher across
+multiple indexes with a Boolean query, specifically, foo AND !bar (using
+QueryParser). For example, with two indexes, I have a single document that
+satisfies both "foo" and "bar", so it should be excluded from the search
+result. It's not. If I do the search across the one index (using just
+IndexSearcher) containing the document in question, it excludes the document
+as expected. I've not been able to reproduce this with a simple test case,
+unfortunately. The indexes are large (10K documents), with MB worth of data.
+
+ 
+
+I've spent several frustrating days trying to track down this problem since
+it effects our users. I've traced the code through ReqExclScorer,
+particularly the toNonExcluded() method. It indeed behaves slightly
+differently when searching one index versus two. 
+
+ 
+
+Here is code that "should" reproduce the problem, but alas it does not (it
+works as expected), so this is probably not much help:
+
+ 
+
+package com.dwise.reveal.indexing;
+
+ 
+
+import junit.framework.TestCase;
+
+ 
+
+import org.apache.lucene.analysis.Analyzer;
+
+import org.apache.lucene.analysis.KeywordAnalyzer;
+
+import org.apache.lucene.document.Document;
+
+import org.apache.lucene.document.Field;
+
+import org.apache.lucene.index.IndexWriter;
+
+import org.apache.lucene.index.IndexWriter.MaxFieldLength;
+
+import org.apache.lucene.queryParser.QueryParser;
+
+import org.apache.lucene.search.IndexSearcher;
+
+import org.apache.lucene.search.ParallelMultiSearcher;
+
+import org.apache.lucene.search.Query;
+
+import org.apache.lucene.search.ScoreDoc;
+
+import org.apache.lucene.search.Searchable;
+
+import org.apache.lucene.search.Searcher;
+
+import org.apache.lucene.search.TopDocs;
+
+import org.apache.lucene.search.TopScoreDocCollector;
+
+import org.apache.lucene.store.Directory;
+
+import org.apache.lucene.store.RAMDirectory;
+
+import org.apache.lucene.util.Version;
+
+ 
+
+public class LuceneTest3 extends TestCase {
+
+   
+
+   private Analyzer _analyzer;
+
+   private Directory _directory;
+
+   private Directory _directory2;
+
+   private IndexWriter _indexWriter;
+
+   private IndexSearcher _indexSearcher1;
+
+   private IndexSearcher _indexSearcher2;
+
+   private final Document _doc1 = new Document();
+
+   private final Document _doc1b = new Document();
+
+   private final Document _doc1c = new Document();
+
+   private final Document _doc1d = new Document();
+
+   private final Document _doc2 = new Document();
+
+   private final Document _doc2b = new Document();
+
+   private static String _defaultTerm = "path";
+
+   private static String _nameTerm = "name";
+
+   private static Searcher _searcher;
+
+   
+
+   @Override
+
+   protected void setUp() throws Exception {
+
+      super.setUp();
+
+      _analyzer = new KeywordAnalyzer();
+
+      _directory = new RAMDirectory();
+
+      _indexWriter = new IndexWriter(_directory, _analyzer, true,
+MaxFieldLength.UNLIMITED);
+
+      addDefaultTerm(_doc1,
+"/SDD/DSCLIN/CS-0917/SE917-01/Production/Data/Analysis Ready Data"); //
+matches include clause
+
+      addTerm(_doc1, _nameTerm, "remerge_all.sas");
+
+      addDefaultTerm(_doc1b,
+"/SDD/DSCLIN/CS-0917/Integrated/Production/Data/Analysis Ready
+Data/ae.sas7bdat"); // matches exclude clause
+
+      addDefaultTerm(_doc1c,
+"/SDD/DSCLIN/CS-0917/Integrated/Production/Data/Analysis Ready Data"); //
+this is the bad boy
+
+      addDefaultTerm(_doc1d,
+"/SDD/DSCLIN/CS-0917/Integrated/Production/Data"); // matches exclude clause
+
+      
+
+      _indexWriter.addDocument(_doc1); // docId 0
+
+      _indexWriter.addDocument(_doc1b); // docId 1
+
+      _indexWriter.addDocument(_doc1c); // docId 2
+
+      _indexWriter.addDocument(_doc1d); // docId 3
+
+      _indexWriter.optimize();
+
+      _indexWriter.close();
+
+      
+
+      _indexSearcher1 = new IndexSearcher(_directory, true);
+
+      
+
+      _directory2 = new RAMDirectory();
+
+      _indexWriter = new IndexWriter(_directory2, _analyzer, true,
+MaxFieldLength.UNLIMITED);
+
+      
+
+      addDefaultTerm(_doc2,
+"/SDD/DSCLIN/CS-1008/CS1008-A-U201/Production/Data/Analysis Ready Data"); //
+matches include clause
+
+      addDefaultTerm(_doc2b,
+"/SDD/DSCLIN/CS-0917/Integrated/Production/Data/Analysis Ready
+Data/cm.sas7bdat"); // matches exclude clause
+
+      
+
+      _indexWriter.addDocument(_doc2b); // docId 3 + 1 (4)
+
+      _indexWriter.addDocument(_doc2); // docId 3 + 2 (5)
+
+      _indexWriter.optimize();
+
+      _indexWriter.close();
+
+      
+
+      _indexSearcher2 = new IndexSearcher(_directory2, true);
+
+   }
+
+   
+
+   @Override
+
+   protected void tearDown() throws Exception {
+
+      super.tearDown();
+
+      _searcher.close();
+
+      _directory.close();
+
+      _directory2.close();
+
+   }
+
+   
+
+   public void testPathSearch() throws Exception {
+
+      // Now search the index:
+
+      QueryParser parser = new QueryParser(Version.LUCENE_30, _defaultTerm,
+_analyzer);
+
+      parser.setLowercaseExpandedTerms(true);
+
+      parser.setAllowLeadingWildcard(true);
+
+      _searcher = new ParallelMultiSearcher(new Searchable[] {
+_indexSearcher1, _indexSearcher2 });
+
+      
+
+      // "Include" clause
+
+      System.out.println("Include clause results (should be 3):");
+
+      Query query =
+parser.parse("/sdd/dsclin/*production*analysis?ready?data");
+
+      TopScoreDocCollector collector = TopScoreDocCollector.create(4, true);
+
+      _searcher.search(query, collector);
+
+      assertEquals(3, collector.getTotalHits());
+
+      dumpDocs(_searcher, collector, null);
+
+      System.out.println();
+
+      
+
+      // "Exclude" clause
+
+      System.out.println("Exclude clause results (should be 3):");
+
+      query = parser.parse("(*integrated/production*)");
+
+      collector = TopScoreDocCollector.create(4, true);
+
+      _searcher.search(query, collector);
+
+      assertEquals(4, collector.getTotalHits());
+
+      dumpDocs(_searcher, collector, null);
+
+      System.out.println();
+
+      
+
+      // Both together
+
+      query = parser.parse("/sdd/dsclin/*production*analysis?ready?data
+!(*integrated/production*)");
+
+      System.out.println("parsed query: " + query);
+
+      System.out.println("rewritten query: " + _searcher.rewrite(query));
+
+      System.out.println();
+
+      System.out.println("Together results (should be 2):");
+
+      collector = TopScoreDocCollector.create(4, true);
+
+      _searcher.search(query, collector);
+
+      assertEquals(2, collector.getTotalHits());
+
+      dumpDocs(_searcher, collector, query);
+
+   }
+
+   
+
+   private void addTerm(Document doc, String term, String value) {
+
+      doc.add(new Field(term, value.toLowerCase(), Field.Store.YES,
+Field.Index.NOT_ANALYZED));
+
+   }
+
+   
+
+   private void addDefaultTerm(Document doc, String value) {
+
+      doc.add(new Field(_defaultTerm, value.toLowerCase(), Field.Store.YES,
+Field.Index.NOT_ANALYZED));
+
+   }
+
+   
+
+   private void dumpDocs(Searcher searcher, TopScoreDocCollector collector,
+Query query) throws Exception {
+
+      TopDocs topDocs = collector.topDocs();
+
+      ScoreDoc[] hits = topDocs.scoreDocs;
+
+      for (int i = 0; i < collector.getTotalHits(); i++) {
+
+         int docId = hits[i].doc;
+
+         Document doc = searcher.doc(docId);
+
+         System.out.println("docId: " + docId + "; path: " +
+doc.get(_defaultTerm));
+
+         if (query != null) {
+
+            System.out.println(_searcher.explain(query, docId));
+
+         }
+
+      }
+
+      
+
+   }
+
+}
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+

@@ -1,0 +1,131 @@
+FROM: Frank Geary <fge...@acquiremedia.com>
+SUBJECT: Re: Index corruption using Lucene 2.4.1 - thread safety issue?
+DATE: 3 Feb 2010
+
+
+For the record - I haven't proven this yet - but here's my current theory of
+what is causing the problem:
+
+1) We start with a new RAMDir IW[0] and do some deletes and adds.
+2) We create at least one IndexReader based on that IW. The last of which
+we'll call IndexReader[A].
+3) Then we switch to using the other RAMDir IW[1].
+4) While using IW[1], we clear out IW[0] and create a new IW[0].  However,
+the last IndexReader, IndexReader[A], is left around.
+5) Eventually, we switch to using the other newly re-created RAMDir IW[0]
+again.
+6) The first search that comes in against RAMDir IW[0] trys to reopen
+IndexReader[A].  But IndexReader[A] has nothing to do with the newly
+re-created RAMDir index[0].  
+
+So my theory is that this confuses the IndexReader.reopen() code.  
+Therefore, we can perhaps fix the problem by deleting the last IndexReader
+used whenever we re-create any RAMDir IW.  Furthermore, this problem may be
+so infrequent because:
+a) It can only happen the first time after two RAMDir swaps.
+b) It may depend on what state IndexReader[A] was in when it was created.
+c) It may also depend on what state the new RAMDir IW is in when that first
+reopen() call is made using the old IndexReader[A].  
+d) If the first reopen for a new IW succeeds, we're fine until the next
+swap.
+e) If it fails, it could fail repeatedly or only once.
+
+I'll let you know when I determine if this theory is correct or not.
+
+Frank
+
+ 
+
+Michael McCandless-2 wrote:
+> 
+> It looks like each IW writes to a private log file -- could you zip up
+> all such files and attach as a zip file (CC me directly because the
+> list strips attachments)?  It can give me a bigger picture than just
+> these fragments...
+> 
+> Mike
+> 
+> On Fri, Jan 22, 2010 at 12:02 PM, Frank Geary <fgeary@acquiremedia.com>
+> wrote:
+>>
+>> Mike,
+>>
+>> Below are the portions of the merge log files related to the
+>> setInfoStream()
+>> calls during the time our exception happens.  The ..._1... log file is
+>> from
+>> one RAMDir index and the ..._0... log file is from the other RAMDir
+>> index.
+> 
+> OK
+> 
+>> The time period when our Array index out of bounds exception happens is
+>> 2009-12-27 19:59:51,244 (when the IndexReader.reopen() is about to be
+>> called) to 2009-12-27 19:59:51,259 (when the exception is thrown from the
+>> MultiIndexSearch.search() call).
+> 
+> I suspect the corruption happened before that, ie, somehow the
+> deletions file for a segment got overwritten.  To bound the time I
+> guess we have look back to the reopen before the corrupt IndexReader
+> (which didn't hit the corruption).
+> 
+>> As you can see from the log files below,
+>> our "_1" RAMDir index is the only one being used during the time the
+>> exception is thrown - not new information to me.
+> 
+> Right but we need to see logs from earlier...
+> 
+>> Also a merge has finished
+>> at 2009-12-27 19:59:50,561 and thus it appears that nothing at all is
+>> happening (with respect to merges or commits) in either RAMDir index at
+>> the
+>> time the problem occurs.
+> 
+> Need to see all the infoStream log files to really be sure...
+> 
+>> But one thing that is interesting to me - perhaps
+>> you can clarify - is there is a very short commit at the very top of the
+>> "_1" log file.  Why is that commit different from the commit right below
+>> it?
+>> What does "DW: apply 1 buffered deleted terms and 0 deleted docIDs" mean?
+> 
+> There was one delete-by-Term buffered (and no added docs) for the
+> first commit, and the reverse for the 2nd case.
+> 
+>> What does "commit: pendingCommit == null; skip" mean?  Are there
+>> different
+>> kinds of commit?
+> 
+> It looks like the deleted Term did not in fact match a document and so
+> the flush & commit were skipped.
+> 
+> You should also try making new RAMDirs instead of reusing the same one
+> -- if that still hits GC problems then something else is wrong: once a
+> RAMDir & all readers/writers using it are closed, it should be easy to
+> GC.
+> 
+> Or, another thing you could try is to swap in MockRAMDirectory (from
+> Lucene's tests): it will throw an exception if you attempt to close it
+> when the readers/writers didn't in fact close all their files.  If you
+> hit that exception you know something isn't being closed... it's a
+> good way to catch bugs...
+> 
+> Mike
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://old.nabble.com/Index-corruption-using-Lucene-2.4.1---thread-safety-issue--tp27115515p27441219.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

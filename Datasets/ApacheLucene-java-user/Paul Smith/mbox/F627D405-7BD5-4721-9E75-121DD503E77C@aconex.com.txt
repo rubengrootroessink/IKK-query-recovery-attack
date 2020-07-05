@@ -1,0 +1,83 @@
+FROM: Paul Smith <psm...@aconex.com>
+SUBJECT: Sorting, RuleBasedCollater, and synchronization bottleneck
+DATE: 14 Feb 2007
+
+Hi ho peoples.
+
+We have an application that is internationalized, and stores data  
+from many languages (each project has it's own index, mostly aligned  
+with a single language, maybe 2).
+
+Anyway, I've noticed during some thread dumps diagnosing some  
+performance issues, that there appears to be a _potential_  
+synchronization bottleneck using Locale-based sorting of Strings.  I  
+don't think this problem is the root cause of our performance  
+problem, but I thought I'd mention it here.  Here's the stack dump of  
+a thread waiting:
+
+"http-1001-Processor245" daemon prio=1 tid=0x31434da0 nid=0x3744  
+waiting for monitor entry [0x2cd44000..0x2cd45f30]
+         at java.text.RuleBasedCollator.compare(RuleBasedCollator.java)
+         - waiting to lock <0x6b1e8c68> (a java.text.RuleBasedCollator)
+         at org.apache.lucene.search.FieldSortedHitQueue$4.compare 
+(FieldSortedHitQueue.java:320)
+         at org.apache.lucene.search.FieldSortedHitQueue.lessThan 
+(FieldSortedHitQueue.java:114)
+         at org.apache.lucene.util.PriorityQueue.upHeap 
+(PriorityQueue.java:120)
+         at org.apache.lucene.util.PriorityQueue.put 
+(PriorityQueue.java:47)
+         at org.apache.lucene.util.PriorityQueue.insert 
+(PriorityQueue.java:58)
+         at org.apache.lucene.search.FieldSortedHitQueue.insert 
+(FieldSortedHitQueue.java:90)
+         at org.apache.lucene.search.FieldSortedHitQueue.insert 
+(FieldSortedHitQueue.java:97)
+         at org.apache.lucene.search.TopFieldDocCollector.collect 
+(TopFieldDocCollector.java:47)
+         at org.apache.lucene.search.BooleanScorer2.score 
+(BooleanScorer2.java:291)
+         at org.apache.lucene.search.IndexSearcher.search 
+(IndexSearcher.java:132)
+         at org.apache.lucene.search.IndexSearcher.search 
+(IndexSearcher.java:110)
+         at com.aconex.index.search.FastLocaleSortIndexSearcher.search 
+(FastLocaleSortIndexSearcher.java:90)
+.....
+
+In our case we had 12 threads waiting like this, while one thread had  
+the lock on the RuleBasedCollator.  Turns out  
+RuleBasedCollator's.compare(...) method is synchronized.  I wonder if  
+a ThreadLocal based collator would be better here... ?  There doesn't  
+appear to be a reason for other threads searching the same index to  
+wait on this sort.  Be just as easy to use their own.  (Is  
+RuleBasedCollator a "heavy" object memory wise?  Wouldn't have  
+thought so, per thread)
+
+Thoughts?
+
+
+Paul Smith
+Engineering Manager
+
+Aconex
+The easy way to save time and money on your project
+
+696 Bourke Street, Melbourne,
+VIC 3000, Australia
+Tel: +61 3 9240 0200  Fax: +61 3 9240 0299
+Email: psmith@aconex.com  www.aconex.com
+
+This email and any attachments are intended solely for the addressee.  
+The contents may be privileged, confidential and/or subject to  
+copyright or other applicable law. No confidentiality or privilege is  
+lost by an erroneous transmission. If you have received this e-mail  
+in error, please let us know by reply e-mail and delete or destroy  
+this mail and all copies. If you are not the intended recipient of  
+this message you must not disseminate, copy or take any action in  
+reliance on it. The sender takes no responsibility for the effect of  
+this message upon the recipient's computer system.
+
+
+
+

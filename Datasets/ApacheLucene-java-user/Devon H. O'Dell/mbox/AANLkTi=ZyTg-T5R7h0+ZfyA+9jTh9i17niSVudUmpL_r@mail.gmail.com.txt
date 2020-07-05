@@ -1,0 +1,108 @@
+FROM: "Devon H. O'Dell" <devon.od...@gmail.com>
+SUBJECT: Re: a faster way to addDocument and get the ID just added?
+DATE: 30 Mar 2011
+
+2011/3/30 Simon Willnauer <simon.willnauer@googlemail.com>:
+> On Wed, Mar 30, 2011 at 8:14 AM, Li Li <fancyerii@gmail.com> wrote:
+>> merge will also change docid
+>> all segments' docId begin with 0
+>
+> for all released version this is not true. Before trunk (and I think
+> its in 3.1 also) merge only merged continuous segments so the actual
+> per-segment ID might change but the global document ID doesn't if you
+> only add documents. But this should not be considered a feature. In
+> upcoming version this does not work anymore since merges can now be
+> non-continuous.
+>
+> Anyway, I strongly discourage to rely on lucene document IDs you
+> should not do this at all. Can't you use your own ID mechanism?
+
+At least in a project I'm working on with an add-only scenario, this
+is not sufficient. I need to do sorting and deduplication (on a set of
+billions of records), which requires me to implement my own collector.
+Having a cache that maps a global document ID to the global ID of the
+document it sorts / deduplicates to is a *huge* win for this
+application, where normally a resultset of 10,000 records might take a
+minute (or more) to retrieve with only ~50 million documents, it
+instead takes under a second.
+
+In upcoming versions, will it be possible to disable non-contiguous
+segment merges? I can keep per-reader caches, but that causes a lot of
+cache thrashing on the index that is currently being written to. Or is
+there a better suggested way to do things like this that doesn't
+require relying on document IDs (and is just as fast)?
+
+--dho
+
+> simon
+>>
+>> 2011/3/30 Trejkaz <trejkaz@trypticon.org>:
+>>> On Tue, Mar 29, 2011 at 11:21 PM, Erick Erickson
+>>> <erickerickson@gmail.com> wrote:
+>>>> I'm always skeptical of storing the doc IDs since they can
+>>>> change out from underneath you (just delete even a single
+>>>> document and optimize).
+>>>
+>>> We never delete documents.  Even when a feature request came in to
+>>> update documents (i.e. delete the old one and add a new version), we
+>>> ended up keeping the old version around, partially because we didn't
+>>> want the IDs to shift (which is a bit of a recursive argument), but
+>>> also because it's forensically sound to have the previous versions
+>>> around so people can see what edits were made.
+>>>
+>>>> What is it you're doing with the doc ID that you couldn't do with the guid?
+If your "guid list"
+>>>> were ordered, I can imagine building filters quite quickly from
+>>>> it using TermDocs.skipTo for instance..
+>>>
+>>> The main problem with filters is that DocIdBitSet's iterator has to
+>>> return the doc IDs in order.
+>>>
+>>> Even if our GUIDs are in order (they would be, as it would be the
+>>> primary key on tables using them), they won't be in the same order as
+>>> the IDs of the docs they came from.  So for each row in the ResultSet,
+>>> you need to do a TermDocs.seek(Term).  This not only costs the
+>>> additional I/O (and it's a lot more than the original database query
+>>> was), but you have to read every row in the ResultSet just to get the
+>>> first doc ID.
+>>>
+>>> Contrast this with using doc IDs for the database query.  You don't
+>>> need to hit the index at all since you already have the result.  And
+>>> the docs come back in order, so you don't even have to iterate the
+>>> entire result set - you can read the first 100 rows and then read more
+>>> rows if/when they are needed.  And if the caller is using skipTo then
+>>> this can be incorporated into the database query to avoid returning
+>>> rows which are only going to be discarded anyway.
+>>>
+>>> Integer fields should have improved things a little in terms of the
+>>> amount of I/O required to do the query (at least I would hope that
+>>> this is the case - I haven't done any tests yet and we can't use them
+>>> yet for backwards compatibility reasons) but they don't remove the
+>>> problem of needing to iterate every document in the result set
+>>> up-front.
+>>>
+>>> TX
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

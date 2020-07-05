@@ -1,0 +1,67 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: termpositions at index time...
+DATE: 18 Oct 2006
+
+Here's my problem:
+
+We're indexing books. I need to
+a> return books ordered by relevancy
+b> for any single book, return the number of hits in each chapter (which, of
+course, may be many pages).
+
+1>If I index each page as a document, creating the relevance on a book basis
+is interesting, but collecting page hits per book is easy.
+2>If I index each book as a document, returning the books by relevance is
+easy but aggregating hits per chapter is interesting.
+
+No, creating two indexes is not an option at present, although that would be
+the least work for me.....
+
+I can make <2> work if, for a particular field, I can determine what the
+last termposition on each page is *at index time*. Oh, we don't want
+searches to span pages. Pages are added to the doc with multiple calls like
+so....
+
+doc.add('"field", first page text);
+doc.add('"field", second page text);
+doc.add('"field", third page text);
+
+
+The only approach I've really managed to come up with so far is to make my
+own Analyzer that has the following characteristics...
+1> override getPositionIncrementGap for this field and return, say, 100.
+This should keep us from spanning pages, and provide a convenient trigger
+for me to know we've finished (or are starting to) index a new page.
+2> record the last token position and provide a mechanism for me to retrieve
+that number. I can then keep a record in this document of what offset each
+page starts at, and then accomplish my aggregation by storing, with the
+document, the termpositions of the start (or end) of each page.
+
+Note, I'm rolling my own counter for where terms hit. It'll be a degenerate
+case of only ANDing things together, so it should be pretty simple even in
+the wildcard case.
+
+I'm using the Srnd* classes to do my spans, since they may include wildcards
+and don't see a way to get a Spans object from that, but it's late in the
+day <G>.
+
+Last time I appealed to y'all, you wrote back that it was already done. My
+hope is that it's already done again, but I've spent a couple of hours
+looking and it isn't obvious to me. What I want is a way to do something
+like this....
+
+doc.add('"field", first page text);
+int pos = XXX.getLastTermPosition("field");
+doc.add('"field", second page text);
+pos = XXX.getLastTermPosition("field");
+doc.add('"field", third page text);
+pos = XXX.getLastTermPosition("field");
+
+But if I understand what's happening, the text doesn't get analyzed until
+the doc is added to the index, all the doc.add(field, value) is just set-up
+work without any position information really being available yet. I'd be
+happy to be wrong about that <G>.
+
+Thanks
+Erick
+

@@ -1,0 +1,188 @@
+FROM: "Paul Chan" <wayofdra...@gmail.com>
+SUBJECT: Re: ClassCastException when writing to index writer
+DATE: 7 Oct 2008
+
+Seems like I found the culprit to the problem.  Because I am using
+Terracotta to doing JVM clustering, it has overriden many classes of
+java.util.*.  If I take out Terracotta from my configuration, then I don't
+get the ClassCastException problem any longer.  I will talk to the
+Terracotta folks to see if I have done something wrong on my end.
+
+Thanks again for everyone's help!
+
+On Mon, Oct 6, 2008 at 12:26 PM, Paul Chan <wayofdragon@gmail.com> wrote:
+
+> Hi Edwin,
+>
+> Yes, I am running the TestVector against the same class path as my actual
+> application.  My class path contains the Lucene JAR files.  This is very
+> bizzard because my TestVector class extends Vector and it works, but for
+> some reason SegmentInfos also extends Vector but it doesnt work.
+> I did some more investigation and I found the following:
+>
+> final class SegmentInfos extends Vector
+> {
+>    public Object clone() {
+>       Object a = super.clone(); --> code that I added to do some debug
+>      SegmentInfos sis = (SegmentInfos) a;
+>      ...
+>    }
+> }
+>
+> When super.clone() returns, it actually returns a Vector object instead of
+> a SegmentInfos object against my expectation so that explains why the
+> ClassCastException occurs.  On the other hand, when I run my TestVector
+> class:
+>
+> final class TestVector extends Vector
+> {
+>    public Object clone() {
+>       Object a = super.clone(); --> code that I added to do some debug
+>       TestVector sis = (TestVector) a;
+>      ...
+>    }
+> }
+>
+> When super.clone() returns, it returns TestVector!
+>
+> This tells me that there is something wrong with Lucene build file that
+> causes this problem, but I have no idea what it could be.  In Lucene's
+> common-build.xml, I changed the 1.4 properties to 1.6 propreties but still
+> to no avail.
+>
+>
+>
+> On Mon, Oct 6, 2008 at 12:04 PM, Edwin Lee <edwin11_1979@yahoo.com.sg>wrote:
+>
+>> Hi Paul,
+>>
+>> When you say that your dummy TestVector class works, are you running it
+>> using
+>> the same classpaths that you used to run your actual application? Does it
+>> contain the Lucene JAR files?
+>>
+>>
+>>
+>> Regards,
+>> Edwin
+>>
+>>
+>>
+>> --- Paul Chan <wayofdragon@gmail.com> wrote:
+>>
+>> > I have tried to recompile Lucene 2.3.2 under my environment (SUN JDK
+>> 1.6)
+>> > and it still doesn't work.  I am beginning to think that maybe there is
+>> > something wrong with lucene's build script.  My TestVector class's
+>> clone()
+>> > method works without a hitch, but SegmentInfos' clone() method doesnt
+>> work
+>> > at all.  I don't really know what to do at this moment.  Does anyone
+>> have
+>> > any insight?
+>> >
+>> > On Sun, Oct 5, 2008 at 10:45 PM, Paul Chan <wayofdragon@gmail.com>
+>> wrote:
+>> >
+>> > > Thank you all for your input.  However, this is what I have discovered
+>> so
+>> > > far:
+>> > >
+>> > >    - I tried running the test that Edwin suggested and it failed for
+>> me in
+>> > >    my environment (Lucene 2.3.2, Windows XP, SUN JDK 1.5 or 1.6)
+>> > >
+>> > > e.g. SegmentInfos sis = new SegmentInfos();
+>> > >       SegmentInfos sis2 = (SegmentInfos) sis.clone();
+>> > >
+>> > >    - Interestingly, I tried to create a dummy test class which mimics
+>> > >    SegmentInfos as follows and it works!:
+>> > >
+>> > > public class TestVector extends Vector
+>> > > {
+>> > >    public TestVector clone()
+>> > >    {
+>> > >       TestVector cl = (TestVector)super.clone();
+>> > >       return cl;
+>> > >    }
+>> > > }
+>> > >
+>> > >          TestVector vector = new TestVector();
+>> > >          TestVector vClone = (TestVector)vector.clone();
+>> > >
+>> > >    - This tells me that perhaps there is something wrong with the
+>> lucene
+>> > >    package that I have downloaded (some sort of incompatibility?).  I
+>> will
+>> > try
+>> > >    to recompile the lucene package in my own environment and see if I
+>> can
+>> > fix
+>> > >    the problem.
+>> > >
+>> > >
+>> > > On Sat, Oct 4, 2008 at 2:21 AM, Edwin Lee <edwin11_1979@yahoo.com.sg
+>> >wrote:
+>> > >
+>> > >> i think, very likely, you have another copy of java.util.Vector
+>> loaded,
+>> > >> and
+>> > >> this one tries to be too clever with its implementation of clone
+>> > >> (instantiate a
+>> > >> new Vector instance) instead of delegating to its super class
+>> (Object).
+>> > >>
+>> > >>
+>> > >>
+>> > >> HTH,
+>> > >> Edwin
+>> > >>
+>> > >>
+>> > >>
+>> > >> --- Chris Hostetter <hossman_lucene@fucit.org> wrote:
+>> > >>
+>> > >> >
+>> > >> > :        SegmentInfos sis = (SegmentInfos) super.clone();
+>> > >> >
+>> > >> > : We see that it is trying to cast a Vector into SegmentInfos
+which
+>> > >> explains
+>> > >> > : the ClassCastException.  This is definitely a bug.
+>> > >> >
+>> > >> > I'm really not sure how you could be getting that
+>> ClassCastException
+>> > >> > unless there's a really horrific bug in the JRE you are using.
+>> > >> >
+>> > >> > You'll see this in just about every (non-trivial) use of
+>> super.clone()
+>> > >> ...
+>> > >>
+>> > >>
+>> > >>
+>> > >>       Yahoo! Toolbar is now powered with Search Assist.Download it
+>> now!
+>> > >> http://sg.toolbar.yahoo.com/
+>> > >>
+>> > >>
+>> > >> ---------------------------------------------------------------------
+>> > >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> > >>
+>> > >>
+>> > >
+>> >
+>>
+>>
+>>
+>>       Get your preferred Email name!
+>> Now you can @ymail.com and @rocketmail.com
+>> http://mail.promotions.yahoo.com/newdomains/sg/
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

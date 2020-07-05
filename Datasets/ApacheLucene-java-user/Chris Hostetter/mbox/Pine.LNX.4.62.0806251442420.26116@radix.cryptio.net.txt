@@ -1,0 +1,66 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: yet again: getting the minimum and maximum value of a field
+DATE: 25 Jun 2008
+
+
+: There the final solution suggestion from Hoss was to try it with a binary
+: search
+: on the TermEnum
+
+my suggestion at the time to do a binary search was a bit naive (i was 
+not as familiar with Lucene as I am now).
+
+: Because of the tree-like architecture of the index, where the letters are some
+: kind of nodes, e.g.
+: 
+:      a               z
+:    ab   ar         ze  zu
+:  abi     ark     zer    zul
+: 
+: I would assume that there is a fast possibility to determine that 'abi' is the
+: minimum and 'zul' the maximum for that field - by simply walking through the
+
+the problem is that Terms are not actually organized in a tree structure 
+-- the Term list is essentially a large singly linked list with an "index" 
+(overused terminology unfortunately) of ever N terms so that it's possible 
+to skip very quickly based a lot of nodes in the list.
+
+: like this? At least the RangeQuery implementation I would assume walks throgh
+: the tree.
+
+RangeQuery (and RangeFilter) skipTo the lowerbound and then next() their 
+way to the upper bound -- but that's because they actually care about 
+every term in between.
+
+To find the min you can skipTo(new Term(yourField, ""))and as long as the 
+enum is pointed a Term for yourField you've got the min (if it's not, 
+yourField isn't in the index)
+
+For the max things get harder ... the simplest appraoch is to next() your 
+way along untill you find a term not in the current field ... whatever the 
+last Term value was is your max ... but for fields with lots of Terms, it 
+*might* be faster to do some iterative attempts with skipTo() to jump 
+ahead -- if you ever pass over into a new field, then you know you skiped 
+to far, you need to get a new TermEnum, skipTo() the last "good" term and 
+then iterate from there (or skipTo() with smaller jumps ... maybe that's 
+what i ment by a binary search?)
+
+writing completley generic code to do this would be easy, but probably not 
+very efficient since it would have to worry about the fully gambit of 
+unicode characters.  if however you know that a field always contains 
+integers, or english text with limited punctuation, you can probably make 
+much more efficient guesses about what to try skiping to ("z" for example)
+
+Typically, it's much easier to just keep track at indexing time of the 
+min/max ... a TokenFilter that inspects Tokens without modifying them can 
+do this very easily.
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

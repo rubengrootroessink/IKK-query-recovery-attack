@@ -1,0 +1,158 @@
+FROM: "Chris Lu" <chris...@gmail.com>
+SUBJECT: Re: Design Consideration for lucene index
+DATE: 6 Oct 2006
+
+Regarding Question #1:
+If there is only Keyword matching for tags, you can achieve the same
+by creating a table with two fields like this: (one tag, a list of
+images) in database to mimic Erick's answer. No lucene really needed
+for this case. Of course this would not help if you want to search
+several tags.
+
+Since you are searching for Images, the right way for your case may be
+to create a Document with (id:"image id", tags: "tag1, tag2, tag3").
+And you can do full text search with several tags.
+
+You are welcome to experiment different ways to organize your data
+using DBSight. No java coding needed. You can see the results right
+away.
+
+Chris Lu
+-----------------------------------------
+Instant Lucene Search on Any Database/Application
+http://www.dbsight.net
+
+On 10/6/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> If you're *sure* that your database solution isn't adequate <G>.... see
+> below.
+>
+> On 10/6/06, smathews@funmobility.com <smathews@funmobility.com> wrote:
+> >
+> > I am a newbie to the lucene search area. I would like to best way to do
+> > the following using lucene in terms of efficiency and the size of the
+> > index.
+> >
+> > Question : #1
+> > I have a table that contains some tags. These tags are tagged against
+> > multiple images that are in a different table (potentially 20 to 30,000
+> > images). If I am searching for a tag phrase and get the corresponding
+> > images, the approach that I was thinking is to join these two tables and
+> > index the result set.
+> > For example:
+> > Tag(abc)- ImageId1, Tag(abc)-ImageId2, Tag(abc)-ImageId3 etc. Hence this
+> > is a fairly fat joint. Assuming that we are doing like this how is the
+> > performance on lucene? If it is a bad design, what should be a better
+> > way of doing this? Looking forward to your valuable suggestions.
+>
+>
+>
+> So, really, you're de-normalizing your database into an index. It seems that
+> what you're really doing here is, for each tag, storing a list of images.
+> Then, given a tag, you want all the images. What do you think about
+> something like this....
+> doc = new Document();
+> doc.add("ID", "Tag(abc)", STORED, UNTOKENIZED); (note, IDs are often best
+> untokenized, since you really don't want to split them up).
+> doc.add("images", "ImageId1", STORED, NO); (not indexed, but stored).
+> doc.add("images", "ImageId2", STORED, NO);
+> .
+> .
+> .
+> writer.add(doc);
+>
+> Now, to get the images associated with a tag, you just search for the doc
+> whose ID is your tag, get the doc and read the stored images field. You'll
+> have to parse the image IDs out, but that should be trivial. The search
+> should be extremely fast since one and only one "document" matches.
+>
+> There's no problem storing multiple data into the same document field. Or
+> you could assemble the whole list of IDs into a string and add the "images"
+> field only once. or.....
+>
+> You can vary this as you see fit. For instance, you could store each image
+> in its own field in the doc. There are ways to enumerate the fields in a
+> given document, so once your search was satisfied by tag id, you'd be off
+> and running.
+>
+> doc.add("image1", "ImageId1", STORED, NO); (not indexed, but stored).
+> doc.add("image2", "ImageId2", STORED, NO);
+>
+>
+> NOTE: there is no requirement that each document in a lucene index have the
+> same number or name of fields. In fact, you could create an index that for
+> which no two documents had any field in common. Not, perhaps, a *useful*
+> index, but you could do it. If your head is in the DB table world, this may
+> not immediately occur to you <G>....
+>
+>
+> Don't know if this helps, but I thought I'd mention it.
+>
+>
+> Question : #2
+> > I need to search the multiple fields from a table. The search phrase
+> > needs to look for the fields DESCRIPTION1 and DESCRIPTION2 in the table.
+> > I have done something like this:
+> > while (rs.next()) {
+> > Document doc = new Document();
+> > doc.add(new Field("ID", String.valueOf(rs.getInt("ID")),
+> > Field.Store.YES, Field.Index.UN_TOKENIZED));
+> > doc.add(new Field("Description1", rs.getString("Description1"),
+> > Field.Store.YES, Field.Index.TOKENIZED));
+> > doc.add(new Field("Description2", rs.getString("Description2"),
+> > Field.Store.YES, Field.Index.TOKENIZED));
+> > String content = rs.getString("Description1") + " " +
+> > rs.getString("Description2")
+> > doc.add(new Field("cContent", content, Field.Store.YES,
+> > Field.Index.TOKENIZED));
+> > list[0].add(doc);
+> > }
+> >
+> > Do I need to do the cContent part for searching? Is this increasing the
+> > size of the index? Is it better to create a dynamic query that looks for
+> > the description1 description2 field or use the cContent?
+>
+>
+> No, you do not need the cContent part for searching. Yes, it'll increase the
+> size of your index to include both (how could it not?).
+>
+> Whether you should store description1 and description2, or just the
+> combination of the two depends upon whether you ever expect to need to
+> distinguish between them during searching. All other things being equal, I
+> tend to favor leaving them in two distinct fields, as I don't believe
+> there's a noticable penalty for searching both, and you preserve
+> information.
+>
+> OTOH, it depends also on how you want to search your data. Let's say you
+> want to ask "Are terms A and B in the description fields?" If you store them
+> as distinct fields, you need to form something like if (A is in description1
+> or description2) and (B is indescription1 or description2). Whereas if they
+> are combined, all you have to ask is if (A and B are in combined).
+>
+> So, let's assume that you have two description fields "because we had to
+> split them up to fit them in fixed length columns in the DB". Putting them
+> back together actually makes the index representation of the problem truer
+> to the real problem space, so that's yet another consideration.....
+>
+> Hope this helps
+> Erick
+>
+> Please help me in figuring out these things.
+> > Thanks
+> >
+> > Mathews
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,78 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Optimizing index takes too long
+DATE: 12 Nov 2007
+
+
+> I am using the 2.3-dev version only because LUCENE-843 suggested
+> that this might be a path to faster indexing.  I started out using
+> 2.2 and can easily go back. I am using default MergePolicy and
+> MergeScheduler.
+
+Did you note any indexing or optimize speed differences between 2.2 &
+2.3-dev?
+
+One important thing to realize is LUCENE-843 only addresses speeding
+up the creation of newly flushed segments (from add/updateDocument()
+calls).
+
+It does not speed up segment merging (which is what optimize() is
+actually doing), though there have been at least a couple recent
+issues on 2.3-dev that should speed up merging:
+
+  - LUCENE-1043 (use bulk byte-copying to merge stored fields when
+    possible)
+
+  - LUCENE-888 (increase buffer sizes in input/outputs used during
+    merging)
+
+There is a separate issue open (LUCENE-856) to track ideas on how to
+speed up segment merging.
+
+> Also, maybe Mike M. can chime in w/ how compressed fields are merged
+> now.
+
+As far as I know, merging of compressed fields is unchanged wrt 2.2:
+we still [efficiently] load & rewrite the raw bytes without
+decompresssing them.
+
+> For a start, I would lower the merge factor quite a bit. A high
+> merge factor is over rated :) 
+
+I would second this one: try lower values and see if optimizing is
+faster.  It's not clear that a high mergeFactor gives faster merging
+overall.
+
+> The hardware is quite new and fast: 8 cores, 15,000 RPM disks.
+
+Your machine sounds fabulous (I'm jealous!) so the numbers don't seem
+to add up.
+
+Are you giving the JVM plenty of RAM?  And the machine is not
+swapping?  Indexing/optimizing should not be RAM intensive, like
+searching, but it's still worth checking into.
+
+> IndexWriter settings are MergeFactor 50, MaxMergeDocs 2000,
+> RAMBufferSizeMB 32, MaxFieldLength Integer.MAX_VALUE.
+
+The MaxMergeDocs=2000 is what's causing 35K files in your index (which
+is far too many) -- and, this also foists all the merge cost into your
+optimize call.  With the default MaxMergeDocs (effectively unlimited)
+Lucene would do more merging, concurrently (in 2.3-dev), as the
+index is being built.
+
+If possible, the next time you run optimize() could you also call
+IndexWriter.setInfoStream(...) and post the result log?  This would
+have details on what merges are being selected, in case something
+is going awry in the LogByteSizeMergePolicy.
+
+Can you do "ls -l" on one of your sub-indices and post the results?
+This would give us a raw check on where the bytes are going in the
+index...
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

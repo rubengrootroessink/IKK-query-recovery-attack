@@ -1,0 +1,63 @@
+FROM: "Israel Tsadok" <itsa...@gmail.com>
+SUBJECT: Re: Search on tag / category / label / keyword ...
+DATE: 27 Oct 2008
+
+On Mon, Oct 27, 2008 at 11:21 AM, T. H. Lin <easy.lin@gmail.com> wrote:
+
+> I would like to search a collection of "keyword"s with lucene.
+>
+> A Document has one or many keywords. The keywords appear only once in a
+> document. (tf = 1)
+> for example:
+> Document_1 : ( "aa"  "bb"  "cc"         )
+> Document_2 : (         "bb"  "cc"         )
+> Document_3 : (                 "cc"  "dd" )
+> Document_4 : ( "aa"          "cc"  "dd" )
+>
+> I have a query from more terms with different boost. The coord(int overlap,
+> int maxOverlap) is turn off. i.e. always return 1.0.
+> query = "aa^0.1 bb^0.9 xx^0.1 yy^0.1 zz^0.1"
+> the query may contain many terms which do not appear in a Document. i.e.
+> "xx" "yy" and "zz" here.
+>
+> Amd I got
+> 3 hits
+> Document_2 : (         "bb"  "cc"         ) : score : 0.75391763
+> Document_1 : ( "aa"  "bb"  "cc"         ) : score : 0.67014897
+> Document_4 : ( "aa"          "cc"  "dd" ) : score : 0.0670149
+>
+> [Question] is...why Document_2 better than Document_1 !?
+> Document_1 does match two terms; "aa" and "bb".
+> I want to emphasize the "match" and less care the "mismatch".
+> How should I modify Similarity to achieve that? (Document_1 should get
+> higher score!)
+>
+
+First, you should use Searcher.explain() when you have questions about the
+scoring. You'll get a lot of hints as to why a document gets a better score
+than another.
+
+In your case, it seems that document2 is shorter, and therefore
+the occurrence of "bb" in it is given a greater weight. I've had a similar
+problem in the past, where short documents would get a huge advantage in the
+search results.
+
+We solved it using a custom similarity at index time:
+
+IndexWriter writer = new IndexWriter( ...
+writer.setSimilarity(new DefaultSimilarity() {
+    public float lengthNorm(String fieldName, int numTerms) {
+        numTerms = numTerms < 15 ? 15 : numTerms;
+        return super.lengthNorm(fieldName, numTerms);
+    }
+});
+
+The code above eliminates the advantage of documents with less than 15
+terms. In your case, you probably want to replace 15 with 1000 (or as high
+as you need).
+
+Note that I'm not sure if this is the preferred method to achieve what
+you're looking for, but it works for me.
+
+Israel Tsadok
+

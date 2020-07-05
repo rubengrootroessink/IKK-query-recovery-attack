@@ -1,0 +1,146 @@
+FROM: "Michael J. Prichard" <michael_prich...@mac.com>
+SUBJECT: EMAIL ADDRESS: Tokenize (i.e. an EmailAnalyzer)
+DATE: 28 Jul 2006
+
+Howdy....not sure if anyone else wants this but here is my first attempt 
+at writing an analyzer for an email address...modifications, updates, 
+fixes welcome.
+
+-------------- EmailAnalyzer
+
+import java.io.Reader;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.LowerCaseFilter;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.standard.StandardTokenizer;
+
+public class EmailAnalyzer extends Analyzer {
+   
+    public EmailAnalyzer() {
+    }
+
+    public TokenStream tokenStream(String fieldName, Reader reader) {
+        // return a tokenstream based on the email address
+        TokenStream result = new EmailFilter(new LowerCaseFilter(new 
+StandardTokenizer(reader)));
+       
+        return result;
+    }
+   
+}
+
+-------------- end EmailAnalyzer
+
+-------------- EmailFilter
+
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.Token;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Stack;
+
+public class EmailFilter extends TokenFilter {
+    public static final String TOKEN_TYPE_EMAIL = "EMAILPART";
+
+    private Stack emailTokenStack;
+   
+    public EmailFilter(TokenStream in) {
+        super(in);
+        emailTokenStack = new Stack();
+    }
+
+    public Token next() throws IOException {
+
+        if (emailTokenStack.size() > 0) {
+            return (Token) emailTokenStack.pop();
+        }   
+
+        Token token = input.next();
+        if (token == null) {
+            return null;
+        }
+
+        addEmailPartsToStack(token);
+
+        return token;
+    }
+   
+    private void addEmailPartsToStack(Token token) throws IOException {
+        String[] parts = getEmailParts(token.termText());
+
+        if (parts == null) return;
+
+        for (int i = 0; i < parts.length; i++) {
+            Token synToken = new Token(parts[i],
+                                 token.startOffset(),
+                                 token.endOffset(),
+                                 TOKEN_TYPE_EMAIL);
+            synToken.setPositionIncrement(0);
+
+            emailTokenStack.push(synToken);
+        }
+    }
+
+    /*
+     * Parses emails into its parts for tokenization.
+     * For example john@foo.com would be broken into
+     *
+     *    [john@foo.com]
+     *    [john]
+     *    [foo.com]
+     *    [foo]
+     *    [com]
+     *      
+     */
+    private String[] getEmailParts(String email) {
+        // array for the parts
+        String[] emailParts;
+        // so i can add them before calling toArray
+        ArrayList partsList = new ArrayList();
+
+        /* let's do it */
+        // split on the @
+        String[] splitOnAmpersand = email.split("@");
+        // add the username
+        partsList.add(splitOnAmpersand[0]);
+        // add the full host name
+        partsList.add(splitOnAmpersand[1]);
+       
+        // split the host name into pieces
+        String[] splitOnDot = splitOnAmpersand[1].split("\\.");
+        // add all pieces from splitOnDot
+        for (int i=0; i < splitOnDot.length; i++) {
+            partsList.add(splitOnDot[i]);
+        }
+       
+        /*
+         *  if this is great than 2 then we need to add the domain name 
+which
+         *  should be the last two
+         * 
+         */
+        if (splitOnDot.length > 2) {
+            String domain = splitOnDot[splitOnDot.length-2] + "." + 
+splitOnDot[splitOnDot.length-1];
+            // add domain
+            partsList.add(domain);
+        }
+       
+       
+        return (String[]) partsList.toArray(new String[0]);       
+    }
+
+}
+
+------------ end EmailFilter
+
+Let me know...
+-Michael
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

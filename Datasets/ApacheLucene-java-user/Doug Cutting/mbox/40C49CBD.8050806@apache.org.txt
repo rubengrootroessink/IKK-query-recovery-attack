@@ -1,0 +1,87 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: problems with lucene in multithreaded environment
+DATE: 7 Jun 2004
+
+Jayant Kumar wrote:
+> Thanks for the patch. It helped in increasing the
+> search speed to a good extent.
+
+Good.  I'll commit it.  Thanks for testing it.
+
+> But when we tried to
+> give about 100 queries in 10 seconds, then again we
+> found that after about 15 seconds, the response time
+> per query increased.
+
+This still sounds very slow to me.  Is your index optimized?  What JVM 
+are you using?
+
+You might also consider ramping up your benchmark more slowly, to warm 
+the filesystem's cache.  So, when you first launch the server, give it a 
+few queries at a lower rate, then, after those have completed, try a 
+higher rate.
+
+> We were able to simplify the searches further by
+> consolidating the fields in the index but that
+> resulted in increasing the index size to 2.5 GB as we
+> required fields 2-5 and fields 1-7 in different
+> searches.
+
+That will slow updates a bit, but searching should be faster.
+
+How about your range searches?  Do you know how many terms they match? 
+The easiest way to determine this might be to insert a print statement 
+in RangeQuery.rewrite() that shows the query before it is returned.
+
+> Our indexes are on the local disk therefor
+> there is no network i/o involved.
+
+It does like file i/o is now your bottleneck.  The traces below show 
+that you're using the compound file format, which combines many files 
+into one.  When two threads try to read two logically different files 
+(.prx and .frq below) they must sychronize when the compound format is 
+used.  But if your application did not use the compound format this 
+synchronization would not be required.  So you should try rebuilding 
+your index with the compound format turned off.  (The fastest way to do 
+this is simply to add and/or delete a single document, then re-optimize 
+the index with compound format turned off.  This will cause the index to 
+be re-written in non-compound format.)
+
+Is this on linux?  If so, please try running 'iostat -x 1' while you 
+perform your benchmark (iostat is installed by the 'sysstat' package). 
+What percentage is the disk utilized (%util)?  What is the percentage of 
+idle CPU (%idle)?  What is the rate of data that is read (rkB/s)?  If 
+things really are i/o bound then you might consider spreading the data 
+over multiple disks, e.g., with lvm striping or a RAID controller.
+
+If you have a lot of RAM, then you could also consider moving certain 
+files of the index onto a ramfs-based drive.  For example, moving the 
+.tis, .frq and .prx can greatly improve performance.  Also, having these 
+files in RAM means that the cache does not need to be warmed.
+
+Hope this helps!
+
+Doug
+
+  > "Thread-23" prio=1 tid=0x08169f38 nid=0x2867 waiting for monitor 
+entry [69bd4000..69bd48c8]
+>         at org.apache.lucene.index.CompoundFileReader$CSInputStream.readInternal(CompoundFileReader.java:217)
+>         - waiting to lock <0x46f1b828> (a org.apache.lucene.store.FSInputStream)
+>         at org.apache.lucene.store.InputStream.refill(InputStream.java:158)
+>         at org.apache.lucene.store.InputStream.readByte(InputStream.java:43)
+>         at org.apache.lucene.store.InputStream.readVInt(InputStream.java:83)
+>         at org.apache.lucene.index.SegmentTermPositions.next(SegmentTermPositions.java:58)
+> 
+> "Thread-22" prio=1 tid=0x08159f78 nid=0x2866 waiting for monitor entry [69b53000..69b538c8]
+>         at org.apache.lucene.index.CompoundFileReader$CSInputStream.readInternal(CompoundFileReader.java:217)
+>         - waiting to lock <0x46f1b828> (a org.apache.lucene.store.FSInputStream)
+>         at org.apache.lucene.store.InputStream.refill(InputStream.java:158)
+>         at org.apache.lucene.store.InputStream.readByte(InputStream.java:43)
+>         at org.apache.lucene.store.InputStream.readVInt(InputStream.java:86)
+>         at org.apache.lucene.index.SegmentTermDocs.read(SegmentTermDocs.java:126)
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

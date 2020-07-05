@@ -1,0 +1,57 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Internals question: BooleanQuery with many TermQuery children
+DATE: 7 Apr 2009
+
+On Tuesday 07 April 2009 05:04:44 Daniel Noll wrote:
+> Hi all.
+> 
+> This is something I have been wondering for a while but can't find a 
+> good answer by reading the code myself.
+> 
+> If you have a query like this:
+> 
+>    ( field:Value1 OR
+>      field:Value2 OR
+>      field:Value3 OR
+>       ... )
+> 
+> How many TermEnum / TermDocs scans should this execute?
+> 
+> (a) One per clause, or
+> (b) One for the entire boolean query?
+
+One per clause.
+
+> 
+> I wonder because we do use a lot of queries of this nature, and I can't 
+> find any direct evidence that they get logically merged, leading me to 
+> believe that it's one per clause at present (and thus this becomes a 
+> potential optimisation.)
+
+The problem is not only in the scanning of the TermDocs, but also in
+the merging by docId (on a heap) that has to take place when more of them
+are used at the same time during the query search.
+
+Some optimisations are already in place:
+- By allowing docs scored out of order, most top level OR queries
+  can be merged with a faster algorithm (distributive sort over docId ranges)
+  using the term frequencies (see BooleanQuery.setAllowDocsOutOfOrder())
+- Various Filters that merge into a bitset, using a single TermDocs
+  and ignoring term frequencies, (see MultiTermQuery.getFilter()).
+- The new TrieRangeFilter that premerges ranges at indexing time,
+  also ignoring term frequencies.
+
+Using the TermDocs one by one has another advantage in that it
+reduces disk seek distances in the index. This is noticeable when
+disks have heads that take more time to move longer distances.
+SSD's don't have moving heads, so they have smaller performance
+differences between merging into a bitset, by distributive sort,
+and by a heap.
+
+For the time being, Lucene does not have a low level facility for key values
+that occur at most once per document field, so for these it normally helps
+to use a Filter.
+
+Regards,
+Paul Elschot
+

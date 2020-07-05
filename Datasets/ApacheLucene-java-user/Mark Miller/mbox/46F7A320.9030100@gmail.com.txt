@@ -1,0 +1,369 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: thread safe shared IndexSearcher
+DATE: 24 Sep 2007
+
+I sat down over the weekend and rewrote the code from scratch so that I 
+could improve and simplify it somewhat. I also did some testing of the 
+synch costs, and it is very insignificant compared to the total time to 
+parse a query and run a search. I'll try and get around to posting the 
+code tonight.
+
+- Mark
+
+Jay Yu wrote:
+>
+>
+> Mark Miller wrote:
+>> Good luck Jay. Keep in mind, pretty much all LuceneIndexAccessor does 
+>> is sync Readers with Writers and allow multiple threads to share the 
+>> same instances of them -- nothing more. The code just forces Readers 
+>> to refresh when Writers are used to change the index. There really 
+>> isn't any functionality beyond that offered. Since you want to have a 
+>> multi thread system access the same resources (which occasionally 
+>> need to be refreshed) its not too easy to get around a synchronized 
+>> block.
+>>
+>> If I am able to extract some usable code for you soon I will let you 
+>> know.
+> I will appreciate it!
+> Thanks for your help!
+>
+>>
+>> - Mark
+>>
+>> Jay Yu wrote:
+>>> Mark,
+>>>
+>>> Thanks for sharing your valuable exp. and thoughts.
+>>> Frankly our system already has most of the functionalities 
+>>> LuceneIndexAcessor offers. The only thing I am looking for is to 
+>>> sync the searchers' close. That's why I am little worried about the 
+>>> way accessor handles the searcher sync.
+>>> I will probably give it a try to see how it performs in our system.
+>>>
+>>> Thanks!
+>>>
+>>> Jay
+>>>
+>>> Mark Miller wrote:
+>>>> The method is synched, but this is because each thread *does* share 
+>>>> the same Searcher. To maintain a cache of searchers across multiple 
+>>>> threads, you've got to sync -- to reference count, you've got to 
+>>>> sync. The performance hit of LuceneIndexAcessor is pretty minimal 
+>>>> for its functionality, and frankly, for the functionality you want, 
+>>>> you have to pay a cost. Thats not even the end of it really...your 
+>>>> going to need to maintain a cache of Accessor objects for each 
+>>>> index as well...and if you dont know all the indexes at startup 
+>>>> time, access to this will also need to be synched. I wouldn't worry 
+>>>> though -- searches are still lightening fast...that won't be the 
+>>>> bottleneck. I'll work on getting you some code, but if your 
+>>>> worried, try some benchmarking on the original code.
+>>>>
+>>>> Also, to be clear, I don't have the code in front of me, but 
+>>>> getting a Searcher does not require waiting for a Writer to be 
+>>>> released. Searchers are cached and resused (and instantly 
+>>>> available) until a Writer is released. When this happens, the 
+>>>> release Writer method waits for all the Searchers to return 
+>>>> (happens pretty quick as searches are pretty quick), the Searcher 
+>>>> cache is cleared, and then subsequent calls to getSearcher create 
+>>>> new Searchers that can see what the Writer added.
+>>>>
+>>>> The key is use your Writer/Searcher/Reader quickly and then release 
+>>>> it (unless your bulk loading). I've had such a system with 5+ 
+>>>> million docs on a standard machine and searches where still well 
+>>>> below a second after the first Searcher is cached (and even the 
+>>>> first search is darn quick). And that includes a lot of extra crap 
+>>>> I am doing.
+>>>>
+>>>> - Mark
+>>>>
+>>>> Jay Yu wrote:
+>>>>> Mark,
+>>>>>
+>>>>> After reading the implementation of 
+>>>>> LuceneIndexAccessor.getSearcher(),
+>>>>> I realized that the method is synchronized and wait for 
+>>>>> writingDirector to be released. That means if we getSearcher for 
+>>>>> each query in each thread, there might be a contention and 
+>>>>> performance hit. In fact, even the method of release(searcher) is 
+>>>>> costly. On the other hand, if multiple threads share share one 
+>>>>> searcher then it'd defeat the
+>>>>> purpose of using LuceneIndexAccessor.
+>>>>> Do I miss sth here? What's your suggested use case for 
+>>>>> LuceneIndexAccessor?
+>>>>>
+>>>>> Thanks!
+>>>>>
+>>>>> Jay
+>>>>> Mark Miller wrote:
+>>>>>> Ill respond a point at a time:
+>>>>>>
+>>>>>> 1.
+>>>>>>
+>>>>>> ****************************** Hi Maik,
+>>>>>>
+>>>>>> So what happens in this case:
+>>>>>>
+>>>>>> IndexAccessProvider accessProvider = new 
+>>>>>> IndexAccessProvider(directory,
+>>>>>>
+>>>>>> analyzer);
+>>>>>>
+>>>>>> LuceneIndexAccessor accessor = new 
+>>>>>> LuceneIndexAccessor(accessProvider);
+>>>>>>
+>>>>>> accessor.open();
+>>>>>>
+>>>>>> IndexWriter writer = accessor.getWriter();
+>>>>>>
+>>>>>> // reference to the same instance?
+>>>>>>
+>>>>>> IndexWriter writer2 = accessor.getWriter();
+>>>>>>
+>>>>>> writer.addDocument(....);
+>>>>>>
+>>>>>> writer2.addDocument(....);
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> // I didn't release the writer yet
+>>>>>>
+>>>>>> // will this block?
+>>>>>>
+>>>>>> IndexReader reader = accessor.getReader();
+>>>>>>
+>>>>>> reader.delete(....);
+>>>>>>
+>>>>>> ************
+>>>>>>
+>>>>>> This is not really an issue. First, if you are going to delete 
+>>>>>> with a Reader
+>>>>>> you need to call getWritingReader and not getReader. When you do
+
+>>>>>> that, the
+>>>>>> getWritingReader call will block until writer and writer2 are 
+>>>>>> released. If
+>>>>>> you are just adding a couple docs before releasing the writers, 
+>>>>>> this is no
+>>>>>> problem because the block will be very short. If you are loading
+
+>>>>>> tons of
+>>>>>> docs and you want to be able to delete with a Reader in a timely
+
+>>>>>> manner, you
+>>>>>> should release the writers every now and then (release and re-get
+
+>>>>>> the Writer
+>>>>>> every 100 docs or something). An interactive index should not hog
+
+>>>>>> the
+>>>>>> Writer, while something that is just loading a lot could hog the
+
+>>>>>> Writer.
+>>>>>> This is no different than normal…you cannot delete with a Reader
+
+>>>>>> while
+>>>>>> adding with a Writer with Lucene. This code just enforces those 
+>>>>>> semantics.
+>>>>>> The best solution is to just use a Writer to delete – I never get
+a
+>>>>>> ReadingWriter.
+>>>>>>
+>>>>>> 2. http://issues.apache.org/bugzilla/show_bug.cgi?id=34995#c3
+>>>>>>
+>>>>>> This is no big deal either. I just added another getWriter call 
+>>>>>> that takes a
+>>>>>> create Boolean.
+>>>>>>
+>>>>>> 3. I don't think there is a latest release. This has never gotten
+
+>>>>>> much
+>>>>>> official attention and is not in the sandbox. I worked straight 
+>>>>>> from the
+>>>>>> originally submitted code.
+>>>>>>
+>>>>>> 4. I will look into getting together some code that I can share.
+The
+>>>>>> multisearcher changes that are need are a couple of one liners 
+>>>>>> really, so at
+>>>>>> a minimum I will give you the changes needed.
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> -       Mark
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> On 9/19/07, Jay Yu <yu@ai.sri.com> wrote:
+>>>>>>
+>>>>>> Mark,
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> thanks for sharing your insight and experience about 
+>>>>>> LuceneIndexAccessor!
+>>>>>>
+>>>>>> I remember seeing some people reporting some issues about it, 
+>>>>>> such as:
+>>>>>>
+>>>>>> http://www.archivum.info/java-dev@lucene.apache.org/2005-05/msg00114.html
+
+>>>>>>
+>>>>>>
+>>>>>> http://issues.apache.org/bugzilla/show_bug.cgi?id=34995#c3
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Have those issues been resolved?
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Where did you get the latest release? It is not in the official 
+>>>>>> Lucene
+>>>>>>
+>>>>>> sandbox/contrib.
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Finally, are you willing to share your extended version to 
+>>>>>> include your
+>>>>>>
+>>>>>> tweak relating to the MultiSearcher?
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Thanks a lot!
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Jay
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> Mark Miller wrote:
+>>>>>>
+>>>>>>> I use option 3 extensivley and find it very effective. There
+is 
+>>>>>>> a tweak or
+>>>>>>
+>>>>>>> two required to get it to work right with MultiSearchers, but
+
+>>>>>>> other than
+>>>>>>
+>>>>>>> that, the code is great. I have built a lot on top of it. I'm
+on 
+>>>>>>> the list
+>>>>>>
+>>>>>>> all the time and would be happy to answer any questions you have
+in
+>>>>>> regards
+>>>>>>
+>>>>>>> to LuceneIndexAccessor. Frankly, I think its overlooked far too
+
+>>>>>>> much.
+>>>>>>
+>>>>>>
+>>>>>>> - Mark
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>> On 9/19/07, Jay Yu <yu@ai.sri.com> wrote:
+>>>>>>
+>>>>>>
+>>>>>>>> In a multithread app like web app, a shared IndexSearcher
+could 
+>>>>>>>> throw a
+>>>>>>
+>>>>>>>> AlreadyClosedException when another thread is trying to update
+the
+>>>>>>
+>>>>>>>> underlying IndexReader by closing the shared searcher after
+the 
+>>>>>>>> index is
+>>>>>>
+>>>>>>>> updated. Searching over the past discussions on this mailing
+
+>>>>>>>> list, I
+>>>>>>
+>>>>>>>> found several approaches to solve the problem.
+>>>>>>
+>>>>>>>> 1. use solr
+>>>>>>
+>>>>>>>> 2. use DelayCloseIndexSearcher
+>>>>>>
+>>>>>>>> 3. use LuceneIndexAccessor
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>>> the first one is not feasible for us; some people seemed
+to have
+>>>>>>
+>>>>>>>> problems with No. 2 and I do not find a lot of discussions
+
+>>>>>>>> around No.3.
+>>>>>>
+>>>>>>
+>>>>>>>> I wonder if anyone has good experience on No 2 and 3?
+>>>>>>
+>>>>>>>> Or do I miss other better solutions?
+>>>>>>
+>>>>>>
+>>>>>>>> Thanks for any suggestion/comment!
+>>>>>>
+>>>>>>
+>>>>>>>> Jay
+>>>>>>
+>>>>>>
+>>>>>>>> ---------------------------------------------------------------------
+
+>>>>>>>>
+>>>>>>
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> ---------------------------------------------------------------------
+
+>>>>>>
+>>>>>>
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,94 @@
+FROM: Regan Heath <regan.he...@BridgeHeadSoftware.com>
+SUBJECT: Re: indexWriter.addIndexes, Disk space, and open files
+DATE: 7 Jun 2010
+
+
+>> That's pretty much exactly what I suspected was happening.  I've had the
+same
+>> problem myself on another occasion... out of interest is there any way to
+>> force the file closed without flushing?
+>
+>No, IndexOutput has no such method.  We could consider adding one...
+
+That sounds useful in general.  
+
+In our case what we actually want is to abort the merge and delete all the
+new files created.  But then, our usage may be slightly unusual in that we
+merge an existing 'master' index and a number of 'temporary' indices into a
+new master index.  On success we delete the old master and rename the new
+master into it's place.
+
+We're doing disk space checks prior to merge, based on the docs here:
+http://lucene.apache.org/java/2_3_2/api/org/apache/lucene/index/IndexWriter.html#optimize()
+
+but I disabled these to test this out of disk space case, as it is possible
+something else could use up the required space during the merge.
+
+>> From memory I tried everything I
+>> could think of at the time but couldn't manage it.  Best I could do was
+>> catch and swallow the expected exception from close and carry on.
+>
+>I think that's the best to do w/ today's API; but, you should save the
+>first IOE you hit, then force close the remaining files, then throw
+>that IOE.
+
+When you say 'force' close do you just mean wrapping the close calls in
+try/catch(IOException) where the catch block is empty (swallows the
+exception)?  Or is there a specific call to force a file closed?
+
+>> So, the only option for us is to upgrade the version of lucene we're
+>> using
+>> to the current trunk?  Is there no existing stable release version
+>> containing the fix?  If not, when do you estimate the next stable release
+>> with the fix will be available?
+>
+>I don't think any release of Lucene will have fixed all of these
+>cases, yet.  Patches welcome :)
+
+I would if I had the time, or sufficient understanding of the existing code,
+sadly I've only looked at it for 5  mins. :(
+
+>Actually, the best fix is something Earwin created but is not yet
+>committed (nor in a patch yet, I think), which adds a nice API for
+>closing multiple IndexOutputs safely.  Earwin, maybe you could pull
+>out just this part of your patch and open a separate issue?  Then we
+>can fix all places in Lucene that need to close multiple IndexOutputs
+>to use this API.
+
+That sounds great.. I'm not sure if something like this is useful to you..
+
+public class Safe
+{
+    /**
+     * Safely closes any object that implements closeable
+     *
+     * @param     closeable The object to close
+     */
+    public static void close(Closeable closeable)
+    {
+        try
+        {
+            closeable.close();
+        }
+        catch(Exception e)
+        {
+            // ignore
+        }
+        finally
+        {
+            closeable = null;
+        }
+    }
+}
+
+We use this in catch and finally blocks where we do not want to raise an
+exception.
+-- 
+View this message in context: http://lucene.472066.n3.nabble.com/indexWriter-addIndexes-Disk-space-and-open-files-tp841735p876022.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,122 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: RE: MissingStringLastComparatorSource and MultiSearcher
+DATE: 15 Jul 2006
+
+> The problem with int is that the FieldCache stores the values as an int[],
+and you can't tell when a value is missing.
+
+I take it that missing values appear as 0, which would be an illegal value
+for my case, but I accept your point that it isn't good enough for a general
+solution.
+
+> String sorting takes more memory, but the speed is the same.
+
+Bearing in mind that 0 would have to be illegal for an int and 0.0f would
+have to be illegal for a float, I would thinking of implementing the
+SortField thus (plagiarising your design) to conserve memory...
+
+Here's the SortField.FLOAT implementation (as a code snippet) - the
+SortField.INT implementation is analogous, but uses
+FieldCache.DEFAULT.getInts:
+
+--------8<--------
+case SortField.FLOAT:
+	return new SortField(fieldName,
+		new SortComparatorSource() {
+
+			private final Comparable missingValueProxy;
+
+			// Instance initialiser - this is how you do Ctors
+in anonymous classes
+			{
+				missingValueProxy = new
+Float(missingValueGoesLast ? Float.MAX_VALUE : Float.MIN_VALUE);
+			}
+
+			public ScoreDocComparator newComparator(IndexReader
+reader,String fieldName) throws IOException {
+
+				// Canonical representation of the String
+(???)
+				final String field = fieldName.intern();
+
+				// Get the index of the field
+				final float index[] =
+FieldCache.DEFAULT.getFloats(reader,field);
+
+				return new ScoreDocComparator() {
+
+					public final int compare (final
+ScoreDoc i, final ScoreDoc j) {
+
+						final float fi =
+index[i.doc];
+						final float fj =
+index[j.doc];
+
+						// 0 is the magic position
+of null
+						if (fi==fj) return 0;
+						if (fi==0.0f) return 1;
+						if (fj==0.0f) return -1;
+						return fi < fj ? -1 : 1;
+					}
+
+					public Comparable sortValue (final
+ScoreDoc i) {
+						float f = index[i.doc];
+						return (0.0f == f) ?
+missingValueProxy : new Float(f);
+					}
+
+					public int sortType() {
+						return SortField.CUSTOM;
+					}
+				};
+		        }
+
+		} // SortComparatorSource
+
+	); // Custom SortField for SortField.FLOAT
+--------8<--------
+
+By the way, this copies fieldName.intern() from your implementation, but I
+confess I couldn't understand why that's used. Also, does the type returned
+by ScoreDocComparator.sortType() relevant here? I made this
+SortField.CUSTOM, but I'm not sure if it wouldn't be better for it to be
+SortField.FLOAT in the above.
+
+-----Original Message-----
+From: Yonik Seeley [mailto:yseeley@gmail.com] 
+Sent: 14 July 2006 21:59
+To: java-user@lucene.apache.org
+Subject: Re: MissingStringLastComparatorSource and MultiSearcher
+
+On 7/14/06, Rob Staveley (Tom) <rstaveley@seseit.com> wrote:
+> I was wanting to apply this to a field, which sorts on INT.
+
+The problem with int is that the FieldCache stores the values as an int[],
+and you can't tell when a value is missing.
+
+> Specifically I'm
+> trying to achieve reverse chronological sorting on a timestamp field, 
+> which stores YYMMDDHHI (i.e. resolves to 10 minutes and doesn't handle
+centuries).
+> Missing timestamps are assumed to be "old" (i.e. should appear at the
+end).
+>
+> I could get this to sort on String and use 
+> MissingStringLastComparatorSource, but would this not be less 
+> efficient than sorting in INT??
+
+String sorting takes more memory, but the speed is the same.  Local sorting
+with the FieldCache for strings is done via the ordinal value (no string
+compare is done, just int comparisons).
+
+-Yonik
+http://incubator.apache.org/solr Solr, the open-source Lucene search server
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+

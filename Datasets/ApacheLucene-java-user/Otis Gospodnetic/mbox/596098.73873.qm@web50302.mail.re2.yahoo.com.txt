@@ -1,0 +1,90 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Index sync up
+DATE: 29 Apr 2007
+
+Hi Tony,
+ 
+----- Original Message ----
+
+All,
+
+After playing around with Lucene, we decided to replace old full-text search 
+engine with Lucene. I got "Lucene in Action" a week ago and finished reading 
+most of the book. I got several questions.
+
+1) Since the book was written two years ago and Lucene has made a lot of 
+changes, is there any plan for 2nd edition? (I guess this question is for 
+Otis and Erik, btw, it is a great book.)
+
+OG: Thanks.  Yes, there are plans for LIA2.  At this point in time they are still just plans.
+ We started preparing for the second edition some months ago, but then Lucene got some fresh
+blood and started developing an changing rapidly, that we decided to wait a little longer.
+ Plus, both Erik and I are quite busy these days (see my signature).
+
+2) I have two processes for indexing. one runs every 5 minutes to add new 
+contents into an existing index. Another one runs daily to rebuild entire 
+index which also handles removing old contents. After rebuild process 
+finishes indexing, we'd like to replace the index built by first process 
+(every 5 minutes) with index built by second process. How do i do it safely 
+and also avoid duplicating or missing documents (It is possible that first 
+process is still adding documents to the index when we try to replace it 
+with second one).
+NOTE: both processes retrieve data from same database.
+
+OG: You'll need to make those two processed communicate somehow.  If they run on the same
+servers, the easiest way might be using files - if file X exists, stop updating the index.
+ Or, if file Y exists, that means the first process is still updating, so wait with the index
+swap.
+If this is running under UNIX, you might be able to just do:
+rm -rf index            // the files won't *really* be removed at this point, so searching
+against this index will still work.
+mv newIndex index
+reopen the IndexSearcher
+
+You could also play with sym-links:
+
+normally you'd have: index -> index-built-on-20070428
+when you build a new index the following night you call it index-built-on-20070429 and point
+index to it: index -> index-built-on-20070429
+reopen the IndexSearcher
+
+3) we are doing indexing on a master server and push index data to slave 
+servers. In order to make new data visible to client, we have to close 
+IndexSearcher and open it after new data is coped over. We use web based 
+application (servlet) as search interface, creating a IndexSearcher as an 
+instance variable for all clients. My question is what will happen to 
+clients if I close IndexSearcher while clients are still doing search. How 
+to safely update index when client are searching?
+
+OG: The clients using the IndexSearcher when you close it will get an exception - IOException
+most likely.
+But you don't *have* to close the old IndexSearcher.  You could just open a new one and let
+the old one get GCed.
+OR, if you really want to close the old one, you could always come up with a simple mechanism
+that implements the "oh, this IndexSearcher needs to be closed soon - ok, let's give all clients
+who are using it 60 seconds to finish up and then we are closing this IS".  Or you could keep
+count of clients using this.  I believe Solr does this.  You'll also want to warm up the new
+IndexSearcher with a query before exposing it to real clients, esp. if your index is big.
+
+4) Lucene caches first 100 hits in memmory. We decided to use requery to 
+return search results back to clients. For first 100 documents, i can 
+iterator through "Hits". Do i have to use doc(n) to retrive documents for 
+any documents > 100? Any performance issues?
+
+OG:  For hits > 100 you still use the same API as for hits < 100.  However, if your
+application or its users need to go deep in the results, you might want to look at the IndexSearcher
+search(....) method that returns TopDocs.
+
+Otis
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+Lucene Consulting - http://lucene-consulting.com/
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,145 @@
+FROM: Hoss <hossman_luc...@fucit.org>
+SUBJECT: Numeric Range Restrictions: Queries vs Filters
+DATE: 23 Nov 2004
+
+(NOTE: numbers in [] indicate Footnotes)
+
+I'm rather new to Lucene (and this list), so if I'm grossly
+misunderstanding things, forgive me.
+
+One of my main needs as I investigate Search technologies is to restrict
+results based on Ranges of numeric values.  Looking over the archives of
+this list, it seems that lots of people have run into problems dealing
+with this.  In particular, whenever someone asks a question about "Numeric
+Ranges" the question seem to always involve one (or more) of the
+following:
+
+   (a) Lexical sorting puts 11 in the range "1 TO 5"
+   (b) Dates (or Dates and Times)
+   (c) BooleanQuery$TooManyClauses Exceptions
+   (d) Should I use a filter?
+
+(a) is a solved problem as long as you use a formatter like
+LongField.java[1]
+
+(b) is really nothing more then a special case of dealing with generic
+numeric values.  While there are certainly special purposes solutions that
+sometimes apply to dealing with Date ranges, any good solution for dealing
+with raw numeric ranges can be applied to Dates (and Times)
+
+(c) is a situation that seems to come up a lot because of the way
+RangeQuery works.  The rewrite method walks all of the Terms in the index
+starting with "lowerTerm" and builds up BooleanQuery containing a separate
+TermQuery for every Term found, until it reaches the upperTerm.  This
+causes a range search of "0001 TO 1000" to generate a BooleanQuery with N
+clauses, where N is the quantity of unique values in the field which are
+lexically greater then 0001 and lexically less then 1000.  depending on
+the nature of your data, this might be 0 BooleanClauses, or it might be
+1000 BooleanClauses; but the list is built before the search is ever even
+executed.
+
+At first, this may seem really strange -- I know I was certainly confused
+-- but there is a very good reason for it: Ultimately RangeQuery still
+provides you with a meaningful score for each document, based on the
+frequency (and quantity) of terms that document has in the range [2].  In
+order to do that, it has to expand itself, but what if you don't care if
+your Range restriction impacts the Score? [3]
+
+Which brings us to...
+
+(c) Filtering.  Filters in general make a lot of sense to me.  They are a
+way to specify (at query time) that only a certain subset of the index
+should be considered for results.  The Filter class has a very straight
+forward API that seems very easy to subclass to get the behavior I want.
+The Query API on the other hand ... I freely admit, that I can't make
+heads or tails out of it.  I don't even know where I would begin to try
+and write a new subclass of Query if I wanted to.
+
+I would think that most people who want to do a "numeric range
+restriction" on their data, probably don't care about the Scoring benefits
+of RangeQuery.  Looking at the code base, the way DateFilter works seems
+like it provides an ideal solution to any sort of Range restriction (not
+just Dates) that *should* be more efficient then using RangeQuery when
+dealing with an unbounded value set. (Both approaches need to iterate over
+all of the terms in the specified field using TermEnum, but RangeQuery has
+to build up an set of BooleanQuery objects for each matching term, and
+then each of those queries have to help score the documents -- DateFilter
+on the other hand only has to maintain a single BitSet of documents that
+it finds as it iterates)
+
+But I was surprised then to see the following quote from "Erik Hatcher" in
+the archives:
+
+  "In fact, DateFilter by itself is practically of no use, I think." [4]
+
+...Erik goes on to suggest that given "a set of canned date ranges", it
+doesn't really matter if you use a RangeQuery or a DateFilter -- as long
+as you cache them to reuse them (with something like CachingWrappingFilter
+or QueryFilter).  I'm hoping that he might elaborate on that comment?
+
+As a test, I wrote a "RangeFilter" which borrows heavily from DateFilter
+to both convince myself it could work, and to do a comparison between it
+and RangeQuery. [5] Based on my limited tests, using a Filter to restrict
+to a Range is a lot faster then using RangeQuery -- independent of
+caching.
+
+The attachment contains my RangeFilter, a unit test that demonstrates it,
+and a Benchmarking unit test that does a side-by-side comparison with
+RangeQuery [6].  If developers feel that this class is useful, then by all
+means roll it into the code base.  (90% of it is cut/pasted from
+DateFilter/RangeQuery anyway)
+
+
+    Comments? ... Questions? ... Answers?
+
+
+
+Footnotes:
+
+[1] It seems to me this class is extremely useful, does anyone know
+    if there's a particular reason it hasn't been added to the main Lucene
+    codebase?
+    http://www.mail-archive.com/lucene-dev@jakarta.apache.org/msg04790.html
+
+[2] Take a look at RangeQueryScoreDemo.java in the attachment, which
+    produces output something like this...
+       Range Search for: 'apple' TO 'dog'
+       0.40924072 ... bed dog emu
+       0.38014847 ... DOG
+       0.2825246 ... cat
+       0.17657787 ... apple emu
+       0.12671615 ... dog
+
+[3] According to the list archives "Matt Quail" mentioned in May that
+    he was working on a "QuickRangeQuery" class that wouldn't have the
+    BooleanQuery limitation, at the expense of always scoring "1.0",
+    but I haven't seen any mention of anything like it since.  Is Matt
+    still an active list member?  Matt, is this something you're still
+    pursuing?
+    http://nagoya.apache.org/eyebrowse/ReadMsg?msgId=1659395
+
+[4] http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg07015.html
+
+[5] The only major difference between my RangeFilter and DateFilter is
+    that RangeFilter supports options for inclusion/exclusion
+    (individually for the low/high terms I might add).  But for the
+    purposes of a benchmark, doing the same thing with DateFilter would
+    have worked fine.
+
+[6] If you have ant, see "ant -projecthelp"; otherwise, read the top
+    of build.xml
+
+
+
+--
+
+-------------------------------------------------------------------
+"Oh, you're a tricky one."                        Chris M Hostetter
+     -- Trisha Weir                    hossman@rescomp.berkeley.edu
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

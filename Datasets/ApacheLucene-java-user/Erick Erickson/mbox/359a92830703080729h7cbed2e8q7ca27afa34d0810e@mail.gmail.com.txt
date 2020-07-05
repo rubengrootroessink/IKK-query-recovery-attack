@@ -1,0 +1,167 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Lucene 2.1, inconsistent phrase query results with slop
+DATE: 8 Mar 2007
+
+In a nutshell, reversing the order of the terms in a phrase query can
+result in different hit counts. That is, "person place"~3 may return
+different results from "place person"~3, depending on the number
+of intervening terms.
+
+
+There's a self-contained program below that
+illustrates what I'm seeing, along with output.
+
+SpanNear does not exhibit this behavior, so I can make things work.
+
+I didn't find anything in my (admittedly brief) search of the archives
+or the open issues that directly spoke to this.....
+
+Several questions:
+
+1> is this a bug or not?
+
+2> is anyone working on it or should I dig into it? It looks like
+it may be related to LUCENE-736.
+
+3> does the phrase from LIA (pg 208) "Given enough slop,
+PhraseQuery will match terms out of order in the original text." apply here?
+
+4> Do you want me to post this on the developers list (I can hear it
+now... "not unless you also post a patch too" <G>)....
+
+Thanks
+Erick
+
+
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+
+
+public class PhraseProblem
+{
+    public static void main(String[] args)
+    {
+        try {
+            PhraseProblem pp = new PhraseProblem();
+
+            pp.tryIt();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    private void tryIt() throws Exception
+    {
+        Directory dir = new RAMDirectory();
+        IndexWriter writer = new IndexWriter(dir, new WhitespaceAnalyzer());
+        Document doc = new Document();
+
+        doc.add(
+                new Field(
+                        "field",
+                        "person space space space place",
+                        Field.Store.YES,
+                        Field.Index.TOKENIZED));
+        writer.addDocument(doc);
+        writer.close();
+
+        IndexSearcher searcher = new IndexSearcher(dir);
+
+        System.out.println("trying phrase queries");
+        this.trySlop(searcher, 2);
+        this.trySlop(searcher, 3); //FAILS
+        this.trySlop(searcher, 4); //FAILS
+        this.trySlop(searcher, 5);
+        this.trySlop(searcher, 6);
+        this.trySlop(searcher, 7);
+
+        System.out.println("trying SpanNear queries");
+        this.trySpan(searcher, 2);
+        this.trySpan(searcher, 3);
+        this.trySpan(searcher, 4);
+        this.trySpan(searcher, 5);
+        this.trySpan(searcher, 6);
+        this.trySpan(searcher, 7);
+    }
+
+    private void trySpan(IndexSearcher searcher, int slop) throws Exception
+{
+
+        SpanQuery sq1 = new SpanTermQuery(new Term("field", "person"));
+        SpanQuery sq2 = new SpanTermQuery(new Term("field", "place"));
+        SpanNearQuery sqn1 = new SpanNearQuery(
+                        new SpanQuery[] {sq1, sq2}, slop, false);
+
+        SpanNearQuery sqn2 = new SpanNearQuery(
+                        new SpanQuery[] {sq2, sq1}, slop, false);
+
+        Hits hits1 = searcher.search(sqn1);
+        Hits hits2 = searcher.search(sqn2);
+
+        this.printResults(hits1, hits2, slop);
+    }
+
+    private void trySlop(IndexSearcher searcher, int slop)
+        throws Exception
+    {
+        QueryParser qp = new QueryParser("field", new WhitespaceAnalyzer());
+        Query query1 = qp.parse(String.format("\"person place\"~%d", slop));
+        Query query2 = qp.parse(String.format("\"place person\"~%d", slop));
+
+        Hits hits1 = searcher.search(query1);
+        Hits hits2 = searcher.search(query2);
+        this.printResults(hits1, hits2, slop);
+    }
+    private void printResults(Hits hits1, Hits hits2, int slop) {
+        if (hits1.length() != hits2.length()) {
+            System.out.println(
+                    String.format(
+                            "Unequeal hit counts. hits1.length %d,
+hits2.length %d slop : %d",
+                            hits1.length(),
+                            hits2.length(),
+                            slop));
+        } else {
+            System.out.println(
+                    String.format(
+                            "Found identical hit counts of %d, slop: %d",
+                            hits1.length(),
+                            slop));
+        }
+    }
+}
+
+****************************output************************
+
+trying phrase queries
+
+Found identical hit counts of 0, slop: 2
+Unequeal hit counts. hits1.length 1, hits2.length 0 slop : 3
+Unequeal hit counts. hits1.length 1, hits2.length 0 slop : 4
+Found identical hit counts of 1, slop: 5
+Found identical hit counts of 1, slop: 6
+Found identical hit counts of 1, slop: 7
+
+
+trying SpanNear queries
+
+Found identical hit counts of 0, slop: 2
+Found identical hit counts of 1, slop: 3
+Found identical hit counts of 1, slop: 4
+Found identical hit counts of 1, slop: 5
+Found identical hit counts of 1, slop: 6
+Found identical hit counts of 1, slop: 7
+

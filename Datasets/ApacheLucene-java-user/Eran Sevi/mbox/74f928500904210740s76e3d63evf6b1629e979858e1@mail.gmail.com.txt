@@ -1,0 +1,224 @@
+FROM: Eran Sevi <erans...@gmail.com>
+SUBJECT: Re: changing term freq in indexing time
+DATE: 21 Apr 2009
+
+Hi,
+
+You might want to take a look at Payloads. If you know the frequency of the
+words in each world in advance than during tokenization for each world you
+could save the frequency as the payload.
+
+During searches you could use BoostingTermQuery to take the frequency into
+account.
+
+Eran.
+On Tue, Apr 21, 2009 at 4:44 PM, liat oren <oren.liat@gmail.com> wrote:
+
+> Hi Doron,
+>
+> Thank you very much for the elaborated answer!
+>
+> About the Synonyms, I can't use Wordnet as I have my own list of synonyms.
+> I
+> will look at contrib/memory and see what it does.
+>
+> You understood correctly the process of using the inverse doc. About the
+> two
+> problems you mentioned: scalability and ignoring the vicinity of words -
+> scalability - this is the reason I wanted to set the frequencies of the
+> terms. The use of the frequencies will be used at this stage, not at the
+> stage of using the synonyms. When I use the sysnonyms, I want to use the
+> score as you suggested below.
+> Here, I have for every word, in which worlds they appear. Currently every
+> world appears once in a word. However, I would like it to appear the number
+> if times as the frequency of the word in the world. In order to avoid
+> writing the world several times in the world field, I would like to be able
+> to set the freq of the specific world accordng to the freq of the word at
+> this world without actually writing it x times (for scalability and index
+> size and performance issues)
+> So if dog appears 10 times in world 1 and 5 times in world 2, and cat
+> appears 5 times in world 1, then I want these frequencies to be taken into
+> account when computing how the word dog and cat are close. BUT I don't want
+> to write world 1 10 times in word dog and 5 times in word cat, but only
+> once
+> and to update the termVector so that the frequency will get 10 and 5
+> respectively.
+> So the *generation* of the synonyms will take into account the frequencies
+>
+> The vicinity of words - is there any better way to take it in account?
+>
+> About the suggestion of using term boosting that will use the score of the
+> synonyms - if I want to query "big white dogs" and I have the following
+> synonyms:
+> big - big (1.0), large (0.9), huge (0.6)
+> white - white (1.0), color (0.5) offwhite (0.8)
+> dog - dog (1.0)
+> So this is the way to do it? :
+>
+>   BooleanQuery bq = new  BooleanQuery();
+>          TermQuery tq = new TermQuery(new Term("text", "big"));
+>          tq.setBoost((float)1.0);
+>                   bq.add(bq, false, false);
+>   tq = new TermQuery(new Term(("text", "large"));
+>             tq.setBoost((float)0.9);
+>                             bq.add(bq, false);
+>  tq = new TermQuery(new Term(("text", "huge"));
+>             tq.setBoost((float)0.6);
+>                             bq.add(bq, false);
+>
+>  tq = new TermQuery(new Term(("text", "white"));
+>             tq.setBoost((float)1.0);
+>                             bq.add(bq, false);
+>  tq = new TermQuery(new Term(("text", "color"));
+>             tq.setBoost((float)0.5);
+>                             bq.add(bq, false);
+> // etc
+>   IndexSearcher searcher = new IndexSearcher("TestSearchIndex");
+>                   Hits hits = searcher.search(bq);
+>
+>
+> how the use of booleanQuery will also look at the position of the words? I
+> remember I read about the score that takes into account also  the position
+> of the term, but I didn't see this factor in the score formula
+> Thanks again, it is very helpful,
+>  Liat
+> 2009/4/21 Doron Cohen <cdoronc@gmail.com>
+>
+> > Hi Liat, there are two packages under Lucene's contrib that deals with
+> > Synonyms - that is contrib/memory and contrib/wordnet - which you
+> > may find useful. I never used these two but they seem relevant to what
+> > you are trying to achieve.
+> >
+> > Anyhow, it seems you compute the synonyms for word w are those
+> > that appear in the same set of documents ('worlds') as w, and you find
+> > this set by (a) indexing an inverse of the collection (docs become words
+> > and words become docs) and (b) using docs(w) as query do find syns(w).
+> >
+> > I assume that your 'worlds' are small, each containing only a small
+> > set of a few related words, otherwise I would have two
+> > concerns with this approach: (a) scalability (b) in a large doc (world)
+> > this
+> > approach ignores the vicinity of words which seems to me important
+> > to their likelihood as synonyms
+> >
+> > Assuming you are okay here, and going back to original question of
+> > altering the term frequency, perhaps taking the (search) scores of the
+> > returned synonyms (which you find by search) is better than just
+> > using their frequency? If you find this approach valid, then at least for
+> > some queries you should be able to use queries boosts. For example
+> > create a BooleanQuery, add to it a TermQuery for each synonym,
+> > but set the boost of the TermQuery according to the synonnym score.
+> > This is also where you could "punish" synnonyms comparing to the
+> > original word. This will only help with queries with contruction API
+> > that takes (sub) queries as input (so it will not help with a
+> PhraseQuery).
+> >
+> > - Doron
+> >
+> > On Tue, Apr 21, 2009 at 12:40 PM, liat oren <oren.liat@gmail.com> wrote:
+> >
+> > > Ok, I will explain the full 'problem' and then explain how I approach
+> it:
+> > >
+> > > Lets divide it into three steps:
+> > >
+> > > 1. I have a 'dictionary' of words - for every word, I have a list of
+> > > worlds,
+> > > which are ids of text documents that the word appears in.
+> > > So, for example, for the word 'dog', I have '1 1600 36000' in the
+> > "worlds"
+> > > field (which are tokenized whin indexed) - which means that the word
+> dog
+> > > appears in worlds 1, 1600 and 36000.
+> > >
+> > > 2. This index is used to choose synonyms for the word dog - using the
+> > > "worlds" field - I do a search on this index, giving the query "'1 1600
+> > > 36000" as in input and thus get the words that are close to the word
+> > "dog".
+> > > I take the 10 closest words.
+> > >
+> > > 3. These 10 synonyms are then used to expand the query.
+> > >
+> > > Basically, I have 2 problems in this process:
+> > >
+> > > a. In the process of finding the synonyms, I would like that the
+> > frequency
+> > > of the word in each of the worlds will be taken into account. so that
+> if
+> > > 'dog' appeared 3 times in world 1, 10 times in world 1600 and 4 times
+> in
+> > > world 36000, then it will be taken into account.
+> > > I wanted to avoid "expanding" the field to be "1 1 1 1600 1600 1600
+> 1600
+> > > 1600 1600 1600 1600 1600 1600 36000 36000 36000 36000". Accordingly I
+> > > wanted
+> > > to be able to set the freq by myself.
+> > >
+> > > b. In the process of using the synonyms, I wanted to be able to set a
+> > > 'penalty' factor to the synonyms, together with giving differnt weight
+> to
+> > > differnt synonyms, according to theur score. I looked at an old thread
+> -
+> > > Search for synonyms - implemenetation for review :
+> > > .
+> > >
+> > >
+> >
+> http://mail-archives.apache.org/mod_mbox/lucene-java-user/200603.mbox/%3c39B0FB508E5D7540ACA5AD57225E150D39203D@xmail.me.corp.entopia.com%3e
+> > >
+> > > I don;t know if its part of lucene now. I didn't quite understand how
+> to
+> > > use
+> > > it.
+> > > Is there a better way to approach it?
+> > >
+> > > I hope I explained it well.
+> > > Thanks,
+> > > Liat
+> > >
+> > >
+> > >
+> > > 2009/4/21 Doron Cohen <cdoronc@gmail.com>
+> > >
+> > > > Depending on the problem you are trying to solve there may be other
+> > > > solutions to it, not requiring setting wrong (?) values for term
+> > > > frequencies.
+> > > > If you can explain what you are trying to solve, people on the list
+> may
+> > > > be able to suggest such alternatives.
+> > > > - Doron
+> > > >
+> > > > On Sun, Apr 19, 2009 at 2:39 PM, liat oren <oren.liat@gmail.com>
+> > wrote:
+> > > >
+> > > > > Hi,
+> > > > >
+> > > > > I would like to be able to set the term freq to differnt values at
+> > > index
+> > > > > time, or at search time.
+> > > > >
+> > > > > So if a document has the following text: 1 2, the freq of 1 will
+> get
+> > > 100
+> > > > > and
+> > > > > the freq of 2 will get 200. I want to avoid expanding it by writing
+> 1
+> > > 100
+> > > > > times.
+> > > > >
+> > > > > I looked at Similarity class and wanted to override it, but the tf
+> > > > function
+> > > > > gets only freq, so I don't know for which term this freq relates
+> to,
+> > > thus
+> > > > I
+> > > > > can't change the value.
+> > > > >
+> > > > > Thanks,
+> > > > > Liat
+> > > > >
+> > > >
+> > >
+> >
+>
+

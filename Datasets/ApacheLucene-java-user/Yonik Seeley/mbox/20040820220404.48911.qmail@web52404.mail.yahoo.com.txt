@@ -1,0 +1,134 @@
+FROM: Yonik Seeley <ysee...@yahoo.com>
+SUBJECT: speeding up queries (MySQL faster)
+DATE: 20 Aug 2004
+
+Hi,
+
+I'm trying to figure out how to speed up queries to a
+large index.
+I'm currently getting 133 req/sec, which isn't bad,
+but isn't too close
+to MySQL, which is getting 500 req/sec on the same
+hardware with the
+same set of documents.
+
+Setup info & Stats:
+- 4.3M documents, 12 keyword fields per document, 11
+unindexed fields per document.
+- lucene index size on disk=1.3G
+- Hardware: dual opteron w/ 16GB memory, running 64
+bit JVM (Sun 1.5 beta)
+- Lucene version 1.4.1
+- Hitting multithreaded server w/ 10 clients at once
+- This is a read-only index... no updating is done
+- Single IndexSearcher that is reused for all requests
+ 
+
+Q1)  while hitting it with multiple queries at once,
+lucene is pegged at 50% CPU usage (meaning it is
+only using 1 out of 2 CPUs on average).  I took a
+thread dump
+and all of the lucene threads except one are blocked
+on
+reading a file (see trace below).  I could create two
+index
+readers, but that seems like it might be a waste, and
+fixing
+a symptom instead of the root problem.  Would multiple
+IndexSearchers or IndexReaders share internal caches?
+Is there a way to cache more info at a higher level
+such that
+it would get rid of this bottleneck?  The JVM isn't
+taking up
+much space (125M or so), and I have 16GB to work with!
+The OS (linux) is obviously caching the index file,
+but
+that doesn't get rid of the synchronization issues,
+and the
+overhead of re-reading.
+How is caching in lucene configured?
+Does it internally use FieldCache, or do I have to use
+that
+somehow myself?
+ 
+"tcpConnection-8080-72" daemon prio=1
+tid=0x0000002b24412490 nid=0x34a4 waiting for monitor
+entry 
+
+[0x0000000045aba000..0x0000000045abb2d0]
+        at
+org.apache.lucene.index.CompoundFileReader$CSInputStream.readInternal(CompoundFileReader.java:215)
+        - waiting to lock <0x0000002ae153fa00> (a
+org.apache.lucene.store.FSInputStream)
+        at
+org.apache.lucene.store.InputStream.refill(InputStream.java:158)
+        at
+org.apache.lucene.store.InputStream.readByte(InputStream.java:43)
+        at
+org.apache.lucene.store.InputStream.readVInt(InputStream.java:83)
+        at
+org.apache.lucene.index.SegmentTermDocs.skipTo(SegmentTermDocs.java:176)
+        at
+org.apache.lucene.search.TermScorer.skipTo(TermScorer.java:88)
+        at
+org.apache.lucene.search.ConjunctionScorer.doNext(ConjunctionScorer.java:53)
+        at
+org.apache.lucene.search.ConjunctionScorer.next(ConjunctionScorer.java:48)
+        at
+org.apache.lucene.search.Scorer.score(Scorer.java:37)
+        at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:92)
+        at
+org.apache.lucene.search.Hits.getMoreDocs(Hits.java:64)
+        at
+org.apache.lucene.search.Hits.<init>(Hits.java:43)
+        at
+org.apache.lucene.search.Searcher.search(Searcher.java:33)
+        at
+org.apache.lucene.search.Searcher.search(Searcher.java:27)
+
+
+Even using only 1 cpu though, MySQL is faster. Here is
+what
+the queries look like:
+
+"field1:4 AND field2:188453 AND field3:1"
+
+field1:4      done alone selects around 4.2M records
+field2:188453 done alone selects around 1.6M records
+field3:1      done alone selects around 1K records
+The whole query normally selects less than 50 records
+Only the first 10 are returned (or whatever range
+the client selects).
+
+The fields are all keywords checked for exact matches
+(no
+fulltext search is done).  Is there anything I can do
+to
+speed these queries up, or is the structure just more
+suited
+to MySQL (and not an inverted index)?
+
+How is a query like this carried out?
+
+Any help would be greatly appreciated.  There's not a
+lot of info
+on searching (much more on updating). I'm looking
+forward
+to "Lucene in Action"!  too bad it's not out till
+October.
+
+-Yonik
+
+
+		
+_______________________________
+Do you Yahoo!?
+Win 1 of 4,000 free domain names from Yahoo! Enter now.
+http://promotions.yahoo.com/goldrush
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,166 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: filtering by first letter
+DATE: 26 Feb 2007
+
+OK, I was thinking you were wondering how to get only the set of letters you
+wanted the user to be able to choose from....
+
+You're right, the TermEnum/TermDocs tell you all of the terms in an index,
+not really useful for your problem as I understand it now....
+
+
+How many documents do you have in your index? If it's not too huge , you
+could think about making a filter for each letter of the alphabet. That
+would only amount to 1 bit/document * 26. You could generate these at
+IndexReader initialization time, or perhaps you could make them persistent
+if your index didn't change too often... And this *is* a TermEnum/TermDocs
+function <G>...
+
+Anyway, the idea here is to pre-calculate 26 bitsets. Then, at query time,
+go the HitCollector route and, as each document came through your Collector,
+check it's ID against your filters to see if you should add the letter
+represented by that bitset to your list of filter letters. So, if your
+document ID was found in bitset 0, you'd have an a. in bitset 1, you'd have
+a b, etc.
+
+This kind of scheme is *probably* significantly more efficient than fetching
+the document for each hit, but I have no metrics so you'll have to
+experiment. I don't like the fact that there are 26 tests for every
+document... but it's late on Sunday <G>..... I'm sure you can make some
+optimizations like not testing for letters already found etc.
+
+What you really want is a map of all document IDs to your letter filter it
+seems. You could think about creating a map of this. Perhaps a RAMDir (or,
+indeed, an FSDir) that you then searched/fetched for your documents,
+populated at start-up time. The notion here is that each document would be a
+document ID and its associated letter. Or maybe just a common Java Map,
+mapping document ID to letter...... Maybe a huge document where each field
+was the document id and the value of that field was the filter letter...
+
+Again, I have no clue how performance relates to fetching a document, but
+it's an idea.
+
+But before going down these routes, how big is your index and do you have
+any clue whether you actually have a performance issue?
+
+And finally, can you sell your product manger on defining this problem away?
+By that I mean is it possible to just present all 26 letters, and if the
+user chooses one that's not out there, return "no such documents"? I mention
+this because I've spent too much time implementing complex solutions to
+problems that really don't add anything that the user notices and only serve
+to make the product late <G>...
+
+Best
+Erick
+
+
+
+On 2/25/07, Paul Sundling (Webdaddy) <tkz@tkz.net> wrote:
+>
+> OK I'm not sure I understand your answer.  I thought TermEnum gave you
+> all the terms in an index, not from a search result.
+>
+> Let me clarify what I need.  I'm looking for a way to find out all the
+> values of the FIELD_FILTER_LETTER field for any given search.
+>
+> INDEX TIME:   (done for each indexed person, stores the first letter of
+> their name as a field)
+>         if (person.getPersonName() != null) {
+>             String filterLetter = person.getPersonName().substring(0,
+> 1).toLowerCase();
+>             document.add(new Field(FIELD_FILTER_LETTER, filterLetter,
+>                     Field.Store.YES, Field.Index.UN_TOKENIZED));
+>         }
+>
+> SEARCH TIME:  (need to present a list of all values of
+> FIELD_FILTER_LETTER for any given SEARCH)
+>         IndexSearcher searcher = getIndexSearcher();
+>         Hits result = searcher.search(query, filter, sort);
+>
+> If the filter letter has been picked, this is the filter used, otherwise
+> the filter is null:
+> So params comes from
+>             TermQuery letterQuery = new TermQuery(new Term(
+>                     KEY_FILTER_LETTER, params.getFilterLetter()));
+>             QueryFilter letterFilter = new QueryFilter(letterQuery);
+>             result = searcher.search(query, letterFilter, sort);
+>
+> So where do I plug in the TermEnum at search time?  I haven't used
+> TermEnum before.
+>
+> Paul
+>
+>
+> Erick Erickson wrote:
+> > See TermEnum (I don't think you need TermDocs for this). If you
+> > instantiate
+> > a TermEnum(new Term("firstletterfield", "")), it'll enumerate all the
+> > terms
+> > in your 'firstletter' field and you can just collect them and go...
+> >
+> > For that matter, and assuming that your names are UN_TOKENIZED, you
+> > could do
+> > something like this without a special field by iterating over your
+> > personName field. This might be reasonable if your index is fairly
+> static
+> > and you could create this list at IndexReader open time, especially
+> since
+> > you can use TermEnum.skipTo("personName", "a") etc.....
+> >
+> > Best
+> > Erick
+> >
+> > On 2/23/07, Paul Sundling (Webdaddy) <tkz@tkz.net> wrote:
+> >>
+> >> I have a requirement to support filtering search results by first
+> >> letter.
+> >>
+> >> This is relatively simple by adding a field to each index that
+> >> represents the first letter for that relevant index and then adding a
+> >> filter to the search.
+> >>
+> >> The hard part is that I need to list all the letters you can filter BY.
+> >> So if there are no names that start with S, it shouldn't appear as an
+> >> option.
+> >>
+> >> Is there a simple and performant way to get a set of all the unique
+> >> values for a Field in the Hits returned?  There would probably only be
+> >> low number of unique values.
+> >>
+> >> So let's say I have the following in my index:
+> >>
+> >> letter, personName
+> >> m, mike smith
+> >> p, paul smith
+> >> g, george smith
+> >> g, glenda smith
+> >>
+> >> I need to be able to display to the user that they can filter based on
+> >> M, P or G within their search for George.
+> >>
+> >> I could do a compromise and for search results above a certain level,
+> >> show all letters and numbers, but it won't always give correct values.
+> >> Imagine this edge case: A search for george has 50,000 results, but
+> only
+> >> a couple people had george as their last name.  Not many of the letters
+> >> would be valid filters.
+> >>
+> >> Thanks for any ideas or approaches I overlooked.
+> >>
+> >> Paul Sundling
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

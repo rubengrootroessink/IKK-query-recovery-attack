@@ -1,0 +1,102 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Copy index while updating the index
+DATE: 10 Apr 2007
+
+
+You do need to be careful with this because if a writer commits while
+you are copying you can easily get a copy that's unusable (is missing
+files).
+
+When you instantiate an IndexReader, it actually holds open most files
+that it uses which protects them from being deleted.  So in theory if
+you could open a reader successfully, ask it which files it is using,
+then copy those files.  Hmmm actually some files it does not hold open
+(eg the *.del files, and the segments_N file) which means this
+approach won't work.  Also on Unix the filenames disappear even though
+the underlying files are still held open.
+
+One way that would work is to use the new custom deletion policy
+feature.
+
+Unfortunately, this is not yet released (only available on trunk).
+The idea is fairly simple.  Make your own deletion policy which at
+normal times (no backup running) is the default policy (delete all but
+the last commit point).  Then, when you want to start a backup, this
+policy would mark the one commit point its now on as not deletable.
+This ensures the writer will not remove any of its files, even as new
+commits are being done.  Then, your backup copies these files off, and
+it's OK if this takes a while (eg if it runs with low priority or
+something) since writer won't delete the files.  Finally when backup
+is done, the deletion policy lets that commit point be deleted again
+and writer will remove its files.
+
+This should allow you to do "live" (not pause indexing) backups of
+a Lucene index, cross platform.
+
+Mike
+
+"Otis Gospodnetic" <otis_gospodnetic@yahoo.com> wrote:
+> Here is one way to do it:
+> You can read/open an index at any point, even when it's being modified. 
+> You can then open a new FSDirectory pointing to a new directory and add
+> your original FSDirectory to that new FSDirectory.  That will copy the
+> index.  Of course, any new documents you add to the original index after
+> you've opened it will not be copied.  The same goes for any documents
+> that were still buffered in memory when you opened the index, and were
+> not yet flushed to disk.
+> 
+> See also:
+> http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg12709.html
+> 
+> Otis
+> 
+> 
+> 
+> ----- Original Message ----
+> From: "Rajendranath, Divya" <Divya.Rajendranath@deshaw.com>
+> To: java-user@lucene.apache.org
+> Sent: Tuesday, April 10, 2007 12:06:12 PM
+> Subject: Copy index while updating the index
+> 
+> Hello,
+> 
+> I have a scenario, where we need to set up our application, that uses
+> Lucene (and has on-demand indexing of documents) in Disaster-recovery
+> site.
+> 
+> The simple files/attachments used by our application can be simply
+> copied to the DR site just by syncing (manual copying).
+> 
+> Yes, we can also copy the index directory, but problem arises when we
+> have copy the index directory, while the index directory is being
+> updated, that means the Index is open.
+> 
+> Wont this corrupt the index directory.
+> 
+> Does Lucene 2.0 have support for copying opened index directory, without
+> corrupting it.
+> 
+> Please do let me know.
+> 
+> 
+> Thanks,
+> Divya.
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

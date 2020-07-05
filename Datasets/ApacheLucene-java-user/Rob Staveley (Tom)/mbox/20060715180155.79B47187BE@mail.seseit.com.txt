@@ -1,0 +1,135 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: RE: MissingStringLastComparatorSource and MultiSearcher
+DATE: 15 Jul 2006
+
+ > I haven't tried to run that test, but the non-null elements in your test
+are ordered a bit funny for a reverse sort ;-)
+
+:-) OK, Revision attached. With my QA-credibility at an all time low, could
+you see what you make of the attached test? The problem one is
+testSortingReverseNullFirst. My reckoning is that you are forward-sorting
+(or ascending-sorting if that's the right thing to say) the non-nulls. 
+
+My feeling is that nullStringLastComparatorSource can only be applicable for
+one of the four conditions and not two as you have it:
+--------8<--------
+  public static SortField getStringSortField(String fieldName, boolean
+reverse, boolean nullLast, boolean nullFirst) {
+    if (nullLast) {
+      if (!reverse) return new SortField(fieldName,
+nullStringLastComparatorSource);
+      else return new SortField(fieldName, SortField.STRING, true);
+    } else if (nullFirst) {
+      if (reverse) return new SortField(fieldName,
+nullStringLastComparatorSource); // <-- !!!
+      else return new SortField(fieldName, SortField.STRING, false);
+    } else {
+      return new SortField(fieldName, SortField.STRING, reverse);
+    }
+  }
+--------8<--------
+-----Original Message-----
+From: Yonik Seeley [mailto:yseeley@gmail.com] 
+Sent: 15 July 2006 16:52
+To: java-user@lucene.apache.org
+Subject: Re: MissingStringLastComparatorSource and MultiSearcher
+
+On 7/15/06, Rob Staveley (Tom) <rstaveley@seseit.com> wrote:
+> Incidentally, Yonik, is the logic for
+> org.apache.solr.search.Sorting#getStringSortField flawed? I don't see 
+> how the same comparator can be used for forward and reverse sorts for 
+> the non-null values.
+
+The logic does cause a double-take at first glance :-) It's the combination
+of the normal lucene string sort and MissingStringLastComparatorSource that
+let you do all the permutations.
+
+Keep in mind that "reverse" in the Solr schema sense is not quite the same
+as "reverse" to a Lucene SortField.
+
+> Methinks it is broken for reverse sorts where you specify nulls to 
+> appear first.
+
+Let's take this case specifically...
+
+First the semantics:
+   * @param nullFirst   true if null should come first, regardless of sort
+order
+
+So if the sort is reversed, we want [null,null,Z,Y,...]
+
+MissingStringLastComparatorSource orders null at the end in an ascending
+sort.  So if the sort is completely reversed (in the lucene sense), nulls
+will be at the beginning like we specified.
+
+> I added this test to TestMissingStringLastComparatorSource.java from 
+> http://issues.apache.org/jira/browse/LUCENE-406, which confirms my 
+> suspicions ...or confirms that I'd never get a job in QA:
+
+:-)
+
+I haven't tried to run that test, but the non-null elements in your test are
+ordered a bit funny for a reverse sort ;-)
+
+-Yonik
+http://incubator.apache.org/solr Solr, the open-source Lucene search server
+
+
+> --------8<--------
+> public void testSortingReverseNullFirst() throws Exception {
+>
+>         Hits result;
+>
+>         boolean reverse = true;
+>         boolean nullLast = false;
+>         boolean nullFirst = true;
+>
+>         Sort order = new Sort(Sorting.getStringSortField("data", 
+> reverse, nullLast, nullFirst));
+>
+>         result = s.search(ALL, order);
+>
+>         assertEquals("didn't get all", data.length, result.length());
+>
+>         assertEquals("wrong order 2", "0", result.doc(2).get("id"));
+>         assertEquals("wrong order 3", "3", result.doc(3).get("id"));
+>         assertEquals("wrong order 4", "6", result.doc(4).get("id"));
+>         assertEquals("wrong order 5", "7", result.doc(5).get("id"));
+>         assertEquals("wrong order 6", "4", result.doc(6).get("id"));
+>         assertEquals("wrong order 7", "1", result.doc(7).get("id")); }
+> --------8<--------
+>
+> -----Original Message-----
+> From: Yonik Seeley [mailto:yseeley@gmail.com]
+> Sent: 14 July 2006 21:59
+> To: java-user@lucene.apache.org
+> Subject: Re: MissingStringLastComparatorSource and MultiSearcher
+>
+> On 7/14/06, Rob Staveley (Tom) <rstaveley@seseit.com> wrote:
+> > I was wanting to apply this to a field, which sorts on INT.
+>
+> The problem with int is that the FieldCache stores the values as an 
+> int[], and you can't tell when a value is missing.
+>
+> > Specifically I'm
+> > trying to achieve reverse chronological sorting on a timestamp 
+> > field, which stores YYMMDDHHI (i.e. resolves to 10 minutes and 
+> > doesn't handle
+> centuries).
+> > Missing timestamps are assumed to be "old" (i.e. should appear at 
+> > the
+> end).
+> >
+> > I could get this to sort on String and use 
+> > MissingStringLastComparatorSource, but would this not be less 
+> > efficient than sorting in INT??
+>
+> String sorting takes more memory, but the speed is the same.  Local 
+> sorting with the FieldCache for strings is done via the ordinal value 
+> (no string compare is done, just int comparisons).
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+

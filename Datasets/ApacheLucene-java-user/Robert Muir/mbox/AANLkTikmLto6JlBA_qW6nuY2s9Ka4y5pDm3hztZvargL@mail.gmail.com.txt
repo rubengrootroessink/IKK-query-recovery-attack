@@ -1,0 +1,76 @@
+FROM: Robert Muir <rcm...@gmail.com>
+SUBJECT: Re: Precision-recall curve with /contrib/benchmark/quality
+DATE: 5 Jun 2010
+
+I experienced this problem too, when implementing a prototype of this
+similarity for LUCENE-2392, i noticed it consistently provided   better
+relevance than this patch. (you can see the prototype, i uploaded it to
+LUCENE-2091).
+
+After lots of discussion and debugging with José Ramón Pérez Agüera, I found
+that both implementations are the same as far as the core formula, but there
+are some current limitations in the LUCENE-2091 patch that can cause it to
+often perform worse than lucene's default ranking formula. Here are some
+examples:
+
+1. it has its own BooleanQuery, which doesn't support coordination-level
+matching [coord()]. This feature often gives a nice relevance boost for
+short queries, such as the topic queries in ohsumed and typical queries
+users enter to search engines.
+2. its IDF formula has no floor, causing some IDF values for very common
+words to have negative values. this can be addressed by using
+Math.log(*1 +*((n - dfj + 0.5F)/(dfj + 0.5F))).
+3. the length normalization encoding is unchanged from lucene's default:
+1/sqrt(n), but then quantized to byte encoding. but this patch then has to
+undo the square root which itself already lost precision from the encoding.
+I think this too causes some problems.
+
+    float fieldNorm =
+this.getSimilarity().decodeNormValue(this.norm[this.docID()]);
+		float length = 1 / (fieldNorm * fieldNorm);
+
+So, I think we can fix all of these issues in LUCENE-2392, where the scoring
+system is modified to be more friendly to these types of similarities, and
+in my tests so far BM25 performs quite well reliably with that system in
+place.
+
+Until some things are improved in lucene itself, it would be hard to adjust
+the patch in LUCENE-2091 to avoid problems like #3, which is really just the
+patch trying to dance around limitations of lucene's scoring API. This
+one is much better with the flexible scoring system since it can run the
+calculations incorporating both the raw docLength and avgDocLength before
+even going to byte[] at all... or if you prefer, not even use byte[] norms
+but float[] or something else :)
+
+
+On Sat, Jun 5, 2010 at 8:10 AM, calin014 <calin014@gmail.com> wrote:
+
+>
+> Hy,
+>
+> I did some tests and i keep getting low scores for bm25 on ORP collections.
+> The implementation is from this patch:
+> https://issues.apache.org/jira/browse/LUCENE-2091
+> https://issues.apache.org/jira/browse/LUCENE-2091
+> Is that normal?
+>
+> I got the following results using StandardAnalyzer:
+>
+> http://lucene.472066.n3.nabble.com/file/n872585/prcurve1.png
+> http://lucene.472066.n3.nabble.com/file/n872585/prcurve.png
+> --
+> View this message in context:
+> http://lucene.472066.n3.nabble.com/Precision-recall-curve-with-contrib-benchmark-quality-tp844442p872585.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+Robert Muir
+rcmuir@gmail.com
+

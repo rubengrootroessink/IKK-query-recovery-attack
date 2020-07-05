@@ -1,0 +1,931 @@
+FROM: "Andrew Schetinin" <ascheti...@entopia.com>
+SUBJECT: Search for synonyms - implemenetation for review
+DATE: 6 Mar 2006
+
+Dear all,
+ 
+Me and my college, Mr. Ziv Gome, would like to present here an
+implementation of synonyms search that we use in our server.
+Probably it will be interesting for those who worked on synonyms, or
+going to implement synonyms search.
+We hope that this mail will raise interesting ideas and will result in
+useful results :-)
+
+And I would like to mention that it was Ziv who inspired this research
+and development.
+He did most of the analytical work and basically invented this entire
+idea. 
+ 
+1. Background
+
+There is an interesting discussion about synonyms in Lucene mailing list
+
+http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg11594.html
+which suggests expanding the search query with additional clauses for
+synonyms penalized using boost factor.
+If we understood correctly, this is employed in the "WordNet" project
+for English synonyms. 
+When we started working with synonyms, we implemented exactly that at
+first, just without the boost (or, better to say, penalty) factor.
+Mr. Erik Hatcher in his book refers to synonyms in a different way -
+injecting them at indexing time - we did not quite liked that because it
+does not allow searching without synonyms, and we wanted
+enabling/disabling this feature from UI.. 
+
+2. First synonyms search implementation and related problems
+
+As I said, at the beginning we simply expanded the query with the
+additional term queries for all synonyms. 
+For example, looking for 
+	car AND tire
+Would result in 
+	(car OR auto OR automobile OR motorcar) AND (tire OR tyre)
+At first we did not even penalized the synonyms with the boost factor.
+The results were very surprising :-)
+
+As those who read about Lucene scoring implementation know, there is an
+IDF factor which is used by Lucene for normalization of different terms
+(inversed document frequency for a term).
+The formula for this factor is 
+	IDF = log( numDocs / (docFreq + 1) ) + 1
+where numDocs is the total number of documents in the index, and docFreq
+is the count of documents containing the given term.
+As it is possible to see, the term not contained in the index at all
+gets the highest IDF value, and the term contained in every single
+document gets the lowest IDF value.
+The basic idea (as far as I got it) is that a very common term does not
+weight much (words like "program"), while a rare term may be very
+meaningful (words like... say, "Lucene" :-) )
+At the search time Lucene engine summarizes squares of IDF for all
+terms, and normalizes all term queries back basing on the square root of
+this sum (somewhat simplified explanation).
+Basically, each term gets its weight like
+	termWeigth = IDF * boost
+	sumOfSquaredWeights = 1 / SQRT( SUM( termWeight[i] *
+termWeight[i] ) ) 
+	weight[i] = IDF * ( termWeigth  / sumOfSquaredWeights )
+Another important thing that will be discussed here is term frequency in
+the document (based on the count of term appearances in the document),
+which is calculated in Lucene as:
+	tf = sqrt( freq )
+Refer to the book I mentioned earlier, or Lucene on-line documentation
+for more information. 
+
+Now, that means, that looking for a single words "tire" without synonyms
+will normalize this word with normalization factor 1.0
+Let's suppose that its synonym "tyre" does not appear in the index, and
+we search for both -  (tire OR tyre)
+Surprisingly, now the result scores is much-much lower - only because of
+the normalization factor that divides the query weight between two
+words.
+It is good for boolean operators (which we used here, so Lucene
+mathematics is perfectly okay), but it does not goes well logically.
+
+Unfortunately, a penalty factor would not help much, only somewhat lower
+the effect.
+
+3. Some ideas we had and the new, hopefully better, implementation 
+
+We started thinking what to do about that (one could say that we would
+need to think ahead before implementation :-) and he would be right).
+First, we decided that a penalty of 0.8 should be applied to the
+synonyms, as they are not exactly the word the user specified in the
+search string.
+But the penalty is not enough to correct the situation.
+
+Then we thought that the synonym is basically another occurrence of the
+searched word, and we thought that if only the query is normalized using
+IDFs of the searched words and not synonyms, the situation would look
+better.
+This would require two things: 
+
+First, we need to take only the IDF of the original word for
+normalization, like in the query:
+	(car OR auto OR automobile OR motorcar) AND (tire OR tyre)
+Lucene implementation would SUM squared weights of all words and
+synonyms, while we need to take only two original words (car AND tire),
+and normalize all the synonyms using normalization factors of the
+original words.
+The idea is that this would give to the synonyms the weight of the
+original word, which is what seems to be more natural if we think of the
+synonyms like another occurrences of the original word.
+This causes the result document score to do not change when we search
+for the word with/without synonyms, and the synonyms do not appear in
+the document -exactly what we wanted.
+This is not hard to do using a variation of DisjunctionQuery, originally
+invented by Chuck Williams and found in the Lucene users' list (please
+correct me if I'm wrong).
+
+Second, we need to calculate term frequency as something like (say, for
+the (tire OR tyre) case )
+	tf = sqrt( freq[tire] + 0.8 * freq[tyre] )
+The idea is that if the word "tire" appeared 10 appearances of the
+synonym "tyre" in a document will be counted like 8 appearances of the
+original word "tire", and it will be multiplied on the normalized weight
+of the original word "tire".
+Note that this 0.8 normalization cannot be applied as the regular query
+boost in Lucene, because the original query boost is used in the query
+normalization and it compensates itself in a case of a single word, and
+we do not need such behavior.
+The problem with that is that the tf() function is calculated for each
+frequency at the scoring time, and while we may square it back in the
+parent scorer to get the original frequence and sum it, it will happen
+for each single document returned in the result, which is unnecessary
+additional work. Because of that we simply use a custom Similarity class
+which returns the unaffected frequency value from tf() function, and a
+special SynonymScorer which accumulates the frequences, and then
+calculates tf() of their sum.
+
+Additionally, we get a new problem - if we apply IDF of the original
+word to the synonym, it would not work good in cases when the original
+word is rare and the synonym is frequent. The documents found because of
+synonyms may get unreasonable high scores because of high term frequency
+of the synonym and high weight of the rare original word. Therefore we
+need a compensation factor like the following
+	tf = sqrt( freq[tire] + 0.8 * freq[tyre] * idfFactor )
+where
+	idfFactor = (IDF[synonym] * IDF[synonym]) / (IDF[word] *
+IDF[word])
+Note that we take relation of IDF squares here, From our experience,
+relation of squares behave better here than simple relation of IDFs.
+
+Now, this is something hard to do, as the term frequency calculation
+occurs at the scoring time, long after the normalization, and cannot be
+affected without changing TermQuery and TermScorer classes, and we did
+not like the idea of touching them. What we did was playing with the
+normalization factor at the time of query normalization in such a way
+that the resulting synonym TermQuery's weight will incorporate the
+necessary boosts which will be applied to tf() function result at the
+time of scoring in exactly the same manner like if tf() function would
+know about these factors.
+Assuming we know that tf() function is a simple square root, we apply
+the square root to both the synonym boost and the IDF squares relation.
+
+Please take a look on the source code provided at the end of this mail.
+It contains the necessary comments.
+It was dififcult to extract a small subset of classes, because there are
+many other dependancies and things unrelated to synonyms.
+I cut a lot of code and change package naming (replaced all our packages
+by org.apache.lucene.search for simplification) and only checked that it
+compiles afterwards. 
+Feel free to to reuse the sources, just don't blame us if something
+brokes in result :-)
+	SynonymsQuery and SynonymsWeight classes - the central point of
+the algorithm
+	SynonymScorer - the scorer which implements the trick with tf()
+function
+	SynonymSimilarity - also for the trick with tf() function
+It may look somewhat complicated, but in fact it is quite simple. 
+
+4. Conclusion
+
+Synonyms search is difficult to do right, and there is hardly a perfect
+implementation which would work correctly for all cases. 
+There are some pitfalls which were not mentioned in this e-mail at all,
+like synonyms which are context-specific, or synonyms with weak relation
+to the original word.
+In practice, it's hardly possible to handle all the cases properly,
+partly because a regular synonyms dictionary is a simple string map, and
+it does not try to categorize or weight the synonyms.
+
+We think that we got a relatively good solution for the synonyms search.
+We like the search results we get now after implementing this idea.
+
+We're looking forward to hear your opinions and other ideas.
+I will be happy to answer your questions, either in this mailing list or
+at my other email aschetinin_gmail_com (replace underscores).
+ 
+Thank you for your time and consideration,
+ 
+Andrew Schetinin
+
+Appendix A. Sources
+
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+
+/*
+ * Copyright (c) 2006 Entopia Ltd. All Rights Reserved.
+ */
+package org.apache.lucene.search;
+
+import org.apache.lucene.search.*;
+import org.apache.lucene.search.synonyms.SynonymScorer;
+import org.apache.lucene.search.synonyms.SynonymSimilarity;
+import org.apache.lucene.index.IndexReader;
+
+import java.util.ArrayList;
+import java.io.IOException;
+
+/**
+ * This query is purposed for working with synonyms of one word.
+ * The general idea is:
+ * 1. The query is normalized by the original word weight only, not
+taking into account its synonyms.
+ * 2. Weights of the synonyms are scaled (normalized) using normlization
+factor of the original word,
+ *    also applying some penalty (since synonyms incure uncertancy into
+the search), and applying
+ *    additional normalization that takes into account weight relation
+between the original word
+ *    and the synonym (an attempt to bring them to the same scale).
+ * 3. When calculating the final score for full text search, we try to
+interpret synonyms just like
+ *    additional appearences of the original word, somewhat penalized
+because synonyms incure
+ *    uncertancy into searches. This is what the algorithm does, and
+thus it requires a special
+ *    scorer SynonymScorer and special similarity
+AggregatableLuceneSimilarity.
+ * Most important functions are: SynonymsWeight#sumOfSquaredWeights()
+and SynonymsWeight#normalize().
+ * Other important functions are: SynonymsWeight#scorer() and
+SynonymsWeight#explain().
+ * @author <a href="mailto:aschetinin_entopia_com">Andrew S.</a>
+ * @version $Revision: 1.2 $
+ * Created by aschetinin on date Feb 5, 2006 and time 11:25:17 AM
+ * Modified by: $Author: zivg $
+ * Last updated on: $Date: 2006/02/21 10:41:45 $
+ */
+public class SynonymsQuery extends Query {
+
+  /** List of QueryInfo objects - the subqueries with all related
+information. */
+  private ArrayList queries = new ArrayList();
+
+  /**
+   * Add a custom subquery with specified parameters.
+   * This function is intended for using with special fields like
+keywords or searchable.
+   * @param query the disjunct added
+   * @param boost Boost implied to this query scores. Not accounted
+during normalization, but only applied to final scores
+   * @param synonym Specifies if this query is a synonym or a word
+itself
+   */
+  public void add( Query query, float boost, boolean synonym ) {
+    queries.add( new QueryInfo( query, boost, synonym ) );
+  }
+
+  /** Returns count of sub-queries */
+  public int getSubQueryCount() {
+    return queries.size();
+  }
+
+  /**
+   * The Weight for DisjunctionQuery's, used to normalize, score and
+explain these queries
+   * This class requires two passes in order to properly calculate
+weights of its subqueries.
+   * On the first pass, it normalizes the keyword field subquery.
+   * On the second pass, it normalizes the content field subquery (this
+ensures that
+   * the ratios in parent queries are normalized to content field).
+   */
+  private class SynonymsWeight implements Weight {
+
+    /** The searcher with which we are associated. */
+    private Searcher searcher;
+
+    /** The Weight's for our subqueries, in 1-1 correspondence with
+disjuncts */
+    private Weight[] weights;
+
+    /** Sum of squared weights of the original word queries */
+    private float sumWordWeights;
+
+    /** Squared weights of the sub-queries */
+    private float[] squareWeights;
+
+    /** Count of original word queries */
+    private int wordCount;
+
+    /** Count of synonym queries */
+    private int synonymCount;
+
+    /** Construct the Weight for this Query searched by searcher.
+        Recursively construct subquery weights. */
+    public SynonymsWeight( Searcher searcher ) {
+      this.searcher = searcher;
+      weights = new Weight[queries.size()];
+      for( int i = 0; i < queries.size(); i++ )
+        weights[i] = ((QueryInfo) queries.get( i
+)).getQuery().createWeight( searcher );
+      squareWeights = new float[queries.size()];
+    }
+
+    /** Return our associated DisjunctionQuery */
+    public Query getQuery() {
+      return SynonymsQuery.this;
+    }
+
+    /** Return our boost */
+    public float getValue() {
+      return getBoost();
+    }
+
+    /** Compute the sub of squared weights of us applied to our
+subqueries.  Used for normalization. */
+    public float sumOfSquaredWeights() throws IOException {
+      sumWordWeights = 0;
+      wordCount = 0;
+      synonymCount = 0;
+      for( int i = 0; i < queries.size(); i++ ) {
+        QueryInfo qi = (QueryInfo) queries.get( i );
+        squareWeights[i] = weights[i].sumOfSquaredWeights();
+        if( qi.getSynonym() ) {
+          synonymCount++;
+        } else {
+          wordCount++;
+          sumWordWeights += weights[i].sumOfSquaredWeights();
+        }
+      }
+      // We ignore IDFs of the synonyms and only use IDF of the original
+word for normalization
+      return sumWordWeights * getBoost() * getBoost();
+    }
+
+    /** Apply the computed normalization factor to our subqueries */
+    public void normalize( float norm ) {
+      norm *= getBoost();  // Incorporate the query boost (usually 1)
+      for( int i = 0; i < queries.size(); i++ ) {
+        QueryInfo qi = (QueryInfo) queries.get( i );
+        // This is the synonym boost which has to affect the frequency
+of synonyms.
+        // For full text query:
+        // Since tf() = sqrt( freq ), we have to take sqrt of the boost
+here in order to get the desired effect.
+        // sqrt( boost ) * tf() = sqrt( boost ) * sqrt( freq ) = sqrt(
+boost * freq )
+        float qnorm = (float) Math.sqrt( qi.getBoost() ) * norm;
+        // For synonyms we have to perform two operations:
+        if( qi.getSynonym() && (sumWordWeights != 0.0f) &&
+(squareWeights[i] != 0.0f) ) {
+          // First we multiply the normalization by the relation of
+squared weights of the original word and the synonym.
+          // This removes the effect of the synonym's IDF and replaces
+it with the word IDF when calculating the score.
+          // The normalization factor is multiplied by square of IDF,
+and this is what we do here -
+          // divide on the synonym IDF in order to remove its effect,
+and multiply on the original word IDF
+          // to add its effect instead of IDF of the synonym.
+          qnorm *= (sumWordWeights / squareWeights[i]);
+          // Second we apply the relation between IDFs of the synonym
+and the orignial word to the term frequency.
+          // Since tf() = sqrt( freq ), we have to take sqrt of the
+relation here in order to get the desired effect,
+          // exactly like with the boost earlier.
+          qnorm *= (float) Math.sqrt( squareWeights[i] / sumWordWeights
+);
+          // P.S. For full text search these two equations may be easily
+turned to one with square root,
+          // but I decided to leave them unoptimized for the sake of
+explainability.
+        }
+        weights[i].normalize( qnorm );
+      }
+    }
+
+    /** Create the scorer used to score our associated DisjunctionQuery
+*/
+    public Scorer scorer( IndexReader reader ) throws IOException {
+      Similarity sim = SynonymSimilarity.getInstance();
+      SynonymScorer result = new SynonymScorer( sim );
+      for( int i = 0; i < weights.length; i++ ) {
+        Weight w = weights[i];
+        Scorer subScorer = w.scorer( reader );
+        if( subScorer == null )
+          return null;
+        result.add( subScorer );
+      }
+      return result;
+    }
+
+    /** Explain the score we computed for doc */
+    public Explanation explain( IndexReader reader, int doc ) throws
+IOException {
+      SynonymSimilarity similarity = SynonymSimilarity.getInstance();
+      Explanation result = new Explanation();
+      float max = 0.0f, sum = 0.0f;
+      result.setDescription( " TF( sum( deTF(weight) )) of:" );
+      int numSubQueries = weights.length, numSubQueriesHit = 0;
+      for( int i = 0; i < weights.length; i++ ) {
+        Explanation e = weights[i].explain( reader, doc );
+        if( e.getValue() > 0 ) {
+          QueryInfo qi = (QueryInfo) queries.get( i );
+          if( qi.getSynonym() && (sumWordWeights != 0.0f) &&
+(squareWeights[i] != 0.0f) ) {
+            Explanation boostExpl = new Explanation( 0, "synonym
+penalty, product of:" );
+            float boost = qi.getBoost();
+            if( qi.getBoost() != 1 )
+              boostExpl.addDetail( new Explanation( qi.getBoost(),
+"configuration penalty" ) );
+            if( squareWeights[i] != 0.0f ) {
+              boostExpl.addDetail( new Explanation( sumWordWeights /
+squareWeights[i],
+                  "IDF normalization: origWeigth^2=" + sumWordWeights +
+" / synonymWeight^2=" + squareWeights[i] ) );
+              boost *= (sumWordWeights / squareWeights[i]);
+            }
+            if( sumWordWeights != 0.0f ) {
+              boostExpl.addDetail( new Explanation( (float) Math.sqrt(
+squareWeights[i] / sumWordWeights ),
+                  "TF normalization: sqrt( synonymWeight^2=" +
+squareWeights[i] + " / origWeigth^2=" + sumWordWeights + " )" ) );
+              boost *= (float) Math.sqrt( squareWeights[i] /
+sumWordWeights );
+            }
+            boostExpl.setValue( boost );
+            e.addDetail( boostExpl );
+          } else if( qi.getBoost() != 1 ) { // should never happen since
+the original word should always have 1.0 boost
+            e.addDetail( new Explanation( qi.getBoost(), "field boost" )
+);
+          }
+          numSubQueriesHit++;
+          result.addDetail( e );
+          float value = e.getValue();
+          sum += similarity.detf( value );
+          max = Math.max( max, value );
+        }
+      }
+      sum = similarity.tf( sum );
+      result.setValue( sum );
+      return result;
+    }
+
+  }  // end of DisjunctionWeight inner class
+
+  /** Create the Weight used to score us */
+  protected Weight createWeight( Searcher searcher ) {
+    return new SynonymsWeight( searcher ); // ordered
+  }
+
+  /**
+   * Optimize our representation and our subqueries representations
+   * @param reader the IndexReader we query
+   * @return an optimized copy of us (which may not be a copy if there
+   *         is nothing to optimize)
+   */
+  public Query rewrite( IndexReader reader ) throws IOException {
+    // this query can only be eliminated if it has one subquery without
+any modifiers
+    if( queries.size() == 1 ) {
+      QueryInfo qi = (QueryInfo) queries.get( 0 );
+      if( qi.getBoost() == 1 ) { // if they are default
+        Query result = qi.getQuery().rewrite( reader );
+        if( getBoost() != 1.0f ) {
+          if( result == qi.getQuery() )
+            result = (Query) result.clone();
+          result.setBoost( getBoost() * result.getBoost() );
+        }
+        return result;
+      }
+    }
+    // otherwise try optimizing the clauses
+    SynonymsQuery clone = null;
+    for( int i = 0; i < queries.size(); i++ ) {
+      QueryInfo clause = (QueryInfo) queries.get( i );
+      Query rewrite = clause.getQuery().rewrite( reader );
+      if( rewrite != clause.getQuery() ) {
+        if( clone == null )
+          clone = (SynonymsQuery) this.clone();
+        clone.queries.set( i, new QueryInfo( rewrite, clause.getBoost(),
+clause.getSynonym() ) );
+      }
+    }
+    if( clone != null )
+      return clone;
+    else
+      return this;
+  }
+
+  /* Create a shallow copy of us -- used in rewriting if necessary
+   * @return a copy of us (but reuse, don't copy, our subqueries) */
+  public Object clone() {
+    SynonymsQuery clone = (SynonymsQuery) super.clone();
+    clone.queries = (ArrayList) this.queries.clone();
+    return clone;
+  }
+
+  /**
+   * Prettyprint us.
+   * @param field the field to which we are applied
+   * @return a string that shows what we do, of the form "(disjunct1 |
+   *         disjunct2 | ... | disjunctn)^boost"
+   */
+  public String toString( String field ) {
+    StringBuffer buffer = new StringBuffer();
+    buffer.append( "sum(" );
+    for( int i = 0; i < queries.size(); i++ ) {
+      QueryInfo qi = (QueryInfo) queries.get( i );
+      Query subquery = qi.getQuery();
+      //if( subquery instanceof TermQuery )       // wrap sub-bools in
+parens
+        buffer.append( subquery.toString( field ) );
+      //else
+      //  buffer.append( '(' ).append( subquery.toString( field )
+).append( ')' );
+      if( qi.getBoost() != 1 )
+        buffer.append( '*' ).append( qi.getBoost() );
+      if( i != queries.size() - 1 )
+        buffer.append( ' ' );
+    }
+    buffer.append( ')' );
+    if( getBoost() != 1.0f ) {
+      buffer.append( '^' ).append( getBoost() );
+    }
+    return buffer.toString();
+  }
+
+  /**
+   * Return true iff we represent the same query as o
+   * @param o another object
+   * @return true iff o is a DisjunctionQuery with the same boost
+   *         and the same subqueries, in the same order, as us
+   */
+  public boolean equals( Object o ) {
+    if( !(o instanceof SynonymsQuery) )
+      return false;
+    SynonymsQuery other = (SynonymsQuery) o;
+    if( this.queries.size() != other.queries.size() )
+      return false;
+    for( int i = 0; i < this.queries.size(); ++i ) {
+      if( !this.queries.get( i ).equals( other.queries.get( i ) ) )
+        return false;
+    }
+    return (this.getBoost() == other.getBoost());
+  }
+
+  /**
+   * Compute a hash code for hashing us
+   * @return the hash code
+   */
+  public int hashCode() {
+    return Float.floatToIntBits( getBoost() ) ^ queries.hashCode();
+  }
+
+  /** Class containing the information about the specific sub-query */
+  private static final class QueryInfo {
+    /** Query object */
+    private Query query = null;
+    /** Boost implied to this query scores. Not accounted during
+normalization, but only applied to final scores */
+    private float boost = 0;
+    /** Specifies if this query is a synonym or a word itself */
+    private boolean synonym = false;
+    /** Default constructor */
+    public QueryInfo( Query query ) {
+      this.query = query;
+    }
+    /** Constructor with all parameters */
+    public QueryInfo( Query query, float boost, boolean synonym ) {
+      this.query = query;
+      this.boost = boost;
+      this.synonym = synonym;
+    }
+    /** Returns the stored query object */
+    public Query getQuery() {
+      return query;
+    }
+    /** Returns if this query is a synonym or a word itself */
+    public boolean getSynonym() {
+      return synonym;
+    }
+    /** Returns the boost for this query */
+    public float getBoost() {
+      return boost;
+    }
+    /**
+     * Return true iff we represent the same query as o
+     * @param o another object
+     * @return true iff o is a DisjunctionQuery with the same boost
+     *         and the same subqueries, in the same order, as us
+     */
+    public boolean equals( Object o ) {
+      if( !(o instanceof QueryInfo) )
+        return false;
+      QueryInfo other = (QueryInfo) o;
+      return this.query.equals( other.query ) && (this.boost ==
+other.boost)
+          && (this.synonym == other.synonym);
+    }
+  }
+
+}
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+
+/*
+ * Copyright (c) 2006 Entopia Ltd. All Rights Reserved.
+ */
+package org.apache.lucene.search.synonyms;
+
+import org.apache.lucene.search.Similarity;
+import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Explanation;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Arrays;
+
+/**
+ * Special scorer for SynonymsQuery query used in full text searches.
+ * This scorer does a trick when summarizing the scores of its
+sub-scorers:
+ * it applies an opposite function from similarity's tf() function to
+get the frequency value back,
+ * and then summarizes the values, and re-applies similarity's tf()
+function to the sum.
+ * This way the scorer makes the sum of scores from several words
+behaving like it was one word
+ * occuring N times, where N is the sum of occurences of all searched
+words.
+ * @author <a href="mailto:aschetinin@entopia.com">Andrew S.</a>
+ * @version $Revision: 1.2 $
+ * Created by aschetinin on date Feb 5, 2006 and time 11:25:17 AM
+ * Modified by: $Author: zivg $
+ * Last updated on: $Date: 2006/02/21 10:41:45 $
+ */
+public class SynonymScorer extends Scorer {
+
+  private static final SynonymSimilarity similarity =
+SynonymSimilarity.getInstance();
+
+  /**
+   * Creates a new instance of SynonymScorer
+   * @param similarity -- not used since our definition involves neither
+coord nor terms directly
+   */
+  public SynonymScorer( Similarity similarity ) {
+    super( similarity );
+  }
+
+  protected float computeScore(float sum, float max, int coord) {
+    return sum;
+  }
+
+  /** Look at the class explanation */
+  protected float oldScore() throws IOException {
+    float max = ((Scorer) subScorers.get(0)).score();
+    float sum = similarity.detf( max );
+    int numSubQueriesHit = 1;
+    for (int i = 1, doc = ((Scorer) subScorers.get(0)).doc(); i <
+        subScorers.size() && ((Scorer) subScorers.get(i)).doc() == doc;
+i++) {
+      float sub = ((Scorer) subScorers.get(i)).score();
+      sum += similarity.detf( sub );
+      max = Math.max( max, sub );
+      numSubQueriesHit++;
+    }
+    sum = similarity.dotf( sum );
+    return computeScore( sum, max, numSubQueriesHit );
+  }
+
+  /* The scorers for subqueries that have remaining docs, kept sorted
+  by number of next doc. */
+  protected ArrayList<Scorer> subScorers = new ArrayList<Scorer>();
+
+  private boolean more = false;          // True iff there is a next
+document
+  private boolean firstTime = true;      // True iff next() has not yet
+been called
+
+  /* Fixed instance of the comparator to reuse */
+  private static MaxDisjunctionClauseComparator subScorerComparator =
+      new MaxDisjunctionClauseComparator();
+
+  private float currentDocScore = -1F;
+
+  /* Comparator to sort subScorers according to the document number of
+  next document */
+  private static class MaxDisjunctionClauseComparator implements
+      Comparator /*<Scorer>*/ {
+
+    /* Scorers have all been positioned at their next document
+  already */
+    public int compare(Object /*Scorer*/ s1, Object /*Scorer*/ s2) {
+      if (!(s1 instanceof Scorer && s2 instanceof Scorer)) {
+        return -1;
+      } else {
+        return ((Scorer) s1).doc() - ((Scorer) s2).doc();
+      }
+    }
+
+    /* Compatible equality */
+    public boolean equals(Scorer s1, Scorer s2) {
+      return s1.doc() == s2.doc();
+    }
+  }
+
+  /**
+   * Add the scorer for a subquery
+   *
+   * @param scorer the scorer of a subquery of our associated
+   *               DisjunctionQuery
+   */
+  public void add(Scorer scorer) throws IOException {
+    if (scorer.next()) {       // Initialize and retain only if it
+produces docs
+      subScorers.add(scorer);
+      more = true;
+    }
+  }
+
+  /**
+   * Generate the next document matching our associated
+   * DisjunctionQuery.
+   *
+   * @return true iff there is a next document
+   */
+  public boolean next() throws IOException {
+    boolean retVal = oldNext();
+    if (retVal)
+      currentDocScore = oldScore();
+    return retVal;
+  }
+
+  private boolean oldNext() throws IOException {
+    if (!more) return false;
+    if (firstTime) {
+      init();
+      return true;   // more would have been false if no subScorers had
+any docs
+    }
+    // Increment all generators that generated the last doc and
+incrementally re-sort.
+    int lastdoc = subScorers.get( 0 ).doc();
+    do {
+      if( subScorers.get( 0 ).next() ) {
+        Scorer s = subScorers.get( 0 );
+        int snextdoc = s.doc(), i = 1;
+        for( ; i < subScorers.size() && snextdoc > subScorers.get( i
+).doc(); i++ )
+          subScorers.set(i - 1, subScorers.get(i));
+        if (i != 1) subScorers.set(i - 1, s);
+      } else {
+        subScorers.remove(0);
+        if (subScorers.isEmpty()) return (more = false);
+      }
+    } while( subScorers.get( 0 ).doc() == lastdoc );
+    return true;
+  }
+
+  /* First time initialization.  Sort subScorers. */
+  private void init() {
+    sortSubScorers();
+    firstTime = false;
+  }
+
+  /* Sort subScorers in order of document number of next document to
+   be generated */
+  private void sortSubScorers() {
+    Scorer[] sorted = subScorers.toArray( new Scorer[subScorers.size()]
+);
+    Arrays.sort(sorted, subScorerComparator);
+    for (int i = 0; i < sorted.length; i++)
+      subScorers.set( i, sorted[i] );
+  }
+
+  /**
+   * Determine the current document number.  Initially invalid, until
+   * {@link #next()} is called the first time.
+   *
+   * @return the document number of the currently generated document
+   */
+  public int doc() {
+    return subScorers.get( 0 ).doc();
+  }
+
+  /**
+   * Determine the current document score.  Initially invalid, until
+   * {@link #next()} is called the first time.
+   *
+   * @return the score of the current generated document
+   */
+  public float score() throws IOException {
+    return currentDocScore;
+  }
+
+  /**
+   * Advance to the first document whose number is greater than or
+   * equal to target.
+   *
+   * @param target the minimum number of the next desired document
+   * @return true iff there is a document to be generated whose number
+   *         is at least target
+   */
+  public boolean skipTo(int target) throws IOException {
+    do {
+      if (!next())
+        return false;
+    } while (target > doc());
+    return true;
+    // the following, original implementation, erroneously approves docs
+that
+    // match on only one subquery
+    /*
+       int i=0;
+       while (i<subScorers.size()) {
+           if (((Scorer)subScorers.get(i)).skipTo(target)) i++;
+           else subScorers.remove(i);
+       }
+       if (i == 0) return false;
+       sortSubScorers();
+       return true;
+    */
+  }
+
+  /**
+   * Explain a score that we computed.  UNSUPPORTED -- see
+   * explanation capability in DisjunctionQuery.
+   *
+   * @param doc the number of a document we scored
+   * @return the Explanation for our score
+   */
+  public Explanation explain(int doc) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+
+}
+
+
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+------------------------------------------------------------------------
+----------------------------------------------------
+
+/*
+ * Copyright (c) 2006 Entopia Ltd. All Rights Reserved.
+ */
+package org.apache.lucene.search.synonyms;
+
+import org.apache.lucene.search.DefaultSimilarity;
+
+/**
+ * Special type of similarity used for synonym scoring in full text
+search.
+ * It returns the term frequency without applying Lucene tf() function
+(square root).
+ * The tf() function is applied later by the scorer, after summarizing
+all synonym scores.
+ * @author <a href="mailto:aschetinin@entopia.com">Andrew S.</a>
+ * @version $Revision: 1.2 $
+ * Created by aschetinin on date Feb 5, 2006 and time 11:25:17 AM
+ * Modified by: $Author: zivg $
+ * Last updated on: $Date: 2006/02/21 10:41:45 $
+ */
+public class SynonymSimilarity extends DefaultSimilarity {
+
+  SynonymSimilarity() {
+  }
+
+  private static final SynonymSimilarity _instance = new
+SynonymSimilarity();
+
+  public static SynonymSimilarity getInstance() {
+    return _instance;
+  }
+
+  /**
+   * do the backward computation to what we did in tf()
+   */
+  public float detf( float tf ) {
+    return tf * tf;
+  }
+
+  /**
+   * we want unaltered term frequence value
+   */
+  public float tf( float freq ) {
+    return freq;
+  }
+
+  /**
+   * the original Lucene tf() function
+   */
+  public float dotf( float freq ) {
+    return (float) Math.sqrt( freq );
+  }
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

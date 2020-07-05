@@ -1,0 +1,59 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: How to setup a scalable deployment?
+DATE: 9 Oct 2009
+
+On Thu, Oct 8, 2009 at 9:32 PM, Chris Were <chris.were@gmail.com> wrote:
+
+> Zoie looks very close to what I'm after, however my whole app is written in
+> Python and uses PyLucene, so there is a non-trivial amount of work to make
+> things work with Zoie.
+>
+
+I've never used PyLucene before, but since it's a wrapper, plugging in zoie
+should be doable - instead of accessing the raw Lucene API via PyLucene,
+you could instantiate a proj.zoie.impl.indexing.ZoieSystem, then it would
+take care of the IndexReader management for you, and you'd just ask it
+for IndexReaders and you'd pass it indexing events.
+
+Not sure how JVM interactions are with Python.  Whenever I use other
+languages,
+I try and turn that paradigm upside down - use Jython and JRuby and Scala,
+and live *inside* of the JVM.  Then everything is nice and happy. :)
+
+I'm currently experiencing a bottleneck when optimising my index. How is
+> this handled / solved with Zoie?
+>
+
+In a realtime environment, optimizing your index isn't always the best thing
+to do - optimize down to small number of segments (with the under-used
+IndexWriter.optimize(int maxNumSegments) call) if you need to, but
+optimizing down to 1 segment means you completely blow away your
+OS disk cache, as all of your old files are gone and you have one huge new
+ginormous one.  Keeping a balanced set of segments which only a couple
+of the big ones merge together occasionally (and the small ones are
+continously
+being integrated into bigger ones) keeps you only blowing away parts of
+the IO cache at a time.
+
+But to answer your question more directly: with Zoie, the disk index is only
+
+refreshed every 15 minutes or so (this is configurable), because you have
+a RAMDirectory serving realtime results as well.  Any background segment
+merging and optimizing can be done on the disk index during this 15 minute
+interval, and typical use cases keep the target number of segments at
+a fixed moderately small number (5, 10 segments or so).
+
+The optimize() call takes progressively more time the fewer segments you
+have left, and much of the time is in the final 2 to 1 segment merge, so if
+you
+never do that last step, things go a lot faster - you can try this without
+zoie - replace your optimize() calls with optimize(2, or 5, or 10), and see
+  a) how long this takes instead, and
+  b) what effect on your latency this has (it will cost you something - but
+how much: check and see!)
+
+  If you end up trying zoie in PyLucene somehow, please post about it,
+we'd love to hear about it used in different sorts of environments.
+
+  -jake
+

@@ -1,0 +1,164 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Infinite loop when searching empty index
+DATE: 27 Feb 2010
+
+Hmm -- can you give more details on the possible file descriptor leak?
+ Or a test case?  Thanks.
+
+Mike
+
+On Sat, Feb 27, 2010 at 12:24 PM, Justin <crynax@yahoo.com> wrote:
+> Thanks for checking.  I think I tracked down the problem.  We apparently extended most
+of these classes and more work was necessary to facilitate the latest API.  I just didn't
+dig deep enough, into nextDoc() which I thought too trivial to step into.  The extended Scorer
+repeatedly returned the last doc ID instead of NO_MORE_DOCS.  Sorry for the wild goose chase!
+>
+> I do think I've run across another problem which I may report in a new thread: ParallelReader.reopen()
+appears to be taking up file descriptors to the same files without letting the old ones go.
+ Our Java process hits the 'limit -n' barrier (in the thousands) after a few minutes.  My
+current work around is to check isCurrent(), close, then open.  I wonder if the changes to
+support near real-time search inadvertently broke this.
+>
+>
+>
+>
+> ----- Original Message ----
+> From: Uwe Schindler <uwe@thetaphi.de>
+> To: java-user@lucene.apache.org
+> Sent: Sat, February 27, 2010 4:55:55 AM
+> Subject: RE: Infinite loop when searching empty index
+>
+> I was doing the same, MatchAllDocsScorer is fine and also AbstractAllTermDocs.
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+>> -----Original Message-----
+>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Sent: Saturday, February 27, 2010 11:52 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Infinite loop when searching empty index
+>>
+>> I turned this into a unit test... but I don't see it never
+>> returning... the test passes.
+>>
+>> How did you create your empty reader?
+>>
+>> Patch:
+>>
+>> Index: src/test/org/apache/lucene/search/TestMatchAllDocsQuery.java
+>> ===================================================================
+>> --- src/test/org/apache/lucene/search/TestMatchAllDocsQuery.java
+>>     (revision
+>> 916939)
+>> +++ src/test/org/apache/lucene/search/TestMatchAllDocsQuery.java
+>>     (working copy)
+>> @@ -27,6 +27,8 @@
+>>  import org.apache.lucene.index.IndexReader;
+>>  import org.apache.lucene.queryParser.QueryParser;
+>>  import org.apache.lucene.store.RAMDirectory;
+>> +import org.apache.lucene.store.Directory;
+>> +import org.apache.lucene.store.MockRAMDirectory;
+>>
+>>  import org.apache.lucene.util.LuceneTestCase;
+>>
+>> @@ -115,6 +117,21 @@
+>>      dir.close();
+>>    }
+>>
+>> +  public void testNeverReturns() throws Exception {
+>> +    Directory dir = new MockRAMDirectory();
+>> +    IndexWriter w = new IndexWriter(dir, new
+>> StandardAnalyzer(TEST_VERSION_CURRENT),
+>> IndexWriter.MaxFieldLength.UNLIMITED);
+>> +    IndexReader r = w.getReader();
+>> +    w.close();
+>> +
+>> +    assertEquals(0, r.numDocs()); // empty index
+>> +    IndexSearcher s = new IndexSearcher(r);
+>> +    TopDocsCollector collector = TopScoreDocCollector.create(0, true);
+>> +    s.search(new MatchAllDocsQuery(), collector);  // never returns
+>> +    s.close();
+>> +    r.close();
+>> +    dir.close();
+>> +  }
+>> +
+>>    public void testEquals() {
+>>      Query q1 = new MatchAllDocsQuery();
+>>      Query q2 = new MatchAllDocsQuery();
+>>
+>> Mike
+>>
+>> On Fri, Feb 26, 2010 at 4:54 PM, Justin <crynax@yahoo.com> wrote:
+>> > Is this a bug in Lucene Java as of trunk@915399?
+>> >
+>> >    int numDocs = reader.numDocs(); // = 0 (empty index)
+>> >    TopDocsCollector collector = TopScoreDocCollector.create(numDocs,
+>> > true);
+>> >    searcher.search(new MatchAllDocsQuery(), collector);  // never
+>> > returns
+>> >
+>> >    // Searcher
+>> >    public void search(Query query, Collector collector)
+>> >      throws IOException {
+>> >      search(createWeight(query), null, collector); // never returns
+>> >    }
+>> >
+>> >    // extends IndexSearcher
+>> >    public void search(Weight weight, Filter filter, final Collector
+>> collector) throws IOException {
+>> >      boolean topScorer = (filter == null) true : false;
+>> >      Scorer scorer = weight.scorer(reader, true, topScorer);
+>> >      if (scorer != null && topScorer) {
+>> >        scorer.score(collector); // never returns
+>> >
+>> >    // Scorer
+>> >    public void score(Collector collector) throws IOException {
+>> >      collector.setScorer(this);
+>> >      int doc;
+>> >      while ((doc = nextDoc()) != NO_MORE_DOCS) { // doc = 0
+>> (infinite)
+>> >        collector.collect(doc);
+>> >      }
+>> >    }
+>> >
+>> >
+>> > Thanks for any feedback,
+>> > Justin
+>> >
+>> >
+>> >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

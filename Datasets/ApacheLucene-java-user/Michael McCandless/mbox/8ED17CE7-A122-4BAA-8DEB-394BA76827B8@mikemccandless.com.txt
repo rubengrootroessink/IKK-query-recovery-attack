@@ -1,0 +1,86 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Performance of never optimizing
+DATE: 5 Nov 2008
+
+
+Justus Pendleton wrote:
+
+> On 05/11/2008, at 4:36 AM, Michael McCandless wrote:
+>> If possible, you should try to use a larger corpus (eg Wikipedia)  
+>> rather than multiply Reuters by N, which creates unnatural term  
+>> frequency distribution.
+>
+> I'll replicate the tests with the wikipedia corpus over the next few  
+> days and regenerate the graphs to show the data points in addition  
+> to the curves. The data I am using comes from the output on the  
+> benchmark framework:
+>
+>     [java] Operation                       round mrg   runCnt    
+> recsPerRun        rec/s  elapsedSec    avgUsedMem    avgTotalMem
+>     [java] UnoptSearch_100_Par     0       2               
+> 1                 100        230.4               0.43         
+> 29,517,680        44,834,816
+>
+> I am plotting the "rec/s" which I am (possibly mistakenly)  
+> interpreting to mean "searches per second" as I asked for 100  
+> searches and it took 0.43 seconds to perform them all.
+
+That is the right interpretation, but you get 6 such numbers for each
+of your data points (6 rounds), so I was wondering how you then digest
+that to 1 number.  EG discard worst & best 2 outliers and average the
+rest?  Or, pick the best one.
+
+Also I would not trust any test that took only 0.43 seconds to run.
+It's too risky that random measurement costs/overhead are skewing the
+results.
+
+>> It's best to use a real query log, if possible, to run the  
+>> queries.  If you are expecting your production machines to have  
+>> plenty of RAM to hold the index, then you should definitely run the  
+>> queries through once, discard it, to get all stuff loaded in RAM  
+>> including the OS caching all required data in its IO cache.
+>>
+>> Not opening/closing a reader per search should change the graphs  
+>> quite a bit (for the better) and hopefully change some of the odd  
+>> things you are seeing (in the questions below).
+>
+> I don't believe our large users to have enough memory for Lucene  
+> indexes to fit in RAM. (Especially given we use quite a bit of RAM  
+> for other stuff.) I think we also close readers pretty frequently  
+> (whenever any user updates a JIRA issue, which I am assuming  
+> happening nearly constantly when you've got thousands of users). I  
+> was trying to mimic our usage as closely as I could to see whether  
+> Lucene behaves pathologically poorly given our current architecture.  
+> There have been some excellent suggestions about using in-memory  
+> indexes for recent updates but changes of that kind are,  
+> unfortunately, currently outside of my purview :-(
+
+This is a very important test criteria to decide up front, because you
+have to carefully design the test to "be too large for RAM" if that's
+the goal.  EG searching the same few queries over and over is not
+right, since the necessary pages are quickly cached in the OS's IO
+cache and you get fabulous results after that.
+
+Are you using the default ReutersQueryMaker to provide queries?  When
+you switch to Wikipedia you should also switch QueryMaker, maybe to
+FileBasedQueryMaker to load a file that you pre-populate with a rich
+"typical" set of queries.  But it's best to get real queries people  
+do... phrase
+queries, single terms, many terms, etc.
+
+Maybe you could talk to Apache infra about using their Jira instance
+(and possibly query logs, but that may be overly optimistic)?  It
+should be a fairly large test case?
+
+Also you should fix the test so that searcher is reopened only as
+often as is "typical" for Jira, not once per query which your current
+algo is doing.  I guess guestimate how many searches are done between
+updates to issues?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

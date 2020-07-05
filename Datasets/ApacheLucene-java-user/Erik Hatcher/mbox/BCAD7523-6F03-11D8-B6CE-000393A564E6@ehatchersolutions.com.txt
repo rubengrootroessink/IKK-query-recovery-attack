@@ -1,0 +1,78 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Storing numbers
+DATE: 6 Mar 2004
+
+On Mar 5, 2004, at 4:16 PM, Erik Hatcher wrote:
+> Another quite cool option is to subclass QueryParser, and override 
+> getRangeQuery.  Do the padding there.  This will allow users to type 
+> in normal looking numbers, and the padding happens automatically.  
+> You'll need to be sure that numbers padded during indexing matches 
+> what getRangeQuery does (oh, say through a common function :).
+
+Ok, here is a solution to storing integers and being able to use 
+QueryParser cleanly.  First a utility to pad the numbers:
+
+public class NumberUtils {
+   private static final DecimalFormat formatter =
+       new DecimalFormat("00000"); // make this as wide as you need
+
+   public static String pad(int n) {
+     return formatter.format(n);
+   }
+}
+
+Index the relevant fields using the pad function:
+
+       doc.add(Field.Keyword("id", NumberUtils.pad(i)));
+
+Create a custom QueryParser subclass:
+
+public class CustomQueryParser extends QueryParser {
+   public CustomQueryParser(String field, Analyzer analyzer) {
+     super(field, analyzer);
+   }
+
+   protected Query getRangeQuery(String field, Analyzer analyzer,
+                                 String part1, String part2,
+                                 boolean inclusive)
+       throws ParseException {
+     if ("id".equals(field)) {
+       try {
+         int num1 = Integer.parseInt(part1);
+         int num2 = Integer.parseInt(part2);
+         return new RangeQuery(new Term(field, NumberUtils.pad(num1)),
+                               new Term(field, NumberUtils.pad(num2)),
+                               inclusive);
+       } catch (NumberFormatException e) {
+         throw new ParseException(e.getMessage());
+       }
+     }
+
+     return super.getRangeQuery(field, analyzer, part1, part2,
+         inclusive);
+   }
+}
+
+Only the "id" field is treated special, but your logic may vary.
+
+Then use the custom QueryParser:
+
+     CustomQueryParser parser =
+         new CustomQueryParser("field", analyzer);
+
+     Query query = parser.parse("id:[37 TO 346]");
+
+     assertEquals("padded", "id:[00037 TO 00346]",
+                            query.toString("field"));
+
+Thanks for the idea for a good example for the upcoming Lucene in 
+Action book... it's been added!
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

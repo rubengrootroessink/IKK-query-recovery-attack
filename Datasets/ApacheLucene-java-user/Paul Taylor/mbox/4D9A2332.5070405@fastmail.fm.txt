@@ -1,0 +1,89 @@
+FROM: Paul Taylor <paul_t...@fastmail.fm>
+SUBJECT: Re: Lucene Merge failing on Open Files
+DATE: 4 Apr 2011
+
+On 04/04/2011 20:13, Michael McCandless wrote:
+> How are you merging these indices?  (IW.addIndexes?).
+>
+> Are you changing any of IW's defaults, eg mergeFactor?
+>
+> Mike
+Hi Mike
+
+I have
+
+indexWriter.setMaxBufferedDocs(10000);
+indexWriter.setMergeFactor(3000);
+
+these are a hangover from earlier code, I tried changing them and it 
+didnt seem to make any difference, but do they look wrong ?
+
+The index that falls over during optmizationcreates about 10,000,000 records
+
+What I do is build 10 different indexes sequentially one after the after 
+(so only one is hitting the db at any one time) but once the index is 
+built I optimize the index in the background
+by creating an instance of the following class and submitting it to  an 
+ExecutionService , configured to have at most 2 threads acting
+
+I built my own class rather than just using optimize() with the 
+background option because that wouldnt allow me to do the necessary 
+debugging/calculations
+
+
+static class IndexWriterOptimizerAndClose implements Callable<Boolean>
+     {
+         private int             maxId;
+         private IndexWriter     indexWriter;
+         private DatabaseIndex   index;
+         private IndexOptions    options;
+
+         /**
+          *
+          * @param maxId
+          * @param indexWriter
+          * @param index
+          * @param options
+          */
+         public IndexWriterOptimizerAndClose(int maxId, IndexWriter 
+indexWriter, DatabaseIndex index, IndexOptions options)
+         {
+             this.maxId=maxId;
+             this.indexWriter= indexWriter;
+             this.index=index;
+             this.options=options;
+         }
+
+         public Boolean call() throws IOException, SQLException
+         {
+
+             StopWatch clock = new StopWatch();
+             clock.start();
+             String path = options.getIndexesDir() + index.getFilename();
+             System.out.println(index.getName()+":Started Optimization 
+at "+Utils.formatCurrentTimeForOutput());
+
+             indexWriter.optimize();
+             indexWriter.close();
+             clock.stop();
+             // For debugging to check sql is not creating too few/many rows
+             if(true) {
+                 int dbRows = index.getNoOfRows(maxId);
+                 IndexReader reader = 
+IndexReader.open(FSDirectory.open(new File(path)),true);
+                 System.out.println(index.getName()+":"+dbRows+" db 
+rows:"+(reader.maxDoc() - 1)+" lucene docs");
+                 reader.close();
+             }
+             System.out.println(index.getName()+":Finished 
+Optimization:" + Utils.formatClock(clock));
+
+             return true;
+         }
+     }
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

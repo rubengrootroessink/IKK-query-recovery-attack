@@ -1,0 +1,66 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Lucene memory usage
+DATE: 25 Dec 2009
+
+Sorry, LUCENE-1458 is "continuing" under LUCENE-2111 (ie, flexible
+indexing is not yet committed).  I've just added a comment to
+LUCENE-1458 to that effect.
+
+Lucene, even with flexible indexing, loads the terms index entirely
+into RAM (it's just that the terms index in flexible indexing has less
+RAM overhead per indexed term).
+
+With flexible indexing one could create a codec that would use mmap
+for the terms index, and I agree it's tempting to explore that.  Lucy
+(loose C port of Lucene -- http://lucene.apache.org/lucy) is taking
+exactly that approach, not only for terms dict but also for all other
+RAM resident data structures in Lucene (deleted docs, field norms,
+field/sort cache).
+
+The problem is, with mmap, you're more likely to hit page faults when
+looking up a term, especially if the machine doesn't have enough RAM,
+which can add substantially to the net latency of the search.  This
+might not be a problem for certain apps, but it would be a problem in
+general for Lucene.  Lucene loads the terms index into RAM so lookups
+are fast.  (Of course the OS can also swap out process RAM, though it
+usually does so less "eagerly" than mapped pages).
+
+Have you tried setting the termInfosIndexDivisor when opening the
+IndexReader?  EG a setting of 2 would load every 256th term (instead
+of every 128th term) into RAM, halving RAM usage, with the downside
+being that looking up a term will generally take longer since it'll
+require more scanning.
+
+Mike
+
+On Wed, Dec 23, 2009 at 11:32 PM, tsuraan <tsuraan@gmail.com> wrote:
+>> This (very large number of unique terms) is a problem for Lucene currently.
+>>
+>> There are some simple improvements we could make to the terms dict
+>> format to not require so much RAM per term in the terms index...
+>> LUCENE-1458 (flexible indexing) has these improvements, but
+>> unfortunately tied in w/ lots of other changes.  Maybe we should break
+>> out a separate issue for this... this'd be a great contained
+>> improvement, if anyone out there has "the itch" :)
+>
+> Resurrecting an old thread, but it's a concern that I have as well, so
+> I thought I'd add on to this.
+>
+> It looks like issue 1458 was resolved on dec. 3, but I couldn't figure
+> out what the resolution was.  Does lucene 3.0 have a more
+> memory-friendly replacement to reading the entire .tii file into RAM?
+> If not, would just mmap'ing the .tii file and skipping around in the
+> mmap be a better solution than essentially reading the entire file and
+> keeping it in arrays on the heap?
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

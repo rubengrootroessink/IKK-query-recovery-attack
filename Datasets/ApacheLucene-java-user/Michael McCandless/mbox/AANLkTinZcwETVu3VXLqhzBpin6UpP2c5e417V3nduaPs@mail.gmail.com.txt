@@ -1,0 +1,82 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IndexWriter.close() performance issue
+DATE: 4 Nov 2010
+
+Likely what happened is you had a bunch of smaller segments, and then
+suddenly they got merged into that one big segment (_aiaz) in your
+index.
+
+The representation for norms in particular is not sparse, so this
+means the size of the norms file for a given segment will be
+number-of-unique-indexed-fields X number-of-documents.
+
+So this count grows quadratically on merge.
+
+Do these fields really need to be indexed?   If so, it'd be better to
+use a single field for all users for the indexable text if you can.
+
+Failing that, a simple workaround is to set the maxMergeMB/Docs on the
+merge policy; this'd prevent big segments from being produced.
+Disabling norms should also workaround this, though that will affect
+hit scores...
+
+Mike
+
+On Wed, Nov 3, 2010 at 7:37 PM, Mark Kristensson
+<mark.kristensson@smartsheet.com> wrote:
+> Yes, we do have a large number of unique field names in that index, because they are
+driven by user named fields in our application (with some cleaning to remove illegal chars).
+>
+> This slowness problem has appeared very suddenly in the last couple of weeks and the
+number of unique field names has not spiked in the last few weeks. Have we crept over some
+threshold with our linear growth in the number of unique field names? Perhaps there is a limit
+driven by the amount of RAM in the machine that we are violating? Are there any guidelines
+for the maximum number, or suggested number, of unique fields names in an index or segment?
+Any suggestions for potentially mitigating the problem?
+>
+> Thanks,
+> Mark
+>
+>
+> On Nov 3, 2010, at 2:02 PM, Michael McCandless wrote:
+>
+>> On Wed, Nov 3, 2010 at 4:27 PM, Mark Kristensson
+>> <mark.kristensson@smartsheet.com> wrote:
+>>>
+>>> I've run checkIndex against the index and the results are below. That net is
+that it's telling me nothing is wrong with the index.
+>>
+>> Thanks.
+>>
+>>> I did not have any instrumentation around the opening of the IndexSearcher (we
+don't use an IndexReader), just around the actual query execution so I had to add some additional
+logging. What I found surprised me, opening a search against this index takes the same 6 to
+8 seconds that closing the indexWriter takes.
+>>
+>> IndexWriter opens a SegmentReader for each segment in the index, to
+>> apply deletions, so I think this is the source of the slowness.
+>>
+>> From the CheckIndex output, it looks like you have many (296,713)
+>> unique fields names on that one large segment -- does that sound
+>> right?  I suspect such a very high field count is the source of the
+>> slowness...
+>>
+>> Mike
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

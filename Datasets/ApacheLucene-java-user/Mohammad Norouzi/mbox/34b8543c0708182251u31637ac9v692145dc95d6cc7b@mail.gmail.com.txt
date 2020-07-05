@@ -1,0 +1,346 @@
+FROM: "Mohammad Norouzi" <mnr...@gmail.com>
+SUBJECT: Re: query question
+DATE: 19 Aug 2007
+
+Erick,
+I am using WhitespaceAnalyzer, and yes it's mixed case, in my application I
+never change the entered information to lowercase because of some reasons,
+
+the thing that I didn't consider was the punctuation in the indexes, but in
+query I didn't use any punctuation.  now using Luke, when I put Ca\. (with
+escaping dot) the result is 5 documents however I expect many more, the
+question is do I have to remove all dots and special characters from the
+indexed information while indexing?
+
+>>And if you only knew how many times I've said something similar to ...
+been totally wrong
+
+Erick, I have to use this because we are writing an API to use object as the
+source of indexes and we have to map objects to documents and vice versa,
+would you tell me to make this what other way we should take?
+
+
+On 8/18/07, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> I think you'll get much farther much faster if you concentrate on
+> a very simple test case for searching until you get the results you
+> expect.
+>
+> It's particularly telling that you can't get your results from Luke.
+> All the rest of your code is irrelevant until you get what you expect
+> from Luke with a simple analyzer or with a stupid-simple bit of
+> test code. Until then, the rest of your code, in which bugs may
+> lurk, just gets in your way.
+>
+> For instance.... you have colons in your term text. I believe you have
+> to escape these for query parsing to work correctly. You have mixed
+> case. Are you absolutely sure that the casing is consistent between
+> indexing and querying? You have other punctuation. Are you also sure
+> that it's not stripped by the query ananlyzers? The fragment above
+> doesn't show us what analyzer you use. I flat guarantee that if it's
+> StandardAnalyzer, lots of punctuation is stripped and the term text is
+> lowercased. Some innocent-seeming bit of code can mess you up in
+> any of these cases.
+>
+> You'll get a log of mileage out of query.toString(), which shows you
+> exactly what the query you send to the searcher looks like. Just
+> copying this into Luke and playing around with it has been very helpful
+> to me.
+>
+> I can't emphasize enough that I've been well served by simplifying the
+> code until it worked. Usually this results for me in a forehead-slapping
+> moment and after that putting the complexity back in is easy. And the
+> total time spent is MUCH shorter than trying to debug the complex case.
+>
+> And if you only knew how many times I've said something similar to
+>
+> "in following code, Context and Dispatcher are parts of interceptor
+> pattern
+> in which I change the given values if they are number and has nothing to
+> do
+> with queries with string values"
+>
+> and been totally wrong <G>.....
+>
+> Best
+> Erick
+>
+> On 8/18/07, Mohammad Norouzi <mnrz57@gmail.com> wrote:
+> >
+> > testn,
+> >
+> > here is my code but the thing is strange is that by Luke I can't reach
+> my
+> > goal as well,
+> >
+> > look, I have a field (Indexed, Tokenized and Stored) this field has a
+> wide
+> > variety of values from numbers to characters, I give the query
+> > patientResult:oxalate but the result is no document (using
+> > WhitespaceAnalyzer) but I expect to have values like Ca. Oxalate:few and
+> > Ca.
+> > Oxalate:many
+> >
+> > in following code, Context and Dispatcher are parts of interceptor
+> pattern
+> > in which I change the given values if they are number and has nothing to
+> > do
+> > with queries with string values
+> >
+> >
+> > public class ExtendedQueryParser extends MultiFieldQueryParser {
+> >     private Log logger = LogFactory.getLog(ExtendedQueryParser.class);
+> >     /**
+> >      * if true, overrides the getRangeQuery() method and treat with
+> dates
+> > just like other strings, but
+> >      * if false, everything will normally proceed just like its super
+> > class.
+> >
+> >      */
+> >     private boolean asString;
+> >     private Class clazz;
+> >
+> >     public ExtendedQueryParser(String[] fields,Analyzer analyzer,Class
+> > clazz) {
+> >         super(fields,analyzer);
+> >         //this.asString = asString;
+> >         this.clazz = clazz;
+> >     }
+> >
+> >     @Override
+> >     protected org.apache.lucene.search.Query getRangeQuery(String field,
+> > String part1, String part2, boolean inclusive) throws ParseException {
+> >         String val1 = part1;
+> >         String val2 = part2;
+> >         String fieldName = field;
+> >         try {
+> >             Dispatcher dispatcher = Dispatcher.getInstance();
+> >             Context c = new Context();
+> >             c.setClazz(clazz);
+> >             c.setFieldData(MetadataHelper.getIndexField(clazz,field));
+> >             c.setValue(val1);
+> >             dispatcher.beforeQuery(c);
+> >             val1 = c.getWorkingValue();
+> >
+> >             c.setValue(val2);
+> >             dispatcher.beforeQuery(c);
+> >             val2 = c.getWorkingValue();
+> >             fieldName = c.getChangedFieldName();
+> >             logger.debug("Query text translated to
+> "+fieldName+":["+val1+
+> > "
+> > TO " + val2+"]");
+> >
+> >         } catch (Exception e) {
+> >             e.printStackTrace();
+> >         }
+> >
+> >         BooleanQuery.setMaxClauseCount(5120);//5 * 1024
+> >         return new RangeQuery(new Term(fieldName, val1),new
+> > Term(fieldName,
+> > val2),inclusive);
+> >     }
+> >
+> >     @Override
+> >     protected org.apache.lucene.search.Query getFieldQuery(String field,
+> > String queryText) throws ParseException {
+> >         logger.debug("FieldQuery no slop:"+queryText);
+> >         String val = queryText;
+> >         String fieldName = field;
+> >         try {
+> >             Dispatcher dispatcher = Dispatcher.getInstance();
+> >             Context c = new Context();
+> >             c.setClazz(clazz);
+> >             c.setFieldData(MetadataHelper.getIndexField(clazz,field));
+> >             c.setValue(val);
+> >             dispatcher.beforeQuery(c);
+> >             val = c.getWorkingValue();
+> >             fieldName = c.getChangedFieldName();
+> >             logger.debug("Query text translated to "+fieldName+ ":" +
+> > val);
+> >
+> >         } catch (Exception e) {
+> >             e.printStackTrace();
+> >         }
+> >
+> >         logger.debug("TermQuery...");
+> >         setLowercaseExpandedTerms(false);
+> >         TermQuery termQuery = new TermQuery(new Term(fieldName, val));
+> >
+> >         return termQuery;//(field,val);
+> >     }
+> >
+> >     @Override
+> >     protected org.apache.lucene.search.Query getFuzzyQuery(String arg0,
+> > String arg1, float arg2) throws ParseException {
+> >         logger.debug("FuzzyQuery Text:"+arg1);
+> >         return super.getFuzzyQuery(arg0, arg1, arg2);
+> >     }
+> >
+> >     @Override
+> >     protected org.apache.lucene.search.Query getPrefixQuery(String
+> field,
+> > String text) throws ParseException {
+> >         logger.debug("PrefixQuery Text:"+text);
+> >         //PrefixQuery prefixQuery = new PrefixQuery(new
+> Term(field,text));
+> >         setLowercaseExpandedTerms(false);
+> >         return super.getPrefixQuery(field,text);
+> >     }
+> >
+> >     @Override
+> >     protected org.apache.lucene.search.Query getWildcardQuery(String
+> > field,
+> > String text) throws ParseException {
+> >         logger.debug("WildcardQuery:"+text);
+> >         setLowercaseExpandedTerms(false);
+> >         //WildcardQuery doesn't need to perform any translation on its
+> > numbers
+> >         return super.getWildcardQuery(field, text);
+> >     }
+> >
+> >     @Override
+> >     protected Query getFieldQuery(String field, String queryText, int
+> > slop)
+> > throws ParseException {
+> >         logger.debug("PhraseQuery :"+queryText+" with slop:"+slop);
+> >         String val = queryText;
+> >         String fieldName = field;
+> >         try {
+> >             Dispatcher dispatcher = Dispatcher.getInstance();
+> >             Context c = new Context();
+> >             c.setClazz(clazz);
+> >             c.setFieldData(MetadataHelper.getIndexField(clazz,field));
+> >             c.setValue(val);
+> >             dispatcher.beforeQuery(c);
+> >             val = c.getWorkingValue();
+> >             fieldName = c.getChangedFieldName();
+> >             logger.debug("Query text translated to
+> > "+fieldName+":"+val+"");
+> >
+> >         } catch (Exception e) {
+> >             e.printStackTrace();
+> >         }
+> >         PhraseQuery phraseQuery = new PhraseQuery();
+> >         phraseQuery.add(new Term(fieldName, val));
+> >         phraseQuery.setSlop(slop);
+> >         return phraseQuery;
+> >     }
+> >
+> >
+> > }
+> > --------------------------
+> >
+> > On 8/16/07, testn <test1@doramail.com> wrote:
+> > >
+> > >
+> > > Can you post your code? Make sure that when you use wildcard in your
+> > > custom
+> > > query parser, it will generate either WildcardQuery or PrefixQuery
+> > > correctly.
+> > >
+> > >
+> > > is_maximum wrote:
+> > > >
+> > > > Yes karl, when I explore the index by Luke I can see the terms
+> > > > for example I have a field namely, patientResult, it contains value
+> > "Ca.
+> > > > Oxalate:many" and also other values such as "Ca. Oxalate:few" etc.
+> > > >
+> > > > the problems are when I put this query: patientResult:(Ca.
+> > Oxalate:few)
+> > > > the result is
+> > > > 84329 Ca. Oxalate:few
+> > > > 112519 Ca. Oxalate:many
+> > > > 139141 Ca. Oxalate:many
+> > > > 394321 Ca. Oxalate:few
+> > > > 397671 Ca. Oxalate:nod
+> > > > 387549 Ca. Oxalate: mod
+> > > >
+> > > > however this is not the required result but another problem is when
+> I
+> > > put
+> > > > patientResult:Oxalate or patientResult:Oxalate* no result will
+> > return!!!
+> > > >
+> > > > let me tell you that I am extended MultiFieldQueryParser to override
+> > its
+> > > > methods and in getFieldQuery(...) method I return TermQuery
+> > > >
+> > > > I don't know what I was made wrong?
+> > > >
+> > > >
+> > > >
+> > > >
+> > > > On 8/15/07, karl wettin <karl.wettin@gmail.com> wrote:
+> > > >>
+> > > >>
+> > > >> 15 aug 2007 kl. 07.18 skrev Mohammad Norouzi:
+> > > >>
+> > > >> > I am using WhitespaceAnalyzer and the query is " icdCode:H* "
+but
+> > > >> > there is
+> > > >> > no result however I know that there are many documents with this
+> > > >> > field value
+> > > >> > such as H20, H20.5 etc.     this field is tokenized and indexed
+> > > >> > what is
+> > > >> > wrong with this?
+> > > >> > when I test this query with Luke it will return no result as
+> well.
+> > > >>
+> > > >> Can you also use Luke to inspect documents you know should contain
+> > > these
+> > > >> terms and make sure it really is in there?
+> > > >>
+> > > >> --
+> > > >> karl
+> > > >>
+> > > >>
+> ---------------------------------------------------------------------
+> > > >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >>
+> > > >>
+> > > >
+> > > >
+> > > > --
+> > > > Regards,
+> > > > Mohammad
+> > > > --------------------------
+> > > > see my blog: http://brainable.blogspot.com/
+> > > > another in Persian: http://fekre-motefavet.blogspot.com/
+> > > >
+> > > >
+> > >
+> > > --
+> > > View this message in context:
+> > > http://www.nabble.com/query-question-tf4271198.html#a12185271
+> > > Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> >
+> > --
+> > Regards,
+> > Mohammad
+> > --------------------------
+> > see my blog: http://brainable.blogspot.com/
+> > another in Persian: http://fekre-motefavet.blogspot.com/
+> >
+>
+
+
+
+-- 
+Regards,
+Mohammad
+--------------------------
+see my blog: http://brainable.blogspot.com/
+another in Persian: http://fekre-motefavet.blogspot.com/
+

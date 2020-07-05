@@ -1,0 +1,448 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: lucene nicking my memory ?
+DATE: 4 Dec 2008
+
+
+It's important to understand that the JRE using up all memory to the  
+max you specified, and then doing GC, is entirely "normal" (if not  
+desirable).
+
+This is just how Java works: when code runs it generates garbage,  
+sometimes quite a bit (eg if you make a new IndexSearcher per query),  
+and then eventually GC kicks in and reclaims it.
+
+I think you need to verify that the hangs you see in production do  
+correlate to when a full GC sweep is running, and then try to  
+understand why that full GC causes hangs in production but not dev,  
+and try to tune the GC to have shorter pause times (or, tune the code  
+to not generate so much garbage, if you can).
+
+Once an IndexSearcher is init'd, I think ongoing searches through it  
+should not generate that much additional garbage (until you close &  
+discard that IndexSearcher).  If you are doing something more  
+interesting, eg creating your own HitCollector which reads the  
+Document or TermVectors for every hit or something, then that would  
+generate alot of garbage (but also run very slowly for a large index).
+
+Mike
+
+Magnus Rundberget wrote:
+
+> hmmm,
+>
+>
+> Well in production (1024M heap), it seems that after a while (some  
+> hundred user queries) the memory starts reaching the max threshold  
+> and when it does at some point it becomes unresponsive.
+> Id rather it was slightly less performant (cleaning up memory more  
+> frequently) than freezing up when there are "many" (not really that  
+> many users..) concurrently doing searches when the memory threshold  
+> is reached.
+>
+> In dev Im not able to recreate this behavior, but by reducing  
+> available memory to say 384M things like OOME starts to show up when  
+> running a number of concurrent users.
+>
+> ... as mentioned earlier though it might not just be lucene it could  
+> be that in combination with lack of db connections or other things  
+> that actually cause the freeze up in production. I just still think  
+> its suspicious to grab all available resources and deal with the  
+> problem (with gc) when max available resources are reached.
+>
+> I'd love to be able to tell lucene, hey you have 300Mb for your  
+> cache... deal with it as best as you can.
+> Somewhat similar to DB connections when you configure a pool of  
+> connections and this is what the application has available, not  
+> create db connections until db server starts hicking up and then  
+> release a few.
+>
+> Anyways I guess we have a lot of tuning potential in the way we  
+> index (and what) and how we search as well.
+>
+> magnus
+>
+>
+>
+>
+> On 4. des.. 2008, at 09.47, Khawaja Shams wrote:
+>
+>> Magnus,     Please feel free to ignore my last email; I see that  
+>> you had
+>> this setup earlier.  As far as using up all the memory it can get  
+>> its hands
+>> on, this is actually a good thing. This allows Lucene and other java
+>> applications to keep more things in cache when more memory is  
+>> available.
+>> Also, if you throw more memory at the program, the GC will try to  
+>> spend
+>> little effort in cleaning up until it is necessary. By setting xmx  
+>> to 1536M,
+>> you are effectively telling the jvm that you have this much memory  
+>> available
+>> for the java program.  Therefore, there is no reason for the GC to  
+>> waste any
+>> more resources when the program is taking 1300M of ram. I think you  
+>> should
+>> not worry until you start throwing OOMEs even after you have  
+>> allocated the
+>> 1536M.
+>>
+>>
+>> Is the program still responsive even after it hits the "peak" memory
+>> utilization? You said that the gc request was not being honored,  
+>> but it is
+>> unclear if the queries are returning at that point.  Lastly, I highly
+>> recommend against ever making the gc requests.
+>>
+>>
+>>
+>> Regards,
+>> Khawaja Shams
+>>
+>> On Thu, Dec 4, 2008 at 12:30 AM, Khawaja Shams <ksshams@gmail.com>  
+>> wrote:
+>>
+>>> Magnus,   If you get a chance, can you try setting a different xms  
+>>> and xmx
+>>> value. For instance, try xms384M and xmx1024M.
+>>>
+>>>
+>>> The "forced" GC [request] will almost always reduce the memory  
+>>> footprint
+>>> simply because of the weak references that lucene leverages, but I  
+>>> bet
+>>> subsequent queries are not as fast and you basically need to warm  
+>>> up your
+>>> server after the GC (which would boost up the footprint again :) ).
+>>>
+>>>
+>>>
+>>> Regards,
+>>> Khawaja
+>>>
+>>>
+>>> On Wed, Dec 3, 2008 at 10:27 PM, Magnus Rundberget  
+>>> <rundis@mac.com> wrote:
+>>>
+>>>> Well...
+>>>>
+>>>> after various tests I downgraded to lucene 1.9.1 to see if that  
+>>>> had any
+>>>> effect... doesn't seem that way.
+>>>>
+>>>> I have set up a JMeter test with 5 concurrent users doing a  
+>>>> search (a
+>>>> silly search for a two letter word) every 3 seconds (with a  
+>>>> random of +/-
+>>>> 500ms).
+>>>>
+>>>> - With 512 MB xms/xmx memory usage settles between 400/500 after  
+>>>> a few
+>>>> iterations, but no OOME.
+>>>> At the end of the run memory settles usually between 200-300  
+>>>> somewhere
+>>>> (really depends), but no cleanup occurs for minutes ...unless I  
+>>>> do a forced
+>>>> GC.
+>>>>
+>>>> - Did the same run with 384MB and hit 2 OOME
+>>>>
+>>>> - Did the same run with 256MB and hit 5 or 6 OOME
+>>>>
+>>>> Tried to run tomcat with jdk 1.6 and -server option as well, but  
+>>>> didn't
+>>>> seem to help at all either.
+>>>>
+>>>> The finally I ran the test scenario above but with 1536MB xms/ 
+>>>> xmx... and
+>>>> guess what. It used it all pretty quickly. It used between  
+>>>> 1000-1400/1500
+>>>> for most of the run. At the end of the run memory usage settled  
+>>>> at about 750
+>>>> MB ... until I did a forced gc.
+>>>> This do bother me, if the solution could have been to throw more  
+>>>> memory at
+>>>> the problem I could live with that, but it just seems to consume  
+>>>> all memory
+>>>> it can get it hands on (:-
+>>>> Is there any way to limit the memory usage in Lucene  
+>>>> (configuration) ?
+>>>>
+>>>> Im obviously not sure if lucene is the culprit as Im using spring  
+>>>> (2.5) ,
+>>>> hibernate (3.3) and open session in view and lots of other stuff  
+>>>> etc in my
+>>>> app. So I guess my next step would be to create a very limited  
+>>>> web app with
+>>>> just a servlet calling the lucene api.Then do some profiling on  
+>>>> that.
+>>>>
+>>>> cheers
+>>>> Magnus
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>> On 3. des.. 2008, at 14.45, Michael McCandless wrote:
+>>>>
+>>>>
+>>>>> Are you actually hitting OOME?
+>>>>>
+>>>>> Or, you're watching heap usage and it bothers you that the GC is  
+>>>>> taking a
+>>>>> long time (allowing too much garbage to use up heap space)  
+>>>>> before sweeping?
+>>>>>
+>>>>> One thing to try (only for testing) might be a lower and lower - 
+>>>>> Xmx until
+>>>>> you do hit OOME; then you'll know the "real" memory usage of the  
+>>>>> app.
+>>>>>
+>>>>> Mike
+>>>>>
+>>>>> Magnus Rundberget wrote:
+>>>>>
+>>>>> Sure,
+>>>>>>
+>>>>>> Tried with the following
+>>>>>> Java version: build 1.5.0_16-b06-284 (dev), 1.5.0_12 (production)
+>>>>>> OS : Mac OS/X Leopard(dev) and Windows XP(dev), Windows 2003
+>>>>>> (production)
+>>>>>> Container : Jetty 6.1 and Tomcat 5.5 (latter is used both in  
+>>>>>> dev and
+>>>>>> production)
+>>>>>>
+>>>>>>
+>>>>>> current jvm options
+>>>>>> -Xms512m -Xmx1024M -XX:MaxPermSize=256m
+>>>>>> ... tried a few gc settings as well but nothing that has helped 
+
+>>>>>> (rather
+>>>>>> slowed things down)
+>>>>>>
+>>>>>> production hw running 2 XEON dual core processors
+>>>>>>
+>>>>>> in production our memory reaches the 1024 limit after a while  
+>>>>>> (a few
+>>>>>> hours) and at some point it stops responding to forced gc  
+>>>>>> (using jconsole).
+>>>>>>
+>>>>>> need to digg quite a bit more to figure out the exact prod  
+>>>>>> settings. But
+>>>>>> safe to say the memory usage pattern can be recreated on  
+>>>>>> different hardware
+>>>>>> configs, with different os's, different 1.5 jvms and different  
+>>>>>> containers
+>>>>>> (jetty and tomcat).
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> cheers
+>>>>>> Magnus
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> On 3. des.. 2008, at 13.10, Glen Newton wrote:
+>>>>>>
+>>>>>> Hi Magnus,
+>>>>>>>
+>>>>>>> Could you post the OS, version, RAM size, swapsize, Java VM 
+
+>>>>>>> version,
+>>>>>>> hardware, #cores, VM command line parameters, etc? This can be
+ 
+>>>>>>> very
+>>>>>>> relevant.
+>>>>>>>
+>>>>>>> Have you tried other garbage collectors and/or tuning as  
+>>>>>>> described in
+>>>>>>> http://java.sun.com/javase/technologies/hotspot/gc/gc_tuning_6.html?
+>>>>>>>
+>>>>>>> 2008/12/3 Magnus Rundberget <rundis@mac.com>:
+>>>>>>>
+>>>>>>>> Hi,
+>>>>>>>>
+>>>>>>>> We have an application using Tomcat, Spring etc and Lucene
+ 
+>>>>>>>> 2.4.0.
+>>>>>>>> Our index is about 100MB (in test) and has about 20 indexed
+ 
+>>>>>>>> fields.
+>>>>>>>>
+>>>>>>>> Performance is pretty good, but we are experiencing a very
+ 
+>>>>>>>> high usage
+>>>>>>>> of
+>>>>>>>> memory when searching.
+>>>>>>>>
+>>>>>>>> Looking at JConsole during a somewhat silly scenario (but
+ 
+>>>>>>>> illustrates
+>>>>>>>> the
+>>>>>>>> problem);
+>>>>>>>> (Allocated 512 MB Min heap space, max 1024)
+>>>>>>>>
+>>>>>>>> 0. Initially memory usage is about 70MB
+>>>>>>>> 1. Search for word "er", heap memory usage goes up by 100-150MB
+>>>>>>>> 1.1 Wait for 30 seconds... memory usage stays the same (ie
+no  
+>>>>>>>> gc)
+>>>>>>>> 2. Search by word "og", heap memory usage goes up another
+ 
+>>>>>>>> 50-100MB
+>>>>>>>> 2.1 See 1.1
+>>>>>>>>
+>>>>>>>> ...and so on until it seems to reach the 512 MB limit, and
+ 
+>>>>>>>> then a
+>>>>>>>> garbage
+>>>>>>>> collection is performed
+>>>>>>>> i.e garbage collection doesn't seem to occur until it "hits
+ 
+>>>>>>>> the roof"
+>>>>>>>>
+>>>>>>>> We believe the scenario is similar in production, were our
+ 
+>>>>>>>> heap space
+>>>>>>>> is
+>>>>>>>> limited to 1.5 GB.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Our search is basically as follows
+>>>>>>>> ----------------------------------------------
+>>>>>>>> 1. Open an IndexSearcher
+>>>>>>>> 2. Build a Boolean Query searching across 4 fields (title,
+ 
+>>>>>>>> summary,
+>>>>>>>> content
+>>>>>>>> and daterangestring YYYYMMDD)
+>>>>>>>> 2.1 Sort on title
+>>>>>>>> 3. Perform search
+>>>>>>>> 4. Iterate over hits to build a set of custom result objects
+ 
+>>>>>>>> (pretty
+>>>>>>>> small,
+>>>>>>>> as we dont include content in these)
+>>>>>>>> 5. Close searcher
+>>>>>>>> 6. Return result objects.
+>>>>>>>>
+>>>>>>>
+>>>>>>> You should not close the searcher: it can be shared by all  
+>>>>>>> queries.
+>>>>>>> What happens when you warm Lucene with a (large) number of  
+>>>>>>> queries: do
+>>>>>>> things stabilize over time?
+>>>>>>>
+>>>>>>> A 100MB index is (relatively) very small for Lucene (I have 
+
+>>>>>>> indexes
+>>>>>>>
+>>>>>>>> 100GB). What kind of response times are you getting,  
+>>>>>>>> independent of
+>>>>>>>>
+>>>>>>> memory usage.
+>>>>>>>
+>>>>>>> -glen
+>>>>>>>
+>>>>>>>
+>>>>>>>> We have tried various options based on entries on this  
+>>>>>>>> mailing list;
+>>>>>>>> a) Cache the IndexSearcher - Same results
+>>>>>>>> b) Remove sorting - Same result
+>>>>>>>> c) In point 4 only iterating over a limited amount of hits
+ 
+>>>>>>>> rather than
+>>>>>>>> whole
+>>>>>>>> collection - Same result in terms of memory usage, but  
+>>>>>>>> obviously
+>>>>>>>> increased
+>>>>>>>> performance
+>>>>>>>> d) Using RamDirectory vs FSDirectory - Same result only 
+
+>>>>>>>> initial heap
+>>>>>>>> usage
+>>>>>>>> is higher using ramdirectory (in conjuction with cached 
+
+>>>>>>>> indexsearcher)
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Doing some profiling using YourKit shows a huge number of
+ 
+>>>>>>>> char[],
+>>>>>>>> int[] and
+>>>>>>>> string[], and ever increasing number of lucene related objects.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Reading through the mailing lists, suspicions are that our
+ 
+>>>>>>>> problem is
+>>>>>>>> related to ThreadLocals and memory not being released.  
+>>>>>>>> Noticed that
+>>>>>>>> there
+>>>>>>>> was a related patch for this in 2.4.0, but it doesn't seem
+to  
+>>>>>>>> help us
+>>>>>>>> much.
+>>>>>>>>
+>>>>>>>> Any ideas ?
+>>>>>>>>
+>>>>>>>> kind regards
+>>>>>>>> Magnus
+>>>>>>>>
+>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> --
+>>>>>>>
+>>>>>>> -
+>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>> help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>
+>>>>>> ---------------------------------------------------------------------
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

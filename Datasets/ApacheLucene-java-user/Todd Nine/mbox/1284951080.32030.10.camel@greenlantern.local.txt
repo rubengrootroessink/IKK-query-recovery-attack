@@ -1,0 +1,118 @@
+FROM: Todd Nine <t...@spidertracks.co.nz>
+SUBJECT: Help with numeric ranges and querying with sorting and counts
+DATE: 20 Sep 2010
+
+Hi all,
+  Now that the nasty bug in Cassandra has been fixed, I can use numeric
+fields in my Lucandra for searching and sorting.  I'm having a bit of an
+issue I could use a hand with.  We're creating an SoS index.  Each
+Document corresponds to an SoS.  Every person contacted for the SoS will
+be indexed by their email address, their phone numbers, and the time the
+SoS was created.  I have an api with the following functionality.
+
+
+public List<SoS> getAll(String input, long endTime int count) {
+
+
+Where the string is either a phone number or an email address, the
+endTime is the epoch end time to seek up to, and the count is the number
+of records to return.  I basically want to perform the following search
+
+(email: input OR phone: input) AND endtime[-LONG.MIN : endTime]
+
+Then return the last "count" values that are closest to the end time.
+Here is how I'm creating my document.
+
+	Document doc = new Document();
+		DocumentUtils.setRowKey(doc, sos.getId().toString());
+
+		doc.add(new Field(FIELD_IMEI, sos.getImeiNumber(), Store.NO,
+				Index.NOT_ANALYZED));
+
+		doc.add(new Field(FIELD_TRACKIDX, getHex(sos.getTrackIndexTime()),
+				Store.NO, Index.NOT_ANALYZED));
+
+		doc.add(new Field(FIELD_TIER, getHex(sos.getTier().getStoredValue()),
+				Store.NO, Index.NOT_ANALYZED));
+
+		doc.add(new NumericField(FIELD_CREATETIME).setLongValue(sos
+				.getCreatedTime().getTime()));
+
+		doc.add(new Field(FIELD_RESOLVED, getHex(sos.isResolved()), Store.NO,
+				Index.NOT_ANALYZED));
+
+		if (sos.getNotes() != null) {
+			doc.add(new Field(FIELD_NOTES, sos.getNotes(), Store.NO,
+					Index.ANALYZED));
+		}
+
+		if (sos.isResolved()) {
+			doc.add(new NumericField(FIELD_RESOLVETIME).setLongValue(sos
+					.getResolvedTime().getTime()));
+		}
+
+		for (ContactedPerson person : sos.getContactedPeople()) {
+
+			doc.add(new Field(FIELD_EMAIL, person.getEmail(), Store.NO,
+					Index.NOT_ANALYZED));
+
+			for (Phone phone : person.getPhones()) {
+				doc.add(new Field(FIELD_PHONE, getNumericString(phone
+						.getNumber()), Store.NO, Index.NOT_ANALYZED));
+			}
+
+		}
+
+
+Here is how I'm creating my query.
+
+
+
+
+		BooleanQuery query = new BooleanQuery();
+		
+		BooleanQuery inputTerms = new BooleanQuery();
+		
+		inputTerms.add(new TermQuery(new Term(FIELD_EMAIL, input)),
+				Occur.SHOULD);
+		
+		inputTerms.add(
+				new TermQuery(new Term(FIELD_PHONE, getNumericString(input))),
+				Occur.SHOULD);
+		
+		
+		query.add(inputTerms, Occur.MUST);
+		
+	
+		
+		NumericRangeQuery time = NumericRangeQuery.newLongRange(
+				FIELD_CREATETIME, null, endTime, true, true);
+
+		query.add(time, BooleanClause.Occur.MUST);
+
+     And my sorter
+
+	SortField sort = new SortField(FIELD_CREATETIME, SortField.LONG,true);
+
+
+
+Finally here is some sample test data.
+
+SOS 1: createdTime = 1284093337200L
+SOS 2: createdTime = 1284093337200L + 10000;
+SOS 3: createdTime = 1284093337200L + 20000;
+
+My search criteria is the following
+
+input = "foo@bar.com" (each record has this email address on it)
+time = SOS 3 created time.
+
+I expect to get 3 records, but instead I'm only getting 1.  It's
+something specific to this query, as I have similar queries that work
+properly for the numeric range and sorting.  Any ideas what is wrong
+with my query?
+
+Thanks,
+Todd
+
+

@@ -1,0 +1,271 @@
+FROM: Todd Nine <t...@spidertracks.co.nz>
+SUBJECT: RE: Numeric range query not returning results
+DATE: 4 Oct 2010
+
+Hi Uwe,
+  My example wasn't very clear, as I have a load of other code in my
+actual implementation and I was trying to cut it down for clarity.  This
+is actually my indexing service for my Datanucleus Cassandra plugin, so
+I have a 1 to 1 relationship where a single document corresponds to a
+Persistent object.  I actually create 5 separate documents, and I would
+expect 3 of those to be returned.  I've ported your entire set of tests
+for 32 and 64 bit numeric range tests over, and it unfortunately appears
+that Lucandra is still very broken in terms of numeric ranges even after
+the Cassandra encoding fix for the 7bit shift into UTF 8 characters.
+I'll hopefully be able to solve the bugs in the next few days.  Thanks
+again for your help, it's always appreciated.
+
+Todd
+
+
+
+
+On Mon, 2010-10-04 at 07:55 +0200, Uwe Schindler wrote:
+> This test works perfectly and returns 1 doucment:
+> 
+>  
+> 
+>   public void testToddNine() throws Exception {
+> 
+>     RAMDirectory directory = new RAMDirectory();
+> 
+>     IndexWriter writer = new IndexWriter(directory, new
+> WhitespaceAnalyzer(), true, MaxFieldLength.UNLIMITED);
+> 
+>     try {
+> 
+>       Document doc = new Document();
+> 
+>       doc.add(new
+> NumericField("LastLogin").setLongValue(1282197146L));
+> 
+>       writer.addDocument(doc);
+> 
+>       doc = new Document();
+> 
+>       doc.add(new
+> NumericField("LastLogin").setLongValue(1282197946L));
+> 
+>       writer.addDocument(doc);
+> 
+>     } finally {
+> 
+>       writer.close();
+> 
+>     }
+> 
+>  
+> 
+>     NumericRangeQuery<Long> rangeQuery =
+> 
+>       NumericRangeQuery.newLongRange("LastLogin", 1282197146L,
+> 1282197146L, true, true);
+> 
+>  
+> 
+>     IndexReader reader = IndexReader.open(directory, true);
+> 
+>     try {
+> 
+>       IndexSearcher searcher = new IndexSearcher(reader);
+> 
+>       TopDocs docs = searcher.search(rangeQuery, 1000);
+> 
+>       assertEquals(1,docs.totalHits);
+> 
+>     } finally {
+> 
+>       reader.close();
+> 
+>     }
+> 
+>   }
+> 
+>  
+> 
+> Maybe you have the following problems:
+> 
+> -          Are you executing the same query than created. In your
+> example code the searcher executed “query” but the range query was
+> “rangeQuery” variable name
+> 
+> -          Are you sure that your document is not returned, but you
+> miss some stored fields? E.g. the default NumericField ctor does not
+> create the field as “stored” to the document?
+> 
+>  
+> 
+> public NumericField(String name)
+> 
+> Creates a field for numeric values using the default precisionStep
+> NumericUtils.PRECISION_STEP_DEFAULT (4). The instance is not yet
+> initialized with a numeric value, before indexing a document
+> containing this field, set a value using the various set???Value()
+> methods. This constructor creates an indexed, but not stored field.
+> 
+>  
+> 
+> Uwe
+> 
+>  
+> 
+> -----
+> 
+> Uwe Schindler
+> 
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> 
+> http://www.thetaphi.de
+> 
+> eMail: uwe@thetaphi.de
+> 
+>  
+> 
+>  
+> 
+> > -----Original Message-----
+> 
+> > From: Todd Nine [mailto:todd@spidertracks.co.nz]
+> 
+> > Sent: Monday, October 04, 2010 6:13 AM
+> 
+> > To: java-user@lucene.apache.org
+> 
+> > Subject: Numeric range query not returning results
+> 
+> > 
+> 
+> > Hi all,
+> 
+> >   I'm having some issues with Numeric Range queries not working as
+> expected.
+> 
+> > My underlying storage medium is the Lucandra index reader and
+> writer, so I'm
+> 
+> > not sure if this is an issue within Lucandra or with my usage of
+> numeric field.
+> 
+> > My numeric range tests that are copies of Uwe's pass in the
+> Lucandra, source,
+> 
+> > so I have a feeling it's my usage.  I have a simple test case, with
+> 5 people.  I
+> 
+> > have a Date field, the LastLogin field.  This date is converted to
+> epoch
+> 
+> > milliseconds, and stored in the index in the following way.
+> 
+> > 
+> 
+> > NumericField numeric = new NumericField("LastLogin");
+> 
+> > numeric.setLongValue(fieldValue); doc.add(numeric);
+> 
+> > 
+> 
+> > Where I have the following 2 field values on 2 documents.
+> 
+> > 
+> 
+> > 1282197146L and 1282197946L
+> 
+> > 
+> 
+> > I then perform the following query.
+> 
+> > 
+> 
+> > NumericRangeQuery rangeQuery =
+> 
+> > NumericRangeQuery.newLongRange("LastLogin", 1282197146L,
+> 1282197146L,
+> 
+> > true, true);
+> 
+> > 
+> 
+> > IndexReader reader = new IndexReader(columnFamily,
+> 
+> >
+> getContext(conn));
+> 
+> >
+> IndexSearcher searcher = new
+> 
+> > IndexSearcher(reader);
+> 
+> > 
+> 
+> >                                                            TopDocs
+> docs = searcher.search(query,
+> 
+> > maxResults);
+> 
+> > 
+> 
+> >
+> List<Document> documents = new
+> 
+> > ArrayList<Document>(
+> 
+> >
+> docs.totalHits);
+> 
+> > 
+> 
+> >
+> Set<String> fields = new HashSet<String>();
+> 
+> >
+> fields.add(IndexDocument.ROWKEY);
+> 
+> >
+> fields.add(IndexDocument.IDSERIALIZED);
+> 
+> > 
+> 
+> >
+> SetBasedFieldSelector selector = new
+> 
+> > SetBasedFieldSelector(
+> 
+> >
+> fields, null);
+> 
+> > 
+> 
+> >                                                            for
+> (ScoreDoc score : docs.scoreDocs) {
+> 
+> > 
+> 
+> >             documents.add(reader.document(score.doc, selector));
+> 
+> >                                                            }
+> 
+> > 
+> 
+> >                                                            return
+> documents;
+> 
+> > 
+> 
+> > I'm always getting 0 documents.  I know this is incorrect, I can see
+> the values
+> 
+> > getting written to Cassandra when I run it in debug mode.  Is this
+> an issue with
+> 
+> > precision step, or an issue with the Lucandra index reader
+> implementation?
+> 
+> > 
+> 
+> > Thanks,
+> 
+> > Todd
+> 
+> 
+

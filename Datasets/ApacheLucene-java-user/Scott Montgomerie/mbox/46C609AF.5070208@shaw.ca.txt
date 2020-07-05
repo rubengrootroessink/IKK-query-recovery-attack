@@ -1,0 +1,67 @@
+FROM: Scott Montgomerie <montgome...@shaw.ca>
+SUBJECT: Modification to IndexWriter / IndexReader
+DATE: 17 Aug 2007
+
+I've noticed a few threads on this so far... maybe it's useful or maybe
+somebody's already done this, or maybe it's insane and bug-prone.
+
+Anyways, our application requires lucene to act as a non-critical
+database, as in each record is composed of denormalized data derived
+from the real DBMS.  The index can be regenerated at any time from the
+database.  However, information added to the index must be searchable
+immediately after being added.  The index is written to concurrently by
+many users.  Therefore, flushing the IndexWriter to disk, and re-opening
+a IndexReader is not really feasible.  Therefore, I worked up this hack
+to compensate. 
+
+Note that this solution precludes multiple readers from reading an
+index.  Also, a reader cannot be allowed to delete documents (but
+really, why can you delete using a reader, anyway?  Or has this been
+deprecated?)
+
+Essentially, a IndexWriter owns a IndexReader, and to obtain a reader,
+you call Indexwriter.getReader().  Whenever the writer is written to, a
+new reader is formed, composed of the IndexWriter's SegmentInfos (since
+a reader and writer essentially share copies of both of these structures
+anyways).  It's essentially an in-memory swap rather than reading the
+segment infos back from disk after the writer has written them.
+
+I've attached the patch based on the current dev code.  Basically it
+implements doAfterFlush(), and adds getReader() and addNotifier()
+methods.  The notifier is simply so that anybody using a Searcher can be
+notified that the underlying reader has changed, and the Searcher should
+be re-opened.
+
+Something like this:
+
+writer.addNotifier(new WriterUpdateNotifier()
+            {
+                public void onUpdate(IndexWriter writer, IndexReader r)
+                {
+                    // The reader and writer has been updated, rebuild
+the searchers
+                    readers[readers.length - 1] = r;
+                    try
+                    {
+                        reader = new MultiReader(readers);
+                    }
+                    catch (IOException e)
+                    {
+                        e.printStackTrace();
+                    }
+                    reopenSearcher();
+                }
+            });
+
+This is currently working well in a production system and is working
+quite well.  It has been load tested, and well, our users are load
+testing it for us as well :-).  However, see my previous post about the
+ArrayIndexOutOfBoundsException, although I don't see how this could be
+the cause... but maybe, since nobody else gets the problem.  However, I
+haven't modified the writer at all, and I am never modifying the index
+with the Reader.
+
+So feel free to tell me this is crazy... I'm just throwing it out there.
+
+Thanks
+

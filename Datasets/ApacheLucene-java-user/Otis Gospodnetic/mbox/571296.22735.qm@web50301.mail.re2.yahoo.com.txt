@@ -1,0 +1,177 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Memory Leak when using Custom Sort (i.e., DistanceSortSource) of LocalLucene with Lucene
+DATE: 11 Jun 2008
+
+Hi Ethan,
+
+Yes, it would be good to have this in JIRA.  Please see http://wiki.apache.org/lucene-java/HowToContribute
+for info about generating the patch, etc.
+
+Thanks,
+Otis
+--
+Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+
+
+----- Original Message ----
+> From: Ethan Tao <Ethant@collarity.com>
+> To: java-user@lucene.apache.org
+> Sent: Monday, June 9, 2008 5:10:31 PM
+> Subject: Memory Leak when using Custom Sort (i.e., DistanceSortSource) of LocalLucene
+with Lucene
+> 
+> Hi, 
+> 
+> 
+> 
+> We had the memory leak issue when using DistanceSortSource of
+> LocalLucene for repeated query/search. In about 450 queries, we are
+> experiencing out of memory error. After dig in the code, we found the
+> problem source is coming from Lucene package, the way how it handles
+> "custom" type comparator. Lucene internally caches all created
+> comparators. In the case of query using LocalLucene, we create new
+> comparator for every search due to different lon/lat and query terms.
+> This causes major memory leak as the cached comparators are also holding
+> memory for other large objects (e.g., bit sets). The solution we came up
+> with:
+> 
+> 
+> 
+> 1.  In Lucene package, create new file
+> SortComparatorSourceUncacheable.java:
+> 
+> 
+> 
+> package org.apache.lucene.search;
+> 
+> 
+> 
+> import org.apache.lucene.index.IndexReader;
+> 
+> import java.io.IOException;
+> 
+> import java.io.Serializable;
+> 
+> 
+> 
+> public interface SortComparatorSourceUncacheable extends Serializable {
+> 
+> }
+> 
+> 
+> 
+> 2.       Have your custom sort class to implement the interface
+> 
+> 
+> 
+> public class LocalSortSource extends DistanceSortSource implements
+> SortComparatorSourceUncacheable {
+> 
+> ...
+> 
+> }
+> 
+> 
+> 
+> 3.       Modify Lucene's FieldSorterHitQueue.java to bypass caching for
+> custom sort comparator:
+> 
+> 
+> 
+> Index: FieldSortedHitQueue.java
+> 
+> ===================================================================
+> 
+> --- FieldSortedHitQueue.java     (revision 654583)
+> 
+> +++ FieldSortedHitQueue.java  (working copy)
+> 
+> @@ -53,7 +53,12 @@
+> 
+>      this.fields = new SortField[n];
+> 
+>      for (int i=0; i
+> 
+>        String fieldname = fields[i].getField();
+> 
+> -      comparators[i] = getCachedComparator (reader, fieldname,
+> fields[i].getType(), fields[i].getLocale(), fields[i].getFactory());
+> 
+> +
+> 
+> +      if(fields[i].getFactory() instanceof
+> SortComparatorSourceUncacheable) { // no caching to avoid memory leak
+> 
+> +        comparators[i] = getComparator (reader, fieldname,
+> fields[i].getType(), fields[i].getLocale(), fields[i].getFactory());
+> 
+> +      } else {
+> 
+> +        comparators[i] = getCachedComparator (reader, fieldname,
+> fields[i].getType(), fields[i].getLocale(), fields[i].getFactory());
+> 
+> +      }
+> 
+>       
+> 
+>        if (comparators[i].sortType() == SortField.STRING) {
+> 
+>                   this.fields[i] = new SortField (fieldname,
+> fields[i].getLocale(), fields[i].getReverse());
+> 
+> @@ -157,7 +162,18 @@
+> 
+>    SortField[] getFields() {
+> 
+>      return fields;
+> 
+>    }
+> 
+> -  
+> 
+> +
+> 
+> +  static ScoreDocComparator getComparator (IndexReader reader, String
+> field, int type, Locale locale, SortComparatorSource factory)
+> 
+> +    throws IOException {
+> 
+> +      if (type == SortField.DOC) return ScoreDocComparator.INDEXORDER;
+> 
+> +      if (type == SortField.SCORE) return ScoreDocComparator.RELEVANCE;
+> 
+> +      FieldCacheImpl.Entry entry = (factory != null)
+> 
+> +        ? new FieldCacheImpl.Entry (field, factory)
+> 
+> +        : new FieldCacheImpl.Entry (field, type, locale);
+> 
+> +      return (ScoreDocComparator)Comparators.createValue(reader,
+> entry);
+> 
+> +    }
+> 
+> +
+> 
+> +
+> 
+> 
+> 
+> 
+> 
+> Can someone from internal Lucene Developer please review the change
+> above and see if it makes sense? And possibly if a feature request
+> should be filed in Jira, please let me know.
+> 
+> Thanks.
+> 
+> 
+> 
+> -Ethan
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

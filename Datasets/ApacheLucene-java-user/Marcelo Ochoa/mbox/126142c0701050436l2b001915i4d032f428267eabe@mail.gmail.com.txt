@@ -1,0 +1,137 @@
+FROM: "Marcelo Ochoa" <marcelo.oc...@gmail.com>
+SUBJECT: Re: efficient ways of updating document
+DATE: 5 Jan 2007
+
+John:
+   I had implemented a batch (delete,insert,update) operation for the
+Oracle Lucene Domain Index using OJVMDirectory, see patch:
+http://issues.apache.org/jira/browse/LUCENE-724
+  The strategy used in this solution is to enqueue all operations on
+the table which have a column indexed by Lucene and synchronize then
+all the operations.
+   For each operation into the index (Lucene Domain Context) do:
+    on insert:
+       enqueue the operation storing the rowid of the row inserted.
+    on update:
+       enqueue the operation storing the rowid of the row updated.
+    on delete:
+       open an IndexReader, delete the document using
+deleteDocuments(new Term("rowid", rid));
+       enqueue the operation storing the rowid of the row deleted.
+
+     Delete operations require that the delete operation must be
+performed at the time of the deletion because a following query using
+the operator lcontains() can return non existing rowid.
+     The sync process perform these steps:
+     for each operation enqueued on the lucene_queue do {
+        if operation is delete {
+          remove the rowid from the lists scheduledDeleteForUpdate and
+scheduledAdd
+        } else {
+           if operation is update {
+              add the rowid to the list scheduledDeleteForUpdate
+           }
+           add the rowid to the list scheduledAdd
+        }
+     } // end do
+     Open an IndexReader and delete all the rows on the list
+scheduledDeleteForUpdate
+     Open an IndexWriter and add all the rows on the list scheduledAdd
+
+     Delete operations are enqueued too to eliminate rows inserted or
+updated previous to the delete operation during the time between two
+checkpoints. For example:
+       insert a1;
+       update a1;
+       delete a1;
+       sync(it1);
+       With the above sequence the list scheduledDeleteForUpdate and
+scheduledAdd, have an instance of the rowid a1, but when the loop
+process the delete message remove both rowid from the two list.
+       Best regards, Marcelo.
+
+PD: OJVMDirectory and OJVMFile classes operate on Oracle BLOBs instead
+of Files, so the sync operations can operate on the LOBs without
+having problem of locking or copying the content to alternate
+directories, because the concurrence system of the database
+automatically maintain a copy of the LOBs into the undo area until the
+commit is performed. When a commit is performed the OJVMDirectory
+automatically remove all cached IndexReader opened by the application.
+On 1/5/07, Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote:
+> John,
+>
+> Batch deletion followed by batch addition is the best practise.  Ning Li made some changes
+that improve the performance of non-batch mass delete/add operations, but I'm not sure what
+the state of those changes is (whether they are still in Lucene's JIRA, or whether they are
+in CVS).
+>
+> Otis
+>
+> ----- Original Message ----
+> From: John Song <delphi329@yahoo.com>
+> To: java-user@lucene.apache.org
+> Sent: Friday, January 5, 2007 12:53:12 AM
+> Subject: efficient ways of updating document
+>
+> It seems to me that updating a document is rather tedious and slow in lucene, especially
+for updating large number of documents.  Before opening an IndexWriter to add documents, one
+has to open an IndexReader/IndexSearcher to search for the document of a particular id.  Upon
+finding its docnum, delete it.  One then close the reader and open the writer to add the updated
+content.  Move on to the next item, repeat the process. For large number of updating, the
+performance is bad.
+>
+> One way to speed it up is don't do this process for every single updates.  If one has
+a large number of updates, open the reader/searcher first.  But instead of searching/deleting
+for one document and then close it, search/delete all of them and then close the reader/searcher.
+ Then one can open a writer and just do a batch add.
+>
+> However, I wonder whether we could change the writer to do update automatically. Update
+will be consists of marking an old document invalid, but not removing them and adding the
+new document.  We can clean things up later on.  Using this method, there is no need of switching
+between reader and writer during update.
+>
+>
+> john
+>
+>
+>
+> __________________________________________________
+> Do You Yahoo!?
+> Tired of spam?  Yahoo! Mail has the best spam protection around
+> http://mail.yahoo.com
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+Marcelo F. Ochoa
+http://marcelo.ochoa.googlepages.com/home
+______________
+Do you Know DBPrism? Look @ DB Prism's Web Site
+http://www.dbprism.com.ar/index.html
+More info?
+Chapter 17 of the book "Programming the Oracle Database using Java &
+Web Services"
+http://www.amazon.com/gp/product/1555583296/
+Chapter 21 of the book "Professional XML Databases" - Wrox Press
+http://www.amazon.com/gp/product/1861003587/
+Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+http://www.oreilly.com/catalog/oracleopen/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

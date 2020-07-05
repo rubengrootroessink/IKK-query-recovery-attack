@@ -1,0 +1,202 @@
+FROM: Robert Stewart <Robert.Stew...@INFONGEN.COM>
+SUBJECT: RE: Replicating Lucene Index with out SOLR
+DATE: 28 Aug 2008
+
+We don't use Solr, since we run on Windows <sigh>;(</sigh>, but we did implement
+very similar snapshot replication.  We have 2 master index servers building indexes, partitioned
+by document.  Every 1 minute, we stop index writer, create a local snapshot (on the master
+server), in directory named YYYYMMDDHHMMSS for current timestamp.  Then each query server
+has a background thread which periodically looks in remote directories on master server for
+new snapshot directory.  If it finds one, it copies the new snapshot locally to the query
+server, using the following algorithm:
+
+1. Make a local copy of existing local snapshot:
+        a. Copy all "changeable" files (segments file, etc.)
+        b. Create NTFS "hard-links" for all other files (index files)
+2. Copy any new files in new remote index which do not already exist in local snapshot (since
+Lucene does not every modify existing index files, only new files we need to copy (and new
+segments file).
+3. Delete any files which no longer exist (only deletes local hard-link, not actual file in
+current snapshot).
+4. Open index reader on new local snapshot, and run some "warming" queries.
+5. Switch current index reader object to new index reader object so searches go against new
+local snapshot.
+
+Step 1 above is also used on master index server when making new local snapshots.
+
+Also, note that we don't use rsync.  You do not need it.  You only need to make hard-links,
+and always copy any "changeable" files, such as "segments" file.  Lucene does not modify index
+files, only creates new ones (and deletes old ones after a merge/optimization).
+
+We use following settings for index writer:
+
+This gives many segments but search is still very fast, and total MB of new files copied for
+each snapshot is relatively small.
+
+MergeFactor = 2
+MaxBufferedDocs = 10
+MaxMergeDocs = 1,000,000
+
+Currently we have about 25 million documents in the master index.
+
+-----Original Message-----
+From: Bill Au [mailto:bill.w.au@gmail.com]
+Sent: Thursday, August 28, 2008 8:22 AM
+To: java-user@lucene.apache.org
+Subject: Re: Replicating Lucene Index with out SOLR
+
+The snapinstaller script invokes the commit command to trigger Solr to do a
+commit, which open a new index reader and then auto-warm the caches.  You
+will need to replace that with your own code to do the same for your Lucene
+index.
+
+On Thu, Aug 28, 2008 at 1:47 AM, rahul_k123 <vishnudeepak@gmail.com> wrote:
+
+>
+> Can i make use of solr scripts for this purpose.
+>
+>
+> The snapinstaller runs on the slave after a snapshot has been pulled from
+> the master. This signals the local Solr server to open a new index reader,
+> then auto-warming of the cache(s) begins (in the new reader), while other
+> requests continue to be served by the original index reader.
+>
+> How can i achieve the above in my case??
+>
+>
+> Otis Gospodnetic wrote:
+> >
+> > You don't need to copy the whole index every time if you do incremental
+> > indexing/updates and don't optimize the index before copying.  If you use
+> > rsync for copying the index, only the new/modified files be copied.  This
+> > is what Solr replication scripts do, too.
+> >
+> > Otis
+> > --
+> > Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+> >
+> >
+> >
+> > ----- Original Message ----
+> >> From: rahul_k123 <vishnudeepak@gmail.com>
+> >> To: general@lucene.apache.org
+> >> Sent: Wednesday, August 27, 2008 11:36:07 PM
+> >> Subject: Re: Replicating Lucene Index with out SOLR
+> >>
+> >>
+> >> Currently we index every certain amount of time on A.
+> >>
+> >> -copy the index
+> >>      Copying the whole index everytime ?
+> >>
+> >> Currently i am investigating how i can make use of SOLR replication
+> >> scripts
+> >> to achive this.
+> >>
+> >>
+> >> Is there anyone who did this with out SOLR before?
+> >>
+> >>
+> >> Thanks
+> >>
+> >>
+> >>
+> >> Otis Gospodnetic wrote:
+> >> >
+> >> > Hi,
+> >> >
+> >> > You may want to ask on the java-user list (more subscribers), which
+> I'm
+> >> > CC-ing, so we can continue discussion there.
+> >> > I think you will have to implement your own logic that runs on A and
+> >> does
+> >> > something like this:
+> >> >
+> >> > - stop adding new docs
+> >> > - call commit on the IndexWriter
+> >> >
+> >> > - copy the index
+> >> > - resume indexing
+> >> >
+> >> > Otis
+> >> > --
+> >> > Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+> >> >
+> >> >
+> >> >
+> >> > ----- Original Message ----
+> >> >> From: rahul_k123
+> >> >> To: general@lucene.apache.org
+> >> >> Sent: Thursday, August 28, 2008 1:34:41 AM
+> >> >> Subject: Replicating Lucene Index with out SOLR
+> >> >>
+> >> >>
+> >> >> I have the following requirement
+> >> >>
+> >> >> Right now we have multiple indexes  serving our web application. Our
+> >> >> indexes
+> >> >> are around 30 GB size.
+> >> >>
+> >> >> We want to replicate the index data so that we can use them to
+> >> distribute
+> >> >> the search load.
+> >> >>
+> >> >> This is what we need ideally.
+> >> >>
+> >> >> A - (supports writes and reads)
+> >> >>
+> >> >> A1 -Replicated Index (Supports reads)  . We want to synchronize this
+> >> >> every 5
+> >> >> mins.
+> >> >>
+> >> >>
+> >> >>
+> >> >> Any help is appreciated.   We are not using SOLR
+> >> >>
+> >> >> I also interested in knowing what will be the best way so that I can
+> >> >> scale
+> >> >> my application adding more boxes for search if our load increases.
+> >> >>
+> >> >> Thanks.
+> >> >>
+> >> >> --
+> >> >> View this message in context:
+> >> >>
+> >>
+> http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19191752p19191752.html
+> >> >> Sent from the Lucene - General mailing list archive at Nabble.com.
+> >> >
+> >> >
+> >> >
+> >>
+> >> --
+> >> View this message in context:
+> >>
+> http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19191752p19193670.html
+> >> Sent from the Lucene - General mailing list archive at Nabble.com.
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+>
+> --
+> View this message in context:
+> http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19193696p19194576.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

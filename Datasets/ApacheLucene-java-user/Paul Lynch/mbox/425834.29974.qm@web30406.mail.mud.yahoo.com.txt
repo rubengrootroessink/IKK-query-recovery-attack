@@ -1,0 +1,155 @@
+FROM: Paul Lynch <pabloly...@yahoo.com>
+SUBJECT: Re: Problem with Custom Filter
+DATE: 26 Jan 2007
+
+Thanks for that Erick, it was a great help in clearing up how the mechanism works. I have it
+working now, here is the changed bits method (I would appreciate any advice you/anyone might
+have particularly around efficiency - thanks again):
+ 
+ public BitSet bits(IndexReader reader) throws IOException
+ {
+  BitSet bits = new BitSet(reader.maxDoc());
+  String[] advertiserIds = accessor.advertiserIds();
+  
+  int[] docs = new int[reader.maxDoc()];
+  int[] freqs = new int[reader.maxDoc()];
+  
+  for (int i=0; i<advertiserIds.length; i++)
+  {
+   String advertiserId = advertiserIds[i];
+   if (advertiserId!=null)
+   {
+    TermDocs termDocs = reader.termDocs(new Term("AdvertId", advertiserId));
+    int count = termDocs.read(docs, freqs);
+    for(int ix=0;ix<count;ix++) bits.set(docs[ix]);
+   }
+  }
+  
+  return bits;
+ }
+
+----- Original Message ----
+From: Erick Erickson <erickerickson@gmail.com>
+To: java-user@lucene.apache.org
+Sent: Friday, January 26, 2007 7:14:38 PM
+Subject: Re: Problem with Custom Filter
+
+
+I think you're only setting one bit in your filter.
+
+You're docs array is only one cell long, and your termDocs.read reads up to
+the length of docs (exactly one in this case) entries. So, you're getting
+only one doc ID. And setting it. Even if you made your array larger, you
+would only set one because of the if (count == 1) clause. I'd recommend a
+for loop for (idx = 0; idx < count; ++idx) { bits.set(doc[idx]); }
+
+But I don't think you should be doing it this way in the first place unless
+you're assured that you know what the upper limit of the number of matching
+docs is, since I don't think there's any way to cause TermDocs.read to
+return entries n through n+sizeofdocs. Try something like
+
+termDocs.seek(new Term("advertiserId", advertiserId);
+while (termDocs.next()) {
+    bits.set(termDocs.doc());
+}
+
+Hope this helps
+Erick
+
+On 1/26/07, Paul Lynch <pablolynch@yahoo.com> wrote:
+>
+> Hi,
+>
+> I am going mad trying to find out what I am doing wrong with my custom
+> filter implementation (almost an exact copy of SpecialsFilter from LIA). I
+> have put together a quick sample to illustrate my problem, if some kind soul
+> has 2 minutes to take a quick look and tell me where I am being so stupid, I
+> would really appreciate it:
+>
+> PROBLEM: Filtered query returns 1 result when it should return 10
+>
+> TEST RIG:
+>
+> Add the documents to the index, every 10 documents having the same
+> "advertiserId":
+>   int idToAdd = 100000;
+>   for(int i=0;i<100;i++)
+>   {
+>    if(i>0 && i%10==0) idToAdd++;
+>    Document doc = new Document();
+>    doc.add(new Field("advertiserId", Integer.toString(idToAdd),
+> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>    doc.add(new Field("contents", "document number " + Integer.toString(i)
+> + " random string", Field.Store.YES, Field.Index.TOKENIZED));
+>    writer.addDocument(doc);
+>   }
+>
+> I have verified that the docs were created probably by browsing the index
+> with Luke.
+>
+>    String[] advertiserIds = {"100003"};
+>    IFeaturedAdvertisersAccessor accessor = new
+> FeaturedAdvertisersAccessor(advertiserIds);
+>    Filter filter = new FeaturedAdvertisersFilter(accessor);
+>
+>    TermQuery tq = new TermQuery(new Term("contents", "document"));
+>    BooleanQuery bq = new BooleanQuery();
+>    bq.add(tq, Occur.MUST);
+>
+>    Hits hits = searcher.search(tq, filter);
+>    System.out.println("hits.length: " + hits.length());
+>
+> result "hits.length: 1"
+>
+> Source for FeaturedAdvertisersFilter:
+>
+> public class FeaturedAdvertisersFilter extends Filter
+> {
+> private IFeaturedAdvertisersAccessor accessor;
+>
+> public FeaturedAdvertisersFilter(IFeaturedAdvertisersAccessor accessor)
+> {
+>   this.accessor = accessor;
+> }
+>
+> public BitSet bits(IndexReader reader) throws IOException
+> {
+>   BitSet bits = new BitSet(reader.maxDoc());
+>   String[] advertiserIds = accessor.advertiserIds();
+>
+>   int[] docs = new int[1];
+>   int[] freqs = new int[1];
+>
+>   for (int i=0; i<advertiserIds.length; i++)
+>   {
+>    String advertiserId = advertiserIds[i];
+>    if (advertiserId!=null)
+>    {
+>     TermDocs termDocs = reader.termDocs(new Term("advertiserId",
+> advertiserId));
+>     int count = termDocs.read(docs, freqs);
+>     if (count == 1)
+>     {
+>      bits.set(docs[0]);
+>     }
+>    }
+>   }
+>
+>   return bits;
+> }
+> }
+>
+> Any help would be appreciated, Regards,
+> Paul
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,123 @@
+FROM: Ard Schrijvers <a.schrijv...@onehippo.com>
+SUBJECT: Re: Document Frequency for a set of documents
+DATE: 5 Feb 2010
+
+crossposting to the user list as I think this issue belongs there. See
+my comments inline
+
+On Fri, Feb 5, 2010 at 10:27 AM, lionel duboeuf
+<lionel.duboeuf@boozter.com> wrote:
+> Hi,
+>
+> Sorry for asking again, **I still have not found a scalable solution to get
+> the document frequency of a term t according a set of documents. Lucene only
+> store the document frequency for the global corpus, but i would like to be
+> able to get the document frequency of a term according only to a subset of
+> documents (i.e. a user's collection of documents).
+>
+> I guess that querying the index to get the number of hits for each term and
+> for each field,  filtered by a user will be to slow.
+> Any idea ?
+
+I have recently developed out-of-the-box faceted navigation exposed
+over jcr (hippo repository on top of jackrabbit) where I think you are
+looking for efficient faceted navigation as well, right? First of all,
+I am also interested if others have something to add to my findings.
+
+First of all, you can approach your issue in two different angles,
+where I think depending on the number of results vs number of terms
+(unique facets), you can best switch (runtime) between the two
+approaches:
+
+Approach (1): The lucene TermEnum is leading: if the lucene field has
+*many* (say more then 100.000) unique values, it becomes slow (and
+approach two might be better)
+
+You have a BitSet matchingDocs, and you want the count for all the
+terms for field 'brand' where of course one of the documents in
+matchingDocs should have the term:
+Suppose your field is thus 'brand', then you can do:
+
+           TermEnum termEnum = indexReader.terms(new Term("brand", ""));
+            // iterate through all the values of this facet and see
+look at number of hits per term
+
+            try {
+                TermDocs termDocs = indexReader.termDocs();
+                // open termDocs only once, and use seek: this is more efficient
+                try {
+                    do {
+                        Term term = termEnum.term();
+                        int count = 0;
+                        if (term != null && term.field() ==
+internalFacetName) { // interned comparison
+
+                            termDocs.seek(term);
+                            while (termDocs.next()) {
+                                if (matchingDocs.get(termDocs.doc())) {
+                                    count++;
+                                }
+                            }
+                            if (count > 0) {
+                                if (!"".equals(term.text())) {
+
+facetValueCountMap.put(term.text(), new Count(count));
+                                }
+                            }
+
+                        } else {
+                            break;
+                        }
+                    } while (termEnum.next());
+                } finally {
+                    termDocs.close();
+                }
+            } finally {
+                termEnum.close();
+            }
+
+Approach (2): matching docs are leading. All lucene fields that should
+be useable for your facet counts, must be indexed with TermVectors.
+This approach becomes slow when the matching docs grow > 100.000 hits.
+Then, you rather use approach (1)
+
+Create your own HitCollector, and have its hit method something like:
+
+public final void collect(final int docid, final float score) {
+        try {
+            if (facetMap != null) {
+                final TermFreqVector tfv =
+reader.getTermFreqVector(docid, internalName);
+                if (tfv != null) {
+                    for (int i = 0; i < tfv.getTermFrequencies().length; i++) {
+                        addToFacetMap(tfv.getTerms()[i]);
+                    }
+
+
+Note that the HitCollector's are not advised for large hit sets, also see [1]
+
+This is how i currently have a really performant faceted navigation
+exposed as a jcr tree. If somebody has tried more ways, or something
+to add, I would be interested
+
+Regards Ard
+
+[1] http://lucene.apache.org/java/2_3_2/api/org/apache/lucene/search/HitCollector.html
+
+>
+>
+> regards,
+>
+> Lionel
+>
+> *
+> *
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

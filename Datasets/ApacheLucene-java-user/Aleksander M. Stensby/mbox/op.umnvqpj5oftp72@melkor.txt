@@ -1,0 +1,256 @@
+FROM: "Aleksander M. Stensby" <aleksander.sten...@integrasco.no>
+SUBJECT: Re: Fwd: Lucene search problem
+DATE: 24 Dec 2008
+
+Hello Amar,
+the reason why people got confused from your questions is that you are  
+using Hibernate Search (which is built on top of Lucene and Hibernate) to  
+persist objects from your DB to lucene. So, you should really ask such  
+questions on the hibernate mailing list since the indexing logic has  
+nothing at all to do with Lucene (since you are using annotations).
+If you were to use Lucene directly, you would read values from you DB  
+(possibly into you Entity Bean), then transform values into fields and  
+index with IndexWriter. This is where Erick mentions that you could just  
+do something like
+if(recipe.getChain == null) {
+  //add field with value = "NULLNULLNULL"
+}else{
+  ...
+  // add value that we get from the chain object.
+}
+
+
+cheers,
+  Aleks
+
+On Wed, 24 Dec 2008 10:13:20 +0100, <amar.sannaik@gmail.com> wrote:
+
+> Hello Erick,
+>
+> ah I got the problem solved :). here is how I changed my recipe object  
+> to be
+>
+> class Recipe {
+> @DocumentId
+> Integer id;
+> @Field(index = Index.TOKENIZED, name="chainName")
+> @FieldBridge(impl= ChainFieldBridge.class)
+> Chain chain;
+> }
+>
+> Here what I am trying to do is, save object to be as index field and  
+> there
+> is bridge to cross and bridge take care of how it should be indexed.
+>
+> here is code snippet from my bridge
+>
+> public void set(String pName, Object pValue, Document pDocument, Store
+> pStore,
+>             Index pIndex, Float pArg5) {
+>         Field lField = null;
+>         if(null == pValue) {
+>             lField = new Field(pName,"nullnull",pStore, pIndex);
+>             pDocument.add(lField);
+>         } else {
+>             Chain lChain = (Chain)pValue;
+>             lField = new Field(pName,lChain.getName(),pStore, pIndex);
+>             pDocument.add(lField);
+>         }
+>     }
+>
+> so here, where chain object is null I am saving the value to be  
+> "nullnull".
+> The query I would use to retrieve what is null looks like
+> "chainName:nulllnull".
+>
+> This solve everything I was looking for.
+>
+> Thanks,
+> -Amar
+> ---------- Forwarded message ----------
+> From: <amar.sannaik@gmail.com>
+> Date: Wed, Dec 24, 2008 at 11:33 AM
+> Subject: Re: Lucene search problem
+> To: java-user@lucene.apache.org
+>
+>
+> hi Erick,
+>
+> I agree lucene do not index the object. in the following example I have
+> quoted fields are indexed as chain.chainName.
+> I am able to retrieve recipe objects using FullTextQuery as
+> "chain.chainName:something' ... question is in somecase chain itself is
+> null.
+> I can be able to achieve required as below:
+>
+> class Recipe {
+>   @DocumentId
+>   Integer id;
+>   @IndexedEmbedded
+>   Chain chain = new Chain();
+>   //gettter and setter
+> }
+>
+>  class Chain {
+>   @DocumentId
+>   Integer id;
+>   @Field(index = Index.TOKENIZED, name="chainName")
+>   String name = "NULLNULNUL";
+>   //getter and setter
+>  }
+>
+> so this means to always there is will be chain along with Recipe object  
+> with
+> has default name to "NULLNULNUL" and that wil be indexed..
+> We dont want to do that, Recipe is our persistence object and we hate to  
+> do
+> that.
+>
+> -Amar
+>
+>
+> On Tue, Dec 23, 2008 at 8:05 PM, Erick Erickson  
+> <erickerickson@gmail.com>wrote:
+>
+>> How do you intend to index these? Lucene will not
+>> index objects for you. You have to break the object
+>> down into a series of fields. At that point you can
+>> substitute whatever you want.
+>>
+>> Best
+>> Erick
+>>
+>> On Tue, Dec 23, 2008 at 3:36 AM, <amar.sannaik@gmail.com> wrote:
+>>
+>> > Hi Aaron Schon/EricK,
+>> >
+>> > That really make sense to me but it really seems easy if is the string
+>> > object. See the object structure I have it below hopefully that gives  
+>> you
+>> > some idea
+>> >
+>> > class Recipe {
+>> > @DocumentId
+>> > Integer id;
+>> > @IndexedEmbedded
+>> > Chain chain;
+>> > //gettter and setter
+>> > }
+>> >
+>> > class Chain {
+>> > @DocumentId
+>> > Integer id;
+>> > @Field(index = Index.TOKENIZED, name="chainName")
+>> > String name;
+>> > //getter and setter
+>> > }
+>> >
+>> > I am creating index on the recipe object. and for some recipe.m_chain
+>> would
+>> > be null. So can you tell me how do I assign the value  
+>> "NULLNULNULLNULL"
+>> for
+>> > object chain in recipe.
+>> >
+>> > I also was thinking if #FieldBridge help me this way. My plan was to  
+>> have
+>> > default value where chain is null as you mentioned. but it does not  
+>> seems
+>> > to
+>> > work for null values.
+>> >
+>> > Please suggest
+>> >
+>> > Thanks in advance.
+>> > -Amar
+>> >
+>> > On Tue, Dec 23, 2008 at 12:04 AM, Aaron Schon <aaron_schon@yahoo.com>
+>> > wrote:
+>> >
+>> > > I would second Erick's recommendation - create an arbitrary
+>> > representation
+>> > > for NULL such as "NULL" (if you are certain the term "NULL" does not
+>> > occur
+>> > > in actual docs. Alternatively, use "NULLNULNULLNULL" or something to
+>> that
+>> > > effect.
+>> > >
+>> > >
+>> > >
+>> > > ----- Original Message ----
+>> > > From: Erick Erickson <erickerickson@gmail.com>
+>> > > To: java-user@lucene.apache.org
+>> > > Sent: Monday, December 22, 2008 8:58:21 AM
+>> > > Subject: Re: Lucene search problem
+>> > >
+>> > > Try searching the mailing list archives for a fuller discussion, but
+>> > > the short answer is usually to index an unique value for your
+>> > > "null" entries, then search on that, something totally
+>> > > outrageous like, say AAABBBCCCDDDEEEFFF.
+>> > >
+>> > > Alternatively, you could create, at startup time, a
+>> > > Filter of all the docs that *do* contain terms for the
+>> > > field in question, flip the bits and use the Filter in your
+>> > > searches. (Hint: see TermDocs/TermEnum)
+>> > >
+>> > > Best
+>> > > Erick
+>> > >
+>> > > On Mon, Dec 22, 2008 at 8:11 AM, <amar.sannaik@gmail.com> wrote:
+>> > >
+>> > > > Hi,
+>> > > >
+>> > > > I have problem with lucene search, I am quite new to this. Can  
+>> some
+>> > body
+>> > > > help or just push me to who can please.
+>> > > >
+>> > > > Problem what I am facing we need search for object whose attribute
+>> > > "chain"
+>> > > > contaning null, but lucene does not help indexing the null  
+>> values..
+>> > > >
+>> > > > how can I achieve this, or please guide me the alternative way of
+>> doing
+>> > > > this.
+>> > > >
+>> > > > Thanks in advance.
+>> > > > -Amar
+>> > > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >
+>> > >  
+>> ---------------------------------------------------------------------
+>> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> > >
+>> > >
+>> >
+>> >
+>> > --
+>> > Amar Sannaik | Programmer | ATHARVA LIBSON Software Pvt Ltd.,
+>> > # 9886476270, amarsannaik@atharvalibson.com
+>> >
+>>
+>
+>
+>
+
+
+
+-- 
+Aleksander M. Stensby
+Senior software developer
+Integrasco A/S
+www.integrasco.no
+
+Please consider the environment before printing all or any of this e-mail
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

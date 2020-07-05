@@ -1,0 +1,99 @@
+FROM: Yonik Seeley <yo...@lucidimagination.com>
+SUBJECT: Re: NRT and Caching based on IndexReader
+DATE: 18 May 2010
+
+Yep, confirmed what you are seeing.  I'll check into it and open an issue.
+
+-Yonik
+http://www.lucidimagination.com
+
+On Mon, May 17, 2010 at 5:54 PM, Shay Banon <kimchy@gmail.com> wrote:
+> Yea, I noticed that ;). Even so, I think that with NRT, even the lower level
+> readers are cloned, meaning that you always get a new instance... . Here is
+> a sample program that tests this behavior, am I doing something wrong? By
+> the way, if what I say is correct, it affects field cache as well....
+>
+> public static void main(String[] args) throws Exception {
+>    Directory dir = new RAMDirectory();
+>    IndexWriter indexWriter = new IndexWriter(dir, new
+> StandardAnalyzer(Version.LUCENE_CURRENT), true,
+> IndexWriter.MaxFieldLength.UNLIMITED);
+>    IndexReader reader = indexWriter.getReader();
+>
+>    Set<IndexReader> readers = new HashSet<IndexReader>(); // tracks all
+> readers
+>    for (int i = 0; i < 100; i++) {
+>        readers.add(reader);
+>        Document doc = new Document();
+>        doc.add(new Field("id", Integer.toString(i), Field.Store.YES,
+> Field.Index.NO));
+>        indexWriter.addDocument(doc);
+>
+>        IndexReader newReader = reader.reopen(true);
+>        if (reader == newReader) {
+>            System.err.println("Should not get the same reader...");
+>        } else {
+>            reader.close();
+>            reader = newReader;
+>        }
+>    }
+>
+>    reader.close();
+>
+>    // now, go and check that all are ref == 0
+>    // and, that all readers, even sub readers, are unique instances
+> (sadly...)
+>    Set<IndexReader> allReaders = new HashSet<IndexReader>();
+>    for (IndexReader reader1 : readers) {
+>        if (reader1.getRefCount() != 0) {
+>            System.err.println("A reader is not closed");
+>        }
+>        if (allReaders.contains(reader1)) {
+>            System.err.println("Found an existing reader...");
+>        }
+>        allReaders.add(reader1);
+>        if (reader1.getSequentialSubReaders() != null) {
+>            for (IndexReader reader2 : reader1.getSequentialSubReaders()) {
+>                if (reader2.getRefCount() != 0) {
+>                    System.err.println("A reader is not closed...");
+>                }
+>                if (allReaders.contains(reader2)) {
+>                    System.err.println("Found an existing reader...");
+>                }
+>                allReaders.add(reader2);
+>
+>                // there should not be additional readers...
+>                if (reader2.getSequentialSubReaders() != null) {
+>                    System.err.println("Should not be more readers...");
+>                }
+>            }
+>        }
+>    }
+>
+>    indexWriter.close();
+> }
+>
+>
+>
+>
+> On Tue, May 18, 2010 at 12:30 AM, Yonik Seeley
+> <yonik@lucidimagination.com>wrote:
+>
+>> On Mon, May 17, 2010 at 5:00 PM, Shay Banon <kimchy@gmail.com> wrote:
+>> >   I wanted to verify if my understanding is correct. Assuming that I use
+>> > NRT, and refresh, say, every 1 second, caching based on IndexReader, such
+>> is
+>> > what is used in the CachingWrapperFilter is basically useless
+>>
+>> No, it's fine.  Searching in Lucene is now done per-segment, and so
+>> the readers that are passed to Filter.getDocIdSet are the segment
+>> readers, not the top-level readers.  Caching is now per-segment.
+>>
+>> -Yonik
+>> http://www.lucidimagination.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,251 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Problems with reopening IndexReader while pushing documents to the index
+DATE: 1 Jul 2008
+
+
+Aha!  OK now I see how that led to your exception.
+
+When you create a MultiReader, passing in the array of IndexReaders,  
+MultiReader simply holds onto your array.  It also computes & caches  
+norms() the first time its called, based on the total # docs it sees  
+in all the readers in that array.
+
+But then when you re-opened single readers in that array, without then  
+creating a new MultiReader, this makes the norms array "stale" and  
+thus it's easily possible to encounter a docID that's out of bounds.
+
+I think a good fix for this sort of trap would be for MultiReader to  
+make a private copy of the array that's passed in.  I'll open an issue.
+
+Mike
+
+Sascha Fahl wrote:
+
+> Yes I am using IndexReader.reopen(). Here is my code doing this:
+> 	public void refreshIndeces() throws CorruptIndexException,  
+> IOException {
+> 		if ((System.currentTimeMillis() - this.lastRefresh) >  
+> this.REFRESH_PERIOD) {
+> 			this.lastRefresh = System.currentTimeMillis();
+> 			boolean refreshFlag = false;
+> 			for (int i = 0; i < this.indeces.length; i++){
+> 				IndexReader newIR = this.indeces[i].reopen();
+> 				if (newIR != this.indeces[i]){
+> 					this.indeces[i].close();
+> 					refreshFlag = true;
+> 				}
+> 				this.indeces[i] = newIR;
+> 			}
+> 			if(refreshFlag){
+> 				this.multiReader = new MultiReader(this.indeces);
+> 				this.multiSearcher = new IndexSearcher(this.multiReader);
+> 			}
+> 		}
+> 	}
+> As you see I am using a MultiReader. With creating a new MultiReader  
+> + new IndexSearcher the exception goes away. I tested it with  
+> updating the index with 50000 Documents and sent 60000 requests and  
+> nothing bad happened.
+>
+> Sascha
+>
+>
+> Am 01.07.2008 um 12:14 schrieb Michael McCandless:
+>
+>>
+>> That's interesting.  So you are using IndexReader.reopen() to get a  
+>> new reader?  Are you closing the previous reader?
+>>
+>> The exception goes away if you create a new IndexSearcher on the  
+>> reopened IndexReader?
+>>
+>> I don't yet see how that could explain the exception, though.  If  
+>> you reopen() the underling IndexReader in an IndexSearcher, the  
+>> original IndexReader should still be intact and still searching the  
+>> point-in-time snapshot that it had been opened on.  IndexSearcher  
+>> itself doens't hold any "state" about the index (I think); it  
+>> relies on IndexReader for that.
+>>
+>> Mike
+>>
+>> Sascha Fahl wrote:
+>>
+>>> I think I could solve the "problem". It was no Lucene specific  
+>>> problem. What I did was reopen the IndexReader but not creating a  
+>>> new IndexSearcher object. But of course as Java always passes  
+>>> parameters by value (no matter what parameter) the old  
+>>> IndexSearcher object did not see the updated IndexReader object,  
+>>> because IndexSearcher is working with its own instance of  
+>>> IndexReader and not with the reference to the original  
+>>> IndexReader. So what caused
+>>> the problem was the requests always were sent to the same instance  
+>>> of IndexSearcher. But when the IndexSearcher had to access the  
+>>> index physically (the harddisk) of course changes made by the  
+>>> IndexWriter were just visible to the IndexReader but not to the  
+>>> IndexSearcher.
+>>> Is that the explaination Mike?
+>>>
+>>> Sascha
+>>>
+>>> Am 01.07.2008 um 10:52 schrieb Michael McCandless:
+>>>
+>>>>
+>>>> By "does not help" do you mean CheckIndex never detects this  
+>>>> corruption, yet you then hit that exception when searching?
+>>>>
+>>>> By "reopening fails" what do you mean?  I thought reopen works  
+>>>> fine, but then it's only the search that fails?
+>>>>
+>>>> Mike
+>>>>
+>>>> Sascha Fahl wrote:
+>>>>
+>>>>> Checking the index after adding documents and befor reopening  
+>>>>> the IndexReader does not help. After adding documents nothing  
+>>>>> bad happens and CheckIndex says the index is all right. But when  
+>>>>> I check the index before reopen it
+>>>>> CheckIndex does not detect any corruption and says the index is  
+>>>>> ok and reopening fails.
+>>>>>
+>>>>> Sascha
+>>>>>
+>>>>> Am 30.06.2008 um 18:34 schrieb Michael McCandless:
+>>>>>
+>>>>>>
+>>>>>> This is spooky: that exception means you have some sort of  
+>>>>>> index corruption.  The TermScorer thinks it found a doc ID  
+>>>>>> 37389, which is out of bounds.
+>>>>>>
+>>>>>> Reopening IndexReader while IndexWriter is writing should be  
+>>>>>> completely fine.
+>>>>>>
+>>>>>> Is this easily reproduced?  If so, if you could narrow it down  
+>>>>>> to sequence of added documents, that'd be awesome.
+>>>>>>
+>>>>>> It's very strange that you see the corruption go away.  Can you 
+
+>>>>>> run CheckIndex (java org.apache.lucene.index.CheckIndex  
+>>>>>> <indexDir>) to see if it detects any corruption.  In fact,
+if  
+>>>>>> you could run CheckIndex after each session of IndexWriter to  
+>>>>>> isolate which batch of added documents causes the corruption,  
+>>>>>> that could help us narrow it down.
+>>>>>>
+>>>>>> Are you changing any of the settings in IndexWriter?  Are you  
+>>>>>> using multiple threads?  Which exact JRE version and OS are you 
+
+>>>>>> using?  Are you creating a new index at the start of each run?
+>>>>>>
+>>>>>> Mike
+>>>>>>
+>>>>>> Sascha Fahl wrote:
+>>>>>>
+>>>>>>> Hi,
+>>>>>>>
+>>>>>>> I see some strange behavoiur of lucene. The following scenario.
+>>>>>>> While adding documents to my index (every doc is pretty small,
+ 
+>>>>>>> doc-count is about 12000) I have implemented a custom  
+>>>>>>> behaviour of flushing and committing documents to the index.
+ 
+>>>>>>> Before adding documents to the index I check if wether der  
+>>>>>>> ramDocCount has reached a certain number of if the last commit
+ 
+>>>>>>> is a while ago. If so i flush the buffered documents and  
+>>>>>>> reopen the IndexWriter. So far, so good. Indexing works very
+ 
+>>>>>>> well. The problem is that if I send requests with die  
+>>>>>>> IndexReader while writing documents with the IndexWriter (I 
+
+>>>>>>> send around 10.000 requests to lucene) I reopen the  
+>>>>>>> IndexReader every 100 requests (only for testing) if the  
+>>>>>>> IndexReader is not current. The first around 4000 requests  
+>>>>>>> work very well, but afterwards I always get the following  
+>>>>>>> exception:
+>>>>>>>
+>>>>>>> java.lang.ArrayIndexOutOfBoundsException: 37389
+>>>>>>> 	at org.apache.lucene.search.TermScorer.score(TermScorer.java:
+
+>>>>>>> 126)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache 
+>>>>>>> .lucene.util.ScorerDocQueue.topScore(ScorerDocQueue.java:112)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache 
+>>>>>>> .lucene 
+>>>>>>> .search 
+>>>>>>> .DisjunctionSumScorer 
+>>>>>>> .advanceAfterCurrent(DisjunctionSumScorer.java:172)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache 
+>>>>>>> .lucene 
+>>>>>>> .search.DisjunctionSumScorer.next(DisjunctionSumScorer.java:146)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache.lucene.search.BooleanScorer2.score(BooleanScorer2.java:
+
+>>>>>>> 319)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache.lucene.search.IndexSearcher.search(IndexSearcher.java:
+
+>>>>>>> 146)
+>>>>>>> 	at  
+>>>>>>> org 
+>>>>>>> .apache.lucene.search.IndexSearcher.search(IndexSearcher.java:
+
+>>>>>>> 113)
+>>>>>>> 	at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:100)
+>>>>>>> 	at org.apache.lucene.search.Hits.<init>(Hits.java:67)
+>>>>>>> 	at org.apache.lucene.search.Searcher.search(Searcher.java:46)
+>>>>>>> 	at org.apache.lucene.search.Searcher.search(Searcher.java:38)
+>>>>>>>
+>>>>>>> This seems to be a temporarily problem because opening a new
+ 
+>>>>>>> IndexReader after all documents were added everything is ok 
+
+>>>>>>> again and the 10.000 requests are all right.
+>>>>>>>
+>>>>>>> So what could be the problem here?
+>>>>>>>
+>>>>>>> reg,
+>>>>>>> sascha
+>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user- 
+>>>>>>> help@lucene.apache.org
+>>>>>>>
+>>>>>>
+>>>>>
+>>>>
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+> Sascha Fahl
+> Softwareenticklung
+>
+> evenity GmbH
+> Zu den Mühlen 19
+> D-35390 Gießen
+>
+> Mail: sascha@evenity.net
+>
+>
+>
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

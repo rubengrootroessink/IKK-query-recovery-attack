@@ -1,0 +1,276 @@
+FROM: "Cecil, Paula New" <c...@fuse.net>
+SUBJECT: Re: Indexing other documents type than html and txt
+DATE: 30 Nov 2001
+
+Here is another version of something I had posted earlier.  It attempts to
+read the "text" out of binary files.  Not perfect and doesn't work at all on
+PDF.  It permits you use the "reader" form of a Field to index.
+import java.util.*;
+import java.io.*;
+
+/**
+<p>This class is designed to retrieve text from binary files.
+The occasion for its development was to find a way generic way to
+index typical office documents which are almost always in a
+a proprietary and binary form.
+<p>This class will <b>not</b> work with PDF files.
+<p>You can exercise some control over the result by using the
+<code>setCharArray()</code> method and the
+<code>setShortestToken()</code> method.
+<ul>
+<li><code>setCharArray()</code>: allows you to override the default
+characters to keep.  All others are eliminated.  The default "keepers"
+are all ASCII character plus whitespace.  This means that if a
+text file is the input, it will pass thru unchanged (except that
+consequtive blanks are squeezed to a single blank).
+<li><code>setShortestToken()</code>: allows you only keep strings of
+a minimum length.  By default the length is zero, meaning that all
+tokens are passed.
+</ul>
+<p>Note lastly that this class is only designed to work with ASCII.
+It may not be difficult to change to support Unicode, but I do
+not know how to do that.
+*/
+
+public class BinaryReader
+  extends java.io.FilterReader
+{
+  // private vars
+  // for debugging
+  private int count=0;
+  private int rawcnt=0;
+  private int shortestToken = 0;
+  // default char set to keep, blank out everything else
+  private char[][] charArray = {
+    {'!', '~'},
+    {'\t', '\t'},
+    {'\r', '\r'},
+    {'\n', '\n'},
+  };
+
+  private String leftovers="";
+
+  private char charFilter(char c) {
+    for (int i=0; i < charArray.length; i++) {
+      if ( c >= charArray[i][0] && c <= charArray[i][1] ) {
+        return c;
+      }
+    }
+    return ' ';
+  }
+
+  public BinaryReader(Reader in) {
+    super(in);
+  }
+
+/**
+<p>This method may be used to override the ranges of characters
+that are retained.  All others are elminiated.  The default is:
+<code>
+  private char[][] charArray = {
+    {'!', '~'},
+    {'\t', '\t'},
+    {'\r', '\r'},
+    {'\n', '\n'},
+  };
+</code>
+<p>Note that the ranges are inclusive and that to pick our a
+"single" character instead of a range, just make that character
+both the min and max (as shown for the whitespace characters above).
+@param char[][] - array of ranges to keep
+*/
+  public void setCharArray( char[][] keepers ) {
+    // in each row, column 1 is min and column 2 is max
+    // to pick out a single character instead of a range
+    // just make it both min and max.
+    charArray = keepers;
+  }
+
+/**
+<p>This method may be used to eliminate "short strings" of text.
+By default it takes even single letters, since the value is
+initialized to zero.  For example, if the
+length 3 is used, the single and two letter strings will not
+be returned.
+<p><b>Warning: the test doesn't always work for strings that
+begin a line of text (at least in DOS/Windows).</b>
+@param int len - length of shortest strings to pass
+*/
+  public void setShortestToken(int len) {
+    shortestToken = len;
+  }
+
+/**
+<p>Reads a single character and runs it through the filter.  The
+(int) character returned will either be -1 for end-of-file,
+a blank (indicating it was filtered), or the character unchanged.
+*/
+  public int read() throws IOException
+  {
+    int c = in.read();
+    if ( c != -1 ) return c;
+    rawcnt++;
+    count++;
+    return charFilter((char)c);
+  }
+/**
+<p>Reads from stream and populates the supplied char array.
+@param char[] cbuf - character buffer to fill
+@return int - number of characters actually placed into the buffer
+*/
+  public int read(char[] cbuf) throws IOException
+  {
+    return read(cbuf, 0, cbuf.length);
+  }
+
+/**
+<p>Reads from stream and populates the supplied char array
+using the offset and length provided.
+@param char[] cbuf - character buffer to fill
+@param int offset - offset to being filling array
+@param int length - maximun characters to place into the array
+@return int - number of characters actually placed into the buffer
+*/
+
+  public int read(char[] cbuf, int off, int len)
+    throws IOException
+  {
+    char[] cb = new char[len];
+    int cnt = in.read(cb);
+    if ( cnt == -1 ) {
+      file://System.out.println("At end, rawcnt is "+rawcnt);
+      return cnt; // done
+    }
+    int cnt2=cnt;
+    int loc = off;
+    for ( int i=0; i < cnt; i++ ) {
+        cbuf[loc++] = charFilter(cb[i]);
+    }
+
+    char[] weeded = filter(new String(cbuf, off, cnt));
+    if ( weeded.length > -1 ) {
+      cnt2 = weeded.length;
+      // redo buffer
+      for (int i=0; i < cnt2; i++) {
+        cbuf[off+i] = weeded[i];
+      }
+    }
+
+    rawcnt += cnt;
+    count += cnt2;
+    return cnt2;
+  }
+
+  private char[] filter(String instring)
+  {
+    // record the buffer size (ie, size of incoming string)
+    int max = instring.length();
+    // combine leftovers into incoming string and reset leftovers
+    String s = leftovers+instring;
+    leftovers="";
+
+    StringBuffer sb = new StringBuffer(s.length());
+    StringTokenizer st = new StringTokenizer(s," ");
+    String tok=null;
+    while (st.hasMoreTokens()) {
+      tok = st.nextToken();
+      int toklength = tok.length();
+      if ( toklength < shortestToken ) {
+        // skip it
+        continue;
+      }
+
+      sb.append(tok);
+      sb.append(' ');
+    }
+
+    String t = sb.toString();
+    t = t.substring(0,t.length()); // remove the appended blank
+    if ( t.length() > max ) {
+      leftovers = t.substring(max);
+      t = t.substring(0,max);
+    }
+    return t.toCharArray();
+  }
+/**
+<p>Returns the number characters read from the Reader stream
+@return int number of characters read
+*/
+  public int getInputCount() { return rawcnt; }
+/**
+<p>Returns the number characters passed by the filter (ie, after the
+binary characters are removed.
+@return int number of characters not filtered out
+*/
+  public int getOutputCount()    { return count;  }
+
+/**
+<p>A handy main() method to test or perform the filtering using the
+defaults.  Started from the command line, it takes two required
+arguments: the input filename and the output filename.
+<p>An optional third argument is an integer to set the
+shortest tokens to pass the filter.
+*/
+  public static void main(String[] args)
+    throws FileNotFoundException, IOException
+  {
+    if ( args.length < 2 ) {
+      System.out.println(
+        "Usage: java BinaryReader infile outfile [shortest]");
+      System.out.println("where 'shortest' is the shortest token passed.");
+      System.exit(0);
+    }
+    FileWriter fw = new FileWriter( args[1] );
+    FileReader fr = new FileReader( args[0] );
+    BufferedReader br = new BufferedReader(fr);
+    BinaryReader binr = new BinaryReader(br);
+    if ( args.length > 2 ) {
+      binr.setShortestToken(Integer.parseInt(args[2]));
+    }
+    char[] cb = new char[1024];
+    int cnt;
+    while ( (cnt = binr.read(cb)) != -1 ) {
+      fw.write(cb,0,cnt);
+    }
+    fw.close();
+    int ocnt = binr.getOutputCount();
+    int icnt = binr.getInputCount();
+    System.out.println("Input Character Count ="+icnt);
+    System.out.println("Output Character Count="+ocnt);
+  }
+
+}
+
+----- Original Message -----
+From: Antonio Vazquez <avazquez@cystelcom.com>
+To: Lucene Users List <lucene-user@jakarta.apache.org>
+Sent: Thursday, November 29, 2001 6:26 AM
+Subject: Indexing other documents type than html and txt
+
+
+> Hi all,
+> I have a doubt. I know that lucene can index html and text documents, but
+> can it index other type of documents like pdf,docs, and xls documents? if
+it
+> can, how can I implement it? Perhaps can implement it like html and txt
+> indexing?
+>
+> regards
+>
+> Antonio
+>
+>
+> --
+> To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+>
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

@@ -1,0 +1,276 @@
+FROM: <oh...@cox.net>
+SUBJECT: Re: java.io.IOException when trying to list terms in index  (IndexReader)
+DATE: 2 Aug 2009
+
+Erick,
+
+It's working now (I removed the finally, and put the close() elsewhere).  Thanks for the explanation.
+
+Jim
+
+
+---- Erick Erickson <erickerickson@gmail.com> wrote: 
+> I've seen Eclipse get into weird states, but I don't think that's your
+> problem.
+> 
+> You open the IndexReader and set up a TermEnum on it. Then, no matter
+> what you close the underlying IndexReader in the finally block. Then later
+> you use the TermEnum *even though the underlying reader has been closed*.
+> You want something like
+> try {
+>   open reader
+>   set up TermEnum
+>   enumerate terms
+>   close termEnum
+>  } catch () {
+> }
+> finally {
+> close reader
+> }
+> 
+> Getting an IO exception isn't at all strange in this situation, and exactly
+> when
+> you throw the exception is indeterminate.
+> 
+> See below.
+> public class ReadIndex {
+> 
+>        public static void main(String[] args) {
+>                IndexReader reader = null;
+>                TermEnum termsEnumerator = null;
+>                Term currentTerm = null;
+> 
+>                try {
+>                        reader = IndexReader.open(args[0]);
+>                        Term term = new Term("path", "");
+>                        termsEnumerator = reader.terms(term);
+>                } catch (IOException e) {
+>                        System.out.println("** ERROR **: Exception when
+> opened IndexReader: [" + e + "]");
+>                } finally {
+> **********
+> Why close the reader here? You need it later I think.
+> **********
+>                        try { reader.close(); } catch (IOException e) { /*
+> suck it up */ }
+>                }
+> 
+>                System.out.println("Index in directory :[" + args[0] + "] was
+> opened successfully!");
+> 
+>                try {
+>                        System.out.println("About to drop into while()...");
+> **************
+> This relies on the underlying reader that has been closed???
+> **************
+> 
+>                        while (termsEnumerator.next()) {
+>                                System.out.println("About to get
+> terms.Enumerator.term()...");
+>                                currentTerm = termsEnumerator.term();
+>                                System.out.println("Term = [" +
+> currentTerm.text() + "]");
+>                        }
+>                        termsEnumerator.close();
+>                } catch (Exception e) {
+>                        System.out.println("** ERROR **: Exception while
+> stepping through index: [" + e + "]");
+>                        }
+>        } // end main()
+> 
+> } // end CLASS ReadIndex
+> 
+> On Sun, Aug 2, 2009 at 3:15 PM, <ohaya@cox.net> wrote:
+> 
+> > Hi,
+> >
+> > I thought that, in the code that I posted, there was a close() in the
+> > finally?
+> >
+> > Or, are you saying that when an IndexReader is opened, that that somehow
+> > persists in the system, even past my Java app terminating?
+> >
+> > FYI, I'm doing this testing on Windows, under Eclipse...
+> >
+> > Jim
+> >
+> >
+> >
+> > ---- se3g2011 <se3g2011@gmail.com> wrote:
+> > >
+> > > hi,as you the error messages you listed below,pls put the
+> > 'reader.close()'
+> > > block to the bottom of method.
+> > > i think,if you invoke it first,the infrastructure stream is closed ,so
+> > > exceptions is encountered.
+> > >
+> > >
+> > > ohaya wrote:
+> > > >
+> > > > Hi,
+> > > >
+> > > > I changed the beginning of the try to:
+> > > >
+> > > >             try {
+> > > >                     System.out.println("About to call .next()...");
+> > > >                     boolean foo = termsEnumerator.next();
+> > > >                     System.out.println("Finished calling first
+> > .next()");
+> > > >                     System.out.println("About to drop into
+> > while()...");
+> > > > .
+> > > > .
+> > > > .
+> > > >
+> > > > and here's what I got when I ran the app:
+> > > >
+> > > > Index in directory :[C:\lucene-devel\lucene-devel\index] was opened
+> > > > successfully!
+> > > > About to call .next()...
+> > > > ** ERROR **: Exception while stepping through index:
+> > [java.io.IOException:
+> > > > The handle is invalid]
+> > > > java.io.IOException: The handle is invalid
+> > > >     at java.io.RandomAccessFile.seek(Native Method)
+> > > >     at
+> > > >
+> > org.apache.lucene.store.FSDirectory$FSIndexInput.readInternal(FSDirectory.java:591)
+> > > >     at
+> > > >
+> > org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.java:136)
+> > > >     at
+> > > >
+> > org.apache.lucene.index.CompoundFileReader$CSIndexInput.readInternal(CompoundFileReader.java:247)
+> > > >     at
+> > > >
+> > org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.java:157)
+> > > >     at
+> > > >
+> > org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.java:38)
+> > > >     at org.apache.lucene.store.IndexInput.readVInt(IndexInput.java:78)
+> > > >     at org.apache.lucene.index.TermBuffer.read(TermBuffer.java:64)
+> > > >     at
+> > org.apache.lucene.index.SegmentTermEnum.next(SegmentTermEnum.java:127)
+> > > >     at ReadIndex.main(ReadIndex.java:29)
+> > > >
+> > > > Jim
+> > > >
+> > > > ---- ohaya@cox.net wrote:
+> > > >> Hi,
+> > > >>
+> > > >> BTW, the next() method is an abstract method in the Javadocs.  Does
+> > that
+> > > >> mean that I'm suppose to have my own implementation?
+> > > >>
+> > > >> Jim
+> > > >>
+> > > >>
+> > > >> ---- ohaya@cox.net wrote:
+> > > >> > Phil,
+> > > >> >
+> > > >> > I posted in haste.  Actually, from the output that I posted,
+doesn't
+> > it
+> > > >> it look like the .next() itself is throwing the exception?
+> > > >> >
+> > > >> > That is what has been puzzling me.  It looks like it got through
+the
+> > > >> open() and terms() with no problem, then it blew up when calling the
+> > > >> next()?
+> > > >> >
+> > > >> > Jim
+> > > >> >
+> > > >> >
+> > > >> > ---- ohaya@cox.net wrote:
+> > > >> > > Phil,
+> > > >> > >
+> > > >> > > Yes, that exception is not very helpful :)!!
+> > > >> > >
+> > > >> > > I'll try your suggestions and post back.
+> > > >> > >
+> > > >> > > Thanks,
+> > > >> > > Jim
+> > > >> > >
+> > > >> > >
+> > > >> > > ---- Phil Whelan <phil123@gmail.com> wrote:
+> > > >> > > > Hi Jim,
+> > > >> > > >
+> > > >> > > > I cannot see anything obvious, but both open() and
+terms() throw
+> > > >> > > > IOException's. You could try putting these in separate
+> > try..catch
+> > > >> > > > blocks to see which one it's coming from. Or using
+> > > >> e.printStackTrace()
+> > > >> > > > in the catch block will give more info to help you
+debug what's
+> > > >> > > > happening.
+> > > >> > > >
+> > > >> > > > On Sat, Aug 1, 2009 at 7:09 PM, <ohaya@cox.net>
+wrote:
+> > > >> > > > >                        reader = IndexReader.open(args[0]);
+> > > >> > > > >                        Term term = new Term("path",
+"");
+> > > >> > > > >                        termsEnumerator = reader.terms(term);
+> > > >> > > >
+> > > >> > > > Cheers,
+> > > >> > > > Phil
+> > > >> > > >
+> > > >> > > >
+> > > >> ---------------------------------------------------------------------
+> > > >> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> > > > For additional commands, e-mail:
+> > java-user-help@lucene.apache.org
+> > > >> > > >
+> > > >> > >
+> > > >> > >
+> > > >> > >
+> > ---------------------------------------------------------------------
+> > > >> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >> > >
+> > > >> >
+> > > >> >
+> > > >> >
+> > ---------------------------------------------------------------------
+> > > >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >> >
+> > > >>
+> > > >>
+> > > >> ---------------------------------------------------------------------
+> > > >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >>
+> > > >
+> > > >
+> > > > ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> > > >
+> > > >
+> > >
+> > > --
+> > > View this message in context:
+> > http://www.nabble.com/java.io.IOException-when-trying-to-list-terms-in-index-%28IndexReader%29-tp24774351p24775753.html
+> > > Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+> > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

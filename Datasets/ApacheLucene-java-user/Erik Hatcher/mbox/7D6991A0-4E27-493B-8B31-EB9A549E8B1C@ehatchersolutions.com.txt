@@ -1,0 +1,134 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Hypenated word
+DATE: 13 Jun 2005
+
+
+On Jun 13, 2005, at 7:08 AM, Markus Wiederkehr wrote:
+> I work on an application that has to index OCR texts of scanned books.
+> Naturally there occur many words that are hyphenated across lines.
+>
+> I wonder if there is already an Analyzer or maybe a TokenFilter that
+> can merge those syllables back into whole words? It looks like Erik
+> Hatcher uses something like that at http://www.lucenebook.com/.
+
+Markus - you're right, I did develop something to handle hyphenated  
+words for lucenebook.com.  It was sort of a hack in that I had to  
+build in a static list of exceptions in how I handled this, so you'll  
+likely have to use caution as well.  The LiaAnalyzer is this:
+
+   public TokenStream tokenStream(String fieldName, Reader reader) {
+     TokenFilter filter = new DashSplitterFilter(
+               new HyphenatedFilter(
+                 new DashDashFilter(
+                   new LiaTokenizer(reader))));
+
+     filter = new LengthFilter(3, filter);
+     filter = new StopFilter(filter, stopSet);
+
+     if (stem) {
+       filter = new SnowballFilter(filter, "English");
+     }
+
+     return filter;
+   }
+
+
+And my HyphenatedFilter is this:
+
+public class HyphenatedFilter extends TokenFilter {
+   private HashMap exceptions = new HashMap();
+
+   private static final String[] EXCEPTION_LIST = {
+      "full-text", "information-retrieval", "license-code", "old- 
+fashioned",
+      "well-designed", "free-form", "file-based", "ramdirectory- 
+based", "ram-based",
+      "index-modifying", "read-only",
+      "top-scoring", "most-recently-used", "queryparser-parsed",
+      "in-order", "per-document", "lower-caser", "domain-specific",  
+"high-level",
+      "utf-encoding", "non-english", "phraseprefix-it", "all-inclusive",
+      "date-range", "computation-intensive", "hits-returning", "lower- 
+level",
+      "number-padding", "utf-address-book", "third-party", "plain- 
+text", "google-like",
+      "re-add", "english-specific", "file-handling", "already- 
+created", "d-add", "d-add",
+      "hits-length", "hits-doc", "hits-score", "d-get", "writer-new",  
+"porteranalyzer-new",
+      "writer-set", "document-new", "doc-add", "field-keyword",  
+"field-unstored", "writer-add",
+      "writer-optimize", "queryparser-new", "porteranalyzer-new",  
+"parser-parse", "indexsearcher-new",
+      "hitcollector-new", "searcher-doc", "searcher-search", "jakarta- 
+lucene", "www-ibm", "java-specific",
+      "non-java", "vis--vis", "medium-sized", "browser-based", "utf- 
+before", "concept-based",
+      "natural-language", "queue-based", "high-likelihood", "slp-or",  
+"noisy-channel", "al-rasheed",
+      "hands-free", "top-notch", "google-esque", "search-config",  
+"java-related",
+      "lucene-so", "lucene-tar", "lucene-jar", "lucene-demos-jar",  
+"lucene-web", "lucene-webindex",
+      "command-line", "lucene-version", "issue-tracking"
+   };
+
+   protected HyphenatedFilter(TokenStream tokenStream) {
+     super(tokenStream);
+
+     for (int i = 0; i < EXCEPTION_LIST.length; i++) {
+       exceptions.put(EXCEPTION_LIST[i], "");
+     }
+   }
+
+   private Token savedToken;
+
+   public Token next() throws IOException {
+
+     if (savedToken != null) {
+       Token token = savedToken;
+       savedToken = null;
+       return token;
+     }
+
+     Token firstToken = input.next();
+
+     if (firstToken == null)
+       return firstToken;
+
+
+     if (firstToken.termText().endsWith("-")) {
+       String firstPart;
+       firstPart = firstToken.termText();
+
+       // consume next token
+       Token secondToken = input.next();
+       if (secondToken == null)
+         return firstToken;
+
+       String termText = firstPart.substring(0, firstPart.length() -  
+1) + secondToken.termText();
+
+       if (exceptions.containsKey(firstPart + secondToken.termText())) {
+         savedToken = secondToken;
+         return firstToken;
+       }
+
+       return new Token(termText, firstToken.startOffset(),  
+firstToken.endOffset() + secondToken.termText().length() + 1);
+     }
+
+     return firstToken;
+   }
+}
+
+Not all that pretty, I'm afraid, but by all means use it if its useful.
+
+     Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,101 @@
+FROM: Richard Grantham <richard.grant...@limehouse.co.uk>
+SUBJECT: Restricting the searchable fields
+DATE: 24 Feb 2006
+
+Hi list,
+
+I've been working on trying to restrict the indexed fields that are 
+available to different types of search.  I have two 'classes' of search: 
+admin and standard.  Admin may search all fields, standard may search 
+only three or four.  Unfortunately I've not had much joy reliably 
+implementing this in Lucene.
+
+Here is my first implementation (apologies for the 1.4.3 code)
+
+// get the fields that may be searched and set the flags to be
+// prohibited by default
+String[] fields = getAdminSearchFields();
+int[] flags = new int[fields.length];
+for (int i = 0; i < flags.length; i++) {
+     flags[i] = MultiFieldQueryParser.PROHIBITED_FIELD;
+}
+
+// get the fields we are allowed to search
+String[] searchFields = null;
+switch (mode) {
+     case MODE_ADMIN :
+         searchFields = getAdminSearchFields();
+         break;
+     case MODE_STANDARD :
+     default:
+         searchFields = getStandardSearchFields();
+         break;
+}
+
+// set the flags on the allowed fields to normal
+for (int i = 0; i < fields.length; i++) {
+     for (int j = 0; j < searchFields.length; j++) {
+         if (fields[i].equals(searchFields[j])) {
+             flags[i] = MultiFieldQueryParser.NORMAL_FIELD;
+         }
+     }
+}
+
+Query query = MultiFieldQueryParser.parse(queryString, fields, flags,
+     new StandardAnalyzer());
+
+The search fields are just string arrays:
+
+protected String[] getAdminSearchFields() {
+     // admin search fields
+     return new String[] { ADDRESS, EMAIL_ADDRESS, FAMILY_NAME, FAX_NUMBER,
+         GIVEN_NAME, HISTORICAL_ID, NOTES, ORGANISATION, PHONE_NUMBER, 
+POSITION,
+         POST_CODE, POST_TOWN, TITLE, USERNAME };
+}
+
+protected String[] getStandardSearchFields() {
+     // standard search fields
+     return new String[] { TITLE, FAMILY_NAME, GIVEN_NAME, ORGANISATION };
+}
+
+I have found that the standard query doesn't work as intended.  I am not 
+able to specify specific search fields in the query and sometimes 
+searches on permitted fields fail.  An example of a query which would 
+return no results even though there is a hit would be 'givenName:fred'. 
+  I suppose this makes sense given the query that's generated.
+
+My second attempt looks like this:
+
+// get the fields we are allowed to search
+String[] searchFields = null;
+switch (mode) {
+     case MODE_ADMIN :
+         searchFields = getAdminSearchFields();
+         break;
+     case MODE_STANDARD :
+     default:
+         searchFields = getStandardSearchFields();
+         break;
+}
+
+Query query = MultiFieldQueryParser.parse(queryString, searchFields,
+     new StandardAnalyzer());
+
+This mostly works.  The point where it falls down is when you specify a 
+field I want prohibited in the query string.  Eg. searching for 'london' 
+will fail, but searching for 'address:london' will return results.
+
+Can anyone recommend a method that might achieve what I want?  I really 
+don't want standard users to be able to search on address, etc.
+
+rgds,
+
+Richard
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

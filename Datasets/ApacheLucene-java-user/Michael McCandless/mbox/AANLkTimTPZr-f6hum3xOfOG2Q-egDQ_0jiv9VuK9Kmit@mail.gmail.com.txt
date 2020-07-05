@@ -1,0 +1,55 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Using field cache on real time index
+DATE: 8 Jun 2010
+
+When you use .reopen() from an existing reader, the new reader will
+share sub-readers with the prior one, and the FieldCache will also
+share cache entries for those sub readers, with the prior one.
+
+Still, remember that the incrementality you'll see is in proportion to
+the size of the new segments.  EG, if you optimize from the writer
+before closing, then IR.reopen buys you nothing since no segments can
+be reused from the prior reader.  Also, if a large merge completes,
+that large segment must be opened for the new reader.  If this becomes
+a problem you should warm the new reader before swapping it into
+production.
+
+NRT (IndexWriter.getReader), at least in the current impl, is just
+like reopen, except it saves having to close/commit from IndexWriter
+(which can be costly since it must fsync all newly created files),
+it's also able in some cases to carry pending deletions in RAM instead
+of going through the filesystem, and it's able to warm a newly merged
+segment in the BG before it's committed to the index, without blocking
+the reopen.
+
+Mike
+
+On Mon, Jun 7, 2010 at 2:02 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+> I'm looking for some clarification on the use of field cache in a real time index situation.
+>
+> We are using Lucene in a real time fashion, but we update our reader via IndexReader.reopen()
+rather than using the IndexWriter.getReader(); After opening a new reader the old reader is
+closed.
+>
+> In the book Lucene in Action (2nd) it mentions something regarding since 2.9.2 you can
+pass in a subreader instead of the reader if you are reopening a reader so that you only have
+to load the new segment.  But it is not clear on how all of this works.
+>
+> My big question is does doing it this way mean that I can reuse the portion of the cache
+that was created with prior readers?  Or does the whole cache have to be rebuilt each time
+I do a reopen?  I guess what I am asking is if in a real time situation, since I will be
+reopening readers regularly, is my cache constantly having to be rebuilt from scratch, or
+can I use this subreader approach to sequentially add to the cache?
+>
+> Also if the approach lets me sequentially add to the cache, how exactly do I go about
+dealing with the subreaders?  All I have used before is my primary reader and as I perform
+a reopen, how do I know what subreader to pass into the fieldcache?
+>
+> Any info appreciated.
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

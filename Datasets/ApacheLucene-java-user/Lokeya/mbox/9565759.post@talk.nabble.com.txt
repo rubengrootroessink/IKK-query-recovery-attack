@@ -1,0 +1,785 @@
+FROM: Lokeya <lok...@gmail.com>
+SUBJECT: Re: Issue while parsing XML files due to control characters, help appreciated.
+DATE: 20 Mar 2007
+
+
+Thanks all for the valuable suggestions.
+
+The lock issue also got resolved and all 7 laks files are indexed in arnd 85
+minutes which is like wow !
+
+To get away with the lock issue i followed the suggestion given in this :
+http://mail-archives.apache.org/mod_mbox/lucene-java-user/200601.mbox/%3CPKEIKOCKCHNIIHNECPCCGELACCAA.koji.sekiguchi@m4.dion.ne.jp%3E
+
+There is another approach also but certain issues are there:
+
+try
+{
+ writer.close();
+}
+finally
+{
+FSDirectory fs = FSDirectory.getDirectory("./LUCENE",false);
+if(IndexReader.isLocked(fs));
+{
+ IndexReader.unlock(fs);
+}
+}
+
+Thanks a lot again.
+
+
+Lokeya wrote:
+> 
+> I will try to explain it like an algorithm what I am trying to do:
+> 
+> 1. There are 70 Dump files which have 10,000 record tags which I have
+> pasted in my earlier mails. I split every dumpfile and create 10,000 xml
+> files each with a single <record> and its child tags. This is because
+> there are some parsing issues due to unicode characters and we have
+> decided to process only valid records.
+> 
+> 2. With the above idea, I created 70 directories each with the name of
+> dumpfile like : oai_citeseer_1/ etc and under this I will have 10,000
+> XML's being extracted out using some Java program.
+> 
+> 3. So now coming to my program, I do the following:
+>     a. Take Each Dumpfile directory.
+>     b. Get all child xml files(would be 10,000 in number)
+>     c. Get the <title> and <description> tag values and put them in an
+> array list.
+>     d. Create a new doc. 
+>     e. In a for loop add all title and description values as fields which
+> we haev stored in ArrayList(this loop will add 10,000 X 2 = 20,000 fields
+> for both tags)
+>    f. Add this document to the index writer.
+>    g. Optimize and close it.
+> 
+> Hope this clearly tells how im trying to index the values of those tags.
+> 
+> Additional Info: I am using lucene-core-2.0.0.jar.
+> 
+> StackTrace :
+> Indexer.java:75)
+> java.io.IOException: Lock obtain timed out:
+> Lock@/tmp/lucene-e36d478e46e88f594d57a03c10ee0b3b-write.lock
+>         at org.apache.lucene.store.Lock.obtain(Lock.java:56)
+>         at
+> org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:254)
+>         at
+> org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:204)
+>         at edu.vt.searchengine.Indexer.main(Indexer.java:110)
+> 
+> 
+> Erick Erickson wrote:
+>> 
+>> I'm not sure what the lock issues is. What version of Lucene are you
+>> using? And what is your filesystem like? There are some known locking
+>> issues with some versions of Lucene and some filesystems,
+>> particularly NFS mounts as I remember... It would help if you told
+>> us the entire stack trace rather than just the exception.
+>> 
+>> But I really don't understand your index structure. You are still
+>> opening and closing Lucene every time you add a document.
+>> And each document contains the titles and descriptions
+>> of all the files in the directory. Is this actually your intent or
+>> do you really want to index one Lucene document per
+>> title/description pair? If the latter, you want a loop something like...
+>> 
+>> open writer
+>> for each file
+>>     parse file
+>>     Doc doc = new Document();
+>>     doc.add(field, val);
+>>     doc.add(field2, val2);
+>>     writer.write(doc);
+>> end for
+>> 
+>> writer.close();
+>> 
+>> There's no reason to close the writer until the last xml file has been
+>> indexed......
+>> 
+>> If that re-structuring causes your lock error to go away, I'll be
+>> baffled because it shouldn't (unless your version of Lucene
+>> and filesystem is one of the "interesting" ones).
+>> 
+>> But it'll make your code simpler...
+>> 
+>> Best
+>> Erick
+>>     add fields to
+>> 
+>> On 3/18/07, Lokeya <lokeya@gmail.com> wrote:
+>>>
+>>>
+>>> Yep I did that, and now my code looks as follows.
+>>> The time taken for indexing one file is now => Elapsed Time in Minutes
+>>> ::
+>>> 0.3531, which is really great, but after processing 4 dumpfiles(which
+>>> means
+>>> 40,000 small xml's), I get :
+>>>
+>>> caught a class java.io.IOException
+>>> 40114  with message: Lock obtain timed out:
+>>> Lock@/tmp/lucene-e36d478e46e88f594d57a03c10ee0b3b-write.lock
+>>>
+>>>
+>>> This is the new issue now.What could be the reason ?. I am surprised
+>>> because
+>>> I am only writing to Index under ./LUCENE/ evrytime and not doing
+>>> anything
+>>> with the index(ofcrs to avoid such synchronization issues !)
+>>>
+>>>                 for (int i=0; i<children1.length; i++)
+>>>                         {
+>>>                                 // Get filename of file or directory
+>>>                                 String filename = children1[i];
+>>>
+>>>                                 if(!filename.startsWith("oai_citeseer"))
+>>>                                 {
+>>>                                         continue;
+>>>                                 }
+>>>                                 String dirName = filename;
+>>>                                 System.out.println("File => "+filename);
+>>>
+>>>                                 NodeList nl = null;
+>>>                                 //Testing the creation of Index
+>>>                                 try
+>>>                                 {
+>>>                                         File dir = new File(dirName);
+>>>                                         String[] children = dir.list();
+>>>                                         if (children == null) {
+>>>                                                 // Either dir does not
+>>> exist or is not a directory
+>>>                                         }
+>>>                                         else
+>>>                                         {
+>>>                                                 ArrayList alist_Title =
+>>> new ArrayList(children.length);
+>>>                                                 ArrayList alist_Descr =
+>>> new ArrayList(children.length);
+>>>                                                 System.out.println("Size
+>>> of Array List : "+alist_Title.size());
+>>>                                                 String title = null;
+>>>                                                 String descr = null;
+>>>
+>>>                                                 long startTime =
+>>> System.currentTimeMillis();
+>>>                                                 System.out.println(dir
+>>> +"
+>>> start time  ==> "+
+>>> System.currentTimeMillis());
+>>>
+>>>                                                 for (int ii=0; ii<
+>>> children.length; ii++)
+>>>                                                 {
+>>>                                                         // Get filename
+>>> of
+>>> file or directory
+>>>                                                         String file =
+>>> children[ii];
+>>>                                                        
+>>> System.out.println("
+>>> Name of Dir : Record ~~~~~~~ " +dirName +" : "+
+>>> file);
+>>>                                                        
+>>> //System.out.println("The
+>>> name of file parsed now ==> "+file);
+>>>
+>>>                                                         //Get the value
+>>> of
+>>> recXYZ's metadata tag
+>>>                                                         nl =
+>>> ValueGetter.getNodeList(filename+"/"+file, "metadata");
+>>>
+>>>                                                         if(nl == null)
+>>>                                                         {
+>>>
+>>> System.out.println("Error shoudlnt be thrown ...");
+>>>
+>>>                                                                
+>>> alist_Title.add(ii,"title");
+>>>
+>>>                                                                
+>>> alist_Descr.add(ii,"descr");
+>>>                                                                
+>>> continue;
+>>>                                                         }
+>>>
+>>>                                                         //Get the
+>>> metadata
+>>> element(title and description tags from dump file
+>>>                                                         ValueGetter vg =
+>>> new ValueGetter();
+>>>
+>>>                                                         //Get the
+>>> Extracted Tags Title, Identifier and Description
+>>>                                                         try
+>>>                                                         {
+>>>                                                                 title =
+>>> vg.getNodeVal(nl, "dc:title");
+>>>
+>>>                                                                
+>>> alist_Title.add(ii,title);
+>>>                                                                 descr =
+>>> vg.getNodeVal(nl, "dc:description");
+>>>
+>>>                                                                
+>>> alist_Descr.add(ii,descr);
+>>>                                                         }
+>>>                                                         catch(Exception
+>>> ex)
+>>>                                                         {
+>>>
+>>> ex.printStackTrace();
+>>>
+>>> System.out.println("Excep ==> "+ ex);
+>>>                                                         }
+>>>
+>>>                                                 }//End of For
+>>>
+>>>                                                 //Create an Index under
+>>> LUCENE
+>>>
+>>>                                                 IndexWriter writer = new
+>>> IndexWriter("./LUCENE", new
+>>> StopStemmingAnalyzer(),false);
+>>>                                                 Document doc = new
+>>> Document();
+>>>
+>>>                                                 //Get Array List
+>>> Elements  and add them as fileds to doc
+>>>
+>>>                                                 for(int k=0; k <
+>>> alist_Title.size(); k++)
+>>>                                                 {
+>>>                                                         doc.add(new
+>>> Field("Title",alist_Title.get(k).toString(),
+>>> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>>>                                                 }
+>>>
+>>>                                                 for(int k=0; k <
+>>> alist_Descr.size(); k++)
+>>>                                                 {
+>>>                                                         doc.add(new
+>>> Field("Description",alist_Descr.get(k).toString(),
+>>> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>>>                                                 }
+>>>
+>>>                                                 //Add the document
+>>> created
+>>> out of those fields to the IndexWriter
+>>> which will create and index
+>>>                                                 writer.addDocument(doc);
+>>>                                                 writer.optimize();
+>>>                                                 writer.close();
+>>>
+>>>                                                 long elapsedTimeMillis =
+>>> System.currentTimeMillis()-startTime;
+>>>                                                
+>>> System.out.println("Elapsed
+>>> Time for  "+dirName +" :: " +
+>>> elapsedTimeMillis);
+>>>                                                 float elapsedTimeMin =
+>>> elapsedTimeMillis/(60*1000F);
+>>>                                                
+>>> System.out.println("Elapsed
+>>> Time in Minutes ::  "+ elapsedTimeMin);
+>>>
+>>>                                         }//End of Else
+>>>
+>>>                                 } //End of try
+>>>                                 catch (Exception ee)
+>>>                                 {
+>>>                                         ee.printStackTrace();
+>>>                                         System.out.println("caught a " +
+>>> ee.getClass() + "\n with message: "+
+>>> ee.getMessage());
+>>>                                 }
+>>>                                 System.out.println("Total Record ==>
+>>> "+total_records);
+>>>
+>>>                         }// End of For
+>>>
+>>> Grant Ingersoll-5 wrote:
+>>> >
+>>> > Move index writer creation, optimization and closure outside of your
+>>> > loop.  I would also use a SAX parser.  Take a look at the demo code
+>>> > to see an example of indexing.
+>>> >
+>>> > Cheers,
+>>> > Grant
+>>> >
+>>> > On Mar 18, 2007, at 12:31 PM, Lokeya wrote:
+>>> >
+>>> >>
+>>> >>
+>>> >> Erick Erickson wrote:
+>>> >>>
+>>> >>> Grant:
+>>> >>>
+>>> >>>  I think that "Parsing 70 files totally takes 80 minutes" really
+>>> >>> means parsing 70 metadata files containing 10,000 XML
+>>> >>> files each.....
+>>> >>>
+>>> >>> One Metadata File is split into 10,000 XML files which looks as
+>>> >>> below:
+>>> >>>
+>>> >>> <root>
+>>> >>>     <record>
+>>> >>>     <header>
+>>> >>>     <identifier>oai:CiteSeerPSU:1</identifier>
+>>> >>>     <datestamp>1993-08-11</datestamp>
+>>> >>>     <setSpec>CiteSeerPSUset</setSpec>
+>>> >>>     </header>
+>>> >>>             <metadata>
+>>> >>>             <oai_citeseer:oai_citeseer
+>>> >>> xmlns:oai_citeseer="http://copper.ist.psu.edu/oai/oai_citeseer/"
+>>> >>> xmlns:dc
+>>> >>> ="http://purl.org/dc/elements/1.1/"
+>>> >>> xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+>>> >>> xsi:schemaLocation="http://copper.ist.psu.edu/oai/oai_citeseer/
+>>> >>> http://copper.ist.psu.edu/oai/oai_citeseer.xsd ">
+>>> >>>             <dc:title>36 Problems for Semantic
+>>> Interpretation</dc:title>
+>>> >>>             <oai_citeseer:author name="Gabriele Scheler">
+>>> >>>                     <address>80290 Munchen , Germany</address>
+>>> >>>                     <affiliation>Institut fur Informatik;
+Technische
+>>> Universitat
+>>> >>> Munchen</affiliation>
+>>> >>>             </oai_citeseer:author>
+>>> >>>             <dc:subject>Gabriele Scheler 36 Problems for Semantic
+>>> >>> Interpretation</dc:subject>
+>>> >>>             <dc:description>This paper presents a collection
+of
+>>> problems for
+>>> >>> natural
+>>> >>> language analysisderived mainly from theoretical linguistics. Most
+>>> of
+>>> >>> these problemspresent major obstacles for computational systems
+of
+>>> >>> language interpretation.The set of given sentences can easily be
+>>> >>> scaled up
+>>> >>> by introducing moreexamples per problem. The construction of
+>>> >>> computational
+>>> >>> systems couldbenefit from such a collection, either using it
+>>> >>> directly for
+>>> >>> training andtesting or as a set of benchmarks to qualify the
+>>> >>> performance
+>>> >>> of a NLPsystem.1 IntroductionThe main part of this paper consists
+>>> >>> of a
+>>> >>> collection of problems for semanticanalysis of natural language.
+The
+>>> >>> problems are arranged in the following way:example sentencesconcise
+>>> >>> description of the problemkeyword for the type of problemThe sources
+>>> >>> (first appearance in print) of the sentences have been left
+>>> >>> out,because
+>>> >>> they are sometimes hard to track and will usually not be of much
+>>> >>> use,as
+>>> >>> they indicate a starting-point of discussion only. The keywords
+>>> >>> howeve...
+>>> >>>             </dc:description>
+>>> >>>             <dc:contributor>The Pennsylvania State University
+>>> CiteSeer
+>>> >>> Archives</dc:contributor>
+>>> >>>             <dc:publisher>unknown</dc:publisher>
+>>> >>>             <dc:date>1993-08-11</dc:date>
+>>> >>>             <dc:format>ps</dc:format>
+>>> >>>             <dc:identifier>http://citeseer.ist.psu.edu/1.html
+>>> </dc:identifier>
+>>> >>> <dc:source>ftp://flop.informatik.tu-muenchen.de/pub/fki/
+>>> >>> fki-179-93.ps.gz</dc:source>
+>>> >>>             <dc:language>en</dc:language>
+>>> >>>             <dc:rights>unrestricted</dc:rights>
+>>> >>>             </oai_citeseer:oai_citeseer>
+>>> >>>             </metadata>
+>>> >>>     </record>
+>>> >>> </root>
+>>> >>>
+>>> >>>
+>>> >>> From the above I will extract the Title and the Description tags
+>>> >>> to index.
+>>> >>>
+>>> >>> Code to do this:
+>>> >>>
+>>> >>> 1. I have 70 directories with the name like oai_citeseerXYZ/
+>>> >>> 2. Under each of above directory, I have 10,000 xml files each
+>>> having
+>>> >>> above xml data.
+>>> >>> 3. Program does the following
+>>> >>>
+>>> >>>                                     File dir = new File(dirName);
+>>> >>>                                     String[] children = dir.list();
+>>> >>>                                     if (children == null) {
+>>> >>>                                             // Either dir does not
+>>> exist or is not a directory
+>>> >>>                                     }
+>>> >>>                                     else
+>>> >>>                                     {
+>>> >>>                                             for (int ii=0; ii<
+>>> children.length; ii++)
+>>> >>>                                             {
+>>> >>>                                                     // Get filename
+>>> of
+>>> file or directory
+>>> >>>                                                     String file
+=
+>>> children[ii];
+>>> >>>
+>>> //System.out.println("The name of file parsed now ==> "+file);
+>>> >>>                                                     nl =
+>>> ReadDump.getNodeList(filename+"/"+file, "metadata");
+>>> >>>                                                     if(nl == null)
+>>> >>>                                                     {
+>>> >>>
+>>> //System.out.println("Error shoudlnt be thrown ...");
+>>> >>>                                                     }
+>>> >>>                                                     //Get the
+>>> metadata
+>>> element tags from xml file
+>>> >>>                                                     ReadDump rd
+=
+>>> new
+>>> ReadDump();
+>>> >>>
+>>> >>>                                                     //Get the
+>>> Extracted Tags Title, Identifier and Description
+>>> >>>                                                     ArrayList
+>>> alist_Title = rd.getElements(nl, "dc:title");
+>>> >>>                                                     ArrayList
+>>> alist_Descr = rd.getElements(nl, "dc:description");
+>>> >>>
+>>> >>>                                                     //Create an
+>>> Index
+>>> under DIR
+>>> >>>                                                     IndexWriter
+>>> writer
+>>> = new IndexWriter("./FINAL/", new
+>>> >>> StopStemmingAnalyzer(),false);
+>>> >>>                                                     Document doc
+=
+>>> new
+>>> Document();
+>>> >>>
+>>> >>>                                                     //Get Array
+List
+>>> Elements  and add them as fileds to doc
+>>> >>>                                                     for(int k=0;
+k <
+>>> alist_Title.size(); k++)
+>>> >>>                                                     {
+>>> >>>                                                            
+>>> doc.add(new
+>>> Field("Title",alist_Title.get(k).toString(),
+>>> >>> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>>> >>>                                                     }
+>>> >>>
+>>> >>>                                                     for(int k=0;
+k <
+>>> alist_Descr.size(); k++)
+>>> >>>                                                     {
+>>> >>>                                                            
+>>> doc.add(new
+>>> Field("Description",alist_Descr.get(k).toString
+>>> >>> (),
+>>> >>> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>>> >>>                                                     }
+>>> >>>
+>>> >>>                     //Add the document created out of those fields
+>>> to
+>>> the
+>>> >>> IndexWriter which
+>>> >>> will create and index
+>>> >>>                                                    
+>>> writer.addDocument
+>>> (doc);
+>>> >>>                                                    
+>>> writer.optimize();
+>>> >>>                                                     writer.close();
+>>> >>>                }
+>>> >>>
+>>> >>>
+>>> >>> This is the main file which does indexing.
+>>> >>>
+>>> >>> Hope this will give you an idea.
+>>> >>>
+>>> >>>
+>>> >>> Lokeya:
+>>> >>> Can you confirm my supposition? And I'd still post the code
+>>> >>> Grant requested if you can.....
+>>> >>>
+>>> >>> So, you're talking about indexing 10,000 xml files in 2-3 hours,
+>>> >>> 8 minutes or so which is spent reading/parsing, right? It'll be
+>>> >>> important to know how much data you're indexing and now, so
+>>> >>> the code snippet is doubly important....
+>>> >>>
+>>> >>> Erick
+>>> >>>
+>>> >>> On 3/18/07, Grant Ingersoll <gsingers@apache.org> wrote:
+>>> >>>>
+>>> >>>> Can you post the relevant indexing code?  Are you doing things
+like
+>>> >>>> optimizing after every file?  Both the parsing and the indexing
+>>> >>>> sound
+>>> >>>> really long.  How big are these files?
+>>> >>>>
+>>> >>>> Also, I assume you machine is at least somewhat current, right?
+>>> >>>>
+>>> >>>> On Mar 18, 2007, at 1:00 AM, Lokeya wrote:
+>>> >>>>
+>>> >>>>>
+>>> >>>>> Thanks for your reply. I tried to check if the I/O and Parsing
+is
+>>> >>>>> taking time
+>>> >>>>> separately and Indexing time also. I observed that I/O and
+Parsing
+>>> >>>>> 70 files
+>>> >>>>> totally takes 80 minutes where as when I combine this with
+>>> Indexing
+>>> >>>>> for a
+>>> >>>>> single Metadata file it nearly 2 to 3 hours. So looks like
+>>> >>>>> IndexWriter takes
+>>> >>>>> time that too when we are appending to the Index file this
+>>> happens.
+>>> >>>>>
+>>> >>>>> So what is the best approach to handle this?
+>>> >>>>>
+>>> >>>>> Thanks in Advance.
+>>> >>>>>
+>>> >>>>>
+>>> >>>>> Erick Erickson wrote:
+>>> >>>>>>
+>>> >>>>>> See below...
+>>> >>>>>>
+>>> >>>>>> On 3/17/07, Lokeya <lokeya@gmail.com> wrote:
+>>> >>>>>>>
+>>> >>>>>>>
+>>> >>>>>>> Hi,
+>>> >>>>>>>
+>>> >>>>>>> I am trying to index the content from XML files
+which are
+>>> >>>>>>> basically the
+>>> >>>>>>> metadata collected from a website which have a huge
+collection
+>>> of
+>>> >>>>>>> documents.
+>>> >>>>>>> This metadata xml has control characters which causes
+errors
+>>> >>>>>>> while trying
+>>> >>>>>>> to
+>>> >>>>>>> parse using the DOM parser. I tried to use encoding
+= UTF-8 but
+>>> >>>>>>> looks
+>>> >>>>>>> like
+>>> >>>>>>> it doesn't cover all the unicode characters and
+I get error.
+>>> Also
+>>> >>>>>>> when I
+>>> >>>>>>> tried to use UTF-16, I am getting Prolog content
+not allowed
+>>> >>>>>>> here. So my
+>>> >>>>>>> guess is there is no enoding which is going to cover
+almost all
+>>> >>>>>>> unicode
+>>> >>>>>>> characters. So I tried to split my metadata files
+into small
+>>> >>>>>>> files and
+>>> >>>>>>> processing records which doesnt throw parsing error.
+>>> >>>>>>>
+>>> >>>>>>> But by breaking metadata file into smaller files
+I get, 10,000
+>>> >>>>>>> xml files
+>>> >>>>>>> per
+>>> >>>>>>> metadata file. I have 70 metadata files, so altogether
+it
+>>> becomes
+>>> >>>>>>> 7,00,000
+>>> >>>>>>> files. Processing them individually takes really
+long time using
+>>> >>>>>>> Lucene,
+>>> >>>>>>> my
+>>> >>>>>>> guess is I/O is time consuing, like opening every
+small xml file
+>>> >>>>>>> loading
+>>> >>>>>>> in
+>>> >>>>>>> DOM extracting required data and processing.
+>>> >>>>>>
+>>> >>>>>>
+>>> >>>>>>
+>>> >>>>>> So why don't you measure and find out before trying
+to make the
+>>> >>>>>> indexing
+>>> >>>>>> step more efficient? You simply cannot optimize without
+knowing
+>>> >>>>>> where
+>>> >>>>>> you're spending your time. I can't tell you how often
+I've been
+>>> >>>>>> wrong
+>>> >>>>>> about
+>>> >>>>>> "why my program was slow" <G>.
+>>> >>>>>>
+>>> >>>>>> In this case, it should be really simple. Just comment
+out the
+>>> >>>>>> part where
+>>> >>>>>> you index the data and run, say, one of your metadata
+files.. I
+>>> >>>>>> suspect
+>>> >>>>>> that
+>>> >>>>>> Cheolgoo Kang's response is cogent, and you indeed are
+spending
+>>> >>>>>> your
+>>> >>>>>> time parsing the XML. I further suspect that the problem
+is not
+>>> >>>>>> disk IO,
+>>> >>>>>> but the time spent parsing. But until you measure, you
+have no
+>>> >>>>>> clue
+>>> >>>>>> whether you should mess around with the Lucene parameters,
+or
+>>> find
+>>> >>>>>> another parser, or just live with it.. Assuming that
+you
+>>> >>>>>> comment out
+>>> >>>>>> Lucene and things are still slow, the next step would
+be to just
+>>> >>>>>> read in
+>>> >>>>>> each file and NOT parse it to figure out whether it's
+the IO or
+>>> >>>>>> the
+>>> >>>>>> parsing.
+>>> >>>>>>
+>>> >>>>>> Then you can worry about how to fix it..
+>>> >>>>>>
+>>> >>>>>> Best
+>>> >>>>>> Erick
+>>> >>>>>>
+>>> >>>>>>
+>>> >>>>>> Qn  1: Any suggestion to get this indexing time reduced?
+It
+>>> >>>>>> would be
+>>> >>>>>> really
+>>> >>>>>>> great.
+>>> >>>>>>>
+>>> >>>>>>> Qn 2 : Am I overlooking something in Lucene with
+respect to
+>>> >>>>>>> indexing?
+>>> >>>>>>>
+>>> >>>>>>> Right now 12 metadata files take 10 hrs nearly which
+is really a
+>>> >>>>>>> long
+>>> >>>>>>> time.
+>>> >>>>>>>
+>>> >>>>>>> Help Appreciated.
+>>> >>>>>>>
+>>> >>>>>>> Much Thanks.
+>>> >>>>>>> --
+>>> >>>>>>> View this message in context:
+>>> >>>>>>> http://www.nabble.com/Issue-while-parsing-XML-files-due-to-
+>>> >>>>>>> control-characters%2C-help-appreciated.-tf3418085.html#a9526527
+>>> >>>>>>> Sent from the Lucene - Java Users mailing list archive
+at
+>>> >>>>>>> Nabble.com.
+>>> >>>>>>>
+>>> >>>>>>>
+>>> >>>>>>>
+>>> -----------------------------------------------------------------
+>>> >>>>>>> ---
+>>> >>>>>>> -
+>>> >>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> >>>>>>> For additional commands, e-mail:
+>>> java-user-help@lucene.apache.org
+>>> >>>>>>>
+>>> >>>>>>>
+>>> >>>>>>
+>>> >>>>>>
+>>> >>>>>
+>>> >>>>> --
+>>> >>>>> View this message in context: http://www.nabble.com/Issue-while-
+>>> >>>>> parsing-XML-files-due-to-control-characters%2C-help-appreciated.-
+>>> >>>>> tf3418085.html#a9536099
+>>> >>>>> Sent from the Lucene - Java Users mailing list archive at
+>>> >>>>> Nabble.com.
+>>> >>>>>
+>>> >>>>>
+>>> >>>>>
+>>> -------------------------------------------------------------------
+>>> >>>>> --
+>>> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> >>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >>>>>
+>>> >>>>
+>>> >>>> --------------------------
+>>> >>>> Grant Ingersoll
+>>> >>>> Center for Natural Language Processing
+>>> >>>> http://www.cnlp.org
+>>> >>>>
+>>> >>>> Read the Lucene Java FAQ at http://wiki.apache.org/jakarta-lucene/
+>>> >>>> LuceneFAQ
+>>> >>>>
+>>> >>>>
+>>> >>>>
+>>> >>>>
+>>> --------------------------------------------------------------------
+>>> >>>> -
+>>> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >>>>
+>>> >>>>
+>>> >>>
+>>> >>>
+>>> >>
+>>> >> --
+>>> >> View this message in context: http://www.nabble.com/Issue-while-
+>>> >> parsing-XML-files-due-to-control-characters%2C-help-appreciated.-
+>>> >> tf3418085.html#a9540232
+>>> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>> >>
+>>> >>
+>>> >> ---------------------------------------------------------------------
+>>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >>
+>>> >
+>>> > ------------------------------------------------------
+>>> > Grant Ingersoll
+>>> > http://www.grantingersoll.com/
+>>> > http://lucene.grantingersoll.com
+>>> > http://www.paperoftheweek.com/
+>>> >
+>>> >
+>>> >
+>>> > ---------------------------------------------------------------------
+>>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >
+>>> >
+>>> >
+>>>
+>>> --
+>>> View this message in context:
+>>> http://www.nabble.com/Issue-while-parsing-XML-files-due-to-control-characters%2C-help-appreciated.-tf3418085.html#a9542471
+>>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>> 
+>> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Issue-while-parsing-XML-files-due-to-control-characters%2C-help-appreciated.-tf3418085.html#a9565759
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

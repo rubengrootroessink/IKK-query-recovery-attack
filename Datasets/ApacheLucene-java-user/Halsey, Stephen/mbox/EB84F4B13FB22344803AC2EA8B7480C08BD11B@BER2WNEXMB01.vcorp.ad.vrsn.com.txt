@@ -1,0 +1,192 @@
+FROM: "Halsey, Stephen" <shal...@verisign.com>
+SUBJECT: RE: Leaking org.apache.lucene.index.* objects
+DATE: 9 Feb 2007
+
+Hi Otis,
+
+Its funny, but I'm having a memory leak with Hibernate that I spent the
+whole of yesterday banging my head against a wall about and so when
+searching for emails with Leak in the title came across your message.
+I'm probably going to hit the same problem as you for long running
+multi-threaded lucene index updates so am very interested in this.  I
+found the only way to isolate the problem with Hibernate (and hence
+prove it is a Hibernate-only problem) is to write a very simple test
+program that recreates the problem.  Have you got a program that
+recreates this, perhaps one that creates two simple indexes, creates two
+threads and slams away until it runs out of memory and every loop prints
+the memory using this function:-
+
+	private static long print_mem(long last_mem_free) {
+		long mem_total = Runtime.getRuntime().totalMemory();
+		long mem_free = Runtime.getRuntime().freeMemory();
+		long mem_used = mem_total - mem_free;
+		long mem_max = Runtime.getRuntime().maxMemory();
+		long change = (mem_free - last_mem_free);
+
+		LOG.debug((new Date()).toString() + " mem_free= " +
+mem_free 
+				+ " mem_total=" + mem_total
+				+ " change=" + change
+				+ " mem_used=" + mem_used
+				+ " mem_max=" + mem_max);
+
+		return mem_free;
+	}
+
+The trick is to make the program very fast at accumalating memory, so
+you can make it run out of memory quickly and also setting java args to
+-Xms10m -Xmx10m or as low as you can and have it run for a minute so
+that the JVM has to quickly try and reclaim memory.  This proves that
+the JVM really can't free up memory, because the JVM will accumalate
+memory whenever it feels like it, and sometimes only clear up when it
+feels like it.
+
+If you can send/write this test program and post it on the forum, I'll
+give it a run and try using a copy of Jprofiler I have to locate the
+objects that are accumalating memory (if I can work out how to use it
+properly!)
+
+Just noticed this is from December, so may well be a bit late for
+helping out?
+
+Cheers
+
+
+
+steve
+
+ 
+
+>-----Original Message-----
+>From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com] 
+>Sent: 15 December 2006 17:28
+>To: java-user@lucene.apache.org
+>Subject: Leaking org.apache.lucene.index.* objects
+>
+>Hi,
+>
+>About 2-3 weeks ago I emailed about a memory leak in my 
+>application.  I then found some problems in my code (I wasn't 
+>closing IndexSearchers explicitly) and took care of those.  
+>Now I see my app is still leaking memory - jconsole clearly 
+>shows the "Tenured Gen" memory pool getting filled up until I 
+>hit the OOM, but I can't seem to pin-point the source.
+>
+>I found that a bunch or o.a.l.index.* objects are not getting 
+>GCed, even though they should.  For example:
+>
+>$ jmap -histo:live 7825 | grep apache.lucene.index | head -20 
+>| sort -k2 -nr
+>num   #instances    #bytes  class name
+>--------------------------------------
+>  4:   1764840    98831040  
+>org.apache.lucene.index.CompoundFileReader$CSIndexInput
+>  5:   2119215    67814880  org.apache.lucene.index.TermInfo
+>  7:   1112459    35598688  org.apache.lucene.index.SegmentReader$Norm
+>  9:   2132311    34116976  org.apache.lucene.index.Term
+> 12:   1117897    26829528  org.apache.lucene.index.FieldInfo
+> 13:    225340    18027200  org.apache.lucene.index.SegmentTermEnum
+> 15:    589727    14153448  org.apache.lucene.index.TermBuffer
+> 21:     86033     8718504  [Lorg.apache.lucene.index.TermInfo;
+> 20:     86033     8718504  [Lorg.apache.lucene.index.Term;
+> 23:     86120     7578560  org.apache.lucene.index.SegmentReader
+> 26:     90501     5068056  org.apache.lucene.store.FSIndexInput
+> 27:     86120     4822720  org.apache.lucene.index.TermInfosReader
+> 33:     86130     3445200  org.apache.lucene.index.SegmentInfo
+> 36:     87355     2795360  
+>org.apache.lucene.store.FSIndexInput$Descriptor
+> 38:     86120     2755840  org.apache.lucene.index.FieldsReader
+> 39:     86050     2753600  org.apache.lucene.index.CompoundFileReader
+> 42:     46903     2251344  org.apache.lucene.index.SegmentInfos
+> 43:     93778     2250672  
+>org.apache.lucene.search.FieldCacheImpl$Entry
+> 45:     93778     1500448  
+>org.apache.lucene.search.FieldCacheImpl$CreationPlaceholder
+> 47:     86510     1384160  org.apache.lucene.index.FieldInfos
+>
+>I'm running my app in search-only mode - no adds or deletes.
+>The counts of these objects just keeps going up, even though I 
+>am explicitly closing the IndexSearcher.  I can see that file 
+>descriptors _are_ freed up after searcher.close(), because 
+>lsof no longer shows them, but the above objects just linger 
+>and accumulate, even when I force GC via jconsole or via the profiler.
+>
+>I thought maybe various *Readers are not getting close()d, but 
+>I've double-checked all *Readers above, and they all seem to 
+>close their IndexInput references.  The static nested class 
+>CompoundFileReader.CSIndexInput has a close() without any 
+>implementation.  At first I thought that was an omission, but 
+>adding a close of the inner IndexInput there resulted in a 
+>search-time error.  I've added the lovely print debugging to 
+>various close() methods and see those methods being called.  
+>I've added finalize() with some print debugging to 
+>SegmentReader, TermInfosReader, SegmentTermEnum, FieldsReader, 
+>and CompoundFileReader.  All but CFReader get finalized after a while.
+>
+>My application is running as a webapp and has thousands of 
+>separate indices.  This means it's very multi-threaded and the 
+>servlet container has a pool of threads that handle requests, 
+>and each request may be for a different index.  I cache 
+>IndexSearchers for a while, and purge/close them every N 
+>minutes if they have been idle more than M minutes.
+>It occurred to me last night that things like TermInfosReader 
+>and SegmentReader are using ThreadLocal, and since threads are 
+>used in a thread pool, and thus shared with requests handling 
+>searches against different indices, it's not clear to me what 
+>happens with object instances that are put in those 
+>ThreadLocals in such scenario.  Aren't things going to step on 
+>each others' toes?
+>TIR has close() and SR has doClose(), so I put <TL 
+>inst>.set(null) there.  This immediately got rid of those 
+>instances of CompoundFileReader.CSIndexInput in my dev 
+>environment!!!! Yeeees!
+>
+>But in my dev environment I tested my additions by slamming my 
+>app against a *single* index.  I took my modified Lucene to 
+>production, and quickly saw all those o.a.l.index.* objects 
+>accumulate again.  I also see a lot of ThreadLocal's kids:
+>
+> 16:    419387    13420384  java.lang.ThreadLocal$ThreadLocalMap$Entry
+>
+>I *think* that points out to some issues with how that 
+>ThreadLocal is used there, in a multi-threaded, multi-index 
+>environments.
+>I'm running JDK 6, and while this problem sounds a bit like 
+>LUCENE-436, I'm not yet sure if it's the same thing.  
+>Because my IndexSearchers (and thus all those o.a.l.index.* 
+>objects) are long-lived, and threads are shared and reused for 
+>searching of other indices, those close() and doClose() 
+>methods are not called at the end of the request life-cycle, 
+>so at the end of the request those TL instances will *still* 
+>have something in them.  When their thread is later reused for 
+>searching of another index, new data will be put in them, but 
+>the old data will never be cleaned out!  No?
+>It seems a bit odd, but with this ThreadLocals, shouldn't a 
+>multi-threaded, multi-index webapp really have to "clean" 
+>those ThreadLocal instances either before or at the end of the request?
+>
+>I'm running out of ideas, and was wondering if anyone has any 
+>thoughts about what could still be holding references to the 
+>above classes.  I have some 20-30MB memory snapshots (via 
+>YourKit) and heap dumps (via jmap), if anyone is interested.
+>
+>Thanks,
+>Otis
+>
+>
+>
+>
+>
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

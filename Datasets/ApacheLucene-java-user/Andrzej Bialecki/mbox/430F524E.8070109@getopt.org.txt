@@ -1,0 +1,50 @@
+FROM: Andrzej Bialecki ...@getopt.org>
+SUBJECT: Solved (Re: Document visible by Term, but not search)
+DATE: 26 Aug 2005
+
+Hi list,
+
+This is just to let you know that I found the reason (Dan sent me a 
+small sample index off-list), and I thought that the reason for this 
+error was obscure and tricky enough that you might be interested in the 
+solution.
+
+The problem lied in custom boost values. It was impossible to find the 
+documents using the high-level search() interface. If you remember, this 
+interface skips the lowest-scoring hits, among others documents with 
+score==0  :-)
+
+How can the score be 0 if the document matches (and it matched, because 
+it clearly contained the term from the query)? I implemented a version 
+of HitCollector that collects all hits, in order to investigate this. 
+Running a query "testField:test" against that sample index I got 1 hit 
+with score 0, and this explanation:
+
+     0.0000 fieldWeight(testField:test in 0), product of:
+       1.0000 tf(termFreq(testField:test)=1)
+       0.3069 idf(docFreq=1)
+       0.0000 fieldNorm(field=testField, doc=0)
+
+Under normal circumstances fieldNorm is never 0 ... unless a boosting 
+has been applied. In this case the original poster didn't apply boost=0, 
+but some other (small) value. Boost values are encoded floats with very 
+coarse resolution. In this case this resulted in fieldNorm falling below 
+resolution of the encoded float. The fractional part was lost in this 
+case, because it was too small to be encoded, so that the fieldNorm 
+became 0. As a consequence, the score became 0 too, even though the 
+document matched ...
+
+-- 
+Best regards,
+Andrzej Bialecki     <><
+  ___. ___ ___ ___ _ _   __________________________________
+[__ || __|__/|__||\/|  Information Retrieval, Semantic Web
+___|||__||  \|  ||  |  Embedded Unix, System Integration
+http://www.sigram.com  Contact: info at sigram dot com
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,97 @@
+FROM: Amrit Jassal <ajas...@gmail.com>
+SUBJECT: Custom filters and booleanquery (MUST_NOT)
+DATE: 9 Feb 2006
+
+I am experimenting with using a custom filter with QueryParser and ran into
+some unanticipated issues with using NOT terms. I narrowed down the issue
+into the following test case. I am expecting a MUST_NOT booleanclause within
+a booleanquery to return a resultset that is the complement of a MUST
+clause. Can filters not be used for negative queries (such as "-term:xxx")
+like this?
+
+BTW I have checked with the latest SVN codebase as well.
+
+Thanks for any hints...
+
+=====
+
+import java.io.IOException;
+import java.util.BitSet;
+import java.util.Iterator;
+
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Filter;
+import org.apache.lucene.search.FilteredQuery;
+import org.apache.lucene.search.Hit;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.store.RAMDirectory;
+
+import junit.framework.TestCase;
+
+public class FilteredQueryTest extends TestCase {
+    private class MyFilter extends Filter {
+        MyFilter(BitSet bits) {
+            this.bits= bits;
+        }
+        @Override
+        public BitSet bits(IndexReader arg0) throws IOException {
+            return this.bits;
+        }
+        private BitSet bits;
+    }
+    public void setUp() throws Exception {
+        RAMDirectory indexStore = new RAMDirectory ();
+        IndexWriter writer = new IndexWriter (indexStore, new
+SimpleAnalyzer(), true);
+        Document doc = new Document();
+        doc.add(new Field("tag", "t1", Field.Store.YES,
+Field.Index.UN_TOKENIZED));
+        writer.addDocument(doc);
+        doc = new Document();
+        doc.add(new Field("tag", "t2", Field.Store.YES,
+Field.Index.UN_TOKENIZED));
+        writer.addDocument(doc);
+        writer.optimize ();
+        writer.close();
+        this.searcher = new IndexSearcher (indexStore);
+    }
+
+    public void testFilter() {
+        try {
+            BitSet bits = new BitSet(this.searcher.maxDoc());
+            bits.set(1);
+            FilteredQuery fq = new FilteredQuery(new MatchAllDocsQuery(),
+new MyFilter(bits));
+            BooleanQuery bquery = new BooleanQuery();
+            bquery.add(new BooleanClause(fq, BooleanClause.Occur.MUST));
+            Hits hits = this.searcher.search(bquery);
+            assertTrue(hits.length() == 1);
+            for (Iterator h = hits.iterator(); h.hasNext(); ) {
+                assertTrue(((Hit)h.next()).getId() == 1);
+            }
+            bquery = new BooleanQuery();
+            bquery.add(new BooleanClause(fq, BooleanClause.Occur.MUST_NOT));
+            hits = this.searcher.search(bquery);
+            assertTrue(hits.length() == 1);       // <<<<<<<<<
+returns 0,
+expecting doc #2 (t2) to return...
+            for (Iterator h = hits.iterator(); h.hasNext(); ) {
+                assertTrue(((Hit)h.next()).getId() == 2);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            fail();
+        }
+    }
+
+    private IndexSearcher searcher;
+}
+

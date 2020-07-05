@@ -1,0 +1,185 @@
+FROM: "MOYSE Gilles (Cetelem)" <gilles.mo...@cetelem.fr>
+SUBJECT: RE: Tokenizing text custom way
+DATE: 25 Nov 2003
+
+Hi.
+
+You should define expressions.
+To define expressions, you first have to define an expression file.
+An expression file contains one expressions per line.
+For instance :
+	time_out
+	expert_system
+	...
+You can use any character to specify the "expression link". Here, I use the
+underscore (_).
+
+Then, you have to build an expression loader. You can store expressions in
+recursives HashMap.
+Such HashMap must be built so that HashMap.get("word1") = HashMap, and
+(HashMap.get("word1")).get("word2") = null, if you want to code the
+expression "word1_word2".
+In other words 'HashMap.get("a_word")' returns a hashMap containing all the
+successors of the word 'a_word'.
+
+So, if your expression file looks like that :
+	time_out
+	expert_system
+	expert_in_information
+
+you'll have to build a loader which returns a HashMap H so that :
+	H.keySet() = {"time", "expert"}
+	((HashMap)H.get("time")).keySet = {"out"}
+	((HashMap)H.get("time")).get("out") = null // null indicates the end
+of the expression
+	((HashMap)H.get("expert")).keySet = {"system", "in"}
+	((HashMap)H.get("expert")).get("system") = null
+	((HashMap)((HashMap)H.get("expert")).get("in")).keySet() =
+{"information"}
+	((HashMap)((HashMap)H.get("expert")).get("in")).get("information") =
+null
+
+These recursives HashMaps code the following tree :
+	time - out - null
+	system --- expert - null
+		  |- in - information- null
+
+Such an expression loader may be designed this way :
+
+	public static HashMap getExpressionMap( File wordfile ) {
+		HashMap result = new HashMap();
+		
+		try 
+		{
+			String line = null;
+			LineNumberReader in = new LineNumberReader(new
+FileReader(wordfile));
+			HashMap hashToAdd = null;
+			
+			while ((line = in.readLine()) != null)
+			{
+				if (line.startsWith(FILE_COMMENT_CHARACTER))
+					continue;
+
+				if (line.trim().length() == 0)
+					continue;
+
+				StringTokenizer stok = new
+StringTokenizer(line, " \t_");
+				String curTok = "";
+				HashMap currentHash = result;
+				
+				// Test wether the expression contains 2 at
+least words or not
+				if (stok.countTokens() < 2)
+				{
+					System.err.println("Warning : '" +
+line + "' in file '" + wordfile.getAbsolutePath() + "' line " +
+in.getLineNumber() +
+						" is not an expression.\n\tA
+valid expression contains at least 2 words.");
+					continue;
+				}
+				
+				while (stok.hasMoreTokens())
+				{
+					curTok = stok.nextToken();
+					if
+(curTok.startsWith(FILE_COMMENT_CHARACTER)) // if comment at the end of the
+line, break
+						break;
+					if (stok.hasMoreTokens())
+						hashToAdd = new HashMap(6);
+					else
+						hashToAdd = (HashMap)null;
+						
+					if
+(!(currentHash.containsKey(curTok)))
+						currentHash.put(curTok,
+hashToAdd);
+						
+					currentHash =
+(HashMap)currentHash.get(curTok);
+				}
+			}
+			return result;
+		}
+		// On error, use an empty table
+		catch ( Exception e ) 
+		{
+			System.err.println("While processing '" +
+wordfile.getAbsolutePath() + "' : " + e.getMessage());
+			e.printStackTrace();
+			return new HashMap();
+		}
+	}
+
+
+Then, you must build a filter with 2 FIFO stacks : one is the expression
+stack, the other is the default stack.
+Then, you define a 'curMap' variable, initially pointing onto the HashMap
+returned by the ExpressionFileLoader.
+
+When you receive a token, you check wether it is null or not;
+	If it is, you check if the standard stack is null or not.
+		If it is not, you pop a token from the default stack and you
+return it.
+		If it is, you return null
+	If it is not (the token is not null), you check whether it is
+contained in the HashMap or not (curMap.containsKey(token)).
+		If it is not contained and you were building an expression,
+you pop all the terms in the expression stack to push them in the default
+stack (so as not to loose information)
+		If it is not contained and the default stack is empty, you
+return the token.
+		If it is not conatined and the default stack is not empty,
+you return the poped token from the default stack and you push the current
+token.
+	If the token is contained in the curMap, then the token MAY be the
+first element of an expression.
+		You push the token in the expression stack, and you dive
+into the next level in your expression tree (curMap = curMap.get("token"))
+		If the next level (now, curMap), is null, then you have
+completed your expression. You can pop all the tokens from the expresion
+stack to concatenate them, separated by underscores, and push the resulting
+String as a token on the default heap (so as to keep the correct tokens
+oreder in the token stream)
+		You also set a flag "I'm in an expression" (expr_falg)
+
+
+With this short algorithm, you will build expressions, i.e., if an
+expression is detected, it will be returned as such, and if it is not, it
+will return the tokens, unmodified, in their orginal order.
+
+Hope this will help.
+
+Gilles Moyse
+
+-----Message d'origine-----
+De : Dragan Jotanovic [mailto:Dragan.Jotanovic@diosphere.com]
+Envoyé : mardi 25 novembre 2003 12:42
+À : Lucene Users List
+Objet : Tokenizing text custom way
+
+
+Hi. I need to tokenize text while indexing but I don't want space to be
+delimiter. Delimiter should be my custom character (for example comma). I
+understand that I would probably need to implement my own analyzer, but
+could someone help me where to start. Is there any other way to do this
+without writing custom analyzer?
+
+This is what I want to achieve.
+If I have some text that will be indexed like following:
+
+man, people, time out, sun
+
+and if I enter 'time' as a search word, I don't want to get "time out" in
+results. I need exact keyword matching. I would achieve this if I tokenize
+"time out" as one token while idexing.
+
+Maybe someone had similar problem? If someone knows how to handle this,
+please help me.
+
+Dragan Jotanovic
+
+

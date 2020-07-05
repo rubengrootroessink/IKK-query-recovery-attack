@@ -1,0 +1,83 @@
+FROM: cutt...@lucene.com
+SUBJECT: RE: Going through the hits while updating the index.
+DATE: 23 May 2002
+
+> From: Victor Hadianto
+> 
+> A bit of code might help illustrate my situation:
+> 
+> IndexSearcher searcher = new IndexSearcer(dir);
+> 
+> Hits hits = search.search(query);
+> 
+> for (int i = 0; i < hits.length(); i++) {
+> 
+> 	.... get the document and do modification here
+> 
+> 	IndexReader reader = new IndexReader(dir);
+> 	reader.delete(new Term("id", doc.get("id");
+> 	reader.close();
+> 
+> 	IndexWriter writer = new IndexWriter( ... );
+> 	writer.add(doc);
+> 	writer.close();
+> }
+> 
+> searcher.close();
+> 
+> Is this OK?
+
+Looks fine to me.
+
+The restrictions are that you can only have one of the following open at a
+time:
+  - a reader that you've done deletions on; or
+  - a writer
+The theme is that only one thing can modify an index at once, but many can
+read it.  So you can have as many readers open as you like that are not
+doing deletions while either a writer is open *or* another reader is open
+that is doing deletions.
+
+You could do this much more efficiently by iterating through the hits twice,
+once to do all the deletions on a single reader, then close that reader, and
+iterate through the hits again adding each to a single writer, something
+like:
+
+  IndexReader deleter = new IndexReader(dir);
+  Hits hits = search.search(query);
+  for (int i = 0; i < hits.length(); i++) {
+
+    ... get the document ..
+  
+    deleter.delete(new Term("id", doc.get("id");
+  }
+  deleter.close();
+
+  IndexWriter writer = new IndexWriter( ... );
+  Hits hits = search.search(query);
+  for (int i = 0; i < hits.length(); i++) {
+
+    ... get the document again, modify it ..
+    writer.add(doc);
+  }
+  writer.close();
+
+  searcher.close();
+
+Note that since the searcher is not re-opened, you are guaranteed to get the
+same results from the query.
+
+Or, instead of doing the search again, you could save all the documents in
+an array, and then add them in a second pass.  The point is that performing
+a bunch of deletions on a single reader object is *much* faster than opening
+and closing a new reader for each deletion, and performing a bunch of
+additions on a single writer object is *much* faster than opening and
+closing a new writer for each addition.
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

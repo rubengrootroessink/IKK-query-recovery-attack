@@ -1,0 +1,56 @@
+FROM: Li Li <fancye...@gmail.com>
+SUBJECT: Re: I send a email to lucene-dev solr-dev lucene-user but always failed
+DATE: 11 Mar 2011
+
+Problem of Replication Reservation Durationhi all,
+    I tried to send this mail to solr dev mail list but it tells me this is
+a spam. So I send it again and to lucene dev too.
+    The replication handler in solr 1.4 which we used seems to be a little
+problematic in some extreme situation.
+    The default reserve duration is 10s and can't modified by any method.
+      private Integer reserveCommitDuration =
+SnapPuller.readInterval("00:00:10");
+    The current implementation is: slave send a http
+request(CMD_GET_FILE_LIST) to ask server list current index files.
+    In the response codes of master, it will reserve this commit for 10s.
+      // reserve the indexcommit for sometime
+      core.getDeletionPolicy().setReserveDuration(version,
+reserveCommitDuration);
+   If the master's indexes are changed within 10s, the old version will not
+be deleted. Otherwise, the old version will be deleted.
+    slave then get the files in the list one by one.
+    considering the following situation.
+    Every mid-night we optimize the whole indexes into one single index, and
+every 15 minutes, we add new segments to it.
+    e.g. when the slave copy the large optimized indexes, it will cost more
+than 15 minutes. So it will fail to copy all files and
+retry 5 minutes later. But each time it will re-copy all the files into a
+new tmp directory. it will fail again and again as long as
+we update indexes within 15 minutes.
+    we can tack this problem by setting reserveCommitDuration to 20 minutes.
+But then because we update small number of
+documents very frequently, many useless indexes will be reserved and it's a
+waste of disk space.
+    Any one confronted the problem before and is there any solution for it?
+    We comes up a ugly solution like this: slave fetches files using
+multithreads. each file a thread. Thus master will open all the
+files that slave needs. As long as the file is opened. when master want to
+delete them, these files will be deleted. But the inode
+reference count is larger than 0.  Because reading too many files by master
+will decrease the ability of master. we want to use
+some synchronization mechanism to allow only 1 or 2 ReplicationHandler
+threads are doing CMD_GET_FILE command.
+    Is that solution feasible?
+
+2011/3/11 Li Li <fancyerii@gmail.com>
+
+> hi
+>     it seems my mail is judged as spam.
+>     Technical details of permanent failure:
+> Google tried to deliver your message, but it was rejected by the recipient
+> domain. We recommend contacting the other email provider for further
+> information about the cause of this error. The error that the other server
+> returned was: 552 552 spam score (5.1) exceeded threshold
+> (FREEMAIL_FROM,FS_REPLICA,HTML_MESSAGE,RCVD_IN_DNSWL_LOW,SPF_PASS,T_TO_NO_BRKTS_FREEMAIL
+> (state 18).
+

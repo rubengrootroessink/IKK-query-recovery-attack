@@ -1,0 +1,247 @@
+FROM: jian chen <chenjian1...@gmail.com>
+SUBJECT: Re: 'db' sandbox contribution update
+DATE: 18 Jan 2005
+
+Hi, Andi,
+
+I'd like to know when I use Lucene, normally under what condition I
+should use the db (berkeley db) directory instead of using the
+standard file system based directory?
+
+Could you please let me know some brief comparisons of using berkeley
+db vs. using file system and what is better?
+
+Thanks,
+
+Jian
+
+
+On Tue, 18 Jan 2005 13:26:16 -0800 (PST), Andi Vajda
+<andi@osafoundation.org> wrote:
+> 
+> With the release of Berkeley DB 4.3.x, Sleepycat radically changed the Java
+> API to C Berkeley DB. This is to announce that the updates to the DbDirectory
+> implementation I submitted were committed to the lucene sandbox at:
+>      http://cvs.apache.org/viewcvs.cgi/jakarta-lucene-sandbox/contributions/db
+> 
+> I also updated the 'Lucene in Action' samples that illustrate how to use this
+> Berkeley DB-based implementation of org.apache.lucene.store.Directory.
+> They are included below.
+> 
+> Andi..
+> 
+> /* ------- BerkeleyDbIndexer.java ------- */
+> 
+> package lia.tools;
+> 
+> import com.sleepycat.db.EnvironmentConfig;
+> import com.sleepycat.db.Environment;
+> import com.sleepycat.db.Transaction;
+> import com.sleepycat.db.Database;
+> import com.sleepycat.db.DatabaseConfig;
+> import com.sleepycat.db.DatabaseType;
+> import com.sleepycat.db.DatabaseException;
+> 
+> import java.io.File;
+> import java.io.IOException;
+> 
+> import org.apache.lucene.store.db.DbDirectory;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> 
+> public class BerkeleyDbIndexer {
+> 
+>      public static void main(String[] args)
+>          throws IOException, DatabaseException
+>      {
+>          if (args.length < 1)
+>          {
+>              System.err.println("Usage: BerkeleyDbIndexer <index dir> -create");
+>              System.exit(-1);
+>          }
+> 
+>          String indexDir = args[0];
+>          boolean create = args.length == 2 ? args[1].equals("-create") : false;
+>          File dbHome = new File(indexDir);
+> 
+>          if (!dbHome.exists())
+>              dbHome.mkdir();
+>          else if (create)
+>          {
+>              File[] files = dbHome.listFiles();
+> 
+>              for (int i = 0; i < files.length; i++)
+>                  if (files[i].getName().startsWith("__"))
+>                      files[i].delete();
+>          }
+> 
+>          EnvironmentConfig envConfig = new EnvironmentConfig();
+>          DatabaseConfig dbConfig = new DatabaseConfig();
+> 
+>          envConfig.setTransactional(true);
+>          envConfig.setInitializeCache(true);
+>          envConfig.setInitializeLocking(true);
+>          envConfig.setInitializeLogging(true);
+>          envConfig.setLogInMemory(true);
+>          envConfig.setAllowCreate(true);
+>          envConfig.setThreaded(true);
+>          dbConfig.setAllowCreate(true);
+>          dbConfig.setType(DatabaseType.BTREE);
+> 
+>          Environment env = new Environment(dbHome, envConfig);
+>          Transaction txn = null;
+>          Database index, blocks;
+> 
+>          try {
+>              txn = env.beginTransaction(null, null);
+>              index = env.openDatabase(txn, "__index__", null, dbConfig);
+>              blocks = env.openDatabase(txn, "__blocks__", null, dbConfig);
+>          } catch (DatabaseException e) {
+>              if (txn != null)
+>              {
+>                  txn.abort();
+>                  txn = null;
+>              }
+>              throw e;
+>          } finally {
+>              if (txn != null)
+>                  txn.commit();
+>              txn = null;
+>          }
+> 
+>          DbDirectory directory;
+>          IndexWriter writer;
+> 
+>          try {
+>              txn = env.beginTransaction(null, null);
+>              directory = new DbDirectory(txn, index, blocks);
+>              writer = new IndexWriter(directory, new StandardAnalyzer(), create);
+>              writer.setUseCompoundFile(false);
+> 
+>              Document doc = new Document();
+>              doc.add(Field.Text("contents", "The quick brown fox..."));
+>              writer.addDocument(doc);
+> 
+>              writer.optimize();
+>              writer.close();
+>          } catch (IOException e) {
+>              txn.abort();
+>              txn = null;
+>              throw e;
+>          } catch (DatabaseException e) {
+>              if (txn != null)
+>              {
+>                  txn.abort();
+>                  txn = null;
+>              }
+>              throw e;
+>          } finally {
+>              if (txn != null)
+>                  txn.commit();
+> 
+>              index.close();
+>              blocks.close();
+>              env.close();
+>          }
+> 
+>          System.out.println("Indexing Complete");
+>      }
+> }
+> 
+> /* ------- BerkeleyDbSearcher.java ------- */
+> 
+> package lia.tools;
+> 
+> import com.sleepycat.db.EnvironmentConfig;
+> import com.sleepycat.db.Environment;
+> import com.sleepycat.db.Transaction;
+> import com.sleepycat.db.Database;
+> import com.sleepycat.db.DatabaseException;
+> 
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.Hits;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.TermQuery;
+> import org.apache.lucene.store.db.DbDirectory;
+> 
+> import java.io.File;
+> import java.io.IOException;
+> 
+> public class BerkeleyDbSearcher {
+> 
+>      public static void main(String[] args)
+>          throws IOException, DatabaseException
+>      {
+>          if (args.length != 1)
+>          {
+>              System.err.println("Usage: BerkeleyDbSearcher <index dir>");
+>              System.exit(-1);
+>          }
+> 
+>          File dbHome = new File(args[0]);
+>          EnvironmentConfig envConfig = new EnvironmentConfig();
+> 
+>          envConfig.setTransactional(true);
+>          envConfig.setInitializeCache(true);
+>          envConfig.setInitializeLocking(true);
+>          envConfig.setInitializeLogging(true);
+>          envConfig.setLogInMemory(true);
+>          envConfig.setThreaded(true);
+> 
+>          Environment env = new Environment(dbHome, envConfig);
+>          Transaction txn = null;
+>          Database index, blocks;
+> 
+>          try {
+>              txn = env.beginTransaction(null, null);
+>              index = env.openDatabase(txn, "__index__", null, null);
+>              blocks = env.openDatabase(txn, "__blocks__", null, null);
+>          } catch (DatabaseException e) {
+>              if (txn != null)
+>              {
+>                  txn.abort();
+>                  txn = null;
+>              }
+>              throw e;
+>          } finally {
+>              if (txn != null)
+>                  txn.commit();
+>              txn = null;
+>          }
+> 
+>          DbDirectory directory;
+>          IndexSearcher searcher;
+> 
+>          try {
+>              txn = env.beginTransaction(null, null);
+>              directory = new DbDirectory(txn, index, blocks);
+>              searcher = new IndexSearcher(directory);
+> 
+>              Hits hits = searcher.search(new TermQuery(new Term("contents",
+>                                                                 "fox")));
+>              System.out.println(hits.length() + " documents found");
+>              searcher.close();
+>          } finally {
+>              if (txn != null)
+>                  txn.abort();
+> 
+>              index.close();
+>              blocks.close();
+>              env.close();
+>          }
+>      }
+> }
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

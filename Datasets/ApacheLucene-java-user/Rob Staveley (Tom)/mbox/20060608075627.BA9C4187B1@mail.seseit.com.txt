@@ -1,0 +1,302 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: RE: Compound / non-compound index files and SIGKILL
+DATE: 8 Jun 2006
+
+OK, I see it now. It all happens in DocumentWriter.invertDocument. I should
+have looked at the Lucene source.
+
+IndexWriter.addDocument -> DocumentWriter.addDocument ->
+DocumentWriter.invertDocument
+
+Many thanks, Chris. 
+
+Whom should I post to suggest adding a note to
+http://lucene.apache.org/java/docs/api/org/apache/lucene/document/Field.html
+#Field(java.lang.String,%20java.io.Reader) to say that the Reader is only
+actually read from when the document is added? Without internal knowledge,
+it isn't obvious. I can see others making the same mistake I did assuming
+that the Reader would have fulfilled its purpose when the call to the
+constructor returns.
+
+-----Original Message-----
+From: Rob Staveley (Tom) [mailto:rstaveley@seseit.com] 
+Sent: 08 June 2006 00:34
+To: java-user@lucene.apache.org
+Subject: RE: Compound / non-compound index files and SIGKILL
+
+> I'm not sure what exactly your process method is doing
+
+In essence it gets text from the content's input stream and writes it to the
+PipedWriter and hence to the PipedReader passed to the Field constructor.
+The process method for a plain text content handler simply copies from the
+input stream and writes to the PipedWriter, but the HTML handler goes
+through a few more hoops, involving 3rd party libraries. I favoured the
+Reader constructor because it avoided having to load large documents into
+RAM. 
+
+> It isn't until you add that document using IndexWriter.addDocument 
+> that
+anything is read from that Reader
+
+>>From what you are saying, my design is flawed, because the PipedWriter 
+>is
+necessarily closed before the document is added ("// Close the output stream
+to get the PipedReader to see EOF"). If reading only occurs during the
+document add, it can only works if the entire content is able to be held in
+the PipedReader's input buffer, which presumably would mean effectively
+having it all loaded in RAM. Bah! Perhaps that's my problem. If reading
+occurs during the document addition and not during the Field construction, I
+guess I need to use a temporary file, which I should delete after the
+document addition to avoid RAM overhead. The Pipe looked natty, but it was
+ill-conceived.
+
+-----Original Message-----
+From: Chris Hostetter [mailto:hossman_lucene@fucit.org]
+Sent: 07 June 2006 20:17
+To: java-user@lucene.apache.org
+Subject: RE: Compound / non-compound index files and SIGKILL
+
+: However, I'm not sure what to make of:
+: --------8<--------
+: Thread 3740: (state = BLOCKED)
+: - java.lang.Object.wait(long) @bci=0 (Interpreted frame)
+: - java.lang.Object.wait() @bci=2, line=474 (Compiled frame)
+: Error occurred during stack walking:
+: java.lang.NullPointerException
+: at sun.jvm.hotspot.runtime.Frame.addressOfStackSlot(Frame.java:214)
+
+crap.  i don't know what that means, but it certainly looks bad ... if the
+JVM can't make sense of your stack, i can't imagein how there would be any
+hope of your program recovering.
+
+: Does that mean that the PipedReader in the following might persist beyond
+: the scope of this code, and be read from only when the Lucene document is
+: added to the index?
+
+I'm not sure what exactly your process method is doing, but it is certainly
+true that Lucene won't do anything to read from that PipedReader in this
+code... all the new Field constructor willdo is hand on to a refrence to
+that reader, and all the Document.add call will do is hang on to a refrence
+to that Field.  It isn't until you add that document using
+IndexWriter.addDocument that anything is read from that Reader.
+
+That's acctually teh whole point of makinga Field from a Reader -- if you're
+slurping a big chunk of data off disk, or a network connectin or something,
+giving lucene a Reader allows you to pipeline the data all the way to the
+Analyzer without ever needinga fully copy of it in memory.
+
+Which means if the thing producing your data and streaming it to that
+PipedReader chokes and causes your app to crash, it will crash in the middle
+of of writing out your Document.
+
+try buffering all the data for each doc in memory as a String and building a
+Field with that -- it may not prevent your app from crashing (that soudns
+like a problem somewhere else in your code) but it may prevent your index
+from getting corrupt when it does crash.
+
+I say it "may" prevent it -- because if you are multithreading your app then
+there's no garuntee that one thread won't cause acrash while another thread
+is in the middle of writting data to your index.
+
+:
+: --------8<--------
+: 	final PipedWriter pw = new PipedWriter();
+: 	Thread t = new Thread() {
+: 		public void run() {
+: 			try {
+: 				// Index the body text in the Lucene
+: document,
+: 				// but do not store it
+: 				doc.add(
+: 					new Field(
+: 						"body"
+: 						,new PipedReader(pw)
+: 					)
+: 				);
+: 			}
+: 			catch (IOException e) {
+: 				e.printStackTrace();
+: 			}
+: 		}
+: 	};
+: 	t.start();
+:
+: 	// Process an input stream for the content handler.
+: 	// Tokens extracted from the stream are written to
+: 	// the piped writer and hence made available to the
+: 	// PipedReader used in the "body" field constructor.
+: 	process(is,pw);
+:
+: 	// Close the output stream to get the PipedReader to see EOF
+: 	pw.close();
+:
+: 	// Join the thread to wait for the field to be added to the
+: 	// document
+: 	t.join();
+:
+: 	// Now go on to add other fields (metadata), and then add
+: 	// the document to the index...
+: --------8<--------
+:
+:
+: -----Original Message-----
+: From: Chris Hostetter [mailto:hossman_lucene@fucit.org]
+: Sent: 06 June 2006 20:13
+: To: java-user@lucene.apache.org
+: Subject: RE: Compound / non-compound index files and SIGKILL
+:
+:
+: 1) have you tried forcing a threaddump of the JVM when it hangs to see
+what
+: it's doing?  (i don't remember which signal it is off the top of my head,
+: but even if it's not responding to SIGTERM it might respond to that)
+:
+: : SIGTERM. I guess I'd feel more confident about using SIGKILL, if I knew
+: that
+: : the uninterruptible hanged thread was creating a Document, which I could
+: : interrupt without corrupting the index, rather than adding the document
+to
+: : the index, which is liable to result in orphaned files and/or a
+corrupted
+: : index, if killed.
+:
+: 2) It's possible that the thread is doing both (creating and adding) at
+the
+: same time ... if you are Constructing documents using Fields that contain
+: Readers you get back from convertors which stream data from complex
+: documents as needed, then DocumentWriter may have started to write your
+: document, gotten to a Field with a Reader, and then your convertor may be
+: choking on something within the source document while it tries to stream
+: data to that Reader.
+:
+:
+: 	...just a theory.
+:
+:
+: : -----Original Message-----
+: : From: Volodymyr Bychkoviak [mailto:vbychkoviak@i-hypergrid.com]
+: : Sent: 06 June 2006 10:54
+: : To: java-user@lucene.apache.org
+: : Subject: Re: Compound / non-compound index files and SIGKILL
+: :
+: : If your content handlers should respond quickly then you should move
+: : indexing process to separate thread and maintain items in queue.
+: :
+: : Rob Staveley (Tom) wrote:
+: : > This is a real eye-opener, Volodymyr. Many thanks. I guess that means
+: : > that my orphan-producing hangs must be addDocument() calls, and not in
+: : > the content handlers, as I'd previously assumed. I'll put some debug
+: : > before and after my addDocument() calls to confirm (and point my
+: : > writer's infoStream to System.out).
+: : >
+: : > -----Original Message-----
+: : > From: Volodymyr Bychkoviak [mailto:vbychkoviak@i-hypergrid.com]
+: : > Sent: 05 June 2006 18:33
+: : > To: java-user@lucene.apache.org
+: : > Subject: Re: Compound / non-compound index files and SIGKILL
+: : >
+: : > Hi.
+: : > My five cents :)
+: : >
+: : > It might be helpful to know how lucene is working with compound files.
+: : > When segment is flushed to disk it is written uncompound and after
+: : > that is merged into single .cfs file. If you don't change default
+: : > setting for using compound files (which is on) this is only place (I
+: : > guess) for these files to appear.
+: : >
+: : > If you're working with large indexes, than merging segments can take a
+: : > while (Maybe here is your problem? :) ) (merging happens on
+: : > addDocument() call).  If you will kill indexing process during such
+: : > merge you'll get many orphaned files...
+: : >
+: : > You can just run optimize on this index. You'll get three files:
+: : > segments, deletable, <segment>.cfs; you can look name of segment in
+: : > 'segments' file. Everything else is 'garbage' - you can delete it.
+: : >
+: : >
+: : > Rob Staveley (Tom) wrote:
+: : >
+: : >> I've been indexing live data into a compound index from an MTA. I'm
+: : >> resolving a bunch of problems unrelated to Lucene (disparate hangs in
+: : >> my content handlers). When I get a hang, I typically need to kill my
+: : >> daemon, alas more often than not using kill -9 (SIGKILL).
+: : >>
+: : >> However, these SIGKILLs are leaving large temporary(?) files, which I
+: : >>
+: : > guess
+: : >
+: : >> are non-compound index files transiently extracted from the working
+: : >> .cfs
+: : >> files:
+: : >>
+: : >> -rw-r--r--    1  373138432 Jun  2 13:42 _18hup.fdt
+: : >> -rw-r--r--    1      5054464 Jun  2 13:42 _18hup.fdx
+: : >> -rw-r--r--    1              426 Jun  2 13:42 _18hup.fnm
+: : >>
+: : >> -rw-r--r--    1  457253888 Jun  2 09:22 _15djq.fdt
+: : >> -rw-r--r--    1      6205440 Jun  2 09:22 _15djq.fdx
+: : >> -rw-r--r--    1              426 Jun  2 09:21 _15djq.fnm
+: : >>
+: : >> They are left intact after restarting my daemon. Presumably they are
+: : >> not treated as being part of the compound index. I see no
+: : >> corresponding .cfs file for them.
+: : >>
+: : >> As a consequence of these - I suspect - I am getting a very large
+: : >> overall disk requirement for my index, presumably because of
+: : >> replicated field
+: : >>
+: : > data.
+: : >
+: : >> My guess is that the field data in the orphaned .fdt files needs to
+: : >> be regenerated.
+: : >>
+: : >> In another index directory from a previous test run (again with
+: : >> SIGKILLs),
+: : >>
+: : > I
+: : >
+: : >> have 98 GB of index files, with only 12 BG devoted to compound files
+: : >> for
+: : >>
+: : > the
+: : >
+: : >> field index (.cfs). The rest of the disk space is used by orphaned
+: : >> uncompounded index files; I see 51 GB devoted to uncompounded field
+: : >> data (.fdt), 13 BG devoted to term positions (.prx) and 13 BG devoted
+: : >> to term frequencies (.frq).
+: : >>
+: : >> Here's my question:
+: : >>
+: : >> How can I attempt to merge these orphaned into the compound index,
+: : >> using IndexWriter.addIndexes(), or would I be foolish attempting
+this?
+: : >>
+: : >>
+: : >
+: : >
+: :
+: : --
+: : regards,
+: : Volodymyr Bychkoviak
+: :
+: :
+:
+:
+:
+: -Hoss
+:
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+

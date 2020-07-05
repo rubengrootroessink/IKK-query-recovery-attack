@@ -1,0 +1,44 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Concurrency
+DATE: 20 Feb 2004
+
+Alan Smith wrote:
+> 1. What happens if i make a backup (copy) of an index while documents 
+> are being added? Can it cause problems, and if so is there a way to 
+> safely do this?
+
+This is not in general safe.  A copy may not be a usable index.  The 
+segments file points to the current set of files.  An IndexWriter 
+periodically rewrites the segments file, and then may delete files which 
+are no longer used.  If you copy the segments file, then, before you 
+copy all the files, the segments file is re-written and some files are 
+deleted, your copied index will be incoherent.  Or, vice versa, you 
+might copy the segments file last, and it may refer to newly created 
+files which you failed to copy.
+
+The safest way to do this is to use an IndexReader to make your backup, 
+with something like:
+
+   IndexReader reader = IndexReader.open("index");
+   IndexWriter writer = new IndexWriter("backup", analyzer, true);
+   writer.addIndexes(new IndexReader[] { reader });
+   writer.close();
+   reader.close();
+
+This will use Lucene's locking code to make sure all is safe.
+
+> 2. When I create a new IndexSearcher, what method does Lucene use to 
+> take a 'snapshot' of the index (because if i add documents after the 
+> search object is created they dont appear in the search results)?
+
+It keeps the existing set of files open.  As described above, Lucene 
+modifies an index by adding new files and removing old ones.  But an 
+open index never changes its set of files.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

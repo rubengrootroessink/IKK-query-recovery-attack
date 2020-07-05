@@ -1,0 +1,120 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Background merge hit exception
+DATE: 22 Sep 2008
+
+
+OK I found one path whereby optimize would detect that the  
+ConcurrentMergeScheduler had hit an exception while merging in a BG  
+thread, and correctly throw an IOException back to its caller, but  
+fail to set the root cause in that exception.  I just committed it, so  
+it should be fixed in 2.4:
+
+     https://issues.apache.org/jira/browse/LUCENE-1397
+
+Mike
+
+Michael McCandless wrote:
+
+>
+> vivek sar wrote:
+>
+>> Thanks Mike for the insight. I did check the stdout log and found it
+>> was complaining of not having enough disk space. I thought we need
+>> only x2 of the index size. Our index size is 10G (max) and we had 45G
+>> left on that parition - should it still complain of the space?
+>
+> Is there a reader open on the index while optimize is running?  That  
+> ties up potentially another 1X.
+>
+> Are you certain you're closing all previously open readers?
+>
+> On Linux, because the semantics is "delete on last close", it's hard  
+> to detect when you have IndexReaders still open because an "ls"  
+> won't show the deleted files, yet, they are still consuming bytes on  
+> disk until the last open file handle is closed.  You can try running  
+> "lsof" to see which files are held open, while optimize is running?
+>
+> Also, if you can call IndexWriter.setInfoStream(...) for all of the  
+> operations below, I can peak at it to try to see why it's using up  
+> so much intermediate disk space.
+>
+>> Some comments/questions on other issues you raised,
+>>
+>>
+>> We have 2 threads that index the data in two different indexes and
+>> then we merge them into a master index with following call,
+>>
+>>   masterWriter.addIndexesNoOptimize(indices);
+>>
+>> Once the smaller indices have merged into the master index we delete
+>> the smaller indices.
+>>
+>> This process runs every 5 minutes. Master Index can grow up to 10G
+>> before we partition it - move it to other directory and start a new
+>> master index.
+>>
+>> Every hour we then optimize the master index using,
+>>
+>>      writer.optimize(optimizeSegment);    //where optimizeSegment =  
+>> 10
+>
+> How long does that optimize take?  And what do you do with the  
+> every-5-minutes job while optimize is running?  Do you run it,  
+> anyway, sharing the same writer (ie you're calling  
+> addIndexesNoOptimize while another thread is running the optimize)?
+>
+>>
+>> Here are my questions,
+>>
+>> 1) Is this process flawed in terms of performance and efficiency?  
+>> What
+>> would you recommend?
+>
+> Actually I think your approach is the right approach.
+>>
+>> 2) When you say "partial optimize" what do you mean by that?
+>
+> Actually, it's what you're already doing (passing 10 to optimize).   
+> This means the index just has to reduce itself to <= 10 segments,  
+> instead of the normal 1 segment for a full optimize.
+>
+> Still I find that particular merge being done somewhat odd: it was  
+> merging 7 segments, the first of which was immense, and the final 6  
+> were tiny.  It's not an efficient merge to do.  Seeing the  
+> infoStream output might help explain what led to that...
+>
+>>
+>> 3) In Lucene 2.3 "segment merging is done in a background thread" -
+>> how does it work, ie, how does it know which segments to merge? What
+>> would cause this background merge exception?
+>
+> The selection of segments to merge, and when, is done by the  
+> LogByteSizeMergePolicy, which you can swap out for your own merge  
+> policy (should not in general be necessary).  Once a merge is  
+> selected, the execution of that merge is controlled by  
+> ConcurrentMergeScheduler, which runs merges in background threads.   
+> You can also swap that out (eg for SerialMergeScheduler, which uses  
+> the FG thread to merging, like Lucene used to before 2.3).
+>
+> I think the background merge exception is often disk full, but in  
+> general it can be anything that went wrong while merging.  Such  
+> exceptions won't corrupt your index because the merge only commits  
+> the changes to the index if it completes successfully.
+>
+>>
+>> 4) Can we turn off "background merge" if I'm running the optimize
+>> every hour in any case? How do we turn it off?
+>
+> Yes: IndexWriter.setMergeScheduler(new SerialMergeScheduler()) gets  
+> you back to the old (fg thread) way of running merges.  But in  
+> general this gets you worse net performance, unless you are already  
+> using multiple threads when adding documents.
+>
+> Mike
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,145 @@
+FROM: Tricia Williams <pgwil...@uwaterloo.ca>
+SUBJECT: Re: Payloads, Tokenizers, and Filters.  Oh My!
+DATE: 18 Nov 2007
+
+I apologize for cross-posting but  I believe both Solr and Lucene users 
+and developers should be concerned with this.  I am not aware of a 
+better way to reach both communities.
+
+In this email I'm looking for comments on:
+
+    * Do TokenFilters belong in the Solr code base at all?
+    * How to deal with TokenFilters that add new Tokens to the stream?
+    * How to patch TokenFilters and Tokenizers using the model of
+      LUCENE-969 in the Solr code base and in Lucene contrib?
+
+Earlier in this thread I identified that at least one TokenFilter is 
+eating Payloads (WordDelimiterFilter).
+
+Yonik pointed out:
+>> Yes, this will be an issue for many custom tokenizers that don't yet
+>> know about payloads but that create tokens.  It's not clear what to do
+>> in some cases when multiple tokens are created from one... should
+>> identical payloads be created for the new tokens... it depends on what
+>> the semantics of those payloads are.
+>>
+And I responded: 
+> I suppose that it is only fair to take this on a case by case basis.  
+> Maybe we will have to write new TokenFilters for each Tokenzier that 
+> uses Payloads (but I sure hope not!).  Maybe we can build some 
+> optional configuration options into the TokenFilter constructor that 
+> guide their behavior with regard to Payloads.  Maybe there is 
+> something stored in the TokenStream that dictates how the Payloads are 
+> handled by the TokenFilters.  Maybe there is no case where identical 
+> payloads would not be created for new tokens and we can just change 
+> the TokenFilter to deal with payloads directly in a uniform way. 
+
+I thought it might be useful to figure out which existing TokenFilters 
+need to know about Payloads.  To this end I have taken an inventory of 
+the TokenFilters out there.  I think it is fair to categorize them by 
+Add (A), Delete (D), Modify (M), Observe (O):
+
+*org.apache.solr.analysis.*HyphenatedWordsFilter, DM
+*org.apache.solr.analysis.*KeepWordFilter, D
+*org.apache.solr.analysis.*LengthFilter, D
+*org.apache.solr.analysis.*PatternReplaceFilter, M
+*org.apache.solr.analysis.*PhoneticFilter, AM
+*org.apache.solr.analysis.*RemoveDuplicatesTokenFilter, D
+*org.apache.solr.analysis.*SynonymFilter, ADM
+*org.apache.solr.analysis.*TrimFilter, M
+*org.apache.solr.analysis.*WordDelimiterFilter, AM
+*org.apache.lucene.analysis.*CachingTokenFilter, O
+*org.apache.lucene.analysis.*ISOLatin1AccentFilter, M
+*org.apache.lucene.analysis.*LengthFilter, D
+*org.apache.lucene.analysis.*LowerCaseFilter, M
+*org.apache.lucene.analysis.*PorterStemFilter, M
+*org.apache.lucene.analysis.*StopFilter, D
+*org.apache.lucene.analysis.standard*.StandardFilter, M*
+org.apache.lucene.analysis.br.*BrazilianStemFilter, M
+*org.apache.lucene.analysis.cn.*ChineseFilter, D*
+org.apache.lucene.analysis.de.*GermanStemFilter, M
+*org.apache.lucene.analysis.el.*GreekLowerCaseFilter, M
+*org.apache.lucene.analysis.fr.*ElisionFilter, M
+*org.apache.lucene.analysis.fr.*FrenchStemFilter, M
+*org.apache.lucene.analysis.ngram.*EdgeNGramTokenFilter, AM
+*org.apache.lucene.analysis.ngram.*NGramTokenFilter, AM
+*org.apache.lucene.analysis.nl.*DutchStemFilter, M
+*org.apache.lucene.analysis.ru.*RussianLowerCaseFilter, M
+*org.apache.lucene.analysis.ru.*RussianStemFilter, M
+*org.apache.lucene.analysis.th.*ThaiWordFilter, AM
+*org.apache.lucene.analysis.snowball.*SnowballFilter, M
+
+Some characteristics of Add (A), Delete (D), Modify (M), Observe (O)
+Add: new Token() and buffer of Tokens to consider before addressing 
+input.next()
+Delete: loop ignoring tokens based on some criteria
+Modify: new Token(), or use of Token set methods
+Observe: rare CachingTokenFilter
+
+The categories of TokenFilters that are affected by Payloads are add and 
+modify.  The default behavior of TokenFilters which only delete or 
+observe return the Token fed through intact, hence the Payload will 
+remain intact.
+
+Maybe the Lucene community has thought about this problem?  I noticed 
+that the org.apache.lucene.analysis TokenFilters in the modify category 
+(there are none in the add category) refrain from using new Token().  
+That led me to the comment in the JavaDocs:
+>
+> *NOTE:* As of 2.3, Token stores the term text internally as a 
+> malleable char[] termBuffer instead of String termText. The indexing 
+> code and core tokenizers have been changed re-use a single Token 
+> instance, changing its buffer and other fields in-place as the Token 
+> is processed. This provides substantially better indexing performance 
+> as it saves the GC cost of new'ing a Token and String for every term. 
+> The APIs that accept String termText are still available but a warning 
+> about the associated performance cost has been added (below). The 
+> |termText()| 
+> <http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/org/apache/lucene/analysis/Token.html#termText%28%29>
+
+> method has been deprecated.
+>
+> Tokenizers and filters should try to re-use a Token instance when 
+> possible for best performance, by implementing the 
+> |TokenStream.next(Token)| 
+> <http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/org/apache/lucene/analysis/TokenStream.html#next%28org.apache.lucene.analysis.Token%29>
+
+> API. Failing that, to create a new Token you should first use one of 
+> the constructors that starts with null text. Then you should call 
+> either |termBuffer()| 
+> <http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/org/apache/lucene/analysis/Token.html#termBuffer%28%29>
+
+> or |resizeTermBuffer(int)| 
+> <http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/org/apache/lucene/analysis/Token.html#resizeTermBuffer%28int%29>
+
+> to retrieve the Token's termBuffer. Fill in the characters of your 
+> term into this buffer, and finally call |setTermLength(int)| 
+> <http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/org/apache/lucene/analysis/Token.html#setTermLength%28int%29>
+
+> to set the length of the term text. See LUCENE-969 
+> <https://issues.apache.org/jira/browse/LUCENE-969> for details.
+>
+The patch mentioned modifies the Tokenizers and TokenFilters in the 
+Lucene core code base to abide by the suggestions made.  This would mean 
+that the TokenFilters in my modify category would have the default 
+behavior of the Payload of the modified Token remaining intact.  I would 
+argue that when/if the Solr community starts using Lucene 2.3 that a 
+similar patch should be created for the TokenFilters there but I wonder 
+if the TokenFilters belong in Solr's domain at all.  At some point the 
+TokenFilters and Tokenizers in the contrib sections of Lucene should 
+also be patched with the suggestions.
+
+If this occurs then we only have to consider the add case.  I don't 
+think we can avoid looking at this on a case by case basis, but most of 
+the add cases are providing alternate terms for the same position.  In 
+that case the payload would simply be copied to the new Token much like 
+the Token's positionIncrement.
+
+Thanks for your input,
+Tricia
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

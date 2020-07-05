@@ -1,0 +1,198 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Queries boost and scoring problems
+DATE: 15 Jun 2005
+
+The method Similarity.queryNorm() normalizes query term weights.  To 
+disable this you could define it to return 1.0 in your own Similarity 
+implementation.
+
+http://lucene.apache.org/java/docs/api/org/apache/lucene/search/Similarity.html#queryNorm(float)
+
+Doug
+
+Robichaud, Jean-Philippe wrote:
+> Ok, I know that usually, the scores returned by Lucene do not mean "really"
+> something.  But in my case, it does, I play with the similarity and bla bla
+> bla...  Now my concern is that the Query.setBoost() does not always seems to
+> affect the score.  I've built a simple test (code completely at the end) and
+> I have the following output.  I'm not using the Hits object but rather the
+> TopDocs, so that I can have access to the raw un-normalized score.  Query1
+> and query2 gets exactly the same score, while I was expecting that query2
+> would have half the score of query one.  Query3 seems to have been affected
+> by the query boost.  
+> 
+> Is it a "normal behaviour" ?  how can I know if the boost was applied or
+> not?  Even more, how can I "force" the score to be applied?  In this case, I
+> use the QueryParser in others, I create my own TermQuery and set a boost on
+> it. I have the same "problem" with my TermQueries, the boost just don't get
+> applied.  
+> 
+> Any clues?  This is a major showstopper for me...
+> 
+> Thanks, 
+> 
+> Jp
+> 
+> 
+> 
+> == OUTPUT ==
+> QUERY_1=labeltxt:post labeltxt:office
+> QUERY_2=(labeltxt:post labeltxt:office)^0.5
+> QUERY_3=labeltxt:post^0.5 labeltxt:office
+> 
+> score_1: 5.139783
+> score_2: 5.139783
+> score_3: 4.8512564
+> 
+> explanation for qlbl_1:main post office
+> 5.139783 = sum of:
+>   3.7358308 = weight(labeltxt:post in 28114), product of:
+>     0.85255265 = queryWeight(labeltxt:post), product of:
+>       8.763871 = idf(docFreq=16)
+>       0.097280376 = queryNorm
+>     4.3819356 = fieldWeight(labeltxt:post in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:post)=1)
+>       8.763871 = idf(docFreq=16)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+>   1.4039522 = weight(labeltxt:office in 28114), product of:
+>     0.52264136 = queryWeight(labeltxt:office), product of:
+>       5.372526 = idf(docFreq=504)
+>       0.097280376 = queryNorm
+>     2.686263 = fieldWeight(labeltxt:office in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:office)=1)
+>       5.372526 = idf(docFreq=504)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+> 
+> explanation for qlbl_2: main post office
+> 5.139783 = sum of:
+>   3.7358308 = weight(labeltxt:post in 28114), product of:
+>     0.85255265 = queryWeight(labeltxt:post), product of:
+>       8.763871 = idf(docFreq=16)
+>       0.097280376 = queryNorm
+>     4.3819356 = fieldWeight(labeltxt:post in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:post)=1)
+>       8.763871 = idf(docFreq=16)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+>   1.4039522 = weight(labeltxt:office in 28114), product of:
+>     0.52264136 = queryWeight(labeltxt:office), product of:
+>       5.372526 = idf(docFreq=504)
+>       0.097280376 = queryNorm
+>     2.686263 = fieldWeight(labeltxt:office in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:office)=1)
+>       5.372526 = idf(docFreq=504)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+> 
+> explanation for qlbl_3: main post office
+> 4.8512564 = sum of:
+>   2.7695916 = weight(labeltxt:post^0.5 in 28114), product of:
+>     0.63204753 = queryWeight(labeltxt:post^0.5), product of:
+>       0.5 = boost
+>       8.763871 = idf(docFreq=16)
+>       0.14423935 = queryNorm
+>     4.3819356 = fieldWeight(labeltxt:post in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:post)=1)
+>       8.763871 = idf(docFreq=16)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+>   2.081665 = weight(labeltxt:office in 28114), product of:
+>     0.7749297 = queryWeight(labeltxt:office), product of:
+>       5.372526 = idf(docFreq=504)
+>       0.14423935 = queryNorm
+>     2.686263 = fieldWeight(labeltxt:office in 28114), product of:
+>       1.0 = tf(termFreq(labeltxt:office)=1)
+>       5.372526 = idf(docFreq=504)
+>       0.5 = fieldNorm(field=labeltxt, doc=28114)
+> 
+> == Java Code ==
+> package testing;
+> 
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.queryParser.QueryParser;
+> import org.apache.lucene.search.DefaultSimilarity;
+> import org.apache.lucene.search.Explanation;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.Query;
+> import org.apache.lucene.search.TopDocs;
+> 
+> public class TestBoostQueries {
+> 
+>   public static void main(String[] args) {
+>     int maxSearchResults = 1;
+>     WhitespaceAnalyzer analyzer = new WhitespaceAnalyzer();
+>     try {
+>       IndexSearcher labelSearcher = new
+> IndexSearcher("/tmp/Approach2/indices/memphis_tn_labels");
+>       labelSearcher.setSimilarity(new DefaultSimilarity());
+>       
+>       Document dd_1,dd_2,dd_3;
+>       float score_1,score_2,score_3;
+>       float fact = 0.5f;
+>         
+>       Query  qlbl_1 = QueryParser.parse("post office","labeltxt",analyzer);
+> 
+>       Query  qlbl_2 = QueryParser.parse("post office","labeltxt",analyzer);
+>       qlbl_2.setBoost(fact);
+> 
+>       Query  qlbl_3 = QueryParser.parse("post^" +fact + "
+> office","labeltxt",analyzer);
+>       
+>       System.out.println("QUERY_1=" + qlbl_1.toString());
+>       System.out.println("QUERY_2=" + qlbl_2.toString());
+>       System.out.println("QUERY_3=" + qlbl_3.toString());
+>       
+>       TopDocs docs_1 = labelSearcher.search(qlbl_1,null,maxSearchResults);
+>       TopDocs docs_2 = labelSearcher.search(qlbl_2,null,maxSearchResults);
+>       TopDocs docs_3 = labelSearcher.search(qlbl_3,null,maxSearchResults);
+>       
+>       for(int j=0; j < docs_1.scoreDocs.length; j++) {
+>         dd_1 = labelSearcher.doc(docs_1.scoreDocs[j].doc);
+>         dd_2 = labelSearcher.doc(docs_2.scoreDocs[j].doc);
+>         dd_3 = labelSearcher.doc(docs_3.scoreDocs[j].doc);
+>         
+>         System.out.println();
+>         
+>         score_1 = docs_1.scoreDocs[j].score;
+>         score_2 = docs_2.scoreDocs[j].score;
+>         score_3 = docs_3.scoreDocs[j].score;
+> 
+>         System.out.println("score_1: " +score_1);
+>         System.out.println("score_2: " +score_2);
+>         System.out.println("score_3: " +score_3);
+>         System.out.println();
+>         
+>         Explanation ex_1 =
+> labelSearcher.explain(qlbl_1,docs_1.scoreDocs[j].doc);
+>         Explanation ex_2 =
+> labelSearcher.explain(qlbl_2,docs_2.scoreDocs[j].doc);
+>         Explanation ex_3 =
+> labelSearcher.explain(qlbl_2,docs_3.scoreDocs[j].doc);
+>         System.out.println("explanation for qlbl_1:" +
+> dd_1.get("labeltxt"));
+>         System.out.println(ex_1.toString());
+>         System.out.println("explanation for qlbl_2: " +
+> dd_2.get("labeltxt"));
+>         System.out.println(ex_2.toString());
+>         System.out.println("explanation for qlbl_3: " +
+> dd_3.get("labeltxt"));
+>         System.out.println(ex_3.toString());
+> 
+>       }
+>       
+>       
+>     } catch (Exception e) {
+>       e.printStackTrace();
+>     }
+>   }
+> }
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,183 @@
+FROM: "Murat Yakici" <Murat.Yak...@cis.strath.ac.uk>
+SUBJECT: Re: Using Payloads
+DATE: 25 Apr 2009
+
+
+
+Here is what I am doing, not so magical... There are two classes, an
+analyzer and an a TokenStream in which I can inject my document dependent
+data to be stored as payload.
+
+
+private PayloadAnalyzer panalyzer = new PayloadAnalyzer();
+
+    private class PayloadAnalyzer extends Analyzer {
+
+        private PayloadTokenStream payToken = null;
+        private int score;
+
+        public synchronized void setScore(int s) {
+            score=s;
+        }
+
+      public final TokenStream tokenStream(String field, Reader reader) {
+         payToken = new PayloadTokenStream(new LowerCaseTokenizer(reader));
+         payToken.setScore(score);
+         return payToken;
+        }
+    }
+
+    private class PayloadTokenStream extends TokenStream {
+
+        private Tokenizer tok = null;
+        private int score;
+
+        public PayloadTokenStream(Tokenizer tokenizer) {
+            tok = tokenizer;
+        }
+
+        public void setScore(int s) {
+            score = s;
+        }
+
+        public Token next(Token t) throws IOException {
+            t = tok.next(t);
+            if (t != null) {
+                //t.setTermBuffer("can change");
+                //Do something with the data
+                byte[] bytes = ("score:"+ score).getBytes();
+                t.setPayload(new Payload(bytes));
+            }
+            return t;
+        }
+
+        public void reset(Reader input) throws IOException {
+            tok.reset(input);
+        }
+
+        public void close() throws IOException {
+            tok.close();
+        }
+    }
+
+
+    public void doIndex() {
+        try {
+            File index = new File("./TestPayloadIndex");
+            IndexWriter iwriter = new IndexWriter(index,
+                     panalyzer,
+                     IndexWriter.MaxFieldLength.UNLIMITED);
+
+            Document d = new Document();
+            d.add(new Field("content",
+               "Everyone, someone, myTerm, yourTerm", Field.Store.YES,
+                Field.Index.ANALYZED, Field.TermVector.YES));
+            //We set the score for the term of the document that will be
+analyzed.
+            /*I was worried about this part - document dependent score
+which may be utilized*/
+            panalyzer.setScore(5);
+            iwriter.addDocument(d, panalyzer);
+            /*-----------------*/
+            ...
+            iwriter.commit();
+            iwriter.optimize();
+            iwriter.close();
+
+            //Now read the index
+            IndexReader ireader = IndexReader.open(index);
+            TermPositions tpos = ireader.termPositions(
+                                  new Term("content","myterm"));//Note
+LowercaseTokenizer
+            while (tpos.next()) {
+                int pos;
+                for(int i=0;i<tpos.freq();i++){
+                    pos=tpos.nextPosition();
+                    if (tpos.isPayloadAvailable()) {
+                        byte[] data = new byte[tpos.getPayloadLength()];
+                        tpos.getPayload(data, 0);
+                       //Utilise payloads;
+                    }
+                }
+            }
+
+            tpos.close();
+        } catch (CorruptIndexException ex) {
+           //
+        } catch (LockObtainFailedException ex) {
+            //
+        } catch (IOException ex) {
+            //
+        }
+    }
+
+I wish it was designed better... Please let me know if you guys have a
+better idea.
+
+Cheers,
+Murat
+
+> Dear Murat,
+>
+> I saw your question and wondered how did you implement these changes?
+> The requirement below are the same ones as I am trying to code now.
+> Did you modify the source code itself or only used Lucene's jar and just
+> override code?
+>
+> I would very much apprecicate if you could give me a short explanation on
+> how was it done.
+>
+> Thanks a lot,
+> Liat
+>
+> 2009/4/21 Murat Yakici <murat.yakici@cis.strath.ac.uk>
+>
+>> Hi,
+>> I started playing with the experimental payload functionality. I have
+>> written an analyzer which adds a payload (some sort of a score/boost)
+>> for
+>> each term occurance. The payload/score for each term is dependent on the
+>> document that the term comes from (I guess this is the typoical use
+>> case).
+>> So say term t1 may have a payload of 5 in doc1 and 34 in doc5. The
+>> parameter
+>> for calculating the payload changes after each
+>> indexWriter.addDocument(..)
+>> method call in a while loop. I am assuming that the
+>> indexWriter.addDocument(..) methods are thread safe. Can I confirm this?
+>>
+>> Cheers,
+>>
+>> --
+>> Murat Yakici
+>> Department of Computer & Information Sciences
+>> University of Strathclyde
+>> Glasgow, UK
+>> -------------------------------------------
+>> The University of Strathclyde is a charitable body, registered in
+>> Scotland,
+>> with registration number SC015263.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+
+Murat Yakici
+Department of Computer & Information Sciences
+University of Strathclyde
+Glasgow, UK
+-------------------------------------------
+The University of Strathclyde is a charitable body, registered in Scotland,
+with registration number SC015263.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,290 @@
+FROM: "Neeraj Gupta" <neeraj.gupt...@hewitt.com>
+SUBJECT: Re: Lucene 2.2, NFS, Lock obtain timed out
+DATE: 3 Jul 2007
+
+I think you should get  " NFS, Lock obtain timed out" Exception (that you 
+mentioned in subject line) , instead  of "java.io.FileNotFoundException:". 
+Because if one server is holding lock on the directory then other server 
+will wait till default LockTime Out and will throw Time out Exception 
+after that. Try setting locktimeout to writer instance, it might help.
+
+If you are getting file not found exception, then might be the case that 
+you are unlocking the index directory manually (from code or deleting lock 
+file manually), in this case if 2nd sever  will not be able to read the 
+indexes, first server has created.
+
+Cheers,
+Neeraj
+
+
+
+"Patrick Kimber" <mailing.patrick.kimber@gmail.com> 
+
+07/03/2007 04:16 PM
+Please respond to
+java-user@lucene.apache.org
+
+
+
+To
+java-user@lucene.apache.org
+cc
+
+Subject
+Re: Lucene 2.2, NFS, Lock obtain timed out
+
+
+
+
+
+
+Hi
+
+I am using the NativeFSLockFactory.  I was hoping this would have
+stopped these errors.
+
+Patrick
+
+On 03/07/07, Neeraj Gupta <neeraj.gupta.2@hewitt.com> wrote:
+> Hi
+>
+> this is the case where index create by one server is updated by other
+> server, results into index corruption. This exception occuring while
+> creating instance of Index writer because at the time of index writer
+> instance creation it checks if index exists or not, if you are not
+> creating a new Index. And it keeps the information with it, but when you
+> go to add some document, now the indexes has been modified by other
+> server. Now the previous and current state doesnt match and results into
+> exception.
+>
+> What kind of locking you are using? i think you should obey some kind of
+> locking algo so that till the time one server is updating the indexes,
+> other server should not interfere. Once a server finishes its updation
+> into the indexes, it should close all writers and reader to release all
+> the locking.
+>
+> The alternate solution to this problem is you can create seperate 
+indexes
+> for each server, this will help because only one thread will be updating
+> the indexes so there wont be any problem.
+>
+> Cheers,
+> Neeraj
+>
+>
+>
+>
+> "Patrick Kimber" <mailing.patrick.kimber@gmail.com>
+>
+> 07/03/2007 03:47 PM
+> Please respond to
+> java-user@lucene.apache.org
+>
+>
+>
+> To
+> java-user@lucene.apache.org
+> cc
+>
+> Subject
+> Re: Lucene 2.2, NFS, Lock obtain timed out
+>
+>
+>
+>
+>
+>
+> Hi
+>
+> I have added more logging to my test application.  I have two servers
+> writing to a shared Lucene index on an NFS partition...
+>
+> Here is the logging from one server...
+>
+> [10:49:18] [DEBUG] LuceneIndexAccessor closing cached writer
+> [10:49:18] [DEBUG] ExpirationTimeDeletionPolicy onCommit() delete
+> [segments_n]
+>
+> and the other server (at the same time):
+>
+> [10:49:18] [DEBUG] LuceneIndexAccessor opening new writer and caching it
+> [10:49:18] [DEBUG] IndexAccessProvider getWriter()
+> [10:49:18] [ERROR] DocumentCollection update(DocumentData)
+> com.company.lucene.LuceneIcmException: I/O Error: Cannot add the
+> document to the index.
+> [/mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_n (No
+> such file or directory)]
+>     at
+> 
+com.company.lucene.RepositoryWriter.addDocument(RepositoryWriter.java:182)
+>
+> I think the exception is being thrown when the IndexWriter is created:
+> new IndexWriter(directory, false, analyzer, false, deletionPolicy);
+>
+> I am confused... segments_n should not have been touched for 3 minutes
+> so why would a new IndexWriter want to read it?
+>
+> Here is the whole of the stack trace:
+>
+> com.company.lucene.LuceneIcmException: I/O Error: Cannot add the
+> document to the index.
+> [/mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_n (No
+> such file or directory)]
+>                  at
+> 
+com.company.lucene.RepositoryWriter.addDocument(RepositoryWriter.java:182)
+>                  at
+> com.company.lucene.IndexUpdate.addDocument(IndexUpdate.java:364)
+>                  at
+> com.company.lucene.IndexUpdate.addDocument(IndexUpdate.java:342)
+>                  at
+> com.company.lucene.IndexUpdate.update(IndexUpdate.java:67)
+>                  at
+> 
+com.company.lucene.icm.DocumentCollection.update(DocumentCollection.java:390)
+>                  at lucene.icm.test.Write.add(Write.java:105)
+>                  at lucene.icm.test.Write.run(Write.java:79)
+>                  at lucene.icm.test.Write.main(Write.java:43)
+>                  at sun.reflect.NativeMethodAccessorImpl.invoke0(Native
+> Method)
+>                  at
+> 
+sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:39)
+>                  at
+> 
+sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:25)
+>                  at java.lang.reflect.Method.invoke(Method.java:324)
+>                  at
+> org.codehaus.mojo.exec.ExecJavaMojo$1.run(ExecJavaMojo.java:271)
+>                  at java.lang.Thread.run(Thread.java:534)
+> Caused by: java.io.FileNotFoundException:
+> /mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_n (No such
+> file or directory)
+>                  at java.io.RandomAccessFile.open(Native Method)
+>                  at
+> java.io.RandomAccessFile.<init>(RandomAccessFile.java:204)
+>                  at
+> 
+org.apache.lucene.store.FSDirectory$FSIndexInput$Descriptor.<init>(FSDirectory.java:506)
+>                  at
+> 
+org.apache.lucene.store.FSDirectory$FSIndexInput.<init>(FSDirectory.java:536)
+>                  at
+> 
+org.apache.lucene.store.FSDirectory$FSIndexInput.<init>(FSDirectory.java:531)
+>                  at
+> org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:440)
+>                  at
+> org.apache.lucene.index.SegmentInfos.read(SegmentInfos.java:193)
+>                  at
+> 
+org.apache.lucene.index.IndexFileDeleter.<init>(IndexFileDeleter.java:156)
+>                  at
+> org.apache.lucene.index.IndexWriter.init(IndexWriter.java:626)
+>                  at
+> org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:573)
+>                  at
+> 
+com.subshell.lucene.indexaccess.impl.IndexAccessProvider.getWriter(IndexAccessProvider.java:68)
+>                  at
+> 
+com.subshell.lucene.indexaccess.impl.LuceneIndexAccessor.getWriter(LuceneIndexAccessor.java:171)
+>                  at
+> 
+com.company.lucene.RepositoryWriter.addDocument(RepositoryWriter.java:176)
+>                  ... 13 more
+>
+> Thank you very much for your previous comments and emails.
+>
+> Any help solving this issue would be appreciated.
+>
+> Patrick
+>
+>
+> On 30/06/07, Michael McCandless <lucene@mikemccandless.com> wrote:
+> >
+> > Patrick Kimber wrote:
+> >
+> > > I have been checking the application log.  Just before the time when
+> > > the lock file errors occur I found this log entry:
+> > > [11:28:59] [ERROR] IndexAccessProvider
+> > > java.io.FileNotFoundException:
+> > > /mnt/nfstest/repository/lucene/lucene-icm-test-1-0/segments_h75 (No
+> > > such file or directory)
+> > >     at java.io.RandomAccessFile.open(Native Method)
+> >
+> > I think this exception is the root cause.  On hitting this IOException
+> > in reader.close(), that means this reader has not released its write
+> > lock.  Is it possible to see the full stack trace?
+> >
+> > Having the wrong deletion policy or even a buggy deletion policy (if
+> > indeed file.lastModified() varies by too much across machines) can't
+> > cause this (I think).  At worse, the wrong deletion policy should
+> > cause other already-open readers to hit "Stale NFS handle"
+> > IOExceptions during searching.  So, you should use your
+> > ExpirationTimeDeletionPolicy when opening your readers if they will be
+> > doing deletes, but I don't think it explains this root-cause exception
+> > during close().
+> >
+> > It's a rather spooky exception ... in close(), the reader initializes
+> > an IndexFileDeleter which lists the directory and opens any segments_N
+> > files that it finds.
+> >
+> > Do you have a writer on one machine closing, and then very soon
+> > thereafter this reader on a different machine does deletes and tries
+> > to close?
+> >
+> > My best guess is the exception is happening inside that initialization
+> > because the directory listing said that "segments_XXX" exists but then
+> > when it tries to open that file, it does not in fact exist.  Since NFS
+> > client-side caching (especially directory listing cache) is not
+> > generally guaranteed to be "correct", it could explain this.  But 
+let's
+> > see the full stack trace to make sure this is it...
+> >
+> > Mike
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> The information contained in this e-mail and any accompanying documents 
+may contain information that is confidential or otherwise protected from 
+disclosure. If you are not the intended recipient of this message, or if 
+this message has been addressed to you in error, please immediately alert 
+the sender by reply e-mail and then delete this message, including any 
+attachments. Any dissemination, distribution or other use of the contents 
+of this message by anyone other than the intended recipient
+> is strictly prohibited.
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+ 
+The information contained in this e-mail and any accompanying documents may contain information
+that is confidential or otherwise protected from disclosure. If you are not the intended recipient
+of this message, or if this message has been addressed to you in error, please immediately
+alert the sender by reply e-mail and then delete this message, including any attachments.
+Any dissemination, distribution or other use of the contents of this message by anyone other
+than the intended recipient 
+is strictly prohibited.
+
+
+

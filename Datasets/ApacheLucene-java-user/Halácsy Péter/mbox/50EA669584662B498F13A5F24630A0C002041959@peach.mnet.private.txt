@@ -1,0 +1,68 @@
+FROM: Halácsy Péter <halacsy.pe...@axelero.com>
+SUBJECT: CachedSearcher
+DATE: 15 Jul 2002
+
+Hello!
+A lot of people requested a code to cache opened Searcher objects until the index is not modified.
+The first version of this was writed by Scott Ganyo and submitted as IndexAccessControl to
+the list.
+
+Now I've decoupled the logic that is needed to manage searher.
+
+The usage is very simple:
+IndexSearcherCache isc = new IndexSearcherCache(new File("/path/to/the/index"));
+for(int i= 0; i++; i< 100) {
+  Searcher searcher = isc.getSearcher();
+  // search here
+  searcher.close();
+}
+
+only one Searcher will be opened here if no other thread is writing the index; if the index
+was modified getSearcher() will close the old one and create a new.
+
+
+Unfortunatly to compile and use this code one has to modify the lucene source: 
+
+1. change all package-protected abstract method to public in Searcher.java
+
+  /** Frees resources associated with this Searcher. */
+  abstract public void close() throws IOException;
+
+  abstract int docFreq(Term term) throws IOException;
+  abstract int maxDoc() throws IOException;
+  abstract TopDocs search(Query query, Filter filter, int n)
+       throws IOException;
+
+
+  /** Frees resources associated with this Searcher. */
+  public abstract  void close() throws IOException;
+
+  public abstract int docFreq(Term term) throws IOException;
+  public abstract int maxDoc() throws IOException;
+  public abstract TopDocs search(Query query, Filter filter, int n)
+       throws IOException;
+
+2 change package protected TopDocs to public (in TopDocs.java)
+final class TopDocs {  --> public final class TopDocs {
+
+
+Or you can use the modified files I've attached.
+
+I hope this code is helpful. 
+
+The main idea to have an interface SearcherSource something similar to DataSource in javax.sql.
+SearcherSource is responsible for creating searcher object. One implementation is SearcherCache
+that encapsulates the logic of caching searcher. IndexSearcherCache - as you might figure
+out - can cache IndexSearcher objects. Someone could implement a MultiSearcherCache class
+that manages... (recreates the searcher if one of the searchers need reopening).
+
+I create IndexSearcherCache in my init method and pass the object as a SearcherSource to the
+working methods. In the destroy process I call release() method. In this way I can later change
+the implementation of the cache as far as it implementing SearcherSource.
+
+peter
+
+ps: of cource you can change the code, class/method/package/.. names; 
+Unfortunatly a lot of System.out.println debugging code is used but it is very good to understand
+the behaviour.
+

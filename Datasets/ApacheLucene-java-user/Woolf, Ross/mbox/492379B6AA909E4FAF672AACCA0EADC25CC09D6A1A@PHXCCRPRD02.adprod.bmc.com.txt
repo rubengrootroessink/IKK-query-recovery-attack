@@ -1,0 +1,324 @@
+FROM: "Woolf, Ross" <Ross_Wo...@BMC.com>
+SUBJECT: RE: IndexWriter and memory usage
+DATE: 29 Apr 2010
+
+I ported the patch to 2.9.2 dev but it did not seem to help.  Attached is my port of the patch.
+ This patch contains both 2283 and 2387, both of which I have applied in trying to resolving
+this issue.
+
+-----Original Message-----
+From: Michael McCandless [mailto:lucene@mikemccandless.com]
+Sent: Tuesday, April 27, 2010 4:40 AM
+To: java-user@lucene.apache.org
+Subject: Re: IndexWriter and memory usage
+
+Oooh -- I suspect you are hitting this issue:
+
+    https://issues.apache.org/jira/browse/LUCENE-2283
+
+Your 3rd image ("fdt") jogged my memory on this one.  Can you try
+testing the trunk JAR from after that issue landed?  (Or, apply that
+patch against 3.0.x -- let me know if it does not apply cleanly and
+I'll try to back port it).
+
+But: it's spooky that you cannot repro this issue in your dev
+environment.  Are you matching the # thread and exact sequence of
+docs?
+
+Mike
+
+On Mon, Apr 26, 2010 at 4:14 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+> We are still plagued by this issue.  I tried applying the patch mentioned but this did
+not resolve the issue.
+>
+> I once tried to attach images from the heap dump to send out to the group but the server
+removed them so I have posted the images on a public service with links this time.  I would
+appreciate someone looking at them to see if they provide any insight into what is occurring
+with this issue.
+>
+> When you follow the link click on the image and then once you see the image click on
+a link in the lower left hand corner that says "View Raw Image."  This will let you view the
+images at 100% resolution.
+>
+> This first image shows what we are seeing within VisualVM in regards to the memory. 
+As you can see, over time the memory gets consumed.  Finally we are at a point where there
+is no more memory available.
+> Graph
+> http://tinypic.com/view.php?pic=2ltk0h3&s=5
+>
+> This second image in VisualVM shows the classes sorted by size.  As you can see, about
+70% of all memory is consumed in the bytes array.
+> Bytes
+> http://tinypic.com/view.php?pic=s10mqs&s=5
+>
+> This third image is where the real info is.  This is where one of the bytes is being
+examined and the option to go to nearest GC is chosen.  What you see here is what the majority
+of the bytes show if selected, so this one is representative of most all.  As you can see
+this one byte is associated with the index writer as you look at the chain of objects (and
+thus so too are all the other bytes that have not been released for GC).
+> Garbage Collection
+> http://tinypic.com/view.php?pic=5obalj&s=5
+>
+> I'm hoping that as you look at this that it might mean something to you or give you a
+clue as to what is holding on to all the memory.
+>
+> Now the mysterious thing in all of this is that our use of Lucene has been developed
+into a "plug-in" that we use within an application that we have.  If I just run JUnit tests
+around this plugin, indexing some of the same files that the actual application is indexing,
+I cannot ever get the memory loss in my dev environment.  Everything seems to work as expected.
+ However, once we are in our real situation, then we see this behavior.  Because of this I
+would expect that the problem lays with the application, but once we examine the heap dumps
+it then goes back to showing that the consumed bytes are "owned" by the index writer process.
+ It makes no sense to me that we see this as we do, but none the less we do.  We see that
+the Index Writer process is hanging onto a lot of data in byte arrays and it doesn't ever
+seam to release it.
+>
+> In addition, we would love to show this to someone via a webex if that would help in
+seeing what is going on.
+>
+> Please, any help appreciated and any suggestions on how to resolve or even troubleshoot.
+ I can provide an actual heap dump but it is 63mb in size (compressed) so we would need to
+work out some FTP where we can provide it if someone is willing to look at it in VisualVM
+(or any other profiling tool).
+>
+> BTW - If we open and close the index writer on a regular basis then we don't run into
+this problem.  It is only when we run continuously with an open index writer that we do see
+this problem (we altered the code to open/close the writer a lot, but this slows things down,
+so we don't want to run like this, but we wanted to test the behavior if we did so).
+>
+> Thanks,
+> Ross
+>
+> -----Original Message-----
+> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Sent: Wednesday, April 14, 2010 2:52 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: IndexWriter and memory usage
+>
+> Run this:
+>
+>    svn co https://svn.apache.org/repos/asf/lucene/java/branches/lucene_2_9
+> lucene.29x
+>
+> Then apply the patch, then, run "ant jar-core", and in that should
+> create the lucene-core-2.9.2-dev.jar.
+>
+> Mike
+>
+> On Wed, Apr 14, 2010 at 1:28 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>> How do I get to the 2.9.x branch?  Every link I take from the Lucene site takes me
+to the trunk which I assume is the 3.x version.  I've tried to look around svn but can't find
+anything labeled 2.9.x.  Is there a daily build of 2.9.x or do I need to build it myself.
+ I would like to try out the fix you put into it, but I'm not sure where I get it from.
+>>
+>> -----Original Message-----
+>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Sent: Wednesday, April 14, 2010 4:12 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: IndexWriter and memory usage
+>>
+>> It looks like the mailing list software stripped your image attachments...
+>>
+>> Alas these fixes are only committed on 3.1.
+>>
+>> But I just posted the patch on LUCENE-2387 for 2.9.x -- it's a tiny
+>> fix.  I think the other issue was part of LUCENE-2074 (though this
+>> issue included many other changes) -- Uwe can you peel out just a
+>> 2.9.x patch for resetting JFlex's zzBuffer?
+>>
+>> You could also try switching analyzers (eg to WhitespaceAnalyzer) to
+>> see if in fact LUCENE-2074 (which affects StandandAnalyzer, since it
+>> uses JFlex) is [part of] your problem.
+>>
+>> Mike
+>>
+>> On Tue, Apr 13, 2010 at 6:42 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>>> Since the heap dump was so big and can't be attached, I have taken a few screen
+shots from Java VisualVM of the heap dump.  In the first image you can see that at the time
+our memory has become very tight most of it is held up in bytes.  In the second image I examine
+one of those instances and navigate to the nearest garbage collection root.  In looking at
+very many of these objects, they all end up being instantiated through the IndexWriter process.
+>>>
+>>> This heap dump is the same one correlating to the infoStream that was attached
+in a prior message.  So while the infoStream shows the buffer being flushed, what we experience
+is that our memory gets consumed over time by these bytes in the IndexWriter.
+>
+>>>
+>>> I wanted to provide these images to see if they might correlate to the fixes
+mentioned below.  Hopefully those fixes mentioned below have rectified this problem.  And
+as I state in the prior message, I'm hoping these fixes are in a 2.9x branch and hoping for
+someone to point me to where I can get those fixes to try out.
+>>>
+>>> Thanks
+>>>
+>>> -----Original Message-----
+>>> From: Woolf, Ross [mailto:Ross_Woolf@BMC.com]
+>>> Sent: Tuesday, April 13, 2010 1:29 PM
+>>> To: java-user@lucene.apache.org
+>>> Subject: RE: IndexWriter and memory usage
+>>>
+>>> Are these fixes in 2.9x branch?  We are using 2.9x and can't move to 3x just
+yet.  If so, where do I specifically pick this up from?
+>>>
+>>> -----Original Message-----
+>>> From: Lance Norskog [mailto:goksron@gmail.com]
+>>> Sent: Monday, April 12, 2010 10:20 PM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Re: IndexWriter and memory usage
+>>>
+>>> There is some bugs where the writer data structures retain data after
+>>> it is flushed. They are committed as of maybe the past week. If you
+>>> can pull the trunk and try it with your use case, that would be great.
+>>>
+>>> On Mon, Apr 12, 2010 at 8:54 AM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>>>> I was on vacation last week so just getting back to this...  Here is the
+info stream (as an attachment).  I'll see what I can do about reducing the heap dump (It was
+supplied by a colleague).
+>>>>
+>>>>
+>>>> -----Original Message-----
+>>>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>>>> Sent: Saturday, April 03, 2010 3:39 AM
+>>>> To: java-user@lucene.apache.org
+>>>> Subject: Re: IndexWriter and memory usage
+>>>>
+>>>> Hmm why is the heap dump so immense?  Normally it contains the top N
+>>>> (eg 100) object types and their count/aggregate RAM usage.
+>>>>
+>>>> Can you attach the infoStream output to an email (to java-user)?
+>>>>
+>>>> Mike
+>>>>
+>>>> On Fri, Apr 2, 2010 at 5:28 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>>>>> I have this and the heap dump is 63mb zipped.  The info stream is much
+smaller (31 kb zipped), but I don't know how to get them to you.
+>>>>>
+>>>>> We are not using the NRT readers
+>>>>>
+>>>>> -----Original Message-----
+>>>>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>>>>> Sent: Thursday, April 01, 2010 5:21 PM
+>>>>> To: java-user@lucene.apache.org
+>>>>> Subject: Re: IndexWriter and memory usage
+>>>>>
+>>>>> Hmm, not good.  Can you post a heap dump?  Also, can you turn on
+>>>>> infoStream, index up to the OOM @ 512 MB, and post the output?
+>>>>>
+>>>>> IndexWriter should not hang onto much beyond the RAM buffer.  But, it
+>>>>> does allocate and then recycle this RAM buffer, so even in an idle
+>>>>> state (having indexed enough docs to fill up the RAM buffer at least
+>>>>> once) it'll hold onto those 16 MB.
+>>>>>
+>>>>> Are you using getReader (to get your NRT readers)?  If so, are you
+>>>>> really sure you're eventually closing the previous reader after
+>>>>> opening a new one?
+>>>>>
+>>>>> Mike
+>>>>>
+>>>>> On Thu, Apr 1, 2010 at 6:58 PM, Woolf, Ross <Ross_Woolf@bmc.com>
+wrote:
+>>>>>> We are seeing a situation where the IndexWriter is using up the Java
+Heap space and only releases memory for garbage collection upon a commit.   We are using the
+default RAMBufferSize of 16 mb.  We are using Lucene 2.9.1. We are set at heap size of 512
+mb.
+>>>>>>
+>>>>>> We have a large number of documents that are run through Tika and
+then added to the index.  The data from Tika is changed to a string, and then sent to Lucene.
+ Heap dumps clearly show the data in the Lucene classes and not in Tika.  Our intent is to
+only perform a commit once the entire indexing run is complete, but several hours into the
+process everything comes to a crawl.  In using both JConsole and VisualVM  we can see that
+the heap space is maxed out and garbage collection is not able to clean up any memory once
+we get into this state.  It is our understanding that the IndexWriter should be only holding
+onto 16 mb of data before it flushes it, but what we are seeing is that while it is in fact
+writing data to disk when it hits the 16 mb limit, it is also holding onto some data in memory
+and not allowing garbage collection to take place, and this continues until garbage collection
+is unable to free up enough space to all things to move faster than a crawl.
+>>>>>>
+>>>>>> As a test we caused a commit to occur after each document is indexed
+and we see the total amount of memory reduced from nearly 100% of the Java Heap to around
+70-75%.  The profiling tools now show that the memory is cleaned up to some extent after each
+document.  But of course this completely defeats the whole reason why we want to only commit
+at the end of the run for performance sake.  Most of the data, as seen using Heap analasis,
+is held in Byte, Character, and Integer classes whos GC roots are tied back to the Writer
+Objects and threads.  The instance counts, after running just 1,100 documents seems staggering
+>>>>>>
+>>>>>> Is there additional data that the IndexWriter hangs onto regardless
+of when it hits the RAMBufferSize limit?  Why are we seeing the heap space all being used
+up?
+>>>>>>
+>>>>>> A side question to this is the fact that we always see a large amount
+of memory used by the IndexWriter even after our indexing has been completed and all commits
+have taken place (basically in an idle state).  Why would this be?  Is the only way to totally
+clean up the memory is to close the writer?  Our index is also used for real time indexing
+so the IndexWriter is intended to remain open for the lifetime of the app.
+>>>>>>
+>>>>>> Any help in understanding why the IndexWriter is maxing out our heap
+space or what is expected from memory usage of the IndexWriter would be appreciated.
+>>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>
+>>>
+>>>
+>>> --
+>>> Lance Norskog
+>>> goksron@gmail.com
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

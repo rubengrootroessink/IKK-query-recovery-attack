@@ -1,0 +1,198 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Phrase search using quotes -- special Tokenizer
+DATE: 5 Sep 2006
+
+
+1) consider using JUnit tests .. it makes it a lot easier for other people
+to understand your expecations, and if it winds up demonstraing a genuine
+bug in Lucene, it's easy to add to the test tree.
+
+2) as i said before, your fields must be TOKENIZED, or your analyzer is
+irrelevant at index time.
+
+3) when i run the code you sent as is, i get lots of "Test passed" lines
+and no "TEST FAILED" lines ... which makes sense since you have everything
+UN_TOKENIZED, so the literal values are getting indexed, which just so
+happens to be what KeywwordAnalyzer does as well -- hence if you change
+everything from UN_TOKENIZED to TOKENIZED it will still work.
+
+
+do you have na example of something that *isn't* working the way you want?
+... if not i don't see what your problem is, all your tests are passing :)
+
+
+: Date: Tue, 5 Sep 2006 14:06:13 -0700 (PDT)
+: From: Philip Brown <pmb@us.ibm.com>
+: Reply-To: java-user@lucene.apache.org
+: To: java-user@lucene.apache.org
+: Subject: Re: Phrase search using quotes -- special Tokenizer
+:
+:
+: Here's a little sample program (borrowed some code from Erick Erickson :)).
+: Whether I add as TOKENIZED or UN_TOKENIZED seems to make no difference in
+: the output.  Is this what you'd expect?
+:
+: - Philip
+:
+: package com.test;
+:
+: import java.io.IOException;
+: import java.util.HashSet;
+: import java.util.regex.Pattern;
+:
+: import org.apache.lucene.analysis.Analyzer;
+: import org.apache.lucene.analysis.KeywordAnalyzer;
+: import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+: import org.apache.lucene.analysis.standard.StandardAnalyzer;
+: import org.apache.lucene.document.Document;
+: import org.apache.lucene.document.Field;
+: import org.apache.lucene.index.IndexWriter;
+: import org.apache.lucene.index.memory.PatternAnalyzer;
+: import org.apache.lucene.queryParser.QueryParser;
+: import org.apache.lucene.search.Hits;
+: import org.apache.lucene.search.IndexSearcher;
+: import org.apache.lucene.search.Query;
+: import org.apache.lucene.store.RAMDirectory;
+:
+: public class Test2 {
+: 	    private PerFieldAnalyzerWrapper analyzer = null;
+: 	    private RAMDirectory idx = null;
+:
+: 	    private Analyzer getAnalyzer() {
+: 	        if (analyzer == null) {
+: 	        	analyzer = new PerFieldAnalyzerWrapper(new StandardAnalyzer());
+: 	        	analyzer.addAnalyzer("keyword", new KeywordAnalyzer());
+: 	        }
+: 	        return analyzer;
+:
+: 	    }
+:
+: 	    private void makeTestIndex() throws Exception {
+: 			idx = new RAMDirectory();
+: 	        IndexWriter writer = new IndexWriter(idx, getAnalyzer(), true);
+: 			Document doc = new Document();
+: 			doc.add(new Field("keyword", "hello world", Field.Store.YES,
+: Field.Index.UN_TOKENIZED));
+: 			doc.add(new Field("booleanField", "false", Field.Store.YES,
+: Field.Index.UN_TOKENIZED));
+: 			writer.addDocument(doc);
+: 			doc = new Document();
+: 			doc.add(new Field("keyword", "hello world", Field.Store.YES,
+: Field.Index.UN_TOKENIZED));
+: 			doc.add(new Field("booleanField", "true", Field.Store.YES,
+: Field.Index.UN_TOKENIZED));
+: 			writer.addDocument(doc);
+: System.out.println(writer.docCount());
+: 			writer.optimize();
+: 			writer.close();
+: 	    }
+:
+: 	    private void doSearch(String query, int expectedHits) throws Exception
+: {
+: 	        try {
+: 	            QueryParser qp = new QueryParser("keyword", getAnalyzer());
+: 	            IndexSearcher srch = new IndexSearcher(idx);
+: 	            Query tmp = qp.parse(query);
+: 	            // Uncomment to see parsed form of query
+: 	             System.out.println("Parsed form is '" + tmp.toString() + "'");
+: 	            Hits hits = srch.search(tmp);
+:
+: 	            String msg = "";
+:
+: 	            if (hits.length() == expectedHits) {
+: 	                msg = "Test passed ";
+: 	            } else {
+: 	                msg = "************TEST FAILED************ ";
+: 	            }
+: 	            System.out.println(msg + "Expected "
+: 	                    + Integer.toString(expectedHits) + " hits, got "
+: 	                    + Integer.toString(hits.length()) + " hits");
+:
+: 	        } catch (IOException e) {
+: 	            System.out.println("Caught IOException");
+: 	            e.printStackTrace();
+: 	        }
+: 	    }
+:
+:
+: 	    public static void main(String[] args) {
+: 	        try {
+: 	            Test2 test = new Test2();
+: 	            test.makeTestIndex();
+: 	            test.doSearch("Hello World", 0);
+: 	            test.doSearch("hello world", 0);
+: 	            test.doSearch("hello", 0);
+: 	            test.doSearch("world", 0);
+:
+: 	            test.doSearch("\"Hello World\"", 0);
+: 	            test.doSearch("\"hello world\"", 2);
+: 	            test.doSearch("\"hello world\" +booleanField:false", 1);
+: 	            test.doSearch("\"hello world\" +booleanField:true", 1);
+:
+: 	        } catch (Exception e) {
+: 	            System.err.println(e.getMessage());
+: 	        }
+: 	    }
+: }
+:
+:
+: Chris Hostetter wrote:
+: >
+: >
+: > : So, if I do as you suggest below (using PerFieldAnalyzerWrapper with
+: > : StandardAnalyzer) then I still need to enclose in quotes the phrases
+: > : (keywords with spaces) when I issue the search, and they are only
+: > returned
+: >
+: > Yes, quotes will be neccessary to tell the QueryParser "this
+: > is one chunk of text, passs it to the analyzer whole" - but that's so you
+: > can get the "compelx" part of the problem you described... recognizing
+: > that "my brown-cow" and "red fox" should be matched as seperate values
+: > intead of trying to find one big vlaue containing "my brown-cow red fox"
+: >
+: > : in the results if the case is identical to how it was added?  (This
+: > seems to
+: > : be what I observe anyway.  And whether I add as TOKENIZED or
+: > UN_TOKENIZED
+: > : seems to have no effect.)
+: >
+: > 1) wether case matters is determined enitrely by your analyzer, if it
+: >    produces differnet tokens for "Blue" and "BLUE" then case matters
+: > 2) use TOKENIZED or your Analyzer will be completely irrelevant
+: > 3) if you observse something working differently then you expect, post the
+: >   code -- we're way pastthe point of being able to offer you any
+: >   meaningful help without seeing a self contained example of what you want
+: >   to see work.
+: >
+: >
+: >
+: > -Hoss
+: >
+: >
+: > ---------------------------------------------------------------------
+: > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: > For additional commands, e-mail: java-user-help@lucene.apache.org
+: >
+: >
+: >
+:
+: --
+: View this message in context: http://www.nabble.com/Phrase-search-using-quotes----special-Tokenizer-tf2200760.html#a6160316
+: Sent from the Lucene - Java Users forum at Nabble.com.
+:
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

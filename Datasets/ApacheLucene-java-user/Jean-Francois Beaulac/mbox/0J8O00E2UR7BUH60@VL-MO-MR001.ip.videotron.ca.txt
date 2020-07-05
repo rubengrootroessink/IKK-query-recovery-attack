@@ -1,0 +1,173 @@
+FROM: Jean-Francois Beaulac <jean-francois.beau...@beetext.com>
+SUBJECT: RE: IndexReader.getTermFreqVectors() throws Read past EOF exception
+DATE: 13 Nov 2006
+
+Hi,
+
+Here is more information on the problem
+
+My code is pretty straightforward:
+- I create 1 IndexSearcher per index using the constructor : public IndexSearcher(Directory
+directory)
+- Add the IndexSearcher to an array (IndexSearcher[])
+- Instanciate a MultiSearcher using the array: MultiSearcher multi = new MultiSearcher(searcherArray);
+- Then I call Hits searchHits = multi.search(luceneQuery);
+- After that I loop on my hits, and use:
+
+((IndexSearcher)multi.getSearchables()[multi.subSearcher(searchHits.id(k))]).
+getIndexReader().getTermFreqVectors(searchHits.id(k))
+
+to get each TermFreqVectors. (variable k is the index of my loop on the hits).
+
+
+
+I added some debug to the refill() method in the class org.apache.lucene.store.BufferedIndexInput
+
+    private void refill() throws IOException {
+        long start = bufferStart + bufferPosition;
+        System.out.println("LUCENE--> start=" + bufferStart +" + " + bufferPosition);
+        long end = start + BUFFER_SIZE;
+        System.out.println("LUCENE--> end=" + start +" + " + BUFFER_SIZE);
+        
+        if (end > length())				  // don't read past EOF
+            end = length();
+        System.out.println("LUCENE--> length()=" + length());        
+        bufferLength = (int)(end - start);
+        System.out.println("LUCENE--> bufferLength=" + end +" - " + start);
+        
+        if (bufferLength <= 0)
+            throw new IOException("read past EOF");
+        
+        if (buffer == null)
+            buffer = new byte[BUFFER_SIZE];		  // allocate buffer lazily
+        readInternal(buffer, 0, bufferLength);
+        
+        bufferStart = start;
+        bufferPosition = 0;
+    }
+
+Here's the resulting output:
+
+
+LUCENE--> start=668 + 0
+LUCENE--> end=668 + 1024
+LUCENE--> length()=436
+LUCENE--> bufferLength=436 - 668
+[Exception thrown here]
+
+LUCENE--> start=724 + 0
+LUCENE--> end=724 + 1024
+LUCENE--> length()=436
+LUCENE--> bufferLength=436 - 724
+[Exception thrown here]
+
+LUCENE--> start=732 + 0
+LUCENE--> end=732 + 1024
+LUCENE--> length()=436
+LUCENE--> bufferLength=436 - 732
+[Exception thrown here]
+
+
+I don't know if this might help, but each time an exception is thrown the length of the FileEntry
+is always 436
+
+I have also noticed that the exception is thrown on the first call to refill().
+
+
+Thank you
+
+-----Message d'origine-----
+De : Jean-Francois Beaulac [mailto:jean-francois.beaulac@beetext.com] 
+Envoyé : November 13, 2006 12:43 PM
+À : java-user@lucene.apache.org
+Objet : RE: IndexReader.getTermFreqVectors() throws Read past EOF exception
+
+If I run a search with one searcher I get the term vector correctly. 
+
+When I use the MultiSearcher, the Searcher at position 0 in the searchable arrays returns
+me the TermFreqVector correctly, but all
+the subsequent searchers will produce the stacktrace.
+
+
+-----Message d'origine-----
+De : Grant Ingersoll [mailto:grant.ingersoll@gmail.com] 
+Envoyé : November 13, 2006 11:08 AM
+À : java-user@lucene.apache.org
+Objet : Re: IndexReader.getTermFreqVectors() throws Read past EOF exception
+
+Can you provide more info on your setup?
+
+Can you run a search against just one of the other subsearchers and  
+see if you get term vectors that way?  That is, simplify the process  
+by taking the MultiSearcher out of the equation to see if you get  
+valid results.
+
+On Nov 12, 2006, at 3:50 PM, Jean-Francois Beaulac wrote:
+
+> Hi,
+>
+>
+>
+> I make a search on several indexes using a MultiSearcher and I can  
+> only
+> retrieve the TermFreqVectors from the IndexSearcher in the Searcher at
+> position 0 in my searchable array.
+>
+>
+>
+> For example ():
+>
+> hits = multi.search(luceneQuery);
+>
+> for (int k = 0; k < hits.length(); k++) {
+>
+>
+> ((IndexSearcher)multi.getSearchables()[multi.subSearcher(hits.id 
+> (k))]).getIn
+> dexReader().getTermFreqVectors(hits.id(k));
+>
+> }
+>
+>
+>
+> Will work correctly if multi.subSearcher() returns 0, but will fail  
+> if > 0.
+>
+>
+>
+> I'm really wondering why I got this exception since my search  
+> results are
+> good.
+>
+>
+>
+>
+>
+> Thank you
+>
+>
+>
+
+------------------------------------------------------
+Grant Ingersoll
+http://www.grantingersoll.com/
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

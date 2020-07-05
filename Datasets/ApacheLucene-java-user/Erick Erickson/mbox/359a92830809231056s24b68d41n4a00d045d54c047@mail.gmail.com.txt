@@ -1,0 +1,298 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Multi Field search without Multifieldqueryparser
+DATE: 23 Sep 2008
+
+But the "default_field" for your query parser is just that, the default
+*if nothing else is specified*. So the following would work just fine:
+
+QueryParser parser = new QueryParser("default_field", analyzer);
+query = parser.parse("name:Erin AND name:Brochowich AND organization:ABC AND
+organization:law AND organization:firm");
+None of the terms would go against default_field since an
+explicit field is given for each. You'd have to break up the
+incoming queries and add the field to each, but that's not hard.
+
+Or even
+query = parser.parse("name:"Erin Brochowich"~3 AND organization:"ABC law
+firm"~3");
+for phrase queries with slop.
+
+I *still* think you're misunderstanding index-time boosting. It is
+INDEPENDENT of
+query time boosting. Index time boosting has the effect of raising the
+importance
+of a particular field IN THAT DOCUMENT relative to that field IN OTHER
+DOCUMENTS.
+Boosting all the terms for a given field for ALL documents is essentially
+doing nothing.
+
+I very strongly recommend you get a copy of Luke and experiment with how
+queries
+are parsed. That tool has the ability to, for any given query, send it
+through the
+parser and see exactly what it looks like after parsing. I think that would
+allow
+you to get much better answers much more quickly. Just google lucene luke
+and you should be fine.
+
+Finally, the number of documents you're talking about will produce a pretty
+small
+index by Lucene standards. There's no reason to avoid the "bag of words"
+solution
+if that solves your problem because you fear bloating your index.
+
+Best
+Erick
+
+
+On Tue, Sep 23, 2008 at 11:54 AM, Anshul jain <anshulnirvana@gmail.com>wrote:
+
+> unstructured query:
+>  default_field: abc ^5 and xyz
+>
+> seems to have created a confusion, what I meant was while initializing
+> the parser I have "default_field" as the default text field. So, the
+> query should be:
+>
+> QueryParser parser = new QueryParser("default_field",analyzer);
+> query = parser.parse("abc^5 and xyz");
+>
+> so query will be: default_field:abc^5 and default_field:xyz^3
+>
+> I am sorry for mentioning it wrong earlier.
+>
+> To answer Ericks question: I'll be indexing around 10-20 million
+> documents of average size of 4 KB, but the number of documents could
+> be mor.
+>
+> Now let me again clearly explain my problem:
+>
+> say i have a set of lucene documents as:
+>
+> Document 1:
+> name: Anshul ^10
+> organization: EPFL ^5
+> sex: Male
+>
+> Document 2:
+> name: Rakesh ^10
+> organization: IIT-B ^5
+> sex: Male
+>
+> Docuemt 3:
+> name: erin brochowich^10
+> organization: ABC law firm
+> sex: Female
+>
+> Document 4:
+> title: lord of the rings ^10
+> directors: John ^2
+> actors: Kate
+>
+> Document 5:
+> title: godfather ^10
+> directors: Kate ^2
+> actors: alpachino
+>
+>  Docmuent 1, 2 and 3 belongs to a same class so there boosting
+> parameters will be same. Similar is the case with document 4 and 5.
+>
+> If I give a query like:
+>
+> name: "Erin Brochowich" and Oranization: "ABC law firm".  this query
+> will work perfectly.
+>
+> but if the query is
+> QueryParser parser = new QueryParser("default_field",analyzer);
+> query = parser.parse("Erin Brochowich and ABC law firm");
+>  it would not work.
+>
+> what i want is that default_field should be connected to the all the
+> text somehow, but it should not take extra space for storing its own
+> text.
+>
+> I think it should be clear enough now.
+>
+> Thank you for your responses.
+> Regards,
+> Anshul
+>
+>
+>
+>
+>
+> On Tue, Sep 23, 2008 at 4:55 PM, Grant Ingersoll <gsingers@apache.org>
+> wrote:
+> >
+> > On Sep 23, 2008, at 8:35 AM, Anshul jain wrote:
+> >
+> >> yes you are partly correct
+> >>
+> >> what I need is that lucene should support two type of queries for the
+> >> following document:
+> >> name: abc^10
+> >> organization: xyz^3
+> >>
+> >> structured query:
+> >> name: abc and organization: xyz
+> >>
+> >> unstructured query:
+> >> default_field: abc ^5 and xyz
+> >
+> > And what field(s) should "xyz" be searched against?  Again, I ask, how do
+> > you know what fields "xyz" should go against and why does abc go against
+> the
+> > default_field?  You've said it shouldn't go against all fields (b/c there
+> > are thousands of them), and you've said it shouldn't go against a
+> catch-all
+> > field, but otherwise I still have no clue your criteria for what fields
+> xyz
+> > should search.  Are you saying that you want it to intelligently know
+> that
+> > when "xyz" comes in that it should search the organization field?
+> >
+> > Other than seconding Umesh's or Dino's suggestions of using machine
+> learning
+> > or heuristics or using some type of templating system, I'm not sure what
+> > else to offer.  You might look at Solr's Dismax Query Parser, which
+> allows
+> > you to specify the field structure of queries in a multi-field way, but
+> > again, I doubt that is wholly what you are looking for.
+> >
+> >>
+> >>
+> >> But i do not want to create one more field(default_field) that will
+> >> contain all the values concatenated in it. Also, even if i get all the
+> >> fields during indexing and use it for multi field query parser, then
+> >> the query will become very inefficient as there can be thousands of
+> >> fields. I think it should clarify my point.
+> >>
+> >>
+> >>
+> >> On Tue, Sep 23, 2008 at 1:58 PM, Grant Ingersoll <gsingers@apache.org>
+> >> wrote:
+> >>>
+> >>> So, the piece I'm missing is how do you know what field for which
+> terms.
+> >>>  In
+> >>> other words how do you know xyz goes against organization and abc
+> against
+> >>> name.  Your wording implies that you don't know this before hand, yet
+> you
+> >>> are somehow suggesting that Lucene should be able to do it.  Correct me
+> >>> if
+> >>> I'm wrong.
+> >>>
+> >>> -Grant
+> >>>
+> >>>
+> >>> On Sep 23, 2008, at 6:51 AM, Anshul jain wrote:
+> >>>
+> >>>> Here is what I'm trying to do:
+> >>>>
+> >>>> say a lucene document:
+> >>>> name: abc ^10
+> >>>> organization: xyz ^3
+> >>>>
+> >>>> ^10 and ^3 are boosts in the document.
+> >>>>
+> >>>> now if I query name: abc ^5 AND organization: xyz this will work.
+> >>>>
+> >>>> but if I query (default_field): abc^5 AND xyz this won't work.
+> >>>>
+> >>>> Now what I want is that a text can be associated with more than one
+> >>>> field.
+> >>>> i.e.
+> >>>>
+> >>>> (field1,field2,field3):value
+> >>>> name,(default_field),title: abc^10
+> >>>> organization,(default_field),institute: xyz^3
+> >>>>
+> >>>> then both of my queries will work.
+> >>>>
+> >>>> Is it possible to do so in lucene without changing the source?
+> >>>> If no then can anyone please explain the indexing and searching
+> >>>> mechanism for lucene, so that I can start working on it.
+> >>>>
+> >>>> The solution given by the java-users won't work for me as I do not
+> >>>> want to add all the contents of the document in a single field and
+> >>>> then search for that field, as this would increase the index size and
+> >>>> I've to index more than 10 million documents. Also
+> >>>> multifieldqueryparser will make it query execution inefficient, as
+> >>>> there will be thousands of fields.
+> >>>>
+> >>>> If I start storing just a single field as: (default_field): "name abc
+> >>>> organization xyz", then it is possible that some other documents might
+> >>>> get selected that are not relevant. Also i want to boost individual
+> >>>> fields in a document.
+> >>>>
+> >>>> Anshul
+> >>>>
+> >>>> ---------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>
+> >>>
+> >>> --------------------------
+> >>> Grant Ingersoll
+> >>> http://www.lucidimagination.com
+> >>>
+> >>> Lucene Helpful Hints:
+> >>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+> >>> http://wiki.apache.org/lucene-java/LuceneFAQ
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>
+> >>
+> >>
+> >> --
+> >> Anshul Jain
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >
+> > --------------------------
+> > Grant Ingersoll
+> > http://www.lucidimagination.com
+> >
+> > Lucene Helpful Hints:
+> > http://wiki.apache.org/lucene-java/BasicsOfPerformance
+> > http://wiki.apache.org/lucene-java/LuceneFAQ
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+>
+> --
+> Anshul Jain
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

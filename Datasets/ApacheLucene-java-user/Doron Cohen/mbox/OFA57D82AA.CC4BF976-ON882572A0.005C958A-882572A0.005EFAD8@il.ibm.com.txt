@@ -1,0 +1,92 @@
+FROM: Doron Cohen <DOR...@il.ibm.com>
+SUBJECT: Re: Open / Close   when   Merging
+DATE: 16 Mar 2007
+
+Hi Matt,
+
+To verify I understand correctly, are this your settings? :
+
+- one "MAIN" index containing all the data:
+  used for search;
+  never does addDocument();
+- Several side "INC" indexes:
+  addDocument() here for new/modified documents;
+  never searched;
+- at some point all INC indexes are "merged" to MAIN index:
+  for each INC: {
+    (a) delete INC's corresponding docs from MAIN;
+    (b) MAIN.addIndexes({INC});
+  }
+
+It would be interesting to know why you selected this setting - what are
+the benefits from not addDocument()ing on MAIN? For instance, are the INC
+indexes maintained on separate drives, and you get better performance this
+way?
+
+But ignoring the "why" and looking at the "how" - if you are using
+IndexReader for deletion in (a), then yes, you would have to close the
+IndexWriter, because otherwise the IndexReader would fail to delete -
+although called "Reader", it has to get write privilege to the index (using
+Lucene's internal locking).
+
+As of Lucene 2.1 though, IndexWriter supports delete document(s) by term,
+which I assume is what you are doing, so you could use it, and avoid the
+second IndexReader on MAIN. If each INC index have different documents (by
+your definition / application_doc_id) then you could first delete all the
+documents and then add all the indexes in one call to addIndexes (or
+addIndexesNoOptimize).
+
+Hope this helps,
+Doron
+--------------------------------
+
+"DECAFFMEYER MATHIEU" <MATHIEU.DECAFFMAYER@fortis.lu> wrote on 13/03/2007
+06:51:35:
+
+> Hi,
+> I need to merge several indexes (I call them incremental index) with
+> my main index.
+> Each  incremental index can contain the same url's of the main index,
+> that's why I have a list of url's to update, that I will delete from
+> the main index before merging with an incremental index.
+> I have also a list of urls to delete,
+> Then after these operations I can merge the indexes.
+> I am not sure about the operations Open / Close on the Index Writer,
+> I may need some help ...
+>
+> for  i=0 ; i < list_increment_indexes.size() ; ++i
+> { // BEGIN WHILE
+> 1.      OPEN A SECOND READER ON THE MAININDEX
+>         (for not interrupting user queries on
+>          the main indexreader on the main index)
+> 2.      DELETE DOCS TO BE DELETED
+>         DELETE DOCS TO BE UPDATED
+> 3.      CLOSE THE SECOND READER ON THE MAIN INDEX ==> FLUSH DELETIONS !!
+> 4.      RE-OPEN A SECOND READER ON THE MAIN INDEX FOR MERGING
+> 5.      OPEN A READER ON THE INCREMENTAL INDEX
+> 6.      OPEN AN INDEXWRITER
+>         TO MERGE THE READER ON THE INCREMENTAL INDEX
+>         WITH THE READER ON THE MAIN INDEX
+> 7.      CLOSE THE INDEXWRITER
+> 8.      CLOSE THE SECOND READER ON THE MAIN INDEX
+> 9.      CLOSE THE READER ON THE INCREMENTAL INDEX
+> } // END WHILE !
+> 10.     CLOSE THE INDEXSEARCHER
+> 11.     CLOSE THE MAIN INDEXREADER ON THE MAIN INDEX
+> 12.     OPEN A NEW READER ON THE INDEX
+>
+
+> I am not sure if I can open the idnexwriter *before* the loop and
+> close it *outside*,
+> So I do it in the loop for each incremental index for now on ...
+>
+> __________________________________
+>    Matt
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

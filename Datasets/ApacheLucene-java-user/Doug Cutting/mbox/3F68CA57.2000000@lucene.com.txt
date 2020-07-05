@@ -1,0 +1,64 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: Lucene Scoring Behavior
+DATE: 17 Sep 2003
+
+If you're using RangeQuery to do date searching, then you'll likely see 
+unusual scoring.  The IDF of a date, like any other term, is inversely 
+related to the number of documents with that date.  So documents whose 
+dates are rare will score higher, which is probably not what you intend.
+
+Using a Filter for date searching is one way to remove dates from the 
+scoring calculation.  Another is to provide a Similarity implementation 
+that gives an IDF of 1.0 for terms from your date field, e.g., something 
+like:
+
+public class MySimilarity extends DefaultSimilarity {
+   public float idf(Term term, Searcher searcher) throws IOException {
+     if (term.field() == "date") {
+       return 1.0f;
+     } else {
+       return super.idf(term, searcher);
+     }
+   }
+}
+
+Or you could just give date clauses of your query a very small boost 
+(e.g., .0001) so that other clauses dominate the scoring.
+
+Doug
+
+Terry Steichen wrote:
+> I've run across some puzzling behavior regarding scoring.  I have a set of documents
+which contain, among others, a date field (whose contents is a string in the YYYYMMDD format).
+ When I query on the date 20030917 (that is, today), I get 157 hits, all of which have a score
+of .23000652.  If I use 20030916 (yesterday), I get 197 hits, each of which has a score of
+.22295427.
+> 
+> So far, all seems logical.  However, when I search for all records for the date 20030915,
+the first two (of 174 hits) have a score of 1.0, while all the rest of the hits have a score
+of .03125.  Here is a tabulation of these and a few more queries:
+> 
+> Query Date      Result
+> =======        ========================
+> 20030917        all have a score of .23000652 (157)
+> 20030916        all have a score of .22295427 (197)
+> 20030915        first 2 have a 1.0 score, all rest are .03125 (174)
+> 20030914        all have a score of .21384604 (264)
+> 20030913        first 2 have a 1.0 score, all rest are .03125 (156)
+> 20030912        all have a score .2166833 (241)
+> 20030911        first 3 have a 1.0 score, all rest are .03125 (244)
+> 20030910        all have a score of  .2208193 (211)
+> 
+> I would expect that all the hits would have the same score, and I would expect it to
+be normalized to 1 (unless, I guess, the top score was less than 1, in which case normalization
+presumably doesn't occur).  
+> 
+> Does anyone have any ideas as to what might be going on here?  (I'm using the latest
+CVS sources, obtained this afternoon.)
+> 
+> Regards,
+> 
+> Terry
+> 
+
+

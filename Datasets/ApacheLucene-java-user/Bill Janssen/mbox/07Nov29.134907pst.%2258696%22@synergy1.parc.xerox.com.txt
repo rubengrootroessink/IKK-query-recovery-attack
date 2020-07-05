@@ -1,0 +1,107 @@
+FROM: Bill Janssen <jans...@parc.com>
+SUBJECT: Re: lucene-core-2.2.0.jar broken? CorruptIndexException?
+DATE: 29 Nov 2007
+
+> Could you post this part of the code (deleting) too?
+
+Here it is:
+
+
+    private static void remove (File index_file, String[] doc_ids, int start) {
+
+        String number;
+        String list;
+        Term term;
+        TermDocs matches;
+
+        if (debug_mode)
+            System.err.println("index file is " + index_file + " and it " + (index_file.exists()
+? "exists." : "does not exist."));
+
+        try {
+
+            if (index_file.exists() && (doc_ids.length > start)) {
+                IndexReader reader = IndexReader.open(index_file);
+                try {
+                    for (int i = start;  i < doc_ids.length;  i++) {
+                        term = new Term("id", doc_ids[i]);
+                        int deleted = reader.deleteDocuments(term);
+                        System.out.println("Deleted " + deleted + " existing instances of
+" + doc_ids[i]);
+                    }
+                } finally {
+                    reader.close();
+                }
+            }
+
+        } catch (Exception e) {
+	    if (debug_mode) {
+              e.printStackTrace(System.err);
+            } else {
+                System.out.println("* LuceneIndexing 'remove' raised " + e.getClass() + "
+with message " + e.getMessage());
+                System.err.println("LuceneIndexing 'remove': caught a " + e.getClass() +
+                                   "\n with message: " + e.getMessage());
+                System.out.flush();
+            }
+            System.exit(JAVA_EXCEPTION);
+        }
+        System.out.flush();
+    }
+
+    private static void update (File index_file, File doc_root_dir, String[] ids, int start)
+{
+
+        ExtractIndexingInfo.DocumentIterator docit;
+        String number;
+
+        remove (index_file, ids, start);
+
+        try {
+
+            // Now add the documents to the index
+            IndexWriter writer = new IndexWriter(index_file, new StandardAnalyzer(), !index_file.exists());
+            if (debug_mode)
+                writer.setInfoStream(System.err);
+            writer.setMaxFieldLength(Integer.MAX_VALUE);
+
+            try {
+                for (int i = start;  i < ids.length;  i ++) {
+                    docit = build_document_iterator(doc_root_dir, ids[i]);
+                    int count = 0;
+                    while (docit.hasNext()) {
+                        writer.addDocument((Document)(docit.next()));
+                        count += 1;
+                    }
+                    System.out.println("Added " + docit.id + " (" + count + " versions)");
+                    System.out.flush();
+                }
+            } finally {
+                // And close the index
+                System.out.println("Optimizing...");
+                // See http://www.gossamer-threads.com/lists/lucene/java-dev/47895 about optimize
+                // Can fail if low on disk space
+                writer.optimize();
+                writer.close();
+            }
+
+        } catch (Exception e) {
+            if (debug_mode) {
+                e.printStackTrace(System.err);
+            } else {
+                System.out.println("* Lucene search engine raised " + e.getClass() + " with
+message " + e.getMessage());
+                System.err.println(" 'update' caught a " + e.getClass() +
+                                   "\n with message: " + e.getMessage());
+                System.out.flush();
+            }
+            System.exit(JAVA_EXCEPTION);
+        }
+        System.out.flush();
+    }
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

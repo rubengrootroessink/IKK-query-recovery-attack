@@ -1,0 +1,152 @@
+FROM: "叶双明" <yeshuangm...@gmail.com>
+SUBJECT: Re: Lucene Memory Leak
+DATE: 6 Sep 2008
+
+In my opinion, do no need to close the Directory, and keep all Directory and
+all IndexSearcher open.
+
+return ivIndexSearcher.search(query, sortOrder);  ( I think) is also return
+the hits getted frmo IndexSearcher, so it is iterate over the first N, no
+problem.
+
+In addition, how much index Directory do you have?  is there a large number
+of data in one Document?
+
+2008/9/6, N. Hira <nhira@cognocys.com>:
+>
+> I'm not an expert, so please take this with a grain of salt, but if you
+> return the Hits object, you are inadvertently "holding on" to that
+> IndexSearcher, right?
+>
+> According to the FAQ (http://wiki.apache.org/lucene-java/ImproveSearchingSpeed),
+> iterating over all Hits will result in additional queries.  Further, I don't
+> think that you should call Directory.close() because it doesn't really do
+> anything if the Searcher is still out there ...
+>
+> If I was in your place, I would try to iterate over the first N (100?)
+> results and return the results back to the caller in some wrapper object,
+> leaving the Searcher and the Directory open, at least for a test.
+>
+> If you really need to go against the recommended best practice and close
+> the IndexSearcher, then I would strongly suggest some kind of scheduler that
+> closes, re-opens, and warms up IndexSearchers on some kind of timer.
+>
+> Good luck!
+>
+> -h
+> ----------------------------------------------------------------------
+> Hira, N.R.
+> Cognocys, Inc.
+> (773) 251-7453
+>
+>
+> On 05-Sep-2008, at 10:43 AM, Andy33 wrote:
+>
+>
+>> If I don't keep the IndexSearcher as a Singleton and instead open and
+>> close a
+>> new one each time, I have a large memory leak (probably due to the large
+>> queries I am doing). After watching the memory a while, I still believe I
+>> have a small memory leak even when the Directory, Analyzer, and
+>> IndexSearcher are Singletons. My free memory slowly becomes smaller after
+>> each query. Any ideas on what that may be due to?
+>>
+>> Here's my updated code...
+>>
+>> private synchronized Hits doQuery(String field, String queryStr, Sort
+>> sortOrder, String indexDirectory) throws Exception
+>>    {
+>>        Directory directory = null;
+>>        Query query = null;
+>>        QueryParser parser = null;
+>>
+>>        try
+>>        {
+>>            directory = DirectorySingleton.getInstance(indexDirectory);
+>>            ivIndexSearcher = (IndexSearcher)
+>> SearcherSingleton.getInstance(directory);
+>>
+>>            //search the index
+>>            parser = new QueryParser(field,
+>> AnalyzerSingleton.getInstance());
+>>            query = parser.parse(queryStr);
+>>
+>>            return ivIndexSearcher.search(query, sortOrder);
+>>        }
+>>        finally
+>>        {
+>>            if(null != directory)
+>>            {
+>>                directory.close();
+>>            }
+>>
+>>            directory = null;
+>>            parser = null;
+>>            query = null;
+>>        }
+>>    }
+>>
+>>
+>> --------------
+>> Example Singleton
+>>
+>> public class SearcherSingleton
+>> {
+>>    private static volatile HashMap<Directory, Searcher> cvSearches = new
+>> HashMap<Directory, Searcher>();
+>>
+>>
+>>    protected SearcherSingleton()
+>>    {
+>>
+>>    }
+>>
+>>
+>>    public static Searcher getInstance(Directory directory) throws
+>> IOException
+>>    {
+>>        if(!cvSearches.containsKey(directory))
+>>        {
+>>            synchronized(SearcherSingleton.class)
+>>            {
+>>                if(!cvSearches.containsKey(directory))
+>>                {
+>>                    cvSearches.put(directory, new
+>> IndexSearcher(directory));
+>>                }
+>>            }
+>>        }
+>>
+>>        return cvSearches.get(directory);
+>>    }
+>>
+>> }
+>>
+>>
+>>
+>> 장용석 wrote:
+>>
+>>>
+>>> In fact, I think that the important reasons are Directory class and
+>>> Analyzer
+>>> class.
+>>> If you don't want IndexSearcher class keep open for the entire life of a
+>>> web
+>>> application, you can do it.
+>>> I think It will not cause memory leak problem.
+>>> But, Directory and Analyzer classes can cause the problem if they new
+>>> created by method call every time. I think...
+>>> Only keep two classes Directory and Analyzer by singlton and do test. :)
+>>>
+>>>
+>>>
+>>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>

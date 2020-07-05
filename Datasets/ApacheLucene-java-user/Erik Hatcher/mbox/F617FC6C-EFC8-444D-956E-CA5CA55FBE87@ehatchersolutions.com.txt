@@ -1,0 +1,92 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: question on filters
+DATE: 5 Jul 2005
+
+
+On Jul 5, 2005, at 9:48 AM, Aigner, Thomas wrote:
+
+> Hi all,
+>
+>       I am creating a punctuation filter to filter certain punctuation
+> out of the token stream.  I am getting a "The field t.termText is not
+> visible" error.  I'm not sure what I would need to include to make  
+> this
+> property visible (I am still new to Lucene and Java for that  
+> matter).  I
+> copied to code from the LowerCaseFilter that Lucene uses and slightly
+> modified it.
+
+
+>
+>     t.termText = t.termText.replaceAll("-","");
+>
+>     t.termText = t.termText.replaceAll("/","");
+
+Use the termText() _method_, not the internal accessor.  You will  
+need to create a new Token in this case.  For example, look at the  
+source to the following analyzer (from the Lucene in Action source):
+
+package lia.analysis.codec;
+
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.commons.codec.language.Metaphone;
+import org.apache.commons.codec.EncoderException;
+import java.io.IOException;
+
+/**
+* Remove??  We don't show this anymore since SynonymAnalyzer
+* demonstrates placing more than one token in a position
+*/
+public class MetaphoneInjectionFilter extends TokenFilter {
+   public static String METAPHONE = "METAPHONE";
+
+   private Metaphone metaphoner = new Metaphone();
+   private Token save;
+
+   public MetaphoneInjectionFilter(TokenStream input) {
+     super(input);
+   }
+
+   public Token next() throws IOException {
+
+     // emit saved token, if available
+     if (save != null) {
+       Token temp = save;
+       save = null;
+       return temp;
+     }
+
+     // pull next token from stream
+     Token t = input.next();
+
+     if (t == null) return null;   // all done
+
+     // create metaphone, save until next request
+     if (save == null) {
+       String value = t.termText();
+
+       try {
+         value = metaphoner.encode(t.termText());
+       } catch (EncoderException ignored) {
+         // ignored
+       }
+
+       save = new Token(value, t.startOffset(),
+                 t.endOffset(), METAPHONE);
+       save.setPositionIncrement(0);
+     }
+
+     return t;
+
+   }
+}
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

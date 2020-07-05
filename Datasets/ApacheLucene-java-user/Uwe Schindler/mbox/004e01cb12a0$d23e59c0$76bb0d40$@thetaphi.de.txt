@@ -1,0 +1,72 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Help with Numeric Range
+DATE: 23 Jun 2010
+
+Hi Todd,
+
+I am not sure if I understand your problem correctly. I am not familiar with Lucandra/Cassandra
+at all, but if Lucandra implements the IndexWriter and IndexReader according to the documentation,
+numeric queries should work. A NumericField internally creates a TokenStream and "analyzes"
+the number to several Tokens, which are somehow "half binary" (they are terms containing of
+characters in the full 0..127 range for optimal UTF8 compression with 3.x versions of Lucene).
+The exact encoding can be looked at in the NumericUtils class + javadocs.
+
+About your testcase: The test looks good, so does it fail? If yes, where is the problem? You
+can also look into Lucene's test TestNumericRangeQuery64 for more examples. Or modify its
+@BeforeClass to instead build a Lucandra index. 
+
+The test has one thing, that is not intended to be done like that:
+numeric = new NumericField("long", Integer.MAX_VALUE, Store.YES, true);
+
+You are using MAX_VALUE as precision step, this would slowdown all queries to the speed of
+old-style TermRangeQueries. It is always better to stick with the default of 4, which creates
+64 bits / 4 precStep = 16 terms per value. Alternatively for longs, 6 is a good precision
+step (see NumericRangeQuery documentation). MAX_VALUE is only intended for fields that do
+not do numeric ranges but e.g. sort only. precisionStep is a performance tuning parameter,
+it has nothing to do with better/worse precision on terms or different query results. If you
+are using NumericRangeQuery with this large precStep, you are not using the numeric features
+at all, so your test should not behave different from a conventional TermRangeQuery with padded
+terms.
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Todd Nine [mailto:todd@spidertracks.co.nz]
+> Sent: Wednesday, June 23, 2010 7:53 AM
+> To: java-user@lucene.apache.org
+> Subject: Help with Numeric Range
+> 
+> Hi all,
+>   I'm new to Lucene, as well as Cassandra.  I'm working on the Lucandra
+> project to modify it to add some extra functionality.  It hasn't been fully
+> testing with range queries, so I've created some tests and contributed them.
+> You can view my source here.
+> 
+> http://github.com/tnine/Lucandra/blob/master/test/lucandra/NumericRang
+> eTests.java
+> 
+> First, is this a sensible test?  I'm specifically testing the case of longs where I
+> need millisecond precision on my searches.
+> 
+> 
+> Second, I see that Numeric Fields are built via terms.  I think the issue lies in
+> the encoding of these terms into bytes for the Cassandra keys.  Can anyone
+> point me to some documentation on numeric queries and terms, and how
+> they are encoded at the byte level based on the precision?
+> 
+> Thanks,
+> Todd
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,131 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Multiple searchers (Was: CachingWrapperFilter: why cache per IndexReader?)
+DATE: 20 Jan 2008
+
+
+These results are very interesting.  With 3 threads on SSD your  
+searches run 87% faster if you use 3 IndexSearchers instead of  
+sharing a single one.
+
+This means, for your test, there are some crazy synchronization  
+bottlenecks when searching, which I think we should ferret out and fix.
+
+Have you done any profiling to understand where the threads are  
+waiting when you share one IndexSearcher?  EG YourKit can tell you  
+where the threads are waiting...
+
+I know there is synchronization used when reading bytes from the  
+underlying file descriptor.  We've investigated options to remove  
+that (https://issues.apache.org/jira/browse/LUCENE-753) but those  
+options seemed to hurt single threaded performance.  I wonder if the  
+patch on that issue closes some of this 87% performance loss?
+
+Does anyone know of other synchronization bottlenecks in searching?
+
+Mike
+
+Otis Gospodnetic wrote:
+
+> This is great and valuable information, Toke(n)!
+> Just the other day we recommended this multi-IndexSearcher to  
+> somebody concerned with low QPS rates their benchmarks revealed.   
+> They were hitting their index with a good number of threads and  
+> hitting synchronized blocks in Lucene.  Multiple searchers is one  
+> way around that.  Also, your sweet spot of 3 makes sense - keeps  
+> all of your cores fully busy.
+>
+> You are our main SSD info supplier -- keep it coming! :)  And let  
+> us know what numbers you get for 2.2 and 2.3, please.
+>
+> Thanks,
+> Otis
+>
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+> ----- Original Message ----
+> From: Toke Eskildsen <te@statsbiblioteket.dk>
+> To: java-user@lucene.apache.org
+> Sent: Thursday, January 17, 2008 5:31:56 AM
+> Subject: Multiple searchers (Was: CachingWrapperFilter: why cache  
+> per IndexReader?)
+>
+> On Fri, 2008-01-11 at 11:34 +0100, Toke Eskildsen wrote:
+>> As for shared searcher vs. individual searchers, there was just a
+>> slight penalty for using individual searchers.
+>
+> Whoops! Seems like I need better QA for my test-code. I didn't use
+> individual searchers for each thread when I thought I was. The slight
+> penalty wrongly observed must have been due to measurement variations.
+>
+> With the corrected test, some interesting observations about our index
+> can be made, which will definitely affect our configuration. In the
+> following, the queries/second is an average over 350.000 queries.
+> For each query, a search is performed and the content of a specific
+> field is extracted for the first 20 hits.
+>
+> == System-summary ==
+> Dual-core Intel Xeon 5148 2.3 GHz, 8 GB RAM, Linux, Lucene 2.1, 37
+>  GB/10
+> million documents index, queries taken from production system logs.
+>
+> == Conventional harddisks (2 * 15000 RPM in software RAID 1) ==
+> 1 thread,  1 searcher:  109 queries/sec
+> 2 threads, 1 searcher:  118 queries/sec
+> 2 threads, 2 searchers: 157 queries/sec
+> 3 threads, 1 searcher:  111 queries/sec
+> 3 threads, 3 searchers: 177 queries/sec
+> 4 threads, 1 searcher:  108 queries/sec
+> 4 threads, 4 searchers: 169 queries/sec
+>
+> == Solid State Drives (2 * 32 GB Samsung in software RAID 0) ==
+> 1 thread,  1 searcher:  193 queries/sec
+> 2 threads, 1 searcher:  295 queries/sec
+> 2 threads, 2 searchers: 357 queries/sec
+> 3 threads, 1 searcher:  197 queries/sec
+> 3 threads, 3 searchers: 369 queries/sec
+> 4 threads, 1 searcher:  192 queries/sec
+> 4 threads, 4 searchers: 302 queries/sec
+>
+> Graphs can be viewed at http://wiki.statsbiblioteket.dk/summa/Hardware
+>
+> For our setup it seems that the usual avoid-multiple-searchers advice
+>  is
+> not valid, neither for conventional harddisks, nor Solid State Drives.
+> The optimal configuration for our dual-core test machine is three
+> threads with individual searchers. The obvious question is whether  
+> this
+> can be extended to other cases.
+>
+>> As for threading, I noticed something strange: On the dual-core
+>> machine, two threads gave better performance than one, while 4
+>  threads
+>> gave the same performance as one.
+>
+> As can be seen above, this strange picture is consistent. 1, 3 and 4
+> threads with shared searcher performs the same, independent of which
+> storage the machine uses, while 2 threads performs markedly better.
+>
+> I've started the same test-suite for Lucene 2.2 and 2.3RC2. It should
+> be finished in a day or two.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

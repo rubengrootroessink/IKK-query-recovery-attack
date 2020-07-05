@@ -1,0 +1,209 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Highlighter that works with phrase and span queries
+DATE: 22 Jun 2007
+
+Thanks for the good summary, Mark!
+
+Otis
+ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+Simpy -- http://www.simpy.com/  -  Tag  -  Search  -  Share
+
+----- Original Message ----
+From: Mark Miller <markrmiller@gmail.com>
+To: java-user@lucene.apache.org
+Sent: Thursday, June 21, 2007 11:19:22 PM
+Subject: Re: Highlighter that works with phrase and span queries
+
+Results of my tests :
+
+The new SpanScorer is just about the same speed as the old Highlighter's 
+QueryScorer if the Query contains no position sensitive elements. This 
+is only the case, however, if the CachingTokenFilter (from the analysis 
+package) is changed to use an ArrayList instead of a LinkedList 
+(LinkedList is the wrong data structure for this use).
+
+The new SpanScorer is obviously not as fast when dealing with 
+PhraseQuerys and SpanQuerys. It takes about twice the time or less to 
+correctly highlight these Query types when compared to just highlighting 
+every term from the Span or Phrase Query.
+
+As far as my comment about using TokenSources to generate the 
+TokenStream -- for short docs (5-15k) and a quick analyzer, it takes 
+just as long to get TermVector info and sort it as to re-analyze the 
+text. As docs get bigger, you will certainly start to see some benefits 
+though.
+
+Besides the re-analyzing, the reason the Highlighter is slow for very 
+large documents is that every token from a doc is examined and scored 
+and then the doc is rebuilt piece by piece from each token. This does 
+not scale well <g> (Especially in combination with re-analyzer text). 
+While there is probably room for improvement here, I don't see the 
+current approach ever reaching the speed of Ronnie Kolehmainen's 
+Highlighter. However, I also don't see Ronnie's Highlighter ever being 
+as flexible or able to cover as many use cases as the current contrib 
+Highlighter approach.
+
+Ronnie's approach works well for large docs because it only deals with 
+the tokens of interest (tokens from the Query) rather than scoring every 
+token. This is done using TermVectorOffsets and so immediately requires 
+that you have turned those on. Further, I don't see this approach ever 
+being easily extended to supporting Spans or PhraseQuerys without 
+reimplementing special Lucene search logic. Those are the reasons that I 
+chose not to work with Ronnie's Highlighter (particularly, my main 
+motivation was Spans support). Also, to be able to ignore fields when 
+Highlighting, Ronnnie's Highlighter would likely have to try and grab 
+TermVectorOffsets for every field in the index for each Term in the 
+Query. If you have a lot of fields this could be much slower. Even 
+still, it can't be argued that Ronnie's Highlighter is not dramatically 
+faster than the current Highlighter on very large documents, especially 
+if your currently re-analyzing text. It is probably the perfect option 
+for Otis's client if he has TermVectorOffsets on in his index or can 
+easily re-index.
+
+
+I am currently trying to think of some possible hybrid approach to 
+highlighting...
+
+I have fixed a few things with my Highlighter and will be updating it 
+soon. Also, I forgot to mention, there is the dependency on MemoryIndex.
+
+- Mark
+
+
+
+mark harwood wrote:
+> While we're considering highlighter performance there was some discussion of this around
+another implementation here: http://issues.apache.org/jira/browse/LUCENE-644
+>
+> Ronnie Kolehmainen's implementation was proven faster than the current contrib highlighter
+but was almost certainly missing some of the features/support for edge cases.
+>
+> There are certainly some optimisations in the existing implementation that should be
+possible. Not building StringBuffers for document fragments with no hits seems an obvious
+step. Whether this can be done while preserving the existing "helper" interfaces (Fragmenter/Scorer)
+remains to be seen.
+>
+> Cheers,
+> Mark
+>
+>
+> ----- Original Message ----
+> From: Mark Miller <markrmiller@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Thursday, 21 June, 2007 2:11:52 AM
+> Subject: Re: Highlighter that works with phrase and span queries
+>
+> I will work up some performance numbers over the next day or two to 
+> share with you. I have spent the last day or two with a profiler trying 
+> to find the biggest performance drains.
+>
+> Unfortunately, I will probably not be able to squeeze out much more 
+> performance than the current Highlighter. When I started working on this 
+> project I considered starting from scratch to create a better, more 
+> accurate Highlighter. After some initial work I quickly came to the 
+> realization that Mark Harwood (with some additions by others) had 
+> already solved too many corner cases and interesting needs. The few 
+> alternate Highlighters in JIRA did not meet the standards set by Mark's 
+> highlighter. Trying to replicate all that work in a different manner 
+> didn't seem like a fruitful approach -- Harwood is more clever than I <g>
+>
+> Taking that into account, I decided to extend the Highlighter using the 
+> great framework that is already in place. I implemented a new Scorer 
+> that acts much like the default Scorer, but when it finds a Query clause 
+> that is position sensitive (PhraseQuery, SpanQuery), it creates a 
+> MemoryIndex that is used extract the correct Spans for the Query (Credit 
+> to Paul Elschot and Mark Harwood for the approach). Non position 
+> sensitive Query claueses are handled similar to the way they where in 
+> the original highlighter's Scorer. This means that non position 
+> sensitive queries are likely the same speed as before, while position 
+> sensitive queries are likely a bit slower. For my uses, the thing is 
+> damned fast -- of course my uses involves small documents (Newspaper 
+> articles).
+>
+> I am very interested in making this thing as fast as possible though, so 
+> I will build some benchmark tests and try to squeeze as much performance 
+> out of the Highligher as I can. I will also see if my Scorer is any 
+> faster than the original.
+>
+> All that said, my guess is that one of the slowest parts of Highlighting 
+> is re-tokenizing the text. There is always the option of turning on 
+> TermVectors and using org.apache.lucene.search.highlight.TokenSources to 
+> get the TokenStream. Based on Mark H's comments, it may be twice as fast 
+> as re-tokenizing. This method can also be used with my new Highlighter 
+> code as well (which is more a plug-in to the old Highlighter than a 
+> replacement.)
+>
+> Considering that both of your comments immediately went to performance, 
+> I will certainly be spending some time working on this.
+>
+> - Mark
+>
+>   
+>> Hi Mark,
+>>
+>> I know one large user (meaning: high query/highlight rates) of the current Highlighter
+and this user wasn't too happy with its performance.  I don't know the details, other than
+it was inefficient.  So now I'm wondering if you've benchmarked your Highlighter against that/current
+Highlighter to see not only which one is more accurate, but also which one is faster, and
+by how much?
+>>
+>> Thanks,
+>> Otis
+>>  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+>> Simpy -- http://www.simpy.com/  -  Tag  -  Search  -  Share
+>>   
+>>     
+>
+>   
+>> This is really great, Mark.  I'll look into integrating it with Solr,
+>> as better phrase highlighting is a definite sore point for some of our
+>> users.
+>>
+>>
+>>
+>> Any indication on performance differences?
+>>
+>>
+>>
+>> cheers,
+>>
+>> -mike
+>>
+>>
+>>   
+>>     
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+>
+>       ___________________________________________________________ 
+> Yahoo! Mail is the world's favourite email. Don't settle for less, sign up for
+> your free account today http://uk.rd.yahoo.com/evt=44106/*http://uk.docs.yahoo.com/mail/winter07.html
+
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

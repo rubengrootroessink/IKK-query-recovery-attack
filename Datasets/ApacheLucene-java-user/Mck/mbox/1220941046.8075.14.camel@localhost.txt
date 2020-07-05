@@ -1,0 +1,89 @@
+FROM: Mck <m...@semb.wever.org>
+SUBJECT: Replacing FAST functionality at sesam.no - ShingleFilter+ exact	matching
+DATE: 9 Sep 2008
+
+-- original post was on solr's user list. --
+-- i've reposted here as it's centered on the ShingleFilter which comes from lucene --
+
+
+*ShortVersion*
+ is there a way to make the ShingleFilter perform exact matching via
+inserting ^ $ begin/end markers?
+
+
+*LongVersion*
+At sesam.no we want to replace a FAST (fast.no) Query Matching Server
+with a Solr index.
+
+The index we are trying to replace is not a regular index, but specially
+configured to perform phrases (and sub-phrases) matches against several
+large lists (like an index with only a 'title' field).
+
+I'm not sure of a correct, or logical, name for the behaviour we are
+after, but it is like a combination between Shingles and exact matching.
+
+Our test list has 9 entries:
+ "abcd efgh ijkl", "abcd efgh", "efgh ijkl", "abcd", "efgh", "ijkl", "ijkl efgh", "efgh abcd",
+and "ijkl efgh abcd".
+
+The query behaviour we are looking for is like:
+   (i've included ^$ to denote the exact matching)
+
+Original Query   --> Filtered Query
+ abcd            -->  ^abcd$
+"abcd efgh"      --> (^abcd$ ^"abcd efgh"$ ^efgh$)
+"abcd efgh ijkl" --> (^abcd$ ^"abcd efgh"$ ^"abcd efgh ijkl"$ ^efgh$ ^"efgh ijkl"$ ^ijkl$)
+
+I'm using a trunk build of Solr, and using the example/solr for the solr
+home. I'm using trunk builds of lucene libraries as well.
+
+Editing schema.xml so to put these entries in as type="string" and using
+defaultOperator="OR" gives the expected exact matching functionality
+given queries are quoted, eg /solr/select/?q="abcd efgh ijkl"
+  ( I've noticed that this exact matching can also be achieved with
+TextField and using KeywordTokenizer at index time. )
+
+So then i change type="string" to type="shingleString" along with
+
+> <fieldType name="shingleString" class="solr.StrField" positionIncrementGap="100" omitNorms="true"
+>
+>       <analyzer type="index">
+>         <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+>       </analyzer>
+>       <analyzer type="query">
+>         <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+>         <filter class="solr.ShingleFilterFactory" outputUnigrams="true" outputUnigramIfNoNgram="true"
+maxShingleSize="99" />
+>       </analyzer>
+> </fieldType>
+
+I never get any hits with quoted queries.
+Without quotes i only get the unigrams.
+
+I get the same outcomes using fieldType@class="solr.TextField" and in
+the index analyzer tokenizer@class="solr.KeywordTokenizerFactory".
+
+Debugging ShingleFilter I see that (with the quotes) the shingles array
+fills up with the expected shingles.
+And the Query (infact a MultiPhraseQuery)
+  returned from SolrQueryParser.getFieldQuery()
+  looks like
+
+list_entry_shingle:"(abcd abcd efgh abcd efgh ijkl) (efgh efgh ijkl) ijkl"
+
+I'm struggling to make sense of this.
+How can the shingles be matched if they aren't quoted?
+
+I would be expecting a Query instead like:
+abcd "abcd efgh" "abcd efgh ijkl" efgh "efgh ijkl" ijkl
+
+(This with the ShingleFilter disabled does indeed work perfectly).
+
+Am i barking up the wrong tree?
+Is there a way to get the shingles phrased?
+Or, better yet, is there a way to get the shingles surrounded with ^ $
+being/end markers for exact matching?
+
+~mck
+
+

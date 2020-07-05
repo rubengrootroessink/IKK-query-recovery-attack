@@ -1,0 +1,364 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Help to solve an issue when upgrading Lucene-Oracle integration to lucene 2.3.1
+DATE: 7 May 2008
+
+
+Is there any way to capture & serialize the actual documents being
+added (this way I can "replay" those docs to reproduce it)?
+
+Are you using threads?  Is autoCommit true or false?
+
+Are you using payloads?
+
+Were there any previous exceptions in this IndexWriter before flushing
+this segment?  Could you post the full infoStream output?
+
+The computation of bufferUpto is entirely in memory (not using a
+previous segment).  When a posting list is first created (new term is
+first encountered), it allocates an initial slice of 5 bytes.  The
+slice address, a single int, encodes the byte[] buffer index and the
+offset into that buffer as bufferIndex*32768 + bufferOffset.
+
+Then, if that first slice fills up, a larger slice is allocated and
+the "forwarding address" of that larger slice is left in the last 4
+bytes of the previous slice.
+
+Then, when reading the byte stream, during appendPostings, this
+process is reversed so as to write the single contiguous byte stream
+into the real segment's postings frq/prx files.  Somehow, during this
+reading step, you are hitting an out of bounds forwarding address
+when switching to the next slice.
+
+Could you apply the patch below & re-run?  It will likely produce
+insane amounts of output, but we only need the last section to see
+which term is hitting the bug.  If that term consistently hits the bug
+then we can focus on how/when it gets indexed...
+
+Mike
+
+Index: src/java/org/apache/lucene/index/DocumentsWriter.java
+===================================================================
+--- src/java/org/apache/lucene/index/DocumentsWriter.java	(revision  
+638310)
++++ src/java/org/apache/lucene/index/DocumentsWriter.java	(working copy)
+@@ -1763,6 +1763,7 @@
+              writeProxVInt((proxCode<<1)|1);
+              writeProxVInt(payload.length);
+              writeProxBytes(payload.data, payload.offset,  
+payload.length);
++            // nocommit -- not sync!!
+              fieldInfo.storePayloads = true;
+            } else
+              writeProxVInt(proxCode<<1);
+@@ -2216,6 +2217,8 @@
+        while(text[pos] != 0xffff)
+          pos++;
+
++      System.out.println("term=" + new String(text, start, pos- 
+start) + " numToMerge=" + numToMerge);
++
+        long freqPointer = freqOut.getFilePointer();
+        long proxPointer = proxOut.getFilePointer();
+
+@@ -2239,6 +2242,8 @@
+          final int doc = minState.docID;
+          final int termDocFreq = minState.termFreq;
+
++        System.out.println("  doc=" + doc + " freq=" + termDocFreq);
++
+          assert doc < numDocsInRAM;
+          assert doc > lastDoc || df == 1;
+
+@@ -2251,14 +2256,18 @@
+          // changing the format to match Lucene's segment
+          // format.
+          for(int j=0;j<termDocFreq;j++) {
++          System.out.println("    pos=" + j);
+            final int code = prox.readVInt();
++          System.out.println("      code=" + code);
+            if (currentFieldStorePayloads) {
++            System.out.println("      payload");
+              final int payloadLength;
+              if ((code & 1) != 0) {
+                // This position has a payload
+                payloadLength = prox.readVInt();
+              } else
+                payloadLength = 0;
++            System.out.println("      pl=" + payloadLength);
+              if (payloadLength != lastPayloadLength) {
+                proxOut.writeVInt(code|1);
+                proxOut.writeVInt(payloadLength);
+
+Marcelo Ochoa wrote:
+> Hi Mike:
+>   Well the problem is consitently, but to test the code and the
+> project its necesary an Oracle 11g database :(
+>   I don't know why the computation of bufferUpto variable is wrong in
+> the last step, during all other calls pool.buffers.length is
+> consitently to 366 so I asume that its OK. And the value 8192 for
+> byfferUpto is suspicious because seem a bit shift or overrun.
+>   How bufferUpto variable is computed?
+>   Using some segment info alredy writed into the disk, or is in memory
+> at this point?
+>   I am still investigating the problem by adding more debugging  
+> information.
+>   Best regards, Marcelo.
+> On Tue, May 6, 2008 at 7:00 PM, Michael McCandless
+> <lucene@mikemccandless.com> wrote:
+>>
+>>  Hi Marcelo,
+>>
+>>  Hmmm something is not right.
+>>
+>>  Somehow the byte slices, which DocumentsWriter uses to hold the  
+>> postings in
+>> RAM, became corrupt.
+>>
+>>  Is this easily reproduced?
+>>
+>>  Mike
+>>
+>>  Marcelo Ochoa wrote:
+>>
+>>>
+>>>
+>>>
+>>> Hi Lucene experts:
+>>>  I am working upgrading Lucene-Oracle integration project to latest
+>>> Lucene 2.3.1 code.
+>>>  After correcting a minor issue on OJVMDirectory file  
+>>> implementation I
+>>> have the integration running with latest 2.3.1 code.
+>>>  But it only works with small indexes, I think index which are lower
+>>> than the Memory threshold.
+>>>  If I performs an index in a big table, I got this exception:
+>>>  Exception in thread "Root Thread"
+>> java.lang.ArrayIndexOutOfBoundsException
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter$ByteSliceReader.nextSlice 
+>> (DocumentsWriter.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter$ByteSliceReader.readByte 
+>> (DocumentsWriter.java)
+>>>        at org.apache.lucene.store.IndexInput.readVInt 
+>>> (IndexInput.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.appendPostings 
+>> (DocumentsWriter.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.writeSegment 
+>> (DocumentsWriter.java:2011)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.flush(DocumentsWriter.java: 
+>> 548)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.doFlush(IndexWriter.java:2497)
+>>>        at org.apache.lucene.index.IndexWriter.flush 
+>>> (IndexWriter.java:2397)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java)
+>>>        at org.apache.lucene.indexer.TableIndexer.index 
+>>> (TableIndexer.java)
+>>>        at
+>> org.apache.lucene.indexer.LuceneDomainIndex.ODCIIndexCreate 
+>> (LuceneDomainIndex.java:477)
+>>>
+>>>  Something is wrong at nextSlice method :(
+>>>  I added some System.out info and, before the exception is thrown,
+>>> index and arrays have this information:
+>>>
+>>> .nextSlice (previous)
+>>> limit: 11393 buffer.length: 32768
+>>> level: 0 nextLevelArray.length: 10
+>>> bufferUpto: 147 pool.buffers.length: 366
+>>> .nextSlice (current)
+>>> limit: 6189 buffer.length: 32768
+>>> level: 0 nextLevelArray.length: 10
+>>> bufferUpto: 8192 pool.buffers.length: 366
+>>>
+>>>   As you can see bufferUpto variable have 8192 value and  
+>>> pool.buffers
+>>> is an array of 366 elements, this cause the exception  nextSlice()
+>>> method is:
+>>>    public void nextSlice() {
+>>>
+>>>      // Skip to our next slice
+>>>      System.out.println(".nextSlice");
+>>>      System.out.println("limit: "+limit+" buffer.length:  
+>>> "+buffer.length);
+>>>      final int nextIndex = ((buffer[limit]&0xff)<<24) +
+>>> ((buffer[1+limit]&0xff)<<16) + ((buffer[2+limit]&0xff)<<8)
++
+>>> (buffer[3+limit]&0xff);
+>>>
+>>>      System.out.println("level: "+level+" nextLevelArray.length:
+>>> "+nextLevelArray.length);
+>>>      level = nextLevelArray[level];
+>>>      final int newSize = levelSizeArray[level];
+>>>
+>>>      bufferUpto = nextIndex / BYTE_BLOCK_SIZE;
+>>>      bufferOffset = bufferUpto * BYTE_BLOCK_SIZE;
+>>>
+>>>      System.out.println("bufferUpto: "+bufferUpto+"
+>>> pool.buffers.length: "+pool.buffers.length);
+>>>      buffer = pool.buffers[bufferUpto];
+>>>      upto = nextIndex & BYTE_BLOCK_MASK;
+>>>
+>>>      if (nextIndex + newSize >= endIndex) {
+>>>        // We are advancing to the final slice
+>>>        assert endIndex - nextIndex > 0;
+>>>        limit = endIndex - bufferOffset;
+>>>      } else {
+>>>        // This is not the final slice (subtract 4 for the
+>>>        // forwarding address at the end of this new slice)
+>>>        limit = upto+newSize-4;
+>>>      }
+>>>    }
+>>>
+>>>    IndexWriter InfoStream information is:
+>>>  RAM: now flush @ usedMB=53.016 allocMB=53.016 triggerMB=53
+>>> IW 0 [Root Thread]:   flush: segment=_0 docStoreSegment=_0
+>>> docStoreOffset=0 flushDocs=true flushDeletes=false
+>>> flushDocStores=false numDocs=85
+>>> 564 numBufDelTerms=0
+>>> IW 0 [Root Thread]:   index before flush
+>>> flush postings as segment _0 numDocs=85564
+>>> ..... nextSlice output here.....
+>>> docWriter: now abort
+>>> IW 1 [Root Thread]: hit exception flushing segment _0
+>>> docWriter: now abort
+>>> IFD [Root Thread]: now checkpoint "segments_1" [0 segments ;  
+>>> isCommit =
+>> false]
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.tii"
+>>> IFD [Root Thread]: delete "_0.tii"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.fdx"
+>>> IFD [Root Thread]: delete "_0.fdx"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.fnm"
+>>> IFD [Root Thread]: delete "_0.fnm"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.fdt"
+>>> IFD [Root Thread]: delete "_0.fdt"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.prx"
+>>> IFD [Root Thread]: delete "_0.prx"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.frq"
+>>> IFD [Root Thread]: delete "_0.frq"
+>>> IFD [Root Thread]: refresh [prefix=_0]: removing newly created
+>>> unreferenced file "_0.tis"
+>>> IFD [Root Thread]: delete "_0.tis"
+>>> IW 1 [Root Thread]: now flush at close
+>>> IW 1 [Root Thread]:   flush: segment=null docStoreSegment=null
+>>> docStoreOffset=0 flushDocs=false flushDeletes=false
+>>> flushDocStores=false numDocs=0 numBufDelTerms=0
+>>> IW 1 [Root Thread]:   index before flush
+>>> IW 1 [Root Thread]: close: wrote segments file "segments_2"
+>>> IFD [Root Thread]: now checkpoint "segments_2" [0 segments ;  
+>>> isCommit =
+>> true]
+>>> IFD [Root Thread]: deleteCommits: now remove commit "segments_1"
+>>> IFD [Root Thread]: delete "segments_1"
+>>> IW 1 [Root Thread]: at close:
+>>> Exception in thread "Root Thread"  
+>>> java.lang.ArrayIndexOutOfBoundsException
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter$ByteSliceReader.nextSlice 
+>> (DocumentsWriter.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter$ByteSliceReader.readByte 
+>> (DocumentsWriter.java)
+>>>        at org.apache.lucene.store.IndexInput.readVInt 
+>>> (IndexInput.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.appendPostings 
+>> (DocumentsWriter.java)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.writeSegment 
+>> (DocumentsWriter.java:2011)
+>>>        at
+>> org.apache.lucene.index.DocumentsWriter.flush(DocumentsWriter.java: 
+>> 548)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.doFlush(IndexWriter.java:2497)
+>>>        at org.apache.lucene.index.IndexWriter.flush 
+>>> (IndexWriter.java:2397)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java)
+>>>        at
+>> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java)
+>>>        at org.apache.lucene.indexer.TableIndexer.index 
+>>> (TableIndexer.java)
+>>>        at
+>> org.apache.lucene.indexer.LuceneDomainIndex.ODCIIndexCreate 
+>> (LuceneDomainIndex.java:477)
+>>>
+>>>  Any help to find the incompatibility issue will be great.
+>>>  Best regards, Marcelo.
+>>>
+>>> PD: If anybody needs the complete log I can send it my email.
+>>> --
+>>> Marcelo F. Ochoa
+>>> http://marceloochoa.blogspot.com/
+>>> http://marcelo.ochoa.googlepages.com/home
+>>> ______________
+>>> Do you Know DBPrism? Look @ DB Prism's Web Site
+>>> http://www.dbprism.com.ar/index.html
+>>> More info?
+>>> Chapter 17 of the book "Programming the Oracle Database using Java &
+>>> Web Services"
+>>> http://www.amazon.com/gp/product/1555583296/
+>>> Chapter 21 of the book "Professional XML Databases" - Wrox Press
+>>> http://www.amazon.com/gp/product/1861003587/
+>>> Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+>>> http://www.oreilly.com/catalog/oracleopen/
+>>>
+>>> -------------------------------------------------------------------- 
+>>> -
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>>
+>>   
+>> ---------------------------------------------------------------------
+>>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+>
+>
+> -- 
+> Marcelo F. Ochoa
+> http://marceloochoa.blogspot.com/
+> http://marcelo.ochoa.googlepages.com/home
+> ______________
+> Do you Know DBPrism? Look @ DB Prism's Web Site
+> http://www.dbprism.com.ar/index.html
+> More info?
+> Chapter 17 of the book "Programming the Oracle Database using Java &
+> Web Services"
+> http://www.amazon.com/gp/product/1555583296/
+> Chapter 21 of the book "Professional XML Databases" - Wrox Press
+> http://www.amazon.com/gp/product/1861003587/
+> Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+> http://www.oreilly.com/catalog/oracleopen/
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

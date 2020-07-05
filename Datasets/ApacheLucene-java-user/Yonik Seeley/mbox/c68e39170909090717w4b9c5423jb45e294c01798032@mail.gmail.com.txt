@@ -1,0 +1,69 @@
+FROM: Yonik Seeley <yo...@lucidimagination.com>
+SUBJECT: Re: Lucene 2.9 RC2 now available for testing
+DATE: 9 Sep 2009
+
+On Wed, Sep 9, 2009 at 9:40 AM, Peter Keegan<peterlkeegan@gmail.com> wrote:
+> IndexSearcher.search is calling my custom scorer's 'next' and 'doc' methods
+> 64% fewer times. I see no 'advance' method in any of the hot spots'. I am
+> getting the same number of hits from the custom scorer.
+> Has the BooleanScorer2 logic changed?
+
+What does your query structure look like?
+BS2 hasn't changed much.  The old BS may be used in certain
+circumstances, but not in a way that you would see a decrease in
+skipTo()+next().
+
+Shot in the dark: if your scorer is part of a conjunction, maybe
+you're getting lucky with an optimization:
+http://svn.apache.org/viewvc?view=rev&revision=630698
+It was part of http://issues.apache.org/jira/browse/LUCENE-693 , but I
+had a slight bug to the "highest skip first" optimization that wasn't
+fixed until 2.4
+
+Let's assume that your custom scorer is dense (matches almost
+everything) and that another scorer is sparse.  If your custom scorer
+appears first, the conjunction scorer logic would be like so:
+custom.skipTo(),  scorer1.skipTo(),  custom.skipTo() => match!
+
+If the sparse scorer is first, it will look more like so:
+scorer1.skipTo(),  custom.skipTo() => match!
+
+-Yonik
+http://www.lucidimagination.com
+
+
+> Peter
+>
+> On Wed, Sep 9, 2009 at 9:17 AM, Yonik Seeley <
+> yonik.seeley@lucidimagination.com> wrote:
+>
+>> On Wed, Sep 9, 2009 at 8:57 AM, Peter Keegan<peterlkeegan@gmail.com>
+>> wrote:
+>> > Using JProfiler, I observe that the improvement
+>> > is due to a huge reduction in the number of calls to TermDocs.next and
+>> > TermDocs.skipTo (about 65% fewer calls).
+>>
+>> Indexes are searched per-segment now (i.e. MultiTermDocs isn't normally
+>> used).
+>> Off the top of my head, I'm not sure how this can lead to fewer
+>> TermDocs.skipTo() calls though.  Are you sure you weren't also
+>> counting Scorer.skipTo()... which would now be Scorer.advance()?
+>> Have you verified that your custom scorer is working correctly with
+>> 2.9 and that you're getting the same number of hits on the overall
+>> query as you were with previous versions?
+>>
+>> -Yonik
+>> http://www.lucidimagination.com
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

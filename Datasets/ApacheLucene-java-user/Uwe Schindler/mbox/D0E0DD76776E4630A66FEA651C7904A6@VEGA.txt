@@ -1,0 +1,66 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Concurrent IndexReader and IndexSearcher behavior
+DATE: 30 Jan 2009
+
+As long as the indexreader of the seracher is not reopened, the searcher
+will not see any changes and will so not crash.
+
+This works, because all changes are written in an extra file (.del for
+deleted docs). The concurrent reader will not see those changes. If the
+index is then optimized in parallel, the concurrent reader will see nothing
+until it is reopened. The new optimized segment is generated in a new file.
+The Indexwriter will delete the old segment files after optimization, but
+because of the way unix filesystems work, the file is still available, even
+if it does not appear in the directory listing anymore (because it is still
+opened by the other reader). As soon as all references to the deleted file
+are removed, the unix kernel will remove it in real. On windows, this works
+a little bit different: opened files cannot be deleted (access denied). When
+you optimize an index, the open files are marked by a extra file for
+deletion and removed on next index access.
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: Kay Kay [mailto:kaykay.unique@gmail.com]
+> Sent: Friday, January 30, 2009 11:47 PM
+> To: java-user@lucene.apache.org
+> Subject: Concurrent IndexReader and IndexSearcher behavior
+> 
+> Assume I have an index of size 20G and a main memory of 1G.
+> I do the following steps in order.
+> 
+> * Open an IndexSearcher on the directory.
+> * Serve Searches from that directory
+> 
+> Meanwhile (when the IndexSearcher isstill  open on the directory) - the
+> following operations are performed concurrently.
+> * Open an IndexReader on the same directory
+> * invoke delete on the same ( which I believe, internally should 'touch'
+> some records in segments and mark them as deleted. The 'touch'ed records
+> across segments are removed when the index is 'optimize'd. At this point
+> , though the index is not 'optimize'd but just 'commit'ted ).
+> 
+> When the IndexReader is performing a delete operation on a data
+> directory , how would it affect the IndexSearcher that possibly might be
+> trying to return search results for a given input query. Would it be
+> possible for the searcher to crash , when the searcher and reader are
+> accessing the same set of resources (it seems logically correct for the
+> searcher to crash though).
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

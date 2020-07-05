@@ -1,0 +1,167 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: Question about how to speed up custom scoring
+DATE: 11 Oct 2009
+
+What do you mean "not something I can plug in on top of my original query"?
+
+Do you mean that you can't do it like the more complex example in the class
+you posted earlier in the thread, where you take a linear combination of the
+Map<String, Float> -based score, and the regular text score?
+
+Another option is to just use the CustomScoreQuery like your other
+attempt is:
+
+--------
+public class QueryTermBoostingQuery extends CustomScoreQuery {
+  private float bias;
+
+  public QueryTermBoostingQuery (Query q, ValueSourceQuery[] vQueries, float
+bias)  {
+    super(q, vQueries);
+    this.bias = bias;
+  }
+
+  @Override
+  public float customScore(int doc, float subQueryScore, float[]
+valSrcScores)   {
+    float termWeightedScore = 0;
+    for(float valSrcScore : valSrcScores) termWeightedScore +=
+valSrcScore;
+    return bias * subQueryScore + (1 - bias) * termWeightedScore;
+  }
+}
+
+And then to use it, you build up some FloatFieldSource instances like
+before:
+
+  FloatFieldSource m1 = // defined like I did in my previous message
+  FloatFieldSource m2 = //...
+  FloatFieldSource m3 = //...
+
+  ValueSourceQuery vsq1 = new ValueSourceQuery(m1);
+  vsq1.setBoost(model1Weight);
+
+  // vsq2 and vsq3 also
+
+  ValueSourceQuery[] vsq = { vsq1, vsq2, vsq3  };
+
+  Query textQuery = QueryParser.parse("company:Microsoft");
+
+  Query q = new QueryTermBoostingQuery(textQuery, vsq, bias);
+-------
+
+Does this work for you?
+
+  -jake
+
+On Sat, Oct 10, 2009 at 7:24 PM, scott w <scottblanc@gmail.com> wrote:
+
+> Haven't tried it yet but looking at it closer it looks like it's not
+> something I can plug in on top of my original query. I am definitely happy
+> using an approximation for the sake of performance but I do need to be able
+> to have the original results stay the same.
+>
+> On Fri, Oct 9, 2009 at 5:32 PM, Jake Mannix <jake.mannix@gmail.com> wrote:
+>
+> > Great Scott (hah!) - please do report back, even if it just works fine
+> and
+> > you have no more questions, I'd like to know whether this really is
+> > what you were after and actually works for you.
+> >
+>
+> > Note that the FieldCache is kinda "magic" - it's lazy (so the first query
+> > will
+> > be slow and you should fire one off just to warm it up after every time
+> > you reload an IndexReader), and kinda leaky: the entries in the
+> FieldCache
+> > stick around until all references to the IndexReader they're keyed on
+> > get garbage collected (there's a WeakHashMap in the background), so
+> > don't accidentally hang onto references to those IndexReaders past
+> > when needed.
+> >
+>
+> Good to know.
+>
+> >
+> >  -jake
+> >
+> > On Fri, Oct 9, 2009 at 3:52 PM, scott w <scottblanc@gmail.com> wrote:
+> >
+> > > Thanks Jake! I will test this out and report back soon in case it's
+> > helpful
+> > > to others. Definitely appreciate the help.
+> > >
+> > > Scott
+> > >
+> > > On Fri, Oct 9, 2009 at 3:33 PM, Jake Mannix <jake.mannix@gmail.com>
+> > wrote:
+> > >
+> > > > On Fri, Oct 9, 2009 at 3:07 PM, scott w <scottblanc@gmail.com>
+> wrote:
+> > > >
+> > > > > Example Document:
+> > > > > model_1_score = 0.9
+> > > > > model_2_score = 0.3
+> > > > > model_3_score = 0.7
+> > > > >
+> > > > > I want to be able to pass in the following map at query time:
+> > > > > {model_1_score=0.4, model_2_score=0.7} and have that map get used
+> as
+> > > > input
+> > > > > to a custom score function that would look like: 0.9*0.4 + 0.3*0.7,
+> > so
+> > > > that
+> > > > > it is summing over the specified fields and multipling the indexed
+> > > weight
+> > > > > by
+> > > > > the query time weight.
+> > > > >
+> > > >
+> > > > Ok, now I think I get it.  You do have some index-time floats, and
+> > > > query-time
+> > > > boosts.
+> > > >
+> > > > You should be able to do a normal BooleanQuery with three OR'ed
+> > together
+> > > > ValueSourceQueries boosted by input weights, it seems, as that is the
+> > way
+> > > > they work - they take the values in different fields and use them as
+> > the
+> > > > score,
+> > > > and the normal boosting technique will use query time weigting.
+> > > >
+> > > > To get good performance with a ValueSourceQuery, I'd suggest using a
+> > > > FieldCacheSource for speedier processing:
+> > > >
+> > > > -----------
+> > > >  String field = "model_1_score";
+> > > >  float runTimeBoost = 0.5;
+> > > >
+> > > >  ValueSource model1Source = new FloatFieldSource(field,
+> > > >    new FieldCache.FloatParser() {
+> > > >      public float parseFloat(String s) { return Float.parseFloat(s);
+> }
+> > > >    });
+> > > >
+> > > >  Query model1Q = new ValueSourceQuery(model1Source);
+> > > >
+> > > >  model1Q.setBoost(runTimeBoost);
+> > > >
+> > > > // do this for model2 and model3 as well...
+> > > >
+> > > >  BooleanQuery bq = new BooleanQuery();
+> > > >  bq.add(model1Q, Occur.SHOULD);
+> > > >  bq.add(model2Q, Occur.SHOULD);
+> > > >  bq.add(model3Q, Occur.SHOULD);
+> > > > ---------------
+> > > >
+> > > >  I haven't tried this code, but it seems like this is what you are
+> > trying
+> > > > to do...
+> > > >
+> > > >  -jake
+> > > >
+> > >
+> >
+>
+

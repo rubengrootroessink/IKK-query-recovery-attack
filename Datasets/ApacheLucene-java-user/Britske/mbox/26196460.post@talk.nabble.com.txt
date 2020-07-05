@@ -1,0 +1,190 @@
+FROM: Britske <gbr...@gmail.com>
+SUBJECT: Re: merging Parallel indexes (can indexWriter.addIndexesNoOptimize be  used?)
+DATE: 4 Nov 2009
+
+
+Yeah passing in ParallelReader should work. I'll try that thanks!
+
+Probably still going to look into this low-level stuff though. Also because
+some indexes I use (Index B in my example) are pretty costly to index at the
+moment. At the same time the indexing client has a lot of knowledge about
+the documents it's indexing: basically with a little extra coding it could
+know very efficiently the inverted indexes of all indexed fields for the
+docs it's processing. 
+
+Thus basically it very effciently know the contents of .frq. It just needs
+to get it in the correct format.   This would save tremendous amounts of
+indexing time. (I'm forgetting .tii .tis for the moment but these should be
+relatively easy/ efficient to figure out as well from this date if I'm
+correct.) 
+
+I figure Flexible Indexing would give a far better interface for me to plug
+this in right? 
+
+Anyway, thanks for the tip. And yes there will be dragons I'm sure ;-) 
+
+Best, 
+Geert-Jan 
+
+
+
+Michael McCandless-2 wrote:
+> 
+> Roughly, your approach sounds correct.  You essentially need to
+> concatenate tis, tii, frq, prx, but adjusting all absolute pointers
+> accordingly.  If you look at how SegmentMerge, in its
+> mergeTerms/mergeTermInfos/appendPostings, makes us of the
+> FormatPostingsFields/Terms/Docs/PositionsConsumer, that's probably a
+> good start.  But my guess is there are devils in the details....
+> 
+> Oh, actually another option is to just use addIndexes(IndexReader[]),
+> passing in your ParallelReader?
+> 
+> Mike
+> 
+> On Wed, Nov 4, 2009 at 6:46 AM, Britske <gbrits@gmail.com> wrote:
+>>
+>> Thanks, but it's already guaranteed that the indexes are in sync. So I
+>> could
+>> (and do) use parallelReader to search them both at the sime time. This is
+>> what my running index looks like.
+>>
+>> However at certain points I was considering to store a  frozen index from
+>> the parallel index for backup/ other purposes. I figured having it merged
+>> would shave of some complexity.
+>>
+>> Perhaps this should go to .dev channel but anyway:Before giving this a
+>> rest
+>> would it be hard to write some low-level code to merge the two? I've
+>> never
+>> touched the low-level classes and methods (inside documentWriter), but
+>> I'm
+>> looking for a way to directly change the segment files. .frq, .tis, .tii
+>> in
+>> particular, the rest can remain untouched for my setup if I'm correct. In
+>> other words, I would like to bypass writer.addDocument(), because being
+>> able
+>> to change to index-files directly would be far more efficient for my
+>> situation I believe.
+>>
+>> What classes, methods would I need to look into for changing / writing
+>> these
+>> files directly?
+>>
+>>  Some background info why I think a merge could be done rather efficient
+>> in
+>> this particular situation if I had access to these low level methods:
+>>
+>> - we have index A with stored and indexed fields, index B with only
+>> indexed
+>> fields (with omitTF / omitnorms =true)
+>> - merge index B into index A.
+>> --> probably no need to change Fields (.fdx)  and Field Index (.fdt)
+>> (because nothing stored and docids in order)
+>> --> no change to Positions (.prx) Normalization factors (.nrm) (because
+>> omitTF / omitnorms =true))
+>>
+>> - all fields in index B are prefixed with a particular sequence
+>> --> since all fields in index B are prefixed with a particular sequence,
+>> this means I could drop in terms sequentially in Term Infos(.tis) and
+>> Term
+>> Info Index (.tii) (because of the lexiographical ordening of these files
+>> and
+>> the prefixed fields inindex B)
+>> --> similarly, because Frequencies (.frq) depends on ordering of .tis I
+>> could drop .freq of index B into the correct position of .frq of index A
+>> and
+>> be done with it. (again because of the same prefix used on all fields of
+>> index B)
+>>
+>> Would this work? And where to start looking?
+>>
+>> Thanks in advance,
+>> Geert-Jan
+>>
+>>
+>>
+>>
+>> Michael McCandless-2 wrote:
+>>>
+>>> addIndexesNoOptimize is only for shards.
+>>>
+>>> But this [pending patch/contribution] is similar what you're seeking, I
+>>> think:
+>>>
+>>>   https://issues.apache.org/jira/browse/LUCENE-1879
+>>>
+>>> It does not actually merge the indexes, but rather keeps 2 parallel
+>>> indexes in sync so you can use ParallelReader to search them
+>>> coherently.
+>>>
+>>> Mike
+>>>
+>>> On Tue, Nov 3, 2009 at 1:46 PM, Britske <gbrits@gmail.com> wrote:
+>>>>
+>>>> Given two parallel indexes which contain the same products but
+>>>> different
+>>>> fields, one with slowly changing fields and one with fields which are
+>>>> updated regularly:
+>>>>
+>>>> Is it possible to periodically merge these to form a single index?
+>>>>  (thereby
+>>>> representing a frozen snapshot in time)
+>>>>
+>>>> For example: Can indexWriter.addIndexesNoOptimize handle this, or was
+>>>> it
+>>>> (only) designed for merging shards?
+>>>> If not, is there another option (3rd party or not) to use, or would I
+>>>> have
+>>>> to resort to low-level hacking?
+>>>>
+>>>> Thanks,
+>>>> Geert-Jan
+>>>> --
+>>>> View this message in context:
+>>>> http://old.nabble.com/merging-Parallel-indexes-%28can-indexWriter.addIndexesNoOptimize-be-used-%29-tp26161322p26161322.html
+>>>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>
+>> --
+>> View this message in context:
+>> http://old.nabble.com/merging-Parallel-indexes-%28can-indexWriter.addIndexesNoOptimize-be-used-%29-tp26161322p26194788.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://old.nabble.com/merging-Parallel-indexes-%28can-indexWriter.addIndexesNoOptimize-be-used-%29-tp26161322p26196460.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

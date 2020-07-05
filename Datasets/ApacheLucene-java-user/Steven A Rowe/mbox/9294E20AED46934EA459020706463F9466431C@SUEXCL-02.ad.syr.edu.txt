@@ -1,0 +1,259 @@
+FROM: "Steven A Rowe" <sar...@syr.edu>
+SUBJECT: RE: Lucene multifield query problem
+DATE: 19 Dec 2007
+
+Hi Rakesh,
+
+Here's a version that should work (warning: untested):
+
+
+TermQuery notPublishedQuery
+  = new TermQuery(new Term("i_published", "false"));
+PrefixQuery topicQuery = new PrefixQuery
+  (new Term("i_topicsClasses.id", "1_1_*_*"));
+
+String searchCriteria = "Indoor*";
+Term titleTerm = new Term
+  ("i_title", searchCriteria.toLowerCase());
+TermQuery titleQuery = new TermQuery(titleTerm);
+Term descTerm = new Term
+  ("i_description", searchCriteria.toLowerCase());
+TermQuery descQuery = new TermQuery(descTerm);
+BooleanQuery titleOrDescQuery = new BooleanQuery();
+titleOrDescQuery.add
+  (titleQuery, BooleanClause.Occur.SHOULD);
+titleOrDescQuery.add
+  (descQuery, BooleanClause.Occur.SHOULD);
+
+BooleanQuery topLevelQuery = new BooleanQuery();
+topLevelQuery.add
+  (titleOrDescQuery, BooleanClause.Occur.MUST);
+topLevelQuery.add
+  (notPublishedQuery, BooleanClause.Occur.MUST_NOT);
+topLevelQuery.add
+  (topicQuery, BooleanClause.Occur.MUST);
+
+
+Three points worthy of note concerning the above code:
+
+1. In the second version of your code, TermQuery's for "Indoor*" were attempting to match
+the literal string "Indoor*", and never expanding the query to search for all index terms
+that begin with "Indoor".  I have substituted PrefixQuery's.
+
+2. PrefixQuery's do NOT analyze their arguments, so the initial-uppercase "Indoor*" will expand
+to nothing in the index, because (I assume) the index was constructed with the StandardAnalyzer,
+which invokes a LowercaseFilter.  Hence: searchCriteria.toLowerCase().
+
+3. Mixing QueryParser calls with manual Query construction is hard to follow - in the above
+code I do away with calls to QueryParser, instead manually calling constructors for the appropriate
+query types.
+
+Hope it helps,
+Steve
+
+On 12/18/2007 at 11:44 PM, Rakesh Shete wrote:
+> Hi Doren, Steve. Your suggestions make sense but dont give me 
+> the desired results. Here is the code how I generate the query:
+> 
+> String searchCriteria = "Indoor*";QueryParser queryparser = 
+> new QueryParser("i_title",                    new 
+> StandardAnalyzer());Query q1 = 
+> queryparser.parse(searchCriteria);queryparser = new 
+> QueryParser("i_description",                    new 
+> StandardAnalyzer());Query q2 = 
+> queryparser.parse(searchCriteria);queryparser = new 
+> QueryParser("i_published", new StandardAnalyzer());Query q3 = 
+> queryparser.parse("false");queryparser = new 
+> QueryParser("i_topicsClasses.id",                    new 
+> StandardAnalyzer());Query topicQuery = 
+> queryparser.parse("1_1_*_*");BooleanQuery booleanQuery = new 
+> BooleanQuery();booleanQuery.add(q1, 
+> BooleanClause.Occur.SHOULD);booleanQuery.add(q2, 
+> BooleanClause.Occur.SHOULD);booleanQuery.add(q3, 
+> BooleanClause.Occur.MUST_NOT);booleanQuery.add(topicQuery, 
+> BooleanClause.Occur.MUST);
+> 
+> 
+> This produces the following query: i_title:indoor* 
+> i_description:indoor* -i_published:false +i_topicsClasses.id:1_1_*_*
+> This gives me extra unwanted results from 
+> "+i_topicsClasses.id:1_1_*_*".
+> 
+> I modified the above code in the foll. manner:
+> 
+> Term t = new Term("i_title", searchCriteria);TermQuery 
+> termQuery = new TermQuery(t);Term t1 = new 
+> Term("i_description", searchCriteria);TermQuery termQuery1 = 
+> new TermQuery(t1);BooleanQuery booleanQuery1 = new 
+> BooleanQuery();booleanQuery1.add(termQuery, 
+> BooleanClause.Occur.SHOULD);booleanQuery1.add(termQuery1, 
+> BooleanClause.Occur.SHOULD);BooleanQuery booleanQuery = new 
+> BooleanQuery();booleanQuery.add(booleanQuery1, 
+> BooleanClause.Occur.MUST);booleanQuery.add(q3, 
+> BooleanClause.Occur.MUST_NOT);booleanQuery.add(topicQuery, 
+> BooleanClause.Occur.MUST);
+> 
+> This produces the following query: 
+> +(i_title:Indoor* i_description:Indoor*) -i_published:false 
+> +i_topicsClasses.id:1_1_*_*
+> But no results are fetched :(
+> 
+> Any hints if am I doing anything wrong?
+> 
+> --Regards,
+> Rakesh S
+> 
+> 
+> 
+> > Date: Tue, 18 Dec 2007 23:09:09 +0200
+> > From: cdoronc@gmail.com
+> > To: java-user@lucene.apache.org
+> > Subject: Re: Lucene multifield query problem
+> > 
+> > Hi Rakesh,
+> > 
+> > Perhaps the confusion comes from the asymmetry
+> > between +X and -X.   I.e., for the query:
+> >       A B -C +D
+> > one might think that, similar to how -C only disqualifies docs
+> > containing C (but not qualifying docs not containing C), also
+> > +D only disqualifies docs not containing D. But this is
+> > inaccurate, because +D, in addition to disqualifying
+> > docs not containing D, also qualifies docs containing D.
+> > 
+> > The modified query that Steven suggested:
+> >       +(A B) -C +D
+> > removes this asymmetry, because specifying +(A B)  means
+> > that D is not anymore sufficient to qualify a doc.
+> > 
+> > Hope this helps (otherwise let this reply be forever 
+> disqualified : - ) )
+> > Doron
+> > 
+> > On Dec 18, 2007 9:28 PM, Steven A Rowe <sarowe@syr.edu> wrote:
+> > 
+> > > Hi Rakesh,
+> > >
+> > > This doesn't look like a user-generated query.  Have you 
+> considered
+> > > building the Query via the API instead of using QueryParser?
+> > >
+> > > With QueryParser, you should get the results you want 
+> with syntax like:
+> > >
+> > > +(i_title:indoor* OR i_description:indoor*) -i_published:false
+> > > +i_topicsClasses.id:1_1_*_*
+> > >
+> > > Have you tried this yet?
+> > >
+> > > Steve
+> > >
+> > > On 12/18/2007 at 1:58 PM, Rakesh Shete wrote:
+> > > >
+> > > > Thanks for the suggestion Steve. My problem is with getting
+> > > > the correct results. Let me put in words the query :
+> > > >
+> > > > Fetch all documents such that the search string "indoor*" is
+> > > > either part of the 'i_title' field or 'i_description' field,
+> > > > eliminate if not published (-i_published:false) but should
+> > > > have topic id of the form "1_1_*_*" (i_topicsClasses.id:1_1_*_*)
+> > > >
+> > > > i_title:indoor* i_description:indoor* -i_published:false
+> > > > +i_topicsClasses.id:1_1_*_* returns me extra results which
+> > > > should not be fetched.
+> > > >
+> > > > -- Regards,
+> > > > Rakesh Shete
+> > > >
+> > > > > Subject: RE: Lucene multifield query problem
+> > > > > Date: Tue, 18 Dec 2007 13:26:24 -0500
+> > > > > From: sarowe@syr.edu
+> > > > > To: java-user@lucene.apache.org
+> > > > >
+> > > > > Hi Rakesh,
+> > > > >
+> > > > > Set the default QueryParser operator to AND (default 
+> default operator
+> > > > > :) is OR):
+> > > > >
+> > > > >
+> > > > <http://lucene.apache.org/java/2_2_0/api/org/apache/lucene/que
+> > > > ryParser/QueryParser.html#setDefaultOperator(org.apache.lucene
+> > > > .queryParser.QueryParser.Operator)>
+> > > > >
+> > > > > Steve
+> > > > >
+> > > > > On 12/18/2007 at 1:22 PM, Rakesh Shete wrote:
+> > > > > >
+> > > > > > Hi all,
+> > > > > >
+> > > > > > I am facing problem with the following multifield query:
+> > > > > >
+> > > > > > i_title:indoor* i_description:indoor* -i_published:false
+> > > > > > +i_topicsClasses.id:1_1_*_*
+> > > > > >
+> > > > > > The above query returns me even results which should not be
+> > > > > > there. Ideally I would like the query resullts as:
+> > > > > >
+> > > > > > (i_title:indoor* i_description:indoor* -i_published:false)
+> > > > > > AND (i_topicsClasses.id:1_1_*_*)
+> > > > > >
+> > > > > > i.e. The intersection of the first part and second part.
+> > > > > >
+> > > > > > But what is happening currently is that I get a union of the
+> > > > > > first part and second part, i.e., whatever results are
+> > > > > > returned by "i_title:indoor* i_description:indoor*
+> > > > > > -i_published:false" are combined (union) with results
+> > > > > > returned by "+i_topicsClasses.id:1_1_*_*".
+> > > > > >
+> > > > > > How do I write a query that returns me results which are an
+> > > > > > intersection of the above 2 parts?
+> > > > > >
+> > > > > > --Regards,
+> > > > > > Rakesh S
+> > > > > >
+> > > > > >
+> > > > > > 
+> _________________________________________________________________
+> > > Post
+> > > > > > ads for free - to sell, rent or even buy.www.yello.in
+> > > > > > http://ss1.richmedia.in/recurl.asp?pid=186
+> > > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > >
+> > > > > 
+> ---------------------------------------------------------------------
+> > > > > To unsubscribe, e-mail: 
+> java-user-unsubscribe@lucene.apache.org For
+> > > > > additional commands, e-mail: java-user-help@lucene.apache.org
+> > > > >
+> > > >
+> > > > 
+> _________________________________________________________________ Post
+> > > > ads for free - to sell, rent or even buy.www.yello.in
+> > > > http://ss1.richmedia.in/recurl.asp?pid=186
+> > > >
+> > >
+> > >
+> > >
+> > >
+> > > 
+> ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> 
+> _________________________________________________________________
+> Post free property ads on Yello Classifieds now! www.yello.in
+> http://ss1.richmedia.in/recurl.asp?pid=220
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

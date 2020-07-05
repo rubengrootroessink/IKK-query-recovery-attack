@@ -1,0 +1,71 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Lucene does NOT use UTF-8.
+DATE: 27 Aug 2005
+
+Greets,
+
+[crossposted to java-user@lucene.apache.org and plucene@kasei.com]
+
+I've delved into the matter of Lucene and UTF-8 a little further, and  
+I am discouraged by what I believe I've uncovered.
+
+Lucene should not be advertising that it uses "standard UTF-8" -- or  
+even UTF-8 at all, since "Modified UTF-8" is _illegal_ UTF-8.  The  
+two distinguishing characteristics of "Modified UTF-8" are the  
+treatment of codepoints above the BMP (which are written as surrogate  
+pairs), and the encoding of null bytes as 1100 0000 1000 0000 rather  
+than 0000 0000.  Both of these became illegal as of Unicode 3.1  
+(IIRC), because they are not shortest-form and non-shortest-form  
+UTF-8 presents a security risk.
+
+The documentation should really state that Lucene stores strings in a  
+Java-only adulteration of UTF-8, unsuitable for interchange.  Since  
+Perl uses true shortest-form UTF-8 as its native encoding, Plucene  
+would have to jump through two efficiency-killing hoops in order to  
+write files that would not choke Lucene: instead of writing out its  
+true, legal UTF-8 directly, it would be necessary to first translate  
+to UTF-16, then duplicate the Lucene encoding algorithm from  
+OutputStream.  In theory.
+
+Below you will find a simple Perl script which illustrates what  
+happens when Perl encounters malformed UTF-8.  Run it (you need Perl  
+5.8 or higher) and you will see why even if I thought it was a good  
+idea to emulate the Java hack for encoding "Modified UTF-8", trying  
+to make it work in practice would be a nightmare.
+
+If Plucene were to write legal UTF-8 strings to its index files, Java  
+Lucene would misbehave and possibly blow up any time a string  
+contained either a 4-byte character or a null byte.  On the flip  
+side, Perl will spew warnings like crazy and possibly blow up  
+whenever it encounters a Lucene-encoded null or surrogate pair.  The  
+potential blowups are due to the fact that Lucene and Plucene will  
+not agree on how many characters a string contains, resulting in  
+overruns or underruns.
+
+I am hoping that the answer to this will be a fix to the encoding  
+mechanism in Lucene so that it really does use legal UTF-8.  The most  
+efficient way to go about this has not yet presented itself.
+
+Marvin Humphrey
+Rectangular Research
+http://www.rectangular.com/
+
+#----------------------------------------
+
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# illegal_null.plx -- Perl complains about non-shortest-form null.
+
+my $data = "foo\xC0\x80\n";
+
+open (my $virtual_filehandle, "+<:utf8", \$data);
+print <$virtual_filehandle>;
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,213 @@
+FROM: "Christian Meunier" <vch...@club-internet.fr>
+SUBJECT: Re: Few questions regarding the design of the Filter class
+DATE: 24 May 2002
+
+More or less :
+
+"A ChainableFilter allows multiple filters to be chained  such that the result is the intersection
+of all the filters."
+
+I do a OR operator on filters which are based on the same field (hence the issue, i need to
+know on which field the filter is based)
+
+(All my filters are based on a field in my application)
+
+
+----- Original Message ----- 
+From: "Armbrust, Daniel C." <Armbrust.Daniel@mayo.edu>
+To: "'Lucene Users List'" <lucene-user@jakarta.apache.org>
+Sent: Friday, May 24, 2002 3:43 PM
+Subject: RE: Few questions regarding the design of the Filter class
+
+
+> Looks to me like your looking for Kelvin Tan's chainable filter
+> 
+> http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg01168.html
+> 
+> Dan
+> 
+> 
+> 
+> -----Original Message-----
+> From: Christian Meunier [mailto:vchris@club-internet.fr]
+> Sent: Friday, May 24, 2002 5:38 AM
+> To: Lucene Users List
+> Subject: Re: Few questions regarding the design of the Filter class
+> 
+> 
+> >
+> > A workaround for what?  It's not clear what you're trying to do.
+> >
+> 
+> Here is what i am trying to do:
+> 
+> A simple class to filter a field
+> 
+> FieldFilter.java
+> ----------------------------------------------------------------------------
+> ----------------------------------------------------------------------------
+> ----------
+> import java.util.BitSet;
+> import java.io.IOException;
+> 
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.index.TermDocs;
+> import org.apache.lucene.index.IndexReader;
+> 
+> public class FieldFilter extends org.apache.lucene.search.Filter
+> {
+> 
+>     private String field;
+>     private String value;
+>     private Term searchTerm;
+> 
+>     public FieldFilter(String field, String value)
+>     {
+>         this.field = field;
+>         this.value = value;
+>         searchTerm = new Term(field, value);
+>     }
+> 
+>     public String getField()
+>     {
+>         return field;
+>     }
+> 
+>     public BitSet bits(IndexReader reader) throws IOException
+>     {
+>         BitSet bits = new BitSet(reader.maxDoc());
+>         TermDocs matchingDocs = reader.termDocs(searchTerm);
+>         try
+>         {
+>             while(matchingDocs.next())
+>             {
+>                 bits.set(matchingDocs.doc());
+>             }
+>         }
+>         catch (Exception e) { /* ignore */ }
+>         finally
+>         {
+>             if (matchingDocs != null)
+>             {
+>                 matchingDocs.close();
+>             }
+>         }
+>         return bits;
+>     }
+> }
+> ----------------------------------------------------------------------------
+> ----------------------------------------------------------------------------
+> ----------
+> 
+> I then coded a class which handle multiple filters (FieldFilter,
+> DateFilter,....) at once
+> 
+> 
+> MultiFilter.java
+> ----------------------------------------------------------------------------
+> ----------------------------------------------------------------------------
+> ----------
+> import java.util.Hashtable;
+> import java.util.BitSet;
+> import java.util.ArrayList;
+> import java.io.IOException;
+> 
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.index.TermDocs;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.search.Filter;
+> 
+> public class MultiFilter extends org.apache.lucene.search.Filter
+> {
+>     private ArrayList filterList;
+> 
+>     public MultiFilter()
+>  {
+>         filterList = new ArrayList();
+>     }
+> 
+>     public MultiFilter(int initialCapacity)
+>  {
+>         filterList = new ArrayList(initialCapacity);
+>     }
+> 
+>  public String getField()
+>  {
+>   return null;
+>  }
+> 
+> 
+>     public void add(Filter filter)
+>  {
+>         filterList.add(filter);
+>     }
+> 
+>     public BitSet bits(IndexReader reader) throws IOException
+>  {
+>      int filterListSize = filterList.size();
+> 
+>   if (filterListSize > 0)
+>   {
+>             Hashtable filters = new Hashtable();
+>    int pos=0;
+>    for (int i=0; i<filterListSize; i++)
+>    {
+>     if(!filters.containsKey( ((Filter)filterList.get(i)).getField()))
+>     {
+>      filters.put(((Filter)filterList.get(i)).getField(),""+pos);
+>      pos++;
+>     }
+> 
+>    }
+> 
+>    BitSet [] tab_bits = new BitSet[filters.size()];
+>    for (int i=0; i<filterListSize; i++)
+>    {
+> 
+> if(tab_bits[Integer.parseInt((String)filters.get(((Filter)filterList.get(i))
+> .getField()))]==null)
+> 
+> tab_bits[Integer.parseInt((String)filters.get(((Filter)filterList.get(i)).ge
+> tField()))] = ((Filter)filterList.get(i)).bits(reader);
+>       else
+> 
+> tab_bits[Integer.parseInt((String)filters.get(((Filter)filterList.get(i)).ge
+> tField()))].or(((Filter)filterList.get(i)).bits(reader));
+>    }
+> 
+>    for(int i=1;i<tab_bits.length;i++)
+>     tab_bits[0].and(tab_bits[i]);
+> 
+>             return tab_bits[0];
+>         }
+>         else
+>   {
+>             return new BitSet(reader.maxDoc());
+>         }
+>     }
+> }
+> ----------------------------------------------------------------------------
+> ----------------------------------------------------------------------------
+> ----------
+> 
+> As you can see, it's mandatory that the Filter class specify a getFilter
+> method so such MultiFilter can work.
+> 
+> 
+> > Doug
+> >
+> Best regards
+> Christian
+> 
+> 
+> --
+> To unsubscribe, e-mail:
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+> <mailto:lucene-user-help@jakarta.apache.org>
+> 
+> --
+> To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+> 
+

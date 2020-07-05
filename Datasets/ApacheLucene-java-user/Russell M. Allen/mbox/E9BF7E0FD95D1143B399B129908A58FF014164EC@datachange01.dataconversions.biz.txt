@@ -1,0 +1,87 @@
+FROM: "Russell M. Allen" <Russell.Al...@aebn.net>
+SUBJECT: PrefixQuery rewrite() bug, ignores max clause count
+DATE: 14 Jul 2006
+
+We recently ran into an issue while executing a simple prefix search
+"name:b*", which results in a BooleanQuery$TooManyClauses exception.  At
+first I found it odd that a single clause query was causing this, but as
+I dug into the code I found where the PrefixQuery rewrites itself as a
+BooleanQuery.  Unfortunately, it doesn't respect the maxClauseCount of
+the BooleanQuery in the process.  Thus, when we hit a sufficiently large
+number of results, this causes the TooManyClauses exception that a
+number of people have posted about.
+ 
+Here is the code now (1.9.1):
+
+	public class PrefixQuery extends Query {
+	...
+	  public Query rewrite(IndexReader reader) throws IOException {
+	    BooleanQuery query = new BooleanQuery(true);
+	    TermEnum enumerator = reader.terms(prefix);
+	    try {
+	      String prefixText = prefix.text();
+	      String prefixField = prefix.field();
+	      do {
+	        Term term = enumerator.term();
+	        if (term != null &&
+	            term.text().startsWith(prefixText) &&
+	            term.field() == prefixField) {
+	          TermQuery tq = new TermQuery(term);   // found a match
+	          tq.setBoost(getBoost());                // set the
+boost
+	          query.add(tq, BooleanClause.Occur.SHOULD);    // add
+to query
+	          //System.out.println("added " + term);
+	        } else {
+	          break;
+	        }
+	      } while (enumerator.next());
+	    } finally {
+	      enumerator.close();
+	    }
+	    return query;
+	  }
+	...
+	}
+
+I am no expert, but I suspect all that is needed is to watch for the max
+clause count and then 'chunk' the boolean query.  I think the following
+should work (changes in blue):
+ 
+    BooleanQuery query= new BooleanQuery(true);
+    TermEnum enumerator = reader.terms(prefix);
+    try {
+      String prefixText = prefix.text();
+      String prefixField = prefix.field();
+      int count = 0;
+      do {
+        Term term = enumerator.term();
+        if (term != null &&
+              term.text().startsWith(prefixText) &&
+              term.field() == prefixField) {
+          count++;
+          TermQuery tq = new TermQuery(term);   // found a match
+          tq.setBoost(getBoost());                // set the boost
+          if (count >= query.getMaxClauseCount()) {
+            BooleanQuery subQuery = query;
+            query = new BooleanQuery(true);
+            query.add(subQuery, BooleanClause.Occur.SHOULD);
+            count = 1;  //reset count to 1 (the sub query)
+          }
+          query.add(tq, BooleanClause.Occur.SHOULD);    // add to query
+          //System.out.println("added " + term);
+        } else {
+          break;
+        }
+      } while (enumerator.next());
+    } finally {
+      enumerator.close();
+    }
+    return query;
+  }
+ 
+ 
+ 
+Thanks,
+Russell Allen
+

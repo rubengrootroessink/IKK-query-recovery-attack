@@ -1,0 +1,47 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: RangeFilter performance problem using MultiReader
+DATE: 10 Apr 2009
+
+On Fri, Apr 10, 2009 at 11:03 AM, Yonik Seeley
+<yonik@lucidimagination.com> wrote:
+> On Fri, Apr 10, 2009 at 10:48 AM, Michael McCandless
+> <lucene@mikemccandless.com> wrote:
+>> Unfortunately, in Lucene 2.4, any query that needs to enumerate Terms
+>> (Prefix, Wildcard, Range, etc.) has poor performance on Multi*Readers.
+>
+> Do we know why this is, and if it's fixable (the MultiTermEnum, not
+> the higher level query objects)?  Is it simply the maintenance of the
+> priority queue, or something else?
+
+We never fully explained it, but we have some ideas...
+
+It's only if you iterate each term, and do a TermDocs.seek for each,
+that Multi*Reader seems to show the problem.  Just iterating the terms
+seems OK (I have a 51 segment index, and I can iterate ~ 10M unique
+terms in ~8 seconds).
+
+But loading FieldCache, or doing eg RangeQuery, also does a
+MultiTermDocs.seek on each term, which in turn calls
+SegmentTermDocs.seek for each of the sub-readers in sequence.  I
+*think* maybe for highly unique terms, where typically all segments
+but one actually have the term, the cost of invoking seek on those
+segments without the term is high.  Really, somehow, we want to only
+call seek on those segments that have the term, which we know from the
+pqueue...
+
+Mike
+
+> -Yonik
+> http://www.lucidimagination.com
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

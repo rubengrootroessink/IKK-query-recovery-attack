@@ -1,0 +1,121 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: faceting and categorizing on color?
+DATE: 21 Jun 2006
+
+
+: I thought that having: F00000 FF0000 FFFFFF FFFF00...
+: in one field and then searching for FFFFFF in it would
+: match all documents that contain that "word" so I
+	...
+: the counts were equal. I guess I am still not clear on
+: what the differences/advantages/disadvantages are
+: between the above an document and one that like this:
+	...
+: color in its own field? So perhaps a more general
+: question is when is it better to collapse a bunch of
+: words into a single field vs. spread them out over
+: many fields, all of which have the same field name?
+
+My point was that (depending on what exactly you were trying to express)
+when you try to represent a document's structure in email like that both
+examples have the exact same structure in the index.  For any given field
+name, there is only one Field in the index, and it has a stream of values
+regardless of how you constructed your document object -- technically
+there isn't even really a "field" as much as there is an ordered list of
+Terms.  Specificly, this...
+
+  IndexWriter w = new IndexWriter(d, new WhitespaceAnalyzer(), true);
+  Document doc = new Document();
+  doc.add(new Field("color", "red blue green", Store.NO, Index.TOKENIZED));
+  w.addDocument(doc);
+
+...is going to produce and index with the exact same terms maped to that
+document as this...
+
+  IndexWriter w = new IndexWriter(d, new WhitespaceAnalyzer(), true);
+  Document doc = new Document();
+  doc.add(new Field("color", "red", Store.NO, Index.TOKENIZED));
+  doc.add(new Field("color", "blue", Store.NO, Index.TOKENIZED));
+  doc.add(new Field("color", "green", Store.NO, Index.TOKENIZED));
+  w.addDocument(doc);
+
+...the only differnece that might pop up, is if you configure your
+analyzer to have a positionIncrimentGap greater then 0, in which case
+there will be a bigger "gap" between the red and blue and green in the
+second case then in the fist (which will affect any sloppy searches that
+you might do)
+
+LIA has a lot of gret info on exactly how thisworks, and can relaly help
+you "think" in terms of Terms.
+
+: That's a great idea and seems way more straightforward
+: than the RGB/HSV etc. distance calculation algorithms
+: I've been reading about :o) I'll have to run some
+: tests to see how accurate that reduction appears to
+: people.
+
+that's just an easy one if you are already representing your colors in RGB
+hex codes -- the bottom line is any method you have for simplifying your
+pallet will make it easier to do facet counts (because you ar reducing the
+number of facets)
+
+: Huh, perhaps I don't understand the HitCollector
+: fully. Are you saying that if I have an index with 100
+: documents, each of which have a color field (let's say
+: 25 of the documents have FFFFFF in the color field)
+: and I do a search for FFFFFF...using a HitCollector
+: I'm iterating over all 100 documents while extracting
+: values whereas with the regular Hits based search I
+: would only be iterating over 25?
+
+First off, forget the Hits class exists -- it has no place in a discussion
+of facet counts where you need to look at every document that matches a
+given query.
+
+Second: my point is that when you are starting with an arbitrary query,
+and then you wnat to provide counts for a bunch of facet values (ie:
+colors) you have no idea which facet values are the "best" -- you have no
+way of knowing that you should start with FFFFFF, you have to try them
+all...
+
+Conceptually facets are about set intersections and the cardinality of
+those intersections.  You have a main result set of documents which match
+your user's query, and you have many hypothetical sets of documents that
+each represent all docs that contain some single color that deifines that
+set.  You want to intersect each of those sets with your main result set,
+and find out which colors product the greatest intersection cardinality.
+
+With the BitSet approach, you can directly implimenting this comceptual
+model -- making real sets out of your hypothetical sets.  But if that's
+not feasible from a memory usage perspective, then you can traverse the
+two dimensions of the problem space (colors and documents) in either
+order:
+ 1) you can use the FieldCache (or some other data structure you build
+from TermEnums) to have fast access to the list of colors in each doc, and
+then in your HitCollector as you collect each docId matching your primary
+query, incriment a counter for the corrisponding colors.
+ 2) you can start with a HitCollector that just records all of the docIds
+that match your primary query -- a BitSet is convinient for this -- and
+then use a TermEnum with a TermDocs to iterate over every color in your
+index, and count up how many of the documents those colors map to are in
+your BitSet
+
+(NOTE: using a FieldCache for this is non-trivial since FieldCache only
+works if each doc has at most one value, i wasn't really thinking about
+the specifics of your color example when i mentioned it before -- but the
+concept is still the same: an array that allows fast lookup by docId, you
+could make your own array containing the arrays of values just as easily
+as the FieldCache)
+
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

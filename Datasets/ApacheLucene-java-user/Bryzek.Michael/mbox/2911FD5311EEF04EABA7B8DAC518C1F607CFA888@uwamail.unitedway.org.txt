@@ -1,0 +1,238 @@
+FROM: "Bryzek.Michael" <Michael.Bry...@uwa.unitedway.org>
+SUBJECT: RE: Hacking proximity search: looking for feedback
+DATE: 28 Feb 2006
+
+Our geo searches are combined with keyword searches. We previously performed all of our queries
+in the database (Oracle 10g w/ interMedia for the unstructured portion) but found that it
+was easier to scale search outside the database than within.
+
+
+-----Original Message-----
+From:	John Powers [mailto:jpowers@configureone.com]
+Sent:	Tue 2/28/06 3:53 PM
+To:	java-user@lucene.apache.org
+Cc:	
+Subject:	RE: Hacking proximity search: looking for feedback
+
+I don't know if this matters, but we do all of our geolocating in sql
+with decent speed.   All the trig is in the query itself and then we can
+limit top 5, top 10 etc for what we show.    Is the data such that you
+need lucene?    Can I ask what causes it to be beyond a databases
+ability?
+
+-----Original Message-----
+From: Bryzek.Michael [mailto:Michael.Bryzek@uwa.unitedway.org] 
+Sent: Tuesday, February 28, 2006 2:49 PM
+To: java-user@lucene.apache.org
+Subject: RE: Hacking proximity search: looking for feedback
+
+Jeff -
+
+This is an interesting approach. On our end, we have experimented with
+two variants:
+
+Variant 1: Use Range Query
+
+Rather than precomputing the boolean clauses yourself, index encoded
+latitude and longitude values and use a Range Query. We encode by
+adding 1000 to each of the values. Note: We only deal with zip codes
+in the US for which this encoding works fine, but is worth another
+look if you have a broader range of coordinates.
+
+Example: Compute the box as you describe, then encode each value and
+use a RangeQuery. Using the box you provided and lucene's query
+parser:
+
+       North latitude = 47.77704
+       West longitude = -122.41909
+       South latitude = 47.34827
+       East longitude = -122.22031
+
+gives us this query:
+
+latitude:[1047.34827 TO 1047.77704] AND longitude:[877.58091 TO
+877.77969]
+
+Lucene then handles expanding this query into the appropriate set of
+Boolean Queries.
+
+
+Variant 2: Combine the above w/ a custom scorer
+
+For us, boxing works well to retrieve relevant documents, but our
+users want those documents sorted by distance. We modified the custom
+scoring class that Hatcher provides in Lucene in Action to compute the
+distance between two points for only those documents which actually
+match. Thus, we do our search using a Range Query, then for all
+matching documents we compute an actual score that incorporates the
+distance from the actual location from which the user is searching. 
+
+On our data set, we can still end up with 1000s of matching documents
+after boxing. Thus, we still see a bottleneck computing the score for
+even this smaller set of documents which we are still working through.
+
+-Mike
+
+
+-----Original Message-----
+From:	Jeff Rodenburg [mailto:jeff.rodenburg@gmail.com]
+Sent:	Tue 2/28/06 3:10 PM
+To:	java-user@lucene.apache.org
+Cc:	
+Subject:	Hacking proximity search: looking for feedback
+
+I've been wrestling with a way to index and search data with a
+geo-positional aspect.  By a geo-positional search, I want to constrain
+search results within a given location range.  Furthermore, I want to
+allow
+the user to set/change the geo-positional boundaries as needed for their
+search.  This isn't a foreign concept to anyone who's needed to do the
+same.
+
+There's been some work done in this area publicly (or at least what I
+could
+find via the list archives and google), but not a lot.  The guys at
+eventax.de have done some very impressive work.  Their implementation is
+within the constructs of nutch; there's more here at
+http://wiki.apache.org/nutch/GeoPosition.  Their approach is very
+interesting and is predicated by having data indexed in a certain
+format.
+I've considered building something based on the FunctionQuery class as
+well.  Within this class, I could actually do the mathematical
+calculations
+(Haversine formula, anyone?) for geo-positional filtering.  Range
+queries on
+this data set were an option as well.
+
+I've hit a performance wall with these approaches.  The geo-positional
+calculations are proving to be intensive.  With the combination of my
+data
+set, hardware, and OS, this just wasn't getting it done.
+
+So, I reversed my thinking.  Instead of getting Lucene to do geo-math,
+what
+if I made geo-math do Lucene?  Lucene is exceptional at string lookups;
+how
+could I do geo-positional search in that framework?  I seized upon an
+approach that I've validated in testing, but wanted to get more feedback
+from the community.
+
+************************************************************************
+********************************
+
+Data structure:
+Latitude & longitude values in decimal format, i.e. latitude=47.480227,
+longitude=-122.333670 (btw, a tire shop I recently visited).
+
+Geo definition:
+Boxing around a center point.  It's not critical to do a radius search
+with
+a given circle.  A boxed approach allows for taller or wider frames of
+reference, which are applicable for our use.
+
+
+How I'm solving:
+Treat the data as strings and formulate boolean query lookups based on
+positional comparison.  Here are the steps:
+
+Indexing:
+1. Break up lat/long values to individual characters, and store each
+field
+in progression.  Field storage type = Keyword.  The tire shop example:
+Lat1 = [4]
+Lat2 = [7]
+Lat3 = [.]
+Lat4 = [4]
+Lat5 = [8]
+...
+Long1 = [-]
+Long2 = [1]
+Long3 = [2]
+...
+
+Searching:
+1. Start with box coordinates - North/West corner, South/East corner.
+For
+example, a sample box around Seattle, WA:
+North latitude = 47.77704
+West longitude = -122.41909
+South latitude = 47.34827
+East longitude = -122.22031
+2. Break up lat/long values in a manner similar to indexing.
+3. Begin to build boolean query.  Query will contain two required
+clauses:
+the North/South query, and the West/East query.  Both queries are built
+using the same progressional evaluation of characters by position.
+4. Compare North/South (top/bottom) values.  Here's a pseudo-graphical
+chart:
+
+North = [4][7][.][7][7][7][0][4]
+South = [4][7][.][3][4][8][2][7]
+
+Qualifying records will have latitude values between 47.77704 and
+47.34827.
+With lexicographical ordering in mind, I can safely include this phrase
+in
+my North/South query:
+
+   (+Lat1:4 +Lat2:7 +Lat3:. +(Lat4:4 Lat4:5 Lat4:6)
+
+The logic is that any latitude with the first three values matching, and
+the
+fourth position containing either 4 or 5 or 6 will yield a qualifying
+match.
+
+What other queries are needed?  Ones that match 7 or 3 in the fourth
+position should be considered, but they need further qualification.  The
+further qualification is based on values from the fifth position.  I can
+safely included the following phrases in my North/South query:
+
+    (+Lat1:4 +Lat2:7 +Lat3:. +Lat4:7) +(Lat5:6 Lat5:5 Lat5:4 Lat5:3
+Lat5:2
+Lat5:1 Lat5:0)
+    (+Lat1:4 +Lat2:7 +Lat3:. +Lat4:3) +(Lat5:5 Lat5:6 Lat5:7 Lat5:8
+Lat5:9)
+
+The logic here is simply an extension of the first query, extended to
+next
+position in the latitude range.  In the Northern latitude, with the
+first
+four positions matching those values exactly, anything less than 7 in
+the
+fifth position will yield a matching latitude.  Same goes for the South
+(bottom) query.
+
+************************************************************************
+*******************
+
+This approach yields a higher number of boolean query clauses, the more
+granular you get.  In this scenario, I've estimated approximately 145
+clauses within the final constructed query.  In validation testing, this
+approach has proven to be:
+
+1) Accurate.
+2) Performant (thus far).
+
+
+At last, my question to everyone who cares to respond (and read this
+far):
+feedback?
+
+Thanks,
+-- jeff
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

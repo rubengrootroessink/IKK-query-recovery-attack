@@ -1,0 +1,75 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: One direction phrase searches
+DATE: 2 Sep 2003
+
+On Tuesday, September 2, 2003, at 04:11  PM, Joe Paulsen wrote:
+> It seems when I do a search such as "covered wagon" ~5 or the like,
+> the systems disregards the order of my terms.  I.E., it will find 
+> covered
+> within 5 of wagon and it will also find wagon within 5 of covered.
+
+I wanted to see this in action myself, so I coded up a small unit test:
+
+     public void testOrderDoesntMatter() throws Exception {
+         Directory directory = new RAMDirectory();
+         IndexWriter writer = new IndexWriter(directory, new 
+WhitespaceAnalyzer(), true);
+         Document doc = new Document();
+         doc.add(Field.Text("field", "one two"));
+         writer.addDocument(doc);
+         writer.optimize();
+         writer.close();
+
+         IndexSearcher searcher = new IndexSearcher(directory);
+         PhraseQuery query = new PhraseQuery();
+         query.setSlop(5);
+         query.add(new Term("field", "two"));
+         query.add(new Term("field", "one"));
+         Hits hits = searcher.search(query);
+         assertEquals(1, hits.length());
+         searcher.close();
+     }
+
+Notice that I'm searching for "two one"~5 (yet indexed "one two") and 
+it found 1 hit.
+
+And then, like a typical programmer, I looked at the Javadocs *after* 
+coding :) and found this on PhraseQuery:
+
+   /** Sets the number of other words permitted between words in query 
+phrase.
+     If zero, then this is an exact phrase search.  For larger values 
+this works
+     like a <code>WITHIN</code> or <code>NEAR</code> operator.
+
+     <p>The slop is in fact an edit-distance, where the units correspond 
+to
+     moves of terms in the query phrase out of position.  For example, 
+to switch
+     the order of two words requires two moves (the first move places 
+the words
+     atop one another), so to permit re-orderings of phrases, the slop 
+must be
+     at least two.
+
+     <p>More exact matches are scored higher than sloppier matches, thus 
+search
+     results are sorted by exactness.
+
+     <p>The slop is zero by default, requiring exact matches.*/
+   public void setSlop(int s) { slop = s; }
+
+So what you observe is the correct documented behavior.
+
+> Is there anyway to make the system respond only to the order of the
+> terms as entered in the query?
+
+I'm sure there is a way to make an OrderedPhraseQuery, although I'll 
+need to do some more homework myself to craft such a thing.  All the 
+information to do such a thing is available, although maybe it wouldn't 
+be as performant as PhraseQuery (just a guess, no facts to back that up 
+yet).
+
+	Erik
+
+

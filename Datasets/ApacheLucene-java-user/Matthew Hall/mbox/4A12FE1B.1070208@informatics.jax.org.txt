@@ -1,0 +1,354 @@
+FROM: Matthew Hall <mh...@informatics.jax.org>
+SUBJECT: Re: Searching index problems with tomcat
+DATE: 19 May 2009
+
+Sorry, anyhow looking over this quickly here's a summarization of what I 
+see:
+
+You have documents in your index that look like the following:
+
+name which is indexed and stored.
+synonyms which are indexed and stored
+path, which is stored but not indexed
+propin, which is stored and indexed
+propinnum, which is stored but not indexed
+and ... vicinity I guess which is stored but not indexed
+
+For an analyzer you are using Standard analyzer (which considering all 
+the Italian? is an interesting choice.)
+
+And you are opening your index using FSDirectory, in what appears to be 
+a by reference fashion (You don't have a fully qualified path to where 
+your index is, you are ASSUMING that its in the same directory as this 
+code, unless FSDirectory is not implemented as I think it is.)
+
+Now can I see the consumer code?  Specifically the part where you are 
+opening the index/constructing your queries?
+
+I'm betting what's going on here is you are deploying this as a war file 
+into tomcat, and its just not really finding the index as a result of 
+how the war file is getting deployed, but looking more closely at the 
+source code should reveal if my suspicion is correct here.
+
+Also runtime wise, when you run your standalone app, where specifically 
+in your directory structure are you running it from?  Cause if you are 
+opening your index reader/searcher in the same way as you are creating 
+your writer here, I'm pretty darn certain that will cause you problems.
+
+Matt
+
+
+
+Marco Lazzara wrote:
+> _Could you further post your Analyzer Setup/Query Building code from
+> BOTH apps. _
+>
+> there is only one code.It is the same for web and for standalone.
+> And it is exactly the real problem!!the code is the same,libraries are
+> the same,query index etc etc. are the same.
+>
+> This is the class that create index
+>
+>
+> public class AlternativeRDFIndexing {
+>    
+>     private Analyzer analyzer;
+>     private Directory directory;
+>     private IndexWriter iwriter;
+>     private WordNetSynonymEngine wns;
+>     private AlternativeResourceAnalysis rs;
+>     public ArrayList<String> commonnodes;
+>    
+>     //private RDFinder rdfind = new RDFinder("RDFIndexLucene/",new
+> String[] {"name"});
+>    
+> //    public boolean Exists(String node) throws ParseException, IOException{
+> //           
+> //        return rdfind.Exists(node);
+> //    }
+>    
+>     public AlternativeRDFIndexing(String inputfilename) throws
+> IOException, ParseException{
+>      
+>         commonnodes = new ArrayList<String>();
+>        
+>         // bisogna istanziare un oggetto per fare analisi sul documento rdf
+>         rs = new AlternativeResourceAnalysis(inputfilename);
+>
+>            
+>         ArrayList<String> nodelist = rs.getResources();
+>         int nodesize = nodelist.size();
+>         ArrayList<String> sourcelist = rs.getsource();
+>         int sourcesize = sourcelist.size();
+>        
+>         //sinonimi
+>         wns = new WordNetSynonymEngine("sinonimi/");
+>        
+>         //creazione di un analyzer standard
+>         analyzer = new StandardAnalyzer();
+>
+>         //Memorizza l'indice in RAM:
+>        
+>         //Directory directory = new RAMDirector();
+>        
+>         //Memorizza l'indice su file
+>        
+>         directory = FSDirectory.getDirectory("RDFIndexLucene/");
+>        
+>         //Creazione istanza per la scrittura dell'indice
+>         //Tale istanza viene fornita di analyzer, di un boolean per
+> indicare se ricreare o meno da zero
+>         //la struttura e di una dimensione massima (o infinita
+> IndexWriter.MaxFieldLength.UNLIMITED)
+>         iwriter = new IndexWriter(directory, analyzer, true, new
+> IndexWriter.MaxFieldLength(25000));
+>        
+>        
+>         //costruiamo un indice con solo n documenti: un documento per nodo
+>        
+>         for (int i = 0; i < nodesize; i++){
+>            
+>             Document doc = new Document();
+>            
+>             //creazione dei vari campi
+>            
+>             // ogni documento avrˆ
+>             // un campo name: nome del nodo
+>             // indicazione di memorizzazione(Store.YES) e indicizzazione
+> con analyzer(ANALYZED)
+>            
+>             String node = nodelist.get(i);
+>            
+>             //if (sourcelist.contains(node)) break;
+>            
+>             //if (rdfind.Exists(node)) commonnodes.add(node);
+>            
+>             Field field = new Field("name", node,
+> Field.Store.YES,Field.Index.ANALYZED);
+>             //Aggiunta campo al documento
+>             doc.add(field);
+>            
+>             //Aggiungo i sinonimi
+>             String[] nodesynonyms = wns.getSynonyms(node);
+>             for (int is = 0; is < nodesynonyms.length; is++) {
+>                
+>                 field = new Field("synonyms", nodesynonyms[is],
+> Field.Store.YES,Field.Index.ANALYZED);
+>                 //Aggiunta campo al documento
+>                 doc.add(field);
+>             }
+>            
+>             // uno o piu campi path_i: path minimali dalle sorgenti al nodo
+>             // non indicizzati
+>            
+>             for (int j = 0; j < sourcesize; j++) {
+>             String source = sourcelist.get(j);   
+>             ArrayList<LinkedList<String>> path = new
+> ArrayList<LinkedList<String>>();
+>             try{
+>            
+>                 if ((source.equals(node)) || (sourcelist.contains(node))){
+>                     field = new Field("path", "null", Field.Store.YES,
+> Field.Index.NO);
+>                     doc.add(field);
+>                 }
+>                 else{
+>                     path = rs.getPaths(source, node);
+>                     for (int ii = 0; ii < path.size(); ii++) {
+>                         String pp = rs.getPath(path.get(ii));
+>                         field = new Field("path", pp, Field.Store.YES,
+> Field.Index.NO);
+>                         doc.add(field); 
+>                     }
+>                 }
+>                    
+>             }
+>             catch (IllegalArgumentException e){
+>                 System.out.println("source: "+source+ " node: "+node);
+>                 field = new Field("path", "null", Field.Store.YES,
+> Field.Index.NO);
+>                 doc.add(field);
+>             }
+>            
+>            
+>            
+>             }
+>            
+>             // proprietˆ entranti
+>             // indicizzati
+>           //versione con i sinonimi
+>            
+>             ArrayList<String> y = rs.getInProperty(node);
+>            
+>             if (y != null) {
+>
+>             for (int j = 0; j < y.size(); j++) {
+>                
+>                 String propin = y.get(j);
+>                 field = new Field("propIn", propin, Field.Store.YES,
+> Field.Index.ANALYZED);
+>                 doc.add(field);       
+>                
+>          
+>             String[] propinsynonyms = wns.getSynonyms(propin);
+>            
+>             for (int is = 0; is < propinsynonyms.length; is++) {
+>                
+>                 field = new Field("propIn", propinsynonyms[is],
+> Field.Store.YES,Field.Index.ANALYZED);
+>                 //Aggiunta campo al documento
+>                 doc.add(field);
+>                  }
+>            
+>               }
+>            
+>             // un campo num_propIn: numero di proprietˆ entranti
+>             // non indicizzato
+>            
+>             String num_propIN = String.valueOf(y.size());
+>            
+>             field = new Field("num_propIn", num_propIN, Field.Store.YES,
+> Field.Index.NO);
+>             doc.add(field);
+>            
+>             }
+>            
+>             else {
+>                
+>                 String num_propIN = String.valueOf(0);
+>                
+>                 field = new Field("num_propIn", num_propIN,
+> Field.Store.YES, Field.Index.NO);
+>                 doc.add(field);
+>                
+>             }
+>            
+>             // i vicini del nodo
+>            
+>             ArrayList<String> v = rs.getVicini(node);
+>            
+>             if (v != null) {
+>
+>             for (int j = 0; j < v.size(); j++) {
+>                
+>                 String vicino = v.get(j);
+>                 field = new Field("vicini", vicino, Field.Store.YES,
+> Field.Index.ANALYZED);
+>                 doc.add(field);      
+>                
+>             }
+>            
+>             }
+>                
+>            
+>            
+>             //aggiunta documento all'indice
+>             iwriter.addDocument(doc);
+>         }
+>        
+>         iwriter.close();
+>         directory.close();
+>        
+>     }
+>    
+>     public int getNR(){
+>         return rs.NumResource();
+>     }
+>  
+>
+> }
+>
+> MARCO LAZZARA
+>
+>   
+>> Things that could help us immensely here.
+>>
+>> Can you post your indexReader/Searcher initialization code from your
+>> standalone app, as well as your webapp.
+>>
+>> Could you further post your Analyzer Setup/Query Building code from
+>> both apps.
+>>
+>> Could you further post the document creation code used at indexing
+>> time? (Which analyzer, and which fields are indexed/stored)
+>>
+>> Give us this, and I'm pretty darn sure we can nail down your issue.
+>>
+>> Matt
+>>
+>> Ian Lea wrote:
+>>     
+>>>> ...
+>>>> There are no exceptions.When I run the query a new shell is
+>>>> displayed but
+>>>>  with no result.
+>>>>     
+>>>>         
+>>> New shell?
+>>>
+>>>  
+>>>       
+>>>> _*Are you sure the index is the same - what do IndexReader.maxDoc(),
+>>>> numDocs() and getVersion() say, standalone
+>>>> and in tomcat?
+>>>>
+>>>> *_What do you mean with this question??
+>>>>     
+>>>>         
+>>> IndexReader ir = ...
+>>> System.out.printf("maxDoc=%s, ...", ir.maxDoc(), ...);
+>>>
+>>> and run in tomcat and standalone.  To absolutely confirm you're
+>>> looking at the same index, and it has documents, etc.
+>>>
+>>>
+>>> -- 
+>>> Ian.
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>   
+>>>       
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>
+>> __________ Information from ESET NOD32 Antivirus, version of virus
+>> signature database 4087 (20090519) __________
+>>
+>> The message was checked by ESET NOD32 Antivirus.
+>>
+>> http://www.eset.com
+>>
+>>
+>>     
+>
+>
+>
+> __________ Information from ESET NOD32 Antivirus, version of virus signature database
+4087 (20090519) __________
+>
+> The message was checked by ESET NOD32 Antivirus.
+>
+> http://www.eset.com
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>   
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

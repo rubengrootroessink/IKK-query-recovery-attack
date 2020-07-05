@@ -1,0 +1,56 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: RangeFilter performance problem using MultiReader
+DATE: 10 Apr 2009
+
+When I did some profiling I saw that the slow down came from tons of 
+extra seeks (single segment vs multisegment). What was happening was, 
+the first couple segments would have thousands of terms for the field, 
+but as the segments logarithmically shrank in size, the number of terms 
+for the segment would drop dramatically - you basically end up with a 
+long tail eg 5000 4000 200 200 5 5 2. Because loading the field cache 
+would enumerate every term it would end up calling seek 5000 times 
+against each segment - that appeared to be the slowdown for me.
+
+We fixed this with 1483 because we load the fieldcache per segment and 
+so instead of calling seek 5000 times for each segment, you call 5000 
+for the fist, 4000 for the next, then 200, 200, 5 and 5. Can add up to 
+huge savings do the long tail of low term segments.
+
+I had thought we would also see the advantage with multi-term queries - 
+you rewrite against each segment and avoid extra seeks (though not 
+nearly as many as when enumerating every term). As Mike pointed out to 
+me back when though : we still rewrite against the multi-reader and so 
+see no real savings here. Unfortunately.
+
+- Mark
+
+
+>> Do we know why this is, and if it's fixable (the MultiTermEnum, not
+>> the higher level query objects)?  Is it simply the maintenance of the
+>> priority queue, or something else?
+>>     
+>
+> We never fully explained it, but we have some ideas...
+>
+> It's only if you iterate each term, and do a TermDocs.seek for each,
+> that Multi*Reader seems to show the problem.  Just iterating the terms
+> seems OK (I have a 51 segment index, and I can iterate ~ 10M unique
+> terms in ~8 seconds).
+>
+> But loading FieldCache, or doing eg RangeQuery, also does a
+> MultiTermDocs.seek on each term, which in turn calls
+> SegmentTermDocs.seek for each of the sub-readers in sequence.  I
+> *think* maybe for highly unique terms, where typically all segments
+> but one actually have the term, the cost of invoking seek on those
+> segments without the term is high.  Really, somehow, we want to only
+> call seek on those segments that have the term, which we know from the
+> pqueue...
+>
+> Mike
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

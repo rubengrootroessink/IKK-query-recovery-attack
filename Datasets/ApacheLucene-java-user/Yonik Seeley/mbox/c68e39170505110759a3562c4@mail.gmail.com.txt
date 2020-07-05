@@ -1,0 +1,104 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: sanity check - large, long running index updates and concurrent read-only service
+DATE: 11 May 2005
+
+When created, an IndexReader opens all the segment files and hangs
+onto them. Any updates to the index through an IndexWriter (including
+commit and optimize) will not affect already open IndexReaders.
+
+-Yonik
+
+On 5/11/05, Naomi Dushay <Naomi@cs.cornell.edu> wrote:
+> It's my impression that with optimize running so long, there will be a
+> significant period of time (many minutes) when the old IndexReader will not
+> be able to find the segment/documents it needs.  Am I wrong about that?
+> 
+> - Naomi
+> 
+> > Could you explain why you need to copy the index?  It doesn't seem
+> > like that buys you anything (except maybe if the copy is to a
+> > physically separate disk)
+> >
+> > -Yonik
+> >
+> >
+> > On 5/10/05, Naomi Dushay <Naomi@cs.cornell.edu> wrote:
+> > > Context:  our index is currently around 6 gig and takes about an hour
+> > just to
+> > > optimize.  Updating it, even in batches, can involve active updating for
+> > 15
+> > > or more minutes.
+> > >
+> > > Index updates are done with two different batch processes as there are
+> > > currently two different workflows to update the index.  No obvious
+> > indexing
+> > > partitioning is suggested by our workflows.** The index is used in a
+> > read
+> > > only fashion by our REST search service, which runs under tomcat.
+> > >
+> > > Issues:  we don't want our REST service to have slow or strange results
+> > while
+> > > the index is being updated.
+> > >
+> > > Proposed solution:
+> > >
+> > > The world starts with REST service pointing to index A .   Our REST
+> > service
+> > > is read only, so the index file(s) themselves can be read only.
+> > >
+> > > To update the index, the following sequence occurs:
+> > >
+> > > 1.      lock index for update (via a lock/flag file)
+> > > 2.      copy index A into another directory, and make it writable.  This
+> > new
+> > > index will become A'
+> > > 3.      update index A', including optimization
+> > > 4.      set index A' to read only
+> > > 5.      gracefully change REST service to point use index A';  verify
+> > that
+> > > REST service is working properly with A'.
+> > > 6.      optional, but likely:  remove old, out-of-date index A.
+> > > 7.      unlock index for update (remove lock/flag file)
+> > >
+> > > The index updates could keep re-using the same two index directories, or
+> > they
+> > > could create new directories.
+> > >
+> > > Does anyone see any problems or have any suggestions for how to improve
+> > this?
+> > >
+> > > - Naomi Dushay
+> > >
+> > > National Science Digital Library - Core Integration
+> > >
+> > > Cornell University
+> > >
+> > > ** workflow 1:  we get bibliographic metadata that needs to go in the
+> > index.
+> > > This metadata may be new, or it may be an update to existing metadata.
+> > The
+> > > metadata records refer to resource URLs.   Workflow 2:  we fetch the
+> > content
+> > > for the resource URLs, using Nutch as our crawler and content database.
+> > > Fetched content may be for a new URL or updated content for a known URL.
+> > The
+> > > Lucene Documents are a combination of bibliographic metadata and fetched
+> > > content.
+> > >
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

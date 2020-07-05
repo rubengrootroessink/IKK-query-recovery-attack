@@ -1,0 +1,66 @@
+FROM: Paul Smith <psm...@aconex.com>
+SUBJECT: Re: Performance of never optimizing
+DATE: 5 Nov 2008
+
+>>
+>
+> I don't believe our large users to have enough memory for Lucene  
+> indexes to fit in RAM. (Especially given we use quite a bit of RAM  
+> for other stuff.) I think we also close readers pretty frequently  
+> (whenever any user updates a JIRA issue, which I am assuming  
+> happening nearly constantly when you've got thousands of users). I  
+> was trying to mimic our usage as closely as I could to see whether  
+> Lucene behaves pathologically poorly given our current architecture.  
+> There have been some excellent suggestions about using in-memory  
+> indexes for recent updates but changes of that kind are,  
+> unfortunately, currently outside of my purview :-(
+>
+> Given that our current usage may be suboptimal :-/ does anyone have  
+> any ideas about what may be causing the anomalies I identified  
+> earlier?
+
+
+We have exactly the same problem JIRA has only even bigger I think..   
+We have large projects with 10's of millions of documents and mail  
+items.  Our requirement was a 5 second refresh time (that is, an  
+update (add, delete, or update) can take no longer than 5 seconds  
+before a subsequent search can see it.  Worse, we have a large number  
+of fields customers need to sort by, so tearing down a 15Gb index with  
+a dozen sorting fields every 5 seconds and rebuilding the  
+FieldSortedHitQueue's is clearly not going to work.. :)
+
+We solved this by having a virtual index made up of an 'archive' and a  
+'work' index, and then run a multi-reader over the 2.  All updates  
+(adds, updates, deletes) are done as a delete to the Archive index,  
+and then an add/update to the work index.  Every week during a lull we  
+merge the 2 into a new archive index directory and 'switch' to it  
+(blocking updates while we optimize and switch).  This means the work  
+sub-index can be refreshed every 5 seconds because it is small and we  
+'pin' the archive index in memory by doing... well.. a fairly  
+egregious hack to be honest.  We actually have to do updates to the  
+Archive to satisfy the delete, but doing that normally would require a  
+total refresh for that delete to be made visible.  We accomplish that  
+by allowing the delete to go to the disk (via deleted segment) but  
+also we apply the deletes in memory as well so that can be seen.  This  
+way the most up-to-date data can be seen in the work index.
+
+This gives the best of both worlds, a really warmed up large archive  
+index, and a smaller work index ( no more than a weeks worth of  
+updates) that we can refresh every 5 seconds.  The tear down/warm up  
+cycle appears to be fine for us for the work index and we can satisfy  
+searches very quickly.
+
+It would be really nice if Lucene could allow deletes to be done  
+against a live IndexReader without flushing anything else out.
+
+cheers,
+
+Paul
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,326 @@
+FROM: "Greg Shackles" <gshack...@gmail.com>
+SUBJECT: Re: Lucene implementation/performance question
+DATE: 12 Nov 2008
+
+Thanks!  This all actually sounds promising, I just want to make sure I'm
+thinking about this correctly.  Does this make sense?
+
+Indexing process:
+
+1) Get list of all words for a page and their attributes, stored in some
+sort of data structure
+2) Concatenate the text from those words (space separated) into a string
+that represents the entire page
+3) When adding the page document to the index, run it through a custom
+analyzer that attaches the payloads to the tokens
+  * this would have to follow along in the word list from #1 to get the
+payload information for each token
+  * would also have to tokenize the word we are storing to see how many
+Lucene tokens it would translate to (to make sure the right payloads go with
+the right tokens)
+
+I haven't totally analyzed the searching process yet since I want to get my
+head around the storage part first, but I imagine that would be the easier
+part anyway.  Does this approach sound reasonable?
+
+My other concern is your comment about isolating results.  If I'm reading it
+correctly, it means that I'd have to do the search in multiple passes, one
+to get the individual docs containing the matches, and then one query for
+each of those to get the payloads within them?
+
+Thanks again for your help on this one.
+
+- Greg
+
+
+On Wed, Nov 12, 2008 at 12:52 PM, Mark Miller <markrmiller@gmail.com> wrote:
+
+> Here is a great power point on payloads from Michael Busch:
+> www.us.apachecon.com/us2007/downloads/AdvancedIndexing*Lucene*.ppt.
+> Essentially, you can store metadata at each term position, so its an
+> excellent place to store attributes of the term - they are very fast to
+> load, efficient, etc.
+>
+> You can check out the spans test classes for a small example using the
+> PayloadSpanUtil...its actually fairly simple and short, and the main reason
+> I consider it experimental is that it hasn't really been used too much to my
+> knowledge (who knows though). If you have a problem, you'll know quickly and
+> I'll fix quickly. It should work fine though. Overall, the approach wouldn't
+> take that much code, so I don't think youd be out a lot of time.
+>
+> The PayloadSpanUtil takes an IndexReader and a query and returns the
+> payloads for the terms in the IndexReader that match the query. If you end
+> up with multiple docs in the IndexReader, be sure to isolate the query down
+> to the exact doc you want the payloads from (the Span scoring mode of the
+> highlighter actually puts the doc in a fast MemoryIndex which only holds one
+> doc, and uses an IndexReader from the MemoryIndex).
+>
+>
+> Greg Shackles wrote:
+>
+>> Hey Mark,
+>>
+>> This sounds very interesting.  Is there any documentation or examples I
+>> could see?  I did a quick search but didn't really find much.  It might
+>> just
+>> be that I don't know how payloads work in Lucene, but I'm not sure how I
+>> would see this actually doing what I need.  My reasoning is this...you'd
+>> have an index that stores all the text for a particular page.  Would you
+>> be
+>> able to attach payload information to individual words on that page?  In
+>> my
+>> head it seems like that would be the job of a second index, which is
+>> exactly
+>> why I added the word index.
+>>
+>> Any details you can give would be great as I need to keep moving on this
+>> project quickly.  I will also say that I'm somewhat wary of using an
+>> experimental class since this is a really important project that really
+>> won't be able to wait on a lot of development cycles to get the class
+>> fully
+>> working.  That said, if it can give me serious speed improvements it's
+>> definitely worth considering.
+>>
+>> - Greg
+>>
+>>
+>> On Wed, Nov 12, 2008 at 12:01 PM, Mark Miller <markrmiller@gmail.com>
+>> wrote:
+>>
+>>
+>>
+>>> If your new to Lucene, this might be a little much (and maybe I am not
+>>> fully understand the problem), but you might try:
+>>>
+>>> Add the attributes to the words in a payload with a PayloadAnalyzer. Do
+>>> searching as normal. Use the new PayloadSpanUtil class to get the
+>>> payloads
+>>> for the matching words. (Think of the PayloadSpanUtil as a highlighter -
+>>> you
+>>> give it a query, it gives you the payloads to the terms that match). The
+>>> PayloadSpanUtil class is a bit experimental, but I'll fix anything you
+>>> run
+>>> into with it.
+>>>
+>>> - Mark
+>>>
+>>>
+>>> Greg Shackles wrote:
+>>>
+>>>
+>>>
+>>>> Hi Erick,
+>>>>
+>>>> Thanks for the response, sorry that I was somewhat vague in the
+>>>> reasoning
+>>>> for my implementation in the first post.  I should have mentioned that
+>>>> the
+>>>> word details are not details of the Lucene document, but are attributes
+>>>> about the word that I am storing.  Some examples are position on the
+>>>> actual
+>>>> page, color, size, bold/italic/underlined, and most importantly, the
+>>>> text
+>>>> as
+>>>> it appeared on the page.  The reason the last one matters is that things
+>>>> like punctuation, spacing and capitalization can vary between the result
+>>>> and
+>>>> the search term, and can affect how I need to process the results
+>>>> afterwords.  I am certainly open to the idea of a new approach if it
+>>>> would
+>>>> improve on things, I admit I am new to Lucene so if there are options
+>>>> I'm
+>>>> unaware of I'd love to learn about them.
+>>>>
+>>>> Just to sum it up with an example, let's say we have a page of text that
+>>>> stores "This is a page of text."  We want to search for the text "of
+>>>> text",
+>>>> which would span multiple words in the word index.  The final result
+>>>> would
+>>>> need to contain "of" and "text", along with the details about each as
+>>>> described before.  I hope this is more helpful!
+>>>>
+>>>> - Greg
+>>>>
+>>>> On Wed, Nov 12, 2008 at 11:17 AM, Erick Erickson <
+>>>> erickerickson@gmail.com
+>>>>
+>>>>
+>>>>> wrote:
+>>>>>
+>>>>>
+>>>>
+>>>>
+>>>>
+>>>>> If I may suggest, could you expand upon what you're trying to
+>>>>> accomplish? Why do you care about the detailed information
+>>>>> about each word? The reason I'm suggesting this is "the XY
+>>>>> problem". That is, people often ask for details about a specific
+>>>>> approach when what they really need is a different approach
+>>>>>
+>>>>> There are TermFrequencies, TermPositions,
+>>>>> TermVectorOffsetInfo and a bunch of other stuff that I don't
+>>>>> know the details of that may work for you if we had
+>>>>> a better idea of what it is you're trying to accomplish...
+>>>>>
+>>>>> Best
+>>>>> Erick
+>>>>>
+>>>>> On Wed, Nov 12, 2008 at 10:47 AM, Greg Shackles <gshackles@gmail.com>
+>>>>> wrote:
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> I hope this isn't a dumb question or anything, I'm fairly new to
+>>>>>> Lucene
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> so
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> I've been picking it up as I go pretty much.  Without going into
+too
+>>>>>> much
+>>>>>> detail, I need to store pages of text, and for each word on each
+page,
+>>>>>> store
+>>>>>> detailed information about it.  To do this, I have 2 indexes:
+>>>>>>
+>>>>>> 1) pages: this stores the full text of the page, and identifying
+>>>>>> information
+>>>>>> about it
+>>>>>> 2) words: this stores a single word, along with the page it was on
+and
+>>>>>> is
+>>>>>> stored in the order they appear on the page
+>>>>>>
+>>>>>> When doing a search, not only do I need to return the page it was
+>>>>>> found
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> on,
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> but also the details of the matching words.  Since I couldn't think
+of
+>>>>>> a
+>>>>>> better way to do it, I first search the pages index and find any
+>>>>>> matching
+>>>>>> pages.  Then I iterate the words on those pages to find where the
+>>>>>> match
+>>>>>> occurred.  Obviously this is costly as far as execution time goes,
+but
+>>>>>> at
+>>>>>> least it only has to get done for matching pages rather than every
+>>>>>> page.
+>>>>>> Searches still take way longer than I'd like though, and the
+>>>>>> bottleneck
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> is
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> almost entirely in the code to find the matches on the page.
+>>>>>>
+>>>>>> One simple optimization I can think of is store the pages in smaller
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> blocks
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> so that the scope of the iteration is made smaller.  This is not
+>>>>>> really
+>>>>>> ideal, since I also need the ability to narrow down results based
+on
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> other
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> words that can/can't appear on the same page which would mean storing
+>>>>>> 3
+>>>>>> full
+>>>>>> copies of every word on every page (one in each of the 3 resulting
+>>>>>> indexes).
+>>>>>>
+>>>>>> I know this isn't a Java performance forum so I'll try to keep this
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> Lucene
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> related, but has anyone done anything similar to this, or have any
+>>>>>> comments/ideas on how to improve it?  I'm in the process of trying
+to
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> speed
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> things up since I need to perform many searches often over very large
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>> sets
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>> of pages.  Thanks!
+>>>>>>
+>>>>>> - Greg
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>
+>>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>>
+>>
+>>
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

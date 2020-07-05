@@ -1,0 +1,61 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Sorting
+DATE: 31 Jul 2006
+
+
+1) I didn't know there were any JVMs that limited the heap size to 1GB ...
+a 32bit address space would impose a hard limit of 4GB, and I've heard
+that Windows limits process to 2GB, but I don't know of any JVMs that have
+1GB limits.
+
+If you really need to deal with indexes big enough for that to make a
+differnce, you probably want to look into 64bit hardware.
+
+2) ...
+
+: Were going to need to maintain a set sort indexes for documents in a
+: large index too, and I'm interested in suggestions for the best/easiest
+: way to maintain non-RAM-based (or not entirely RAM-based) sort index
+: which is external to Lucene. Would using MySQL for sort indexing be "a
+: sledgehammer to crack a nut", I wonder? I've not really thought through
+: the RAMifications (sorry!) of this approach. I wonder if anyone else
+: here has attempted to integrate an external sort using a database?
+
+The analogy that comes to mind for me is not "a sledgehammer to crack a
+nut" ... more along the lines of "holding a laptop in both hands, and
+using the corner of it to type letters on the keyboard of another
+computer."  Using a relational DB in conjuntion with Lucene just to do
+some sorting on disk seems like a really gratuitious and unneccessary use
+of a relational DB.
+
+The only reason Field sorting in Lucene uses a lot of RAM is because of
+hte FieldCache, which provides an easy way to lookup the sort value for a
+given doc durring hit collection in order to rank them in a priority queue
+-- namely an array indexed by docId.  You could just as easily store that
+data on disk, you just need an API that lets you lookup things by numeric
+id.  A Berkeley DB "map" comes to mind ... or even random acess files
+where the value is stored in offsets based on the docId (would have some
+trickines if you wanted String sorting but would work great for numerics).
+This would eliminate the high RAM usage, but would be a lot slower because
+of the disk access (especially on the first search when the "FieldCache"
+was being built)
+
+
+Alternately, if you assume your results sets are ging to be "small",
+you could collect all of hte docIds into a set and then iteratre over a
+complete pass of a TermEnum/TermDocs for your field looking up the sort
+values for each match -- in esence doing the same work as when building
+the FieldCache on each search, but only for hte docs that match that
+search.  Really low memory usage, no additional disk usage -- just much
+slower.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,180 @@
+FROM: "Mark Modrall" <MModr...@glgroup.com>
+SUBJECT: More frustration with Lucene/Java file i/o on Windows
+DATE: 18 Aug 2006
+
+Hi...
+
+ 
+
+            It was a little comforting to know that other people have
+seen Windows Explorer refreshes crash java Lucene on Windows.  We seem
+to be running into a long list of file system issues with Lucene, and I
+was wondering if other people had noticed these sort of things (and
+hopefully any tips and tricks for working around them).
+
+ 
+
+            We've got a process running as a Windows service that's
+trying to keep a set of Lucene indexes up-to-date from a database.  The
+corpus is pretty small, so we copy the last index build to a temp
+directory and then try to do an incremental index of the changes on the
+working copy.  Since our software is evolving, we've put a version
+number in the meta data of the index files which we check when we're
+starting up.  If the version numbers don't match, we scrap the whole
+thing and start over.  The problem is that java Lucene on Windows
+doesn't do "scrap" very well.
+
+ 
+
+            The current hypothesis is that File.renameTo, File.delete,
+and other jvm operations on windows fail if there is any other handle
+open on the file and that Lucene objects aren't closing/finalizing their
+file handles cleanly/reliably so other things blow up later.
+
+ 
+
+            Here's the chain of events we had in our service process
+last night:
+
+20060817T165611.682,EDT [Indexer.java 813]: Exception occurred deleting
+document 183971: Lock obtain timed out:
+Lock@C:\WINDOWS\TEMP\lucene-22b8462f0f541160a41abfdff8d52f94-write.lock
+
+20060817T165612.682,EDT [Indexer.java 813]: Exception occurred deleting
+document 257265: Lock obtain timed out:
+Lock@C:\WINDOWS\TEMP\lucene-22b8462f0f541160a41abfdff8d52f94-write.lock
+
+20060817T165613.744,EDT [Indexer.java 1184]: Indexing failure, db
+changes will be rolled back and partial index deleted.
+
+java.io.IOException: Lock obtain timed out:
+Lock@C:\WINDOWS\TEMP\lucene-22b8462f0f541160a41abfdff8d52f94-write.lock
+
+            at org.apache.lucene.store.Lock.obtain(Lock.java:56)
+
+            at
+org.apache.lucene.index.IndexReader.aquireWriteLock(IndexReader.java:489
+)
+
+            at
+org.apache.lucene.index.IndexReader.deleteDocument(IndexReader.java:514)
+
+            at
+org.apache.lucene.index.IndexReader.deleteDocuments(IndexReader.java:541
+)
+
+            at ...Indexer.buildIncrementalIndex(Indexer.java:915)
+
+...
+
+ 
+
+Why it couldn't get that temporary lock file, I don't know.  The same
+process runs continuously, and I don't know if Lucene reuses the same
+tmpnames from run to run.  If the files were left around because of
+these JVM File system errors, maybe that would explain it.
+
+ 
+
+The "partial index deleted" part of our message means that we did a
+recursive (java) delete of all the index directories we were working
+with.  Our attempt to clean the slate got everything but
+contact_index\_3zhe.cfs.
+
+ 
+
+An hour later, we come back and try to start another index build.  We
+find the directory still exists, so we try to validate the index version
+number using
+
+            searcher = new
+IndexSearcher(FSDirectory.getDirectory(indexFile, false));
+
+            TermQuery tq = new TermQuery(new
+Term(METADATA_DOCUMENT_FIELD, METADATA_DOCUMENT_FIELD_VALUE));
+
+            Hits h = searcher.search(tq);
+
+            if (h.length() == 1)
+
+            ...
+
+        finally
+
+        {
+
+            if (searcher != null)
+
+            {
+
+                try { searcher.close(); } catch (Exception e) { /*
+ignore */ }
+
+            }
+
+        }
+
+ 
+
+Obviously with only the _3zhe.cfs file left, it's not a valid index, so
+the attempt to get the metadata fails.  No matter what happens, we do a
+searcher.close().  My suspicion is that IndexSearch.close() isn't really
+doing a File.close() on all the files it's using, so you have to wait
+until searcher is garbage collected and its file objects finalized
+before things will work - because immediately after this check, Lucene
+fails a full build with
+
+20060817T175614.323,EDT [Indexer.java 843]: Error building full index
+
+java.io.IOException: Cannot delete
+\\xx.xx.xx.xx\indexbuild2\contact_index\_3zhe.cfs
+
+            at
+org.apache.lucene.store.FSDirectory.create(FSDirectory.java:198)
+
+            at
+org.apache.lucene.store.FSDirectory.getDirectory(FSDirectory.java:144)
+
+            at
+org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:224)
+
+...
+
+ 
+
+Doing a full build, Lucene does it's own attempt to clear out the
+leftovers which fails because it can't delete the file.  And we're stuck
+in this loop all night.
+
+ 
+
+The guy who wrote the Indexing code says the version check is the only
+place in the code where we have an IndexSearcher created using a file
+path string - that all others have a pre-existing IndexReader.  He wants
+me to try it that way instead, so that we can explicitly close the
+reader and hopefully clear that loose file handle.
+
+ 
+
+Sorry for the long-winded vent, but does anyone have any advice for
+getting java lucene working on windows?  Any idea why it would seize up
+on the lock files?  This service process is the only lucene process on
+the system, and the finished indexes are copied off to another server to
+serve the search requests, so it's puzzling that the daemon process
+would block itself...  Anyone know if an IndexReader.close() would do a
+better job of cleaning up the file handles than IndexSearcher.close()?
+
+ 
+
+Thanks
+
+-Mark
+
+ 
+This e-mail message, and any attachments, is intended only for the use of the individual or
+entity identified in the alias address of this message and may contain information that is
+confidential, privileged and subject to legal restrictions and penalties regarding its unauthorized
+disclosure and use. Any unauthorized review, copying, disclosure, use or distribution is strictly
+prohibited. If you have received this e-mail message in error, please notify the sender immediately
+by reply e-mail and delete this message, and any attachments, from your system. Thank you.
+

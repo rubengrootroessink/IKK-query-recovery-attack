@@ -1,0 +1,152 @@
+FROM: John Moylan <jo...@rte.ie>
+SUBJECT: Re: OutOfMemory example
+DATE: 13 Sep 2004
+
+You should reuse your old index (as eg an application variable) unless 
+it has changed - use getCurrentVersion to check the index for updates. 
+This has come up before.
+
+John
+
+Jiří Kuhn wrote:
+> Hi,
+> 
+> 	I think I can reproduce memory leaking problem while reopening an index. Lucene version
+tested is 1.4.1, version 1.4 final works OK. My JVM is:
+> 
+> $ java -version
+> java version "1.4.2_05"
+> Java(TM) 2 Runtime Environment, Standard Edition (build 1.4.2_05-b04)
+> Java HotSpot(TM) Client VM (build 1.4.2_05-b04, mixed mode)
+> 
+> 	The code you can test is below, there are only 3 iterations for me if I use -Xmx5m,
+the 4th fails.
+> 
+> Jiri.
+> 
+> package test;
+> 
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.Hits;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.Searcher;
+> import org.apache.lucene.search.Sort;
+> import org.apache.lucene.search.SortField;
+> import org.apache.lucene.search.TermQuery;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.RAMDirectory;
+> 
+> import java.io.IOException;
+> import java.text.SimpleDateFormat;
+> import java.util.Calendar;
+> import java.util.Date;
+> 
+> /**
+>  * Run this test with Lucene 1.4.1 and -Xmx5m
+>  */
+> public class ReopenTest
+> {
+>     private static long mem_last = 0;
+> 
+>     public static void main(String[] args) throws IOException
+>     {
+>         Directory directory = create_index();
+> 
+>         for (int i = 1; i < 100; i++) {
+>             System.err.println("loop " + i);
+>             search_index(directory);
+>         }
+>     }
+> 
+>     private static void search_index(Directory directory) throws IOException
+>     {
+>         IndexReader reader = IndexReader.open(directory);
+>         Searcher searcher = new IndexSearcher(reader);
+> 
+>         print_mem("search 1");
+>         SortField[] fields = new SortField[2];
+>         fields[0] = new SortField("date", SortField.STRING, true);
+>         fields[1] = new SortField("id", SortField.STRING, false);
+>         Sort sort = new Sort(fields);
+>         TermQuery query = new TermQuery(new Term("text", "\"text 5\""));
+> 
+>         print_mem("search 2");
+>         Hits hits = searcher.search(query, sort);
+>         print_mem("search 3");
+> 
+>         for (int i = 0; i < hits.length(); i++) {
+>             Document doc = hits.doc(i);
+>             System.out.println("doc " + i + ": " + doc.toString());
+>         }
+>         print_mem("search 4");
+>         searcher.close();
+>         reader.close();
+>     }
+> 
+>     private static void print_mem(String log)
+>     {
+>         long mem_free = Runtime.getRuntime().freeMemory();
+>         long mem_total = Runtime.getRuntime().totalMemory();
+>         long mem_max = Runtime.getRuntime().maxMemory();
+> 
+>         long delta = (mem_last - mem_free) * -1;
+> 
+>         System.out.println(log + "= delta: " + delta + ", free: " + mem_free + ", used:
+" + 
+> 	(mem_total-mem_free) + ", total: " + mem_total + ", max: " + mem_max);
+> 
+>         mem_last = mem_free;
+>     }
+> 
+>     private static Directory create_index() throws IOException
+>     {
+>         print_mem("create 1");
+>         Directory directory = new RAMDirectory();
+> 
+>         Calendar c = Calendar.getInstance();
+>         SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+>         IndexWriter writer = new IndexWriter(directory, new StandardAnalyzer(), true);
+>         for (int i = 0; i < 365 * 30; i++) {
+>             Document doc = new Document();
+> 
+>             doc.add(Field.Keyword("date", df.format(new Date(c.getTimeInMillis()))));
+>             doc.add(Field.Keyword("id", "AB" + String.valueOf(i)));
+>             doc.add(Field.Text("text", "Tohle je text " + i));
+>             writer.addDocument(doc);
+> 
+>             c.add(Calendar.DAY_OF_YEAR, 1);
+>         }
+>         writer.optimize();
+>         System.err.println("index size: " + writer.docCount());
+>         writer.close();
+> 
+>         print_mem("create 2");
+>         return directory;
+>     }
+> }
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+
+******************************************************************************
+The information in this e-mail is confidential and may be legally privileged.
+It is intended solely for the addressee. Access to this e-mail by anyone else
+is unauthorised. If you are not the intended recipient, any disclosure,
+copying, distribution, or any action taken or omitted to be taken in reliance
+on it, is prohibited and may be unlawful.
+Please note that emails to, from and within RTÉ may be subject to the Freedom
+of Information Act 1997 and may be liable to disclosure.
+******************************************************************************
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

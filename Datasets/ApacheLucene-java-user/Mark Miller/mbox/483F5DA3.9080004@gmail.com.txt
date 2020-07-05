@@ -1,0 +1,231 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: FileNotFoundException in ConcurrentMergeScheduler
+DATE: 30 May 2008
+
+Michael McCandless wrote:
+>
+> Michael Busch wrote:
+>
+>> Of course it can happen that you run out of available file 
+>> descriptors when a lot of threads open separate IndexReaders, and 
+>> then the SegmentMerger could certainly hit IOExceptions, but I don't 
+>> think a FileNotFoundException would be thrown in such a case.
+>
+> I think I've actually seen a FileNotFoundException thrown when the 
+> underlying root cause was file descriptor exhaustion, but I'm not 
+> certain.
+>
+> Can you use lsof (or something similar) to see how many files you have?
+>
+> Merging, especially several running at once, can greatly increase open 
+> file count, and especially if mergeFactor is increased.
+
+I know you can see it when your out of file descriptors...I have many times.
+
+
+
+ >>Then, to me, it seems like a bug in Lucene.  Code as straight-forward 
+as mine is should not be able to get Lucene into a bad state.
+
+Depends I guess. I think Micahael and Michael are going to say its a 
+bug...I am going to say your shouldnt be creating that many readers. I 
+guess we should support it, not much point in arguing that...but I am 
+telling you, you should not be doing it that way. As you wish though :)
+
+Here is a test that will throw that exception almost instantly on my 
+computer:
+
+
+public class TestIndexAccessor extends TestCase {
+
+  protected static final int MERG_FACTOR = 15;
+  static private FSDirectory index1;
+  static private FSDirectory index2;
+
+
+  private void deleteIndex(FSDirectory indexDir) throws IOException {
+    File[] files = indexDir.getFile().listFiles();
+    if (files != null) {
+      for (int i = 0; i < files.length; i++) {
+        if (!files[i].delete()) {
+          throw new RuntimeException(files[i] + " could not be deleted !");
+        }
+      }
+    }
+    indexDir.getFile().delete();
+  }
+
+
+  static LockFactory lockFactory = new NoLockFactory();
+  String tempDir = System.getProperty("java.io.tmpdir") + File.separator
+      + "indexacessor";
+
+  protected void setUp() throws Exception {
+    System.out.println("setup");
+    if (index1 != null) {
+      deleteIndex(index1);
+    }
+    if (index2 != null) {
+      deleteIndex(index2);
+    }
+    super.setUp();
+
+    try {
+      index1 = FSDirectory.getDirectory(new File(tempDir, "testindex"),
+          lockFactory);
+      index2 = FSDirectory.getDirectory(new File(tempDir, "testindex2"),
+          lockFactory);
+
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+
+ 
+  public void testLotsOfAccess2() throws Exception {
+    final Analyzer analyzer = new WhitespaceAnalyzer();
+
+
+    IndexWriter writer =  new IndexWriter(index1, analyzer, 
+MaxFieldLength.LIMITED);
+    writer.close();
+   
+    index1 = FSDirectory.getDirectory(new File(tempDir, "testindex"),
+        lockFactory);
+    index2 = FSDirectory.getDirectory(new File(tempDir, "testindex2"),
+        lockFactory);
+
+ 
+
+      Thread[] searchThreads = new Thread[50];
+
+      Thread[] updateThreads = new Thread[1];
+
+      for (int i = 0; i < searchThreads.length; i++) {
+        searchThreads[i] = new Thread() {
+
+          public void run() {
+           
+      
+
+            float times = 6600f;
+            Searcher searcher = null;
+            for (int i = 0; i < times; i++) {
+              try {
+                Thread.sleep(15);
+                searcher = new IndexSearcher(index1);
+
+                QueryParser qp = new QueryParser("field", new 
+KeywordAnalyzer());
+                Sort sort = new Sort(new SortField("srt"));
+                searcher.search(qp.parse("test"), sort);
+                sleep(1000);
+              } catch (IOException e) {
+                e.printStackTrace();
+              } catch (ParseException e) {
+                e.printStackTrace();
+              } catch (InterruptedException e) {
+                e.printStackTrace();
+              } finally {
+               try {
+                  searcher.close();
+                } catch (IOException e) {
+                  // TODO Auto-generated catch block
+                  e.printStackTrace();
+                }
+              }
+            }
+
+          }
+        };
+        searchThreads[i].setName("searchThread-" + i);
+      }
+
+
+      for (int i = 0; i < updateThreads.length; i++) {
+        updateThreads[i] = new Thread() {
+
+          public void run() {
+
+            float times = 6600f;
+            IndexWriter writer = null;
+
+            for (int i = 0; i < times; i++) {
+              try {
+     
+                writer =  new IndexWriter(index1, analyzer, 
+MaxFieldLength.LIMITED);
+                writer.setMergeFactor(MERG_FACTOR);
+                Document doc = new Document();
+                doc.add(new Field("field", "test", Store.NO, 
+Index.TOKENIZED));
+                doc.add(new Field("srt", Integer.toString(i), Store.YES,
+                    Index.UN_TOKENIZED));
+                writer.addDocument(doc);
+              } catch (IOException e) {
+                e.printStackTrace();
+                throw new RuntimeException(e);
+              } finally {
+                if (writer != null) {
+                  try {
+                    writer.close();
+                  } catch (CorruptIndexException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                  } catch (IOException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                  }
+                }
+              }
+            }
+
+          }
+        };
+
+        updateThreads[i].setName("updateThread-" + i);
+      }
+
+
+      for (int i = 0; i < updateThreads.length; i++) {
+        System.out.println("starting update thread "
+            + updateThreads[i].getName());
+        updateThreads[i].start();
+      }
+
+
+      Thread.currentThread().sleep(4000);
+
+      for (int i = 0; i < searchThreads.length; i++) {
+        System.out.println("starting search thread "
+            + searchThreads[i].getName());
+        searchThreads[i].start();
+      }
+
+
+      Thread.sleep(8000);
+    
+      for (int i = 0; i < searchThreads.length; i++) {
+        searchThreads[i].join();
+      }
+
+
+      for (int i = 0; i < updateThreads.length; i++) {
+        updateThreads[i].join();
+      }
+
+
+      Thread.sleep(4000);
+      deleteIndex(index1);
+      deleteIndex(index2);
+   
+  }
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

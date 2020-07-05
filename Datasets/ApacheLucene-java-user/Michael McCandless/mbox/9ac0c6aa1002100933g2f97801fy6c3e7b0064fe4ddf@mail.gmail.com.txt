@@ -1,0 +1,91 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Flex & Docs/AndPositionsEnum
+DATE: 10 Feb 2010
+
+On Wed, Feb 10, 2010 at 8:27 AM, Marvin Humphrey <marvin@rectangular.com> wrote:
+
+>> But why didn't you have the Multi*Enums layer add the offset (so
+>> that the codec need not know who's consuming it)?  Performance?
+>
+> That would have involved something like this within the aggregator:
+>
+>    posting.setDocID(posting.getDodID() + docBase).
+>
+> The problem is that that's the docID the SegPostingList is using for
+> its deltas.  If the SegPostingList skips during a call to advance(),
+> it needs to reset that docID to the what the skip data says -- but
+> if the aggregator layer doesn't tell it that it needs to account for
+> a docBase, the new docID will lose the offset.  Can't solve that
+> problem at the aggregator level either -- the aggregator doesn't
+> know when skipping is occurring, so it can't intervene on an
+> as-needed basis.
+
+In Lucene, skipping is done through the aggregator, so it knows that
+it's skipping, and in fact skips whole segments at a time until it
+gets to the segment that may contain the doc.
+
+> The fix was to make SegPostingList aware of a docBase, so that on
+> skipping it could add it to the docID in the skip data and land at
+> the right docID from the perspective of the consumer.  Messy.
+
+OK
+
+> I suppose another possibility would have been to have the aggregator
+> keep its own Posting and copy all data over from the
+> SegPostingList's Posting on each iteration then add its offset.
+
+I think this is what Lucene does (?).  EG the aggregator holds its own
+"int doc" which it must copy to (adding the offset) from the
+underlying sub enum.
+
+> However, that would have been a lot less efficient, and it still
+> wouldn't have worked for the "flat positions space" example because
+> the generic aggregator would not have known about the needs of the
+> specific codec.
+
+But aggregator could also add the positions offset on each
+nextPosition() call, in Lucene.  Like that use case could be made to
+work, if Lucene had used a flat position space.
+
+>> > That example may not be a deal breaker for you, but I'm not
+>> > willing to guarantee that Lucy will always return primitives from
+>> > these enums, now and forever, one per method call.
+>>
+>> But it'd be a major API change down the road to change this, for
+>> Lucy/KS?
+>
+> I suppose so.  It's either foreclose on the possibility of aggregating (Lucy),
+> or foreclose on the possibility of using properties that cannot be aggregated
+> (Lucene).
+
+Right, though... if this even happens in practice for some future app,
+that app can choose to avoid Multi*Enum.  Lucene internally doesn't
+use Multi*Enum (except during merging, which your codec can
+override, as of flex).
+
+>> Also, this is why we're adding Attribute* to all the postings enums,
+>> with flex -- any codec & consumer can use their own private
+>> attributes.  The attrs pass through Multi*Enum.
+>
+> Hmm.  Does that mean that the consumer needs to refresh the attributes with
+> each iteration?  Because what happens when you switch sub-enums within the
+> Multi*Enum?  Don't those attributes go stale, as they belong to a sub-enum
+> that has finished?
+
+Switching sub-enums is indeed tricky (we're iterating on this in
+LUCENE-2154).  Our current plan is to pass an attr source (maps attr
+interface to an actual instance that implements it) to each sub-enum,
+meaning, all codecs being aggregated must be able to use the same attr
+impl.
+
+So consumer gets a single instance for TupleAttribute, next's through
+the enum, calling TupleAttribute.get() each time, regardless of
+whether it's an aggreggated or non-aggregated enum.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,105 @@
+FROM: Tushar B <snow...@sbcglobal.net>
+SUBJECT: Re: document deletion problem
+DATE: 19 Dec 2007
+
+Hi Doron, 
+
+I was just playing around with deletion because I wanted to delete documents due to spurious
+entries in one particular field. Could you tell me how do I file a JIRA issue?
+
+The two workarounds I was using are neither great in perfromance. Provided here just FYI:
+
+1) Have the "for" loop in a "do while" loop, Handle the Array...Exception, resubmit query
+2) Use HitCollector (as also suggested by you)
+
+thanks
+
+----- Original Message ----
+> From: Doron Cohen <cdoronc@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Wednesday, December 19, 2007 3:49:57 AM
+> Subject: Re: document deletion problem
+> 
+> Hi Tushar,
+> 
+> This is an interesting scenario!
+> 
+> The problem arises from the way search() methods that return
+> Hits are working: for start only 100 matching documents are
+> collected, assuming that apps calling this method will not
+> be interested in more documents than this, and that apps
+> traversing all matching documents (like yours) will use the
+> HitCollector API and provide their HitCollector (your
+> HitCollector would then do the deletion).
+> 
+> Anyhow, if an application requests the 101 matching doc,
+> under the hoods, the query is resubmitted, this time fetching
+> 200 docs, out of which first 100 are ignored and the rest are
+> provided as results. If more than 200 are needed the next
+> re-submission would bring 400, then 800, etc.
+> 
+> Now, in your interesting scenario, you deleted every retrieved
+> doc. The sequence of resubmission of queries is:
+> 100, 200, 400, 800, 1,600, 3,200, 6,400, 12,800 (actually 11,475).
+> After first 6,400 were deleted and you ask for the result 6,401,
+> the query is re-submitted, but only 11,475 - 6,400 = 5075 matches
+> are found. Since you asked for the 6,401 match, Hits attempts to
+> skip the first 6,400 and fails of course, because there are not that
+> many docs.
+> 
+> This seems like a bug, because although Hits is not recommended
+> for this task, for performance considerations, and you should better
+> use a HitCollector for this - still, this should have worked correctly.
+> 
+> I tend to think that his should just be documented and not necessarily
+> fixed, not 100% sure which of the two.
+> 
+> Could you file a JIRA Lucene issue for this?
+> 
+> Regards,
+> Doron
+> 
+> On Dec 19, 2007 12:10 PM, Tushar B wrote:
+> 
+> > Hello All,
+> >
+> > I am seeing this issue and would like to understand if its a bug or I am
+> > missing something and doing the wrong way:
+> >
+> > (Note that I am doing all exception handling - but deleted the exception
+> > handling code for sake of brevity below)
+> >
+> > Hits h = m_indexSearcher.search(q); // Returns 11475 documents
+> > for(int i = 0; i < h.length(); i++)
+> > {
+> > int doc = h.id(i);
+> > m_indexSearcher.getIndexReader().deleteDocument(doc);
+> > }
+> >
+> > The above hits Vector::ArrayIndexOutOfBoundsException when i = 6400. The
+> > problem happens in Hits::getMoreDocs.
+> >
+> > By the time 6400 docs are deleted, the majority is gone and
+> > topDocs.totalHits becomes less than 6400 (In this case 5075) and finally
+> > causes exception in the last line of Hits::hitDoc.
+> >
+> > I just took the example numbers which occured in my case but this happens
+> > for any hits > 200 (initial vector size is 100 I guess).
+> >
+> > Any insight on the logic here will be very helpful (note: I have a
+> > workaround too)
+> >
+> > thanks
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

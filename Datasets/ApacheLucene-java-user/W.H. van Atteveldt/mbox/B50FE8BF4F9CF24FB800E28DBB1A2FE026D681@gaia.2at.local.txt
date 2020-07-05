@@ -1,0 +1,226 @@
+FROM: "W.H. van Atteveldt" <wou...@2at.nl>
+SUBJECT: wildcard in phrase query: problem with idf / scoring; QueryParser; MultiPhraseQuery
+DATE: 3 Jul 2006
+
+Dear List,
+
+I am using lucene to count the number of hits of queries in documents
+(ie taking raw frequencies as scores), which seems to work fairly well
+using a modified Similarity, returning freq for tf and 1.0 for everyting
+else, and a HitCollector to collect the hits.
+
+I also want to allow 'prefix phrase queries', ie "microsoft app*". If I
+understand the doc and mailing list correctly, there is some 'backend
+plumbing' for this in the sense of the MultiPhraseQuery, but the
+QueryParser does not handle this. Is this correct? Will this change in
+the near future?
+
+Assuming it is, I subclassed the QueryParser to handle phrase prefixes,
+replacing getFieldQuery by a version that calls the super, and if the
+result is a phrase query and the text contains an asterisk tries to
+create a MultiPhraseQuery. This seems to work ok, returning a
+MultiPhraseQuery "microsoft (app application ..)" for the above query.
+That said, it is highly inelegant and does silly things like using
+String.split rather than the analyzer because that removes wildcards.
+I'm sure this can be done more elegantly... but it feels wrong to meddle
+with things like QueryParsers given the fact that I'm a lucene novice. I
+assume the normal parser refuses to do this because it uses the
+indexreader (which is only available at rewrite time?), but why is there
+no WildcardPhraseQuery that gets rewritten to an appropriate
+MultiPhraseQuery?
+
+Anyway, the problem now is that queries return very high scores, which
+seem to be something like [actual score * nterms^2], where nterms is the
+number of terms in the new phrase. The searcher.explanation is that ifd
+equals nterms (see below). Strange enough, both idf(.) functions in my
+HitCountSimilarity never seem to get called (as revealed by a strategic
+System.err.println), even though the idf for normal queries is 1.0 (as
+it should be) and the first line in my main function is
+[Similarity.setDefault(new HitCountSimilarity());]. So.... obviously I
+am doing something wrong?
+
+Any help greatly appreciated!
+
+-- Wouter
+
+------------ explanation of "from ira*" (on random doc) ------------
+
+289.0 = weight(body:"from (irae irakly iran irandokht irani iranian
+iranians iranica irantzu iraq iraqi iraqis iraqs irascible irate
+irational)" in 4032), product of:
+  17.0 = queryWeight(body:"from (irae irakly iran irandokht irani
+iranian iranians iranica irantzu iraq iraqi iraqis iraqs irascible irate
+irational)"), product of:
+    17.0 = idf(body:"from (irae irakly iran irandokht irani iranian
+iranians iranica irantzu iraq iraqi iraqis iraqs irascible irate
+irational)")
+    1.0 = queryNorm
+  17.0 = fieldWeight(body:"from (irae irakly iran irandokht irani
+iranian iranians iranica irantzu iraq iraqi iraqis iraqs irascible irate
+irational)" in 4032), product of:
+    1.0 = tf(phraseFreq=1.0)
+    17.0 = idf(body:"from (irae irakly iran irandokht irani iranian
+iranians iranica irantzu iraq iraqi iraqis iraqs irascible irate
+irational)")
+    1.0 = fieldNorm(field=body, doc=4032)
+
+------------ exmplanation of "ira*" (on random doc) -----------
+
+3.0 = sum of:
+  2.0 = fieldWeight(body:ira in 4797), product of:
+    2.0 = tf(termFreq(body:ira)=2)
+    1.0 = idf(docFreq=389)
+    1.0 = fieldNorm(field=body, doc=4797)
+  1.0 = fieldWeight(body:iran in 4797), product of:
+    1.0 = tf(termFreq(body:iran)=1)
+    1.0 = idf(docFreq=325)
+    1.0 = fieldNorm(field=body, doc=4797)
+
+------------ PrefixPhraseQueryAnalyzer.java ----------
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.queryParser.ParseException;
+
+import java.util.*;
+
+public class PrefixPhraseQueryParser extends QueryParser {
+
+    public Term[] expand(String field, String prefix) throws
+java.io.IOException
+    {
+        ArrayList<Term> terms = new ArrayList<Term>();
+        TermEnum t = ir.terms(new Term(field, prefix));
+        while(t.next() && t.term().text().startsWith(prefix)) {
+            if (t.term().text().matches("\\w+"))
+                terms.add(t.term());
+        }
+        t.close();
+        return (Term[]) terms.toArray(new Term[0]);
+    }
+
+    private IndexReader ir;
+    public PrefixPhraseQueryParser(String f, Analyzer a, IndexReader ir)
+    {
+        super(f,a);
+        this.ir = ir;
+    }
+
+    protected org.apache.lucene.search.Query getFieldQuery(String field,
+                                  String queryText,
+                                  int slop) throws ParseException
+    {
+        org.apache.lucene.search.Query result =
+super.getFieldQuery(field, queryText, slop);
+
+        if ((result instanceof PhraseQuery) && queryText.contains("*"))
+{
+            MultiPhraseQuery mqr = new MultiPhraseQuery();
+            for (String s : queryText.split("[\\s]+")) {
+                if (s.contains("*")) {
+                    String pref = s.substring(0, s.length() - 1);
+                    if (pref.contains("*"))
+                        throw new ParseException("Can only handle prefix
+queries within phrases (eg 'al q*')");
+                    try {
+                        Term[] terms = expand(field, pref);
+                        mqr.add(terms);
+                    } catch(java.io.IOException e) {throw new
+ParseException("Error while expanding : "+e);}
+                } else
+                    mqr.add(new Term(field, s));
+            }
+            result = mqr;
+
+        }
+        return result;
+    }
+
+    public static void main(String[] args) throws Exception {
+ 	<snip>
+    }
+}
+
+
+-------- HitCountSimilarity.java ----------
+
+import  org.apache.lucene.search.*;
+import java.util.*;
+
+public class HitCountSimilarity extends Similarity {
+
+    public float coord(int overlap, int maxOverlap)
+    {
+        // Computes a score factor based on the fraction of all query
+terms that a document contains.
+        return 1.0f;
+    }
+
+
+    public float idf(Collection terms, Searcher searcher)
+    {
+        // Computes a score factor for a phrase.
+        System.err.println("--*-- "+terms.size());
+        return 1.0f;
+    }
+
+    public float idf(int docFreq, int numDocs)
+    {
+        // Computes a score factor based on a term's document frequency
+(the number of documents which contain the term)\
+.
+        System.err.println("--!-- "+docFreq+"/"+numDocs);
+        return 1.0f;
+    }
+
+    public float idf(org.apache.lucene.index.Term term, Searcher
+searcher)
+    {
+        // Computes a score factor for a simple term.
+        return 1.0f;
+    }
+
+    public float lengthNorm(String fieldName, int numTokens)
+    {
+        // Computes the normalization value for a field given the total
+number of terms contained in a field.
+        return 1.0f;
+    }
+
+    public float queryNorm(float sumOfSquaredWeights)
+    {
+        // Computes the normalization value for a query given the sum of
+the squared weights of each of the query terms.
+        return 1.0f;
+   }
+
+    public float sloppyFreq(int distance)
+    {
+        return 1.0f;
+    }
+
+    public float tf(float freq)
+    {
+        // Computes a score factor based on a term or phrase's frequency
+in a document.
+        return freq;
+    }
+
+    public float tf(int freq)
+    {
+        // Computes a score factor based on a term or phrase's frequency
+in a document.
+        return freq;
+    }
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

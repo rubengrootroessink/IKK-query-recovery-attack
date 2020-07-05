@@ -1,0 +1,64 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: Moving Index from Crawl/Build Server to Search Server
+DATE: 31 Jan 2002
+
+> From: Mark Tucker [mailto:MTucker@infoimage.com]
+>  
+> What is the best way to 
+> move the index from the build server to the search servers 
+> and then change which index a user is searching against?  I 
+> am concerned about switching the index while a user is paging 
+> through search results.  Ideally new users will access the 
+> new index while current users will access the old index.  How 
+> will I know when all current users are no longer accessing 
+> the old index so that it can be deleted?
+
+If you're using Unix, this is easy.  Once an IndexReader is created, it
+keeps open all files it needs.  Since Unix lets you delete files that are
+open, there's no conflict.  When the last search using the old IndexReader
+completes and it is garbage collected, finalizers will close the files and
+the OS will free the disk space.
+
+The simplest approach on Unix is probably to use a symbolic link to the
+latest version of the index.  When a new index is installed, just update the
+symbolic link to the new index and delete the old one: "ln -sf new latest;
+rm -rf old".
+
+Use something like the following to cache the reader for the index in
+"latest":
+  private IndexReader reader;
+  private long readerLastModified;
+  public synchronized IndexReader getIndexReader() {
+    if (lastModified != IndexReader.lastModified("latest")) {
+      // there's a new index: open it
+      lastModified = IndexReader.lastModified("latest");
+      indexReader = IndexReader.open("latest");
+    }
+    return indexReader;
+  }
+
+If you call this for each search, then searches will always search the
+latest index.  It's most efficient keep just one IndexReader per index for
+searching.
+
+On Win32 there are two complications.  First, you cannot use a symbolic link
+to refer to the latest version of the index.  Nor can you rename or
+overwrite the existing index, since it has open files.  So you must do
+something like list a directory, looking for a new index directory.  Second,
+you need to wait until all searches are complete before the old index can be
+deleted.  You can either spawn a thread that keeps trying to delete it.
+When the last search exits and the IndexWriter is garbage collected this
+will succeed.  A riskier approach is simply to wait five minutes, then call
+IndexReader.close(), then delete it.  Any searches in progress on the old
+index will crash when it is closed, but the delete should succeed!  If
+anyone knows a way around these Win32 issues, I'd love to hear it.
+
+
+Doug
+  
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

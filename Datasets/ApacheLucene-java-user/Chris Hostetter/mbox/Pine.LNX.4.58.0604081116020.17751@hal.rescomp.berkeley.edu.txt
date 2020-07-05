@@ -1,0 +1,97 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: I just don't get wildcards at all.
+DATE: 8 Apr 2006
+
+
+: If I understand this right, I could build my own BooleanQuery in chunks of,
+: say, 1,000 terms each by just adding words given me by the WildCardTermEnum,
+: right?
+
+if you took that approach, you would avoid getting a TooManyClauses
+exception, but you could far more easily avoid it by increaseing the max
+allowed clause count.
+
+THe key to the whole issue of query expansion is to understand (1) why
+some queries expand, (2) what happens when they expand, and (3) why
+BooleanQuery.maxClauseCount exists.
+
+let's answer those slightly out of order...
+
+(2) Queries like PrefixQuery and WildCardQuery expand to a BooleanQuery
+containing TermQueries for each of the individual terms in the index
+that "match" the prefix or the wildcard pattern.  Each of these
+TermQueries has it's own TermWeight and TermScorer -- which means that the
+resulting score of a document that contains some terms which match the
+orriginal Prefix/WIldCard pattern is determined by the TF and IDF of those
+terms (relative the document)
+
+(1) why this happens arguably has two answers:
+  a) because that's just the way it was implimented orriginally
+  b) because it usually makes sense to work that way.
+(a) doesn't really merrit much alaboration, but (b) might make more sense
+if you consider what happens when you do a search for the prefix "ca*" ...
+if document X contains the text "the cat was in the car" it makes sense
+that you want it to score higher then document Y which just contains "the
+cat was on the roof".  If the terms "cat" and "car" appear in almost all
+of your documents, but some document Z is the only document to contain
+the terms "cap" and "can" then it might also make sense that Z should
+score high since it not only matches the prefix but it matches it with
+unique terms  (you may disagree with this sentiment, but i'm just
+expalining the rationale)
+
+(3) so what's the deal with maxClauseCount?   If you have a big index,
+with lots of terms then a sufficiently general prefix/wildcard can be
+rewritten into a really honking big BooleanQuery, which can take up a lot
+of RAM (for all of those TermQueries and TermWeights and TermSCorerers)
+and can take a lot of time to execute.  If you've got gobs abd gobs
+of RAM, and don't care how long your queries take, then
+set the maxClauseCount to MAX_INT and forget about.  maxClauseCount is
+just there as a safety valve to protect you.
+
+Which brings us back to your question....
+
+: If I understand this right, I could build my own BooleanQuery in chunks of,
+: say, 1,000 terms each by just adding words given me by the WildCardTermEnum,
+: right?
+
+if you did that, then the resulting query would take up just as much RAM
+(if not more), and it would take just as long to execute (if not more) as
+if you called setMaxCLauseCount(MAX_INT) and used a regular WildCardQuery.
+
+
+Erik suggested two independent ways of addressing your problem, which can
+acctually be combined to make things even better -- the first is the
+character rotation idea which has been discussed in more detail on the
+list in the past (try googling "lucene wildcard rotate")
+
+The second was to build a *Filter* that uses WildcardTermEnum -- not a
+Query.  This would benefit you in the same way RangeFilter benefits people
+who get TooManyClauses using RangeQuery ... because it's a filter, the
+scoring aspects of each document are taken out of the equation -- a
+complete set of TermQueries/TermScorers doesn't need to be built in
+memory, you can just iterate over the applicable Terms at query time.
+
+Take a look at RangeFilter and (Solr's) PrefixFilter for an example of
+whats involved in writing a Filter thta uses Term Enumerators, and then
+re-think about Erik's suggestion.  Once you have a "WildcardFilter"
+wrapping it in a ConstantScoreQuery would give you a drop in replacement
+for WildCardQuery that would sacrifive the TF/IDF scoring factors for
+speed and garunteed execution on any pattern in any index regardless of
+size.
+
+Personally, i think a generic WildcardFilter would make a great
+contribution to the Lucene core.
+
+http://svn.apache.org/viewcvs.cgi/lucene/java/trunk/src/java/org/apache/lucene/search/RangeFilter.java?view=markup
+http://svn.apache.org/viewcvs.cgi/incubator/solr/trunk/src/java/org/apache/solr/search/PrefixFilter.java?view=markup
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

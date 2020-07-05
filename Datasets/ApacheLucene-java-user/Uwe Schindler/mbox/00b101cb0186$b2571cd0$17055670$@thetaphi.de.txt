@@ -1,0 +1,117 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: NumericField API
+DATE: 1 Jun 2010
+
+Hi,
+
+> I have recently been in charge of converting code that was using
+> pre-3.0 API to be compatible with 3.0 API.
+> 
+> There was a piece of code which was storing a date field:
+> 
+> String date = "20091231131415"; // yyyyMMddHHmmss new
+> Field("creationDate", date, Field.Store.YES, Field.Index.UN_TOKENIZED);
+> 
+> After some documents being indexed, the following query would retrieve all
+> documents created in 2009:
+> 
+> new ConstantScoreRangeQuery("creationDate", "20090101000000",
+> "20100101000000", true, true);
+> 
+> Query results would be sortable by simply adding this sort:
+> 
+> boolean descending = ...;   // either true or false
+> new Sort(new SortField("creationDate", SortField.STRING, descending));
+> 
+> Unfortunately this sequence doesn't work in 3.0.
+> ConstantScoreRangeQuery, for example, is gone and replaced with
+> NumericRangeQuery. 
+
+If you want the old behavior (and not native numeric ranges), you can use
+TermRangeQuery - then your code is exactly the same as before, only
+RangeQuery/ConstantScoreRangeQuery is replaced by TermRangeQuery. But this
+is ineffective as real numeric queries are optimized in Lucene 2.9 and
+later. So your guess is right, you should use NumericField and
+NumericRangeQuery.
+
+> With this in mind, Field creation should now become as
+> follows:
+> 
+> long date = 20091231131415L; // same format but different type
+> NumericField nf = new NumericField("creationDate", Field.Store.YES, true);
+> nf.setLongValue(date);
+> 
+
+Correct.
+
+> And the range query now looks like as:
+> 
+> NumericRangeQuery.newLongRange(
+>    "creationDate",
+>    20090101000000
+>    20100101000000
+>    true,
+>    true
+> )
+
+Correct.
+
+Alternatively there is no need to use that type of numbers, you can encode
+the date in any variant, simpliest is Date.time() (miliseconds since epoch).
+
+> This does work, but the above sort isn't. Exception says: "there are more
+> terms than documents in field "creationDate", but it's impossible to sort
+on
+> tokenized fields".
+> 
+> In order to get rid of this exception, I had to change one of the
+following:
+> - SortField must be changed from SortField.STRING to SortField.LONG
+
+This does the trick and is *not* weird. You are using *numeric* fields, so
+you cannot sort as lexical *terms/strings*
+
+> - NumericField constructor must use false for its "index" (last)
+parameter.
+
+Thats incorrect (see below).
+
+> This is a bit weird. So, here are my questions:
+> 
+> 1) I thought the difference between SortField.LONG and SortField.STRING
+> should only be as in numeric sorting VS lexicographical sorting, right?
+Why
+> would changing to SortField.LONG prevent the exception?
+
+It is a *numeric* field, so you *cannot* sort by lexicographical order.
+
+> 2) How does that relate to passing index=true VS index=false in
+NumericField
+> constructor? Which of the two is preferred, assuming I need the data to be
+> stored and indexed as well as being able to run range queries?
+
+This is incorrect. If you want to sort, you must turn on indexing, without
+that sorting is not possible.
+
+The above exception may be caused by something different: Can it be that you
+have an old index that already had non-NumericField documents in it? If this
+is so, you have a mixed field contents and then behavior of range query and
+sort is wrong.
+
+> 3) NumericField API is marked as experimental and volatile
+> (http://lucene.apache.org/java/3_0_1/api/core/index.html). Is there any
+> other "stable" API I can rely on in Lucene 3.0? If not, what would be
+possible
+> NumericField replacement I could use now?
+
+"Experimental" in Lucene's API *only* means that the API (method signatures,
+classes) may change suddenly. The features are tested and working.
+
+Uwe
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,172 @@
+FROM: "John Christopher Groppe" <jgro...@acm.org>
+SUBJECT: Error reading documents from file index lucene 2.0
+DATE: 16 Jun 2006
+
+I've encountered a very vexing problem with Lucene 2.0.0.  I am able
+to create and search an index, but if I attempt get a document out of
+the index, an IO exception is thrown.  The type of exception depends
+on the size of the index.  If the index is very small, say fewer than
+10 documents I do not get the error.  If the index is a Ram index I do
+not get any errors.
+
+Am I doing something wrong, or is this a bug.  I am running:
+
+Lucene 2.0.0
+Java 1.5.0_07
+Windows XP Pro SP2
+
+Here is my test code followed by the Exception stack trace.
+
+Any help is greatly appreciated.  Thanks.
+
+John
+
+import java.util.Iterator;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.Hit;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.RAMDirectory;
+
+public class SearchTest {
+
+    private static final String[][] ALBUM_DATA = {
+        {"51271", "#1 Def Spot Jam [EDITED]", "#1 Def Spot Jam
+[EDITED]", "Rap/Hip Hop", "0", "1016", "Various Artists", "Various
+Artists"},
+        {"51270", "#1 Def Spot Jam [EXPLICIT]", "#1 Def Spot Jam
+[EXPLICIT]", "Rap/Hip Hop", "1", "1016", "Various Artists", "Various
+Artists"},
+        {"64967", "#1 Record/Radio City", "#1 Record/Radio City",
+"Rock", "0", "663", "Big Star", "Big Star"},
+        {"35141", "#1 [EXPLICIT]","#1 [EXPLICIT]","Alternative Rock",
+"1", "9686", "Fischerspooner", "Fischerspooner"},
+        {"55322", "#1's", "#1's", "Jazz/Blues", "0", "2759", "Louis
+Jordan", "Louis Jordan"},
+        {"59738", "#1's", "#1's", "R&B/Soul", "0", "6660", "Destiny's
+Child", "Destiny's Child"},
+        {"25384",  "001", "001", "Alternative Rock", "0", "7733",
+"Dovetail Joint", "Dovetail Joint"},
+        {"2719", "02", "02", "Pop", "0", "807", "O-Town", "O-Town"},
+        {"35398", "02: Avalon Remixed","02: Avalon Remixed","Pop",
+"0","9770","Avalon","Avalon"},
+        {"33073","0304","0304","Pop","0","1116","Jewel","Jewel"},
+        {"27876","05:22:09:12 Off","05:22:09:12 Off","Alternative
+Rock","0","8945","Front 242","Front 242"},
+        {"24513","1 Fille And 4 Types","1 fille & 4
+types","Pop","0","5074","Celine Dion","Celine Dion"},
+        {"23074","1+1","1+1","Jazz/Blues","0","3568","Wayne
+Shorter","Wayne Shorter"},
+        {"15045","1,000 Fires","1,000 Fires","Pop","0","2888","Traci
+Lords","Traci Lords"},
+        {"42193","1.22.03.Acoustic","1.22.03.Acoustic","Pop","0","823","Maroon
+5","Maroon 5"},
+        {"22537","10","10","Rap/Hip Hop","0","3631","LL Cool J","LL Cool J"}
+    };
+
+    public static final String FIELD_ID = "id";
+    public static final String FIELD_TITLE = "title";
+    public static final String FIELD_TITLE_ORIGINAL = "titleOriginal";
+    public static final String FIELD_GENRES = "genres";
+    public static final String FIELD_EXPLICIT = "explicit";
+    public static final String FIELD_ID_ARTIST = "idArtist";
+    public static final String FIELD_ARTIST = "artist";
+    public static final String FIELD_ARTIST_ORIGINAL = "artistOriginal";
+    public static final String FIELD_MEDIA = "media";
+    public static final String MEDIA_SONG = "s";
+    public static final String MEDIA_ALBUM = "a";
+
+    public static void readAlbums(IndexWriter indexWriter) throws Exception {
+        for (int i = 0; i < ALBUM_DATA.length; i++) {
+            String[] line = ALBUM_DATA[i];
+            Document doc = new Document();
+            Field idField = new Field(FIELD_ID, line[0],
+Field.Store.YES, Field.Index.NO);
+            doc.add(idField);
+            Field titleFieldOriginal = new Field(FIELD_TITLE_ORIGINAL,
+line[2], Field.Store.YES, Field.Index.TOKENIZED);
+            doc.add(titleFieldOriginal);
+            Field genreField = new Field(FIELD_GENRES, line[3],
+Field.Store.YES, Field.Index.TOKENIZED);
+            doc.add(genreField);
+            Field explicitField = new Field(FIELD_EXPLICIT, line[4],
+Field.Store.YES, Field.Index.UN_TOKENIZED);
+            doc.add(explicitField);
+            Field artistIdField = new Field(FIELD_ID_ARTIST, line[5],
+Field.Store.YES, Field.Index.NO);
+            doc.add(artistIdField);
+            Field artistFieldOriginal = new
+Field(FIELD_ARTIST_ORIGINAL, line[7], Field.Store.YES,
+Field.Index.TOKENIZED);
+            doc.add(artistFieldOriginal);
+            indexWriter.addDocument(doc);
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        // create index
+        Directory directory = null;
+        directory = FSDirectory.getDirectory("index", true);
+        // RamDirectory Works!!!
+        //directory = new RAMDirectory();
+        IndexWriter indexWriter = new IndexWriter(directory, new
+StandardAnalyzer(), true);
+        indexWriter.setUseCompoundFile(false);
+        readAlbums(indexWriter);
+        System.out.println("Albums Indexed = " + indexWriter.docCount());
+        indexWriter.optimize();
+        indexWriter.close();
+
+        // search index
+        IndexSearcher indexSearcher = new IndexSearcher(directory);
+        QueryParser parser = new
+QueryParser(SearchTest.FIELD_ARTIST_ORIGINAL, new StandardAnalyzer());
+        // serach for albums by various artists
+        Query query = parser.parse("various");
+        Hits hits = indexSearcher.search(query);
+        indexSearcher.close();
+        System.out.println("Hits found:" + hits.length());
+        Iterator<Hit> i = hits.iterator();
+        while(i.hasNext()) {
+            Hit hit = i.next();
+            System.out.println("Artist: " +
+hit.get(SearchTest.FIELD_ARTIST_ORIGINAL) + " , album: " +
+hit.get(SearchTest.FIELD_TITLE_ORIGINAL));
+        }
+
+    }
+
+}
+
+// output
+Albums Indexed = 16
+Hits found:2
+Exception in thread "main" java.io.IOException: No such file or directory
+        at java.io.RandomAccessFile.readBytes(Native Method)
+        at java.io.RandomAccessFile.read(RandomAccessFile.java:315)
+        at org.apache.lucene.store.FSIndexInput.readInternal(FSDirectory.java:454)
+        at org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.java:64)
+        at org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.java:33)
+        at org.apache.lucene.store.IndexInput.readInt(IndexInput.java:46)
+        at org.apache.lucene.store.IndexInput.readLong(IndexInput.java:69)
+        at org.apache.lucene.index.FieldsReader.doc(FieldsReader.java:62)
+        at org.apache.lucene.index.SegmentReader.document(SegmentReader.java:284)
+        at org.apache.lucene.search.IndexSearcher.doc(IndexSearcher.java:83)
+        at org.apache.lucene.search.Hits.doc(Hits.java:103)
+        at org.apache.lucene.search.Hit.fetchTheHit(Hit.java:77)
+        at org.apache.lucene.search.Hit.getDocument(Hit.java:54)
+        at org.apache.lucene.search.Hit.get(Hit.java:101)
+        at SearchTest.main(SearchTest.java:91)
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

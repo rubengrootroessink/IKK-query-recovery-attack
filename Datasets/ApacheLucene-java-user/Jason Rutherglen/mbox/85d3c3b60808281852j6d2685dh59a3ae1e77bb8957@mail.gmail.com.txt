@@ -1,0 +1,334 @@
+FROM: "Jason Rutherglen" <jason.rutherg...@gmail.com>
+SUBJECT: Re: Replicating Lucene Index with out SOLR
+DATE: 29 Aug 2008
+
+Hello,
+
+I have been emailing Otis regarding some of the replication issues and
+it is good to get them into the Lucene forums to obtain feedback and
+try to agree on what is most advantageous.  Solr replication uses what
+I call segment replication.  Ocean can do segment replication but
+usually simply serializes the documents.  The analyzing is redundant
+but I believe it is a small cost.  IO is the largest cost.  I believe
+these issues are solved, and a software system that allows high
+quantities of cheap hardware will make the IO cost lessen.  The hard
+part of the many servers problem is getting the replication to
+function consistently in the event of failure of the master node in a
+cell of nodes.  There is a reason Google chose to develop BigTable
+rather than continue building out large clusters of Mysql servers.
+One of the main issues probably had to do with the master slave
+failover issues with 1000s of servers.  It is probably simply too hard
+to try to rely on master slave alone to insure all the transactions
+are completed to all nodes.  It is also too difficult to make the
+model work over a geographically distributed set of servers though not
+impossible.  In any case the goal with Ocean is to build something a
+little bit better than what is currently available, but also something
+simpler and easier to understand than what is currently available.
+
+For Ocean I have been attempting to develop a system that successfully
+implements conflict resolution without a master slave approach.  I
+detail this somewhat in
+http://wiki.apache.org/lucene-java/OceanRealtimeSearch replication
+section.  I had problems implementing master failover using the Paxos
+algorithm.  I tried implementing my own failover algorithms however
+they just never worked.  Doug Cutting has been interested in how
+CouchDB implements event based replication though I quite frankly do
+not want to learn the Erlang language to figure it out.  The
+motivations of CouchDB seem to be similar in that I do not think they
+have a master slave architecture.  In any case many Mysql
+installations implement their own conflict resolution and they are
+just now looking at implementing it as a standard part of Mysql
+http://mysqlmusings.blogspot.com/2007/06/replication-poll-and-our-plans-for.html.
+ For Ocean I want the replication to work out of the box without
+master slave as it seems like the right thing to do.
+
+One requirement is the ability to perform an update in parallel and
+then not worry if it made it to all nodes.  Then let the nodes get the
+lost update (a rare case) by a polling mechanism that involves
+comparing transaction ids.  Even in master slave it is possible to
+lose transactions during the master slave failover process.  If the
+client only performs a transaction once with a unique id, then if the
+transaction fails and the client tries again, there would be a new id
+and the resolution would not create duplicates.
+
+It seems that Google has implemented this type of asynchronous
+replication judging by this
+http://acmqueue.com/modules.php?name=Content&pa=showpage&pid=337
+article.  It is just plain easier as the number of servers is added.
+The problem with master slave with many servers is knowing which
+server is the master at any given point.  It would seem easier to
+build an architecture where it becomes irrelevant using asynchronous
+conflict resolution.  This also allows the servers to be distributed
+geographically where the latency is higher, which is what a
+multi-master architecture solves using SQL databases.  Multi master in
+SQL databases uses asynchronous conflict resolution.
+
+An important point from the ACM article that is relevant to Lucene is
+the section called "Do databases let schemas evolve for a set of items
+using a bottom-up consensus/tipping point?"  Lucene is the type of
+system that solves this problem with SQL databases.  I believe it is a
+fundamental advantage over SQL databases.  If the Ocean system can
+scale well then it can offer some unique advantages over SQL
+databases, while also providing all of the powerful search
+functionality offered by Lucene such as phrase queries, span queries,
+payloads, custom scoring, functions, etc.
+
+I am not sure how much more to put here right now as I may just be
+blathering on.  I welcome feedback and will try to place the most
+current thoughts on the wiki
+http://wiki.apache.org/lucene-java/OceanRealtimeSearch.  One thing to
+note is that currently Ocean generates ids based on a server number.
+This way each id generated can be traced back to a server but still
+increments.  This is helpful with conflict resolution.  Right now I am
+writing code to use this id for the Ocean conflict resolution.
+
+Cheers,
+Jason
+
+On Thu, Aug 28, 2008 at 12:57 PM, Otis Gospodnetic
+<otis_gospodnetic@yahoo.com> wrote:
+>
+> Yes, I think you pinpointed what I see over and over with Solr.  The two desires pull
+in opposite directions.  I think Jason Rutherglen is very keen to start talking about Lucene
+clusters and index replication in such clusters without using the classic master/slave approach.
+>
+> Jason, want to start a thread on java-dev?
+>
+> Otis
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+>
+>
+> ----- Original Message ----
+> > From: mark harwood <markharw00d@yahoo.co.uk>
+> > To: java-user@lucene.apache.org
+> > Sent: Thursday, August 28, 2008 6:21:19 AM
+> > Subject: Re: Replicating Lucene Index with out SOLR
+> >
+> > >> You don't need to copy the whole index every time
+> > >> if you do incremental  indexing/updates and don't optimize the index
+> >
+> >
+> > But at 5 minute intervals for replication does this not quickly lead to a very
+> > fragmented index?
+> >
+> > It seems there is a fundamental conflict when building replication systems based
+> > entirely on the lucene file format:
+> > * In the interests of good search performance the index should ideally be a
+> > small number of large files (which is what mergepolicy/optimize are all about
+> > maintaining)
+> > * However, in the interest of minimising replication network traffic, the ideal
+> > is a large number of small files.
+> >
+> > I've previously built replication systems which rely on each server pulling
+> > deltas in the form of insert/update/delete records from a database and using
+> > IndexWriter locally on each server to apply these sets of changes. Obviously
+> > this duplicates the analyzing/indexing effort across replicas but does mean the
+> > content being transferred is not restricted by the design of the Lucene file
+> > format and therefore uses minimal network traffic and places no restrictions on
+> > the IndexWriter merge policies I may choose to use to optimise search speed.
+> >
+> > Keen to explore the pros and cons of these different replication schemes.
+> >
+> > Cheers,
+> > Mark
+> >
+> >
+> >
+> > --- On Thu, 28/8/08, rahul_k123 wrote:
+> >
+> > > From: rahul_k123
+> > > Subject: Re: Replicating Lucene Index with out SOLR
+> > > To: java-user@lucene.apache.org
+> > > Date: Thursday, 28 August, 2008, 6:47 AM
+> > > Can i make use of solr scripts for this purpose.
+> > >
+> > >
+> > > The snapinstaller runs on the slave after a snapshot has
+> > > been pulled from
+> > > the master. This signals the local Solr server to open a
+> > > new index reader,
+> > > then auto-warming of the cache(s) begins (in the new
+> > > reader), while other
+> > > requests continue to be served by the original index
+> > > reader.
+> > >
+> > > How can i achieve the above in my case??
+> > >
+> > >
+> > > Otis Gospodnetic wrote:
+> > > >
+> > > > You don't need to copy the whole index every time
+> > > if you do incremental
+> > > > indexing/updates and don't optimize the index
+> > > before copying.  If you use
+> > > > rsync for copying the index, only the new/modified
+> > > files be copied.  This
+> > > > is what Solr replication scripts do, too.
+> > > >
+> > > > Otis
+> > > > --
+> > > > Sematext -- http://sematext.com/ -- Lucene - Solr -
+> > > Nutch
+> > > >
+> > > >
+> > > >
+> > > > ----- Original Message ----
+> > > >> From: rahul_k123
+> > > >> To: general@lucene.apache.org
+> > > >> Sent: Wednesday, August 27, 2008 11:36:07 PM
+> > > >> Subject: Re: Replicating Lucene Index with out
+> > > SOLR
+> > > >>
+> > > >>
+> > > >> Currently we index every certain amount of time on
+> > > A.
+> > > >>
+> > > >> -copy the index
+> > > >>      Copying the whole index everytime ?
+> > > >>
+> > > >> Currently i am investigating how i can make use of
+> > > SOLR replication
+> > > >> scripts
+> > > >> to achive this.
+> > > >>
+> > > >>
+> > > >> Is there anyone who did this with out SOLR before?
+> > > >>
+> > > >>
+> > > >> Thanks
+> > > >>
+> > > >>
+> > > >>
+> > > >> Otis Gospodnetic wrote:
+> > > >> >
+> > > >> > Hi,
+> > > >> >
+> > > >> > You may want to ask on the java-user list
+> > > (more subscribers), which I'm
+> > > >> > CC-ing, so we can continue discussion there.
+> > > >> > I think you will have to implement your own
+> > > logic that runs on A and
+> > > >> does
+> > > >> > something like this:
+> > > >> >
+> > > >> > - stop adding new docs
+> > > >> > - call commit on the IndexWriter
+> > > >> >
+> > > >> > - copy the index
+> > > >> > - resume indexing
+> > > >> >
+> > > >> > Otis
+> > > >> > --
+> > > >> > Sematext -- http://sematext.com/ -- Lucene -
+> > > Solr - Nutch
+> > > >> >
+> > > >> >
+> > > >> >
+> > > >> > ----- Original Message ----
+> > > >> >> From: rahul_k123
+> > > >> >> To: general@lucene.apache.org
+> > > >> >> Sent: Thursday, August 28, 2008 1:34:41
+> > > AM
+> > > >> >> Subject: Replicating Lucene Index with
+> > > out SOLR
+> > > >> >>
+> > > >> >>
+> > > >> >> I have the following requirement
+> > > >> >>
+> > > >> >> Right now we have multiple indexes
+> > > serving our web application. Our
+> > > >> >> indexes
+> > > >> >> are around 30 GB size.
+> > > >> >>
+> > > >> >> We want to replicate the index data so
+> > > that we can use them to
+> > > >> distribute
+> > > >> >> the search load.
+> > > >> >>
+> > > >> >> This is what we need ideally.
+> > > >> >>
+> > > >> >> A – (supports writes and reads)
+> > > >> >>
+> > > >> >> A1 –Replicated Index (Supports reads)
+> > > . We want to synchronize this
+> > > >> >> every 5
+> > > >> >> mins.
+> > > >> >>
+> > > >> >>
+> > > >> >>
+> > > >> >> Any help is appreciated.   We are not
+> > > using SOLR
+> > > >> >>
+> > > >> >> I also interested in knowing what will be
+> > > the best way so that I can
+> > > >> >> scale
+> > > >> >> my application adding more boxes for
+> > > search if our load increases.
+> > > >> >>
+> > > >> >> Thanks.
+> > > >> >>
+> > > >> >> --
+> > > >> >> View this message in context:
+> > > >> >>
+> > > >>
+> > >
+> > http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19191752p19191752.html
+> > > >> >> Sent from the Lucene - General mailing
+> > > list archive at Nabble.com.
+> > > >> >
+> > > >> >
+> > > >> >
+> > > >>
+> > > >> --
+> > > >> View this message in context:
+> > > >>
+> > >
+> > http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19191752p19193670.html
+> > > >> Sent from the Lucene - General mailing list
+> > > archive at Nabble.com.
+> > > >
+> > > >
+> > > >
+> > > ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail:
+> > > java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail:
+> > > java-user-help@lucene.apache.org
+> > > >
+> > > >
+> > > >
+> > >
+> > > --
+> > > View this message in context:
+> > >
+> > http://www.nabble.com/Replicating-Lucene-Index-with-out-SOLR-tp19193696p19194576.html
+> > > Sent from the Lucene - Java Users mailing list archive at
+> > > Nabble.com.
+> > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail:
+> > > java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail:
+> > > java-user-help@lucene.apache.org
+> >
+> >
+> > Send instant messages to your online friends http://uk.messenger.yahoo.com
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

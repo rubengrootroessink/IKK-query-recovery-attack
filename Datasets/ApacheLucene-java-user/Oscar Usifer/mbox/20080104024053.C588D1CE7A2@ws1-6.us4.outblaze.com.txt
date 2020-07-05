@@ -1,0 +1,530 @@
+FROM: "Oscar Usifer" <oscaru...@programmer.net>
+SUBJECT: lucene performance issues
+DATE: 4 Jan 2008
+
+Folks,
+
+We're running into some performance bottle neck issues while running lucene search against
+our indices (approx 1.5 GB in size after optimization), and   the search query seems to block
+on a sychronized read as follows. Obviously we can upgrade to the latest as a first step.
+When Tomcat runs into this,  it stops responding, and is restarted by our monitor software.
+We ran grinder and it shows it can support about max 7 queries per second (log also included).
+Any ideas how to why it's running into this issue or to improve performance?
+
+Thanks
+OSC
+
+"http-8079-2" daemon prio=3D10 tid=3D0x08716000 nid=3D0x4e65 waiting for mo=
+nitor entry [0xbbffd000..0xbbfff55c]
+    java.lang.Thread.State: BLOCKED (on object monitor)
+         at org.apache.lucene.index.CompoundFileReader$CSIndexInput.readInter=
+nal(CompoundFileReader.java:214)
+...
+
+Lucene 1.9.1, CompoundFileReader.java:214
+
+     192     static final class CSIndexInput extends BufferedIndexInput {
+     193
+     194         IndexInput base;
+     195         long fileOffset;
+     196         long length;
+     197
+...
+     205         /** Expert: implements buffer refill.  Reads bytes from the =
+current
+     206          *  position in the input.
+     207          * @param b the array to read bytes into
+     208          * @param offset the offset in the array to start storing by=
+tes
+     209          * @param len the number of bytes to read
+     210          */
+     211         protected void readInternal(byte[] b, int offset, int len)
+     212         throws IOException
+     213         {
+     214             synchronized (base) {
+     215               long start =3D getFilePointer();
+     216               if(start + len > length)
+     217                 throw new IOException("read past EOF");
+     218               base.seek(fileOffset + start);
+     219               base.readBytes(b, offset, len);
+     220             }
+     221         }
+
+lucene 2.2.0
+     202     /** Implementation of an IndexInput that reads from a portion of=
+   the
+     203      *  compound file. The visibility is left as "package" *only* be=
+cause
+     204      *  this helps with testing since JUnit test cases in a differen=
+t class
+     205      *  can then access package fields of this class.
+     206      */
+     207     static final class CSIndexInput extends BufferedIndexInput {
+     208
+     209         IndexInput base;
+     210         long fileOffset;
+     211         long length;
+     212
+     213         CSIndexInput(final IndexInput base, final long fileOffset, f=
+inal long length)
+     214         {
+     215             this(base, fileOffset, length, BufferedIndexInput.BUFFER=
+_SIZE);
+     216         }
+     217
+     218         CSIndexInput(final IndexInput base, final long fileOffset, f=
+inal long length, int readBufferSize)
+     219         {
+     220             super(readBufferSize);
+     221             this.base =3D base;
+     222             this.fileOffset =3D fileOffset;
+     223             this.length =3D length;
+     224         }
+     225
+     226         /** Expert: implements buffer refill.  Reads bytes from the =
+current
+     227          *  position in the input.
+     228          * @param b the array to read bytes into
+     229          * @param offset the offset in the array to start storing by=
+tes
+     230          * @param len the number of bytes to read
+     231          */
+     232         protected void readInternal(byte[] b, int offset, int len)
+     233         throws IOException
+     234         {
+     235             synchronized (base) {
+     236               long start =3D getFilePointer();
+     237               if(start + len > length)
+     238                 throw new IOException("read past EOF");
+     239               base.seek(fileOffset + start);
+     240               base.readBytes(b, offset, len);
+     241             }
+     242         }
+     243
+     244         /** Expert: implements seek.  Sets current position in this =
+file, where
+     245          *  the next {@link #readInternal(byte[],int,int)} will occu=
+r.
+     246          * @see #readInternal(byte[],int,int)
+     247          */
+     248         protected void seekInternal(long pos) {}
+     249
+     250         /** Closes the stream to further operations. */
+     251         public void close() {}
+     252
+     253         public long length() {
+     254           return length;
+     255         }
+     256
+     257
+     258     }
+     259
+     260 }
+
+est	Description	Successful Tests	Errors	Mean Time	Mean Time Standard Deviat=
+ion	TPS	Peak TPS	Mean Response Length	Response Bytes Per Second	Response Er=
+rors	Mean time to resolve host	Mean time to establish connection	Mean time =
+to first byte=09
+Test 100	html	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 200	jsp	18468	18	2710	2320	0.738	7.00	4750	3510	18	16.3	16.5	2700=09
+Test 300	directory	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 400	other	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 500	css	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 700	image	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 10000	viewing a question	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 10100	viewing a member	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+Test 10200	admin tools	0	0		0.00	0.00	0.00		0.00	0=09=09=09=09
+
+Full thread dump Java HotSpot(TM) Server VM (1.6.0_03-b05 mixed mode):
+
+"http-8079-29" daemon prio=3D10 tid=3D0x0881b400 nid=3D0x4094 in Object.wai=
+t() [0xb79fe000..0xb79ff65c]
+     java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(Native Method)
+	- waiting on <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getPooledConnection(OracleCo=
+nnectionCacheImpl.java:471)
+	- locked <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:259)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:237)
+	at com.ee.util.OracleDataSourceManager.getConcreteConnection(OracleDataSou=
+rceManager.java:273)
+	at com.ee.filter.DatabaseFilter.doFilter(DatabaseFilter.java:50)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TranslateLimiter.doFilter(TranslateLimiter.java:27)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TimingFilter.doFilter(TimingFilter.java:52)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.PropertiesFilter.doFilter(PropertiesFilter.java:63)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.RequestResponseFilter.doFilter(RequestResponseFilter.java=
+:55)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ExceptionHandlerFilter.doFilter(ExceptionHandlerFilter.ja=
+va:30)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.StatusHttpServletResponseFilter.doFilter(StatusHttpServle=
+tResponseFilter.java:29)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.HttpSessionFilter.doFilter(HttpSessionFilter.java:64)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SessionFilter.doFilter(SessionFilter.java:31)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.LoadingFilter.doFilter(LoadingFilter.java:74)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.FileUploadLimiter.doFilter(FileUploadLimiter.java:206)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.DOSFilter.doFilter(DOSFilter.java:426)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SpiderFilter.doFilter(SpiderFilter.java:257)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperVal=
+ve.java:210)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextVal=
+ve.java:174)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.jav=
+a:127)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.jav=
+a:117)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve=
+.java:108)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:=
+151)
+	at org.apache.coyote.http11.Http11AprProcessor.process(Http11AprProcessor.=
+java:834)
+	at org.apache.coyote.http11.Http11AprProtocol$Http11ConnectionHandler.proc=
+ess(Http11AprProtocol.java:640)
+	at org.apache.tomcat.util.net.AprEndpoint$Worker.run(AprEndpoint.java:1286)
+	at java.lang.Thread.run(Thread.java:619)
+
+"http-8079-28" daemon prio=3D10 tid=3D0x0882b000 nid=3D0x4093 in Object.wai=
+t() [0xb7bfe000..0xb7bff5dc]
+     java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(Native Method)
+	- waiting on <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getPooledConnection(OracleCo=
+nnectionCacheImpl.java:471)
+	- locked <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:259)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:237)
+	at com.ee.util.OracleDataSourceManager.getConcreteConnection(OracleDataSou=
+rceManager.java:273)
+	at com.ee.filter.DatabaseFilter.doFilter(DatabaseFilter.java:50)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TranslateLimiter.doFilter(TranslateLimiter.java:27)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TimingFilter.doFilter(TimingFilter.java:52)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.PropertiesFilter.doFilter(PropertiesFilter.java:63)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.RequestResponseFilter.doFilter(RequestResponseFilter.java=
+:55)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ExceptionHandlerFilter.doFilter(ExceptionHandlerFilter.ja=
+va:30)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.StatusHttpServletResponseFilter.doFilter(StatusHttpServle=
+tResponseFilter.java:29)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.HttpSessionFilter.doFilter(HttpSessionFilter.java:64)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SessionFilter.doFilter(SessionFilter.java:31)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.LoadingFilter.doFilter(LoadingFilter.java:74)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.FileUploadLimiter.doFilter(FileUploadLimiter.java:206)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.DOSFilter.doFilter(DOSFilter.java:426)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SpiderFilter.doFilter(SpiderFilter.java:257)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperVal=
+ve.java:210)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextVal=
+ve.java:174)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.jav=
+a:127)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.jav=
+a:117)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve=
+.java:108)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:=
+151)
+	at org.apache.coyote.http11.Http11AprProcessor.process(Http11AprProcessor.=
+java:834)
+	at org.apache.coyote.http11.Http11AprProtocol$Http11ConnectionHandler.proc=
+ess(Http11AprProtocol.java:640)
+	at org.apache.tomcat.util.net.AprEndpoint$Worker.run(AprEndpoint.java:1286)
+	at java.lang.Thread.run(Thread.java:619)
+
+"http-8079-27" daemon prio=3D10 tid=3D0x0882a000 nid=3D0x408f in Object.wai=
+t() [0xb7dfe000..0xb7dff55c]
+     java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(Native Method)
+	- waiting on <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getPooledConnection(OracleCo=
+nnectionCacheImpl.java:471)
+	- locked <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:259)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:237)
+	at com.ee.util.OracleDataSourceManager.getConcreteConnection(OracleDataSou=
+rceManager.java:273)
+	at com.ee.filter.DatabaseFilter.doFilter(DatabaseFilter.java:50)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TimingFilter.doFilter(TimingFilter.java:52)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.PropertiesFilter.doFilter(PropertiesFilter.java:63)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ExceptionHandlerFilter.doFilter(ExceptionHandlerFilter.ja=
+va:30)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.StatusHttpServletResponseFilter.doFilter(StatusHttpServle=
+tResponseFilter.java:29)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ErrorFilter.doFilter(ErrorFilter.java:89)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SessionFilter.doFilter(SessionFilter.java:31)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at org.apache.catalina.core.ApplicationDispatcher.invoke(ApplicationDispat=
+cher.java:691)
+	at org.apache.catalina.core.ApplicationDispatcher.processRequest(Applicati=
+onDispatcher.java:471)
+	at org.apache.catalina.core.ApplicationDispatcher.doForward(ApplicationDis=
+patcher.java:403)
+	at org.apache.catalina.core.ApplicationDispatcher.forward(ApplicationDispa=
+tcher.java:301)
+	at org.apache.catalina.core.StandardHostValve.custom(StandardHostValve.jav=
+a:364)
+	at org.apache.catalina.core.StandardHostValve.throwable(StandardHostValve.=
+java:213)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.jav=
+a:135)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.jav=
+a:117)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve=
+.java:108)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:=
+151)
+	at org.apache.coyote.http11.Http11AprProcessor.process(Http11AprProcessor.=
+java:834)
+	at org.apache.coyote.http11.Http11AprProtocol$Http11ConnectionHandler.proc=
+ess(Http11AprProtocol.java:640)
+	at org.apache.tomcat.util.net.AprEndpoint$Worker.run(AprEndpoint.java:1286)
+	at java.lang.Thread.run(Thread.java:619)
+
+"http-8079-26" daemon prio=3D10 tid=3D0x0900f000 nid=3D0x408e in Object.wai=
+t() [0xb7ffe000..0xb7fff4dc]
+     java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(Native Method)
+	- waiting on <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getPooledConnection(OracleCo=
+nnectionCacheImpl.java:471)
+	- locked <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:259)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:237)
+	at com.ee.util.OracleDataSourceManager.getConcreteConnection(OracleDataSou=
+rceManager.java:273)
+	at com.ee.filter.DatabaseFilter.doFilter(DatabaseFilter.java:50)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.TimingFilter.doFilter(TimingFilter.java:52)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.PropertiesFilter.doFilter(PropertiesFilter.java:63)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ExceptionHandlerFilter.doFilter(ExceptionHandlerFilter.ja=
+va:30)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.StatusHttpServletResponseFilter.doFilter(StatusHttpServle=
+tResponseFilter.java:29)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.ErrorFilter.doFilter(ErrorFilter.java:89)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at com.ee.filter.SessionFilter.doFilter(SessionFilter.java:31)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+	at org.apache.catalina.core.ApplicationDispatcher.invoke(ApplicationDispat=
+cher.java:691)
+	at org.apache.catalina.core.ApplicationDispatcher.processRequest(Applicati=
+onDispatcher.java:471)
+	at org.apache.catalina.core.ApplicationDispatcher.doForward(ApplicationDis=
+patcher.java:403)
+	at org.apache.catalina.core.ApplicationDispatcher.forward(ApplicationDispa=
+tcher.java:301)
+	at org.apache.catalina.core.StandardHostValve.custom(StandardHostValve.jav=
+a:364)
+	at org.apache.catalina.core.StandardHostValve.throwable(StandardHostValve.=
+java:213)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.jav=
+a:135)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.jav=
+a:117)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve=
+.java:108)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:=
+151)
+	at org.apache.coyote.http11.Http11AprProcessor.process(Http11AprProcessor.=
+java:834)
+	at org.apache.coyote.http11.Http11AprProtocol$Http11ConnectionHandler.proc=
+ess(Http11AprProtocol.java:640)
+	at org.apache.tomcat.util.net.AprEndpoint$Worker.run(AprEndpoint.java:1286)
+	at java.lang.Thread.run(Thread.java:619)
+
+"http-8079-25" daemon prio=3D10 tid=3D0x08ba9c00 nid=3D0x408d in Object.wai=
+t() [0xb81fe000..0xb81ff85c]
+     java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(Native Method)
+	- waiting on <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getPooledConnection(OracleCo=
+nnectionCacheImpl.java:471)
+	- locked <0x64587b78> (a java.util.Stack)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:259)
+	at oracle.jdbc.pool.OracleConnectionCacheImpl.getConnection(OracleConnecti=
+onCacheImpl.java:237)
+	at com.ee.util.OracleDataSourceManager.getConcreteConnection(OracleDataSou=
+rceManager.java:273)
+	at com.ee.filter.DatabaseFilter.doFilter(DatabaseFilter.java:50)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(Applic=
+ationFilterChain.java:215)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFil=
+terChain.java:188)
+
+....
+
+
+-- 
+Got No Time? Shop Online for Great Gift Ideas!
+http://mail.shopping.com/?linkin_id=8033174
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

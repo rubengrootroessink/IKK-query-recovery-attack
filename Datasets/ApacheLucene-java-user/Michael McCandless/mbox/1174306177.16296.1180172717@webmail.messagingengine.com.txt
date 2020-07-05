@@ -1,0 +1,66 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: improving RAM usage by IndexWriter
+DATE: 19 Mar 2007
+
+Hi,
+
+I've been looking into improving performance of IndexWriter,
+specifically how it makes use of RAM to buffer added documents.
+
+I've created a new class (MultiDocumentWriter) that can build a single
+segment from many documents at once, more efficiently than the current
+single document segment approach.  It buffers terms, freqs and
+positions in memory and then periodically flushes them together.
+
+This only affects the creation of an initial segment from added
+documents.  I haven't changed anything after that, eg how segments are
+merged.
+
+The basic ideas are:
+
+  * Write stored fields and term vectors directly to disk (don't
+    use up RAM for these).
+
+  * Gather posting lists & term infos in RAM, but periodically do
+    in-RAM flushes.  Once RAM is full, flush buffers to disk (and
+    merge them later when it's time to make a real segment).
+
+  * When it's time to really build a segment, merge all postings lists
+    (RAM and flushed) into the real segment files.
+
+  * Recycle buffers/objects when possible (less stress & time spent on
+    GC).
+
+I think some of these changes are similar to how KinoSearch builds a
+segment.  But, I haven't made any changes to Lucene's file format nor
+added requirements for a global fields schema.
+
+With this change you can now tell IndexWriter how much RAM it can use
+before flushing, which I think is better than setting max buffered
+docs when documents are variable in size.  This is in fact the only
+externally visible API change :)
+
+I'm still working through some lingering issues before I can make a
+clean patch, but it now passes all unit tests except the disk full
+tests (I think we would need to change error semantics on disk full).
+
+I've run some very initial performance tests and this approach
+provides a good speedup when equalizing RAM usage for a fair
+comparison, especially when the docs are small.  (Note that this
+speedup is just for the "indexing" part, and for many Lucene apps I
+think other things (eg Analyzer, retrieving docs from the content
+source, etc.) are the bottleneck.
+
+This change also makes "commit only on close" mode (autoCommit=false
+to IndexWriter) especially efficient because no segment is produced
+until you close the IndexWriter, so no normal segment merging takes
+place for the entire session.  You can build a massive index having
+created only 1 segment at the end.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

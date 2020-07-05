@@ -1,0 +1,179 @@
+FROM: Thomas Becker <thomas.bec...@net-m.de>
+SUBJECT: Re: lucene 2.9.0RC4 slower than 2.4.1?
+DATE: 15 Sep 2009
+
+Missed the attachment, sorry.
+
+Thomas Becker wrote:
+> Hi all,
+> 
+> I'm experiencing a performance degradation after migrating to 2.9 and running
+> some tests. I'm getting out of ideas and any help to identify the reasons why
+> 2.9 is slower than 2.4 are highly appreciated.
+> 
+> We've had some issues with custom sorting in lucene 2.4.1. We worked around them
+> by sorting the resultsets manually and caching the results after sorting (memory
+> consuming but fast).
+> 
+> I now migrated to lucene 2.9.0RC4. Build some new FieldComparatorSource
+> implementation for sorting and refactored all deprecated api calls to the new
+> lucene 2.9 api.
+> 
+> Everything works fine from a functional perspective. But performance severly is
+> (negatively) affected by lucene 2.9.
+> 
+> I profiled the application for a couple of hours, build a jmeter load test and
+> compared the following scenarios:
+> 
+> 1. lucene 2.9 - new api
+> 2. lucene 2.9 - old api and custom sorting after lucene
+> 3. lucene 2.4.1 - old api and custom sorting after lucene (what we had up2now)
+> 
+> Please find attached an rrd graph showing the results. The lighter the color the
+> faster the request has been served. y=# requests, x=time.
+> 
+> Most interestingly simply switching the lucene jars between 2.4 and 2.9 degraded
+> response times and therefore throughput (see results of testcase 2 and 3).
+> Adapting to the new api decreased performance again. The difference between
+> testcase 1 and 2 is most probably due to precached custom sorted results.
+> 
+> The application under test is a dedicated lucene search engine doing nothing
+> else, but serving search requests. We're running a cluster of them in prd and
+> it's incredibly fast. With the old implementation and prd traffic we've above
+> 98% of the requests served in 200ms.
+> The index under test contains about 3 million documents (with lots of fields),
+> consumes about 2,5gig disk space and is stored on a tmpfs RAMDISK provided by
+> the linux kernel.
+> 
+> Most interesting methods used for searching are:
+> 
+> getHitsCount (is there a way to speed this up?):
+> 
+> 	public int getHitsCount(String query, Filter filter) throws
+> LuceneServiceException {
+> 		log.debug("getHitsCount('{}, {}')", query, filter);
+> 		if (StringUtils.isBlank(query)) {
+> 			log.warn("getHitsCount: empty lucene query");
+> 			return 0;
+> 		}
+> 		long startTimeMillis = System.currentTimeMillis();
+> 		int count = 0;
+> 
+> 		if (indexSearcher == null) {
+> 			return 0;
+> 		}
+> 
+> 		BooleanQuery.setMaxClauseCount(MAXCLAUSECOUNT);
+> 		Query q = null;
+> 		try {
+> 			q = createQuery(query);
+> 			TopScoreDocCollector tsdc = TopScoreDocCollector.create(1, true);
+> 			indexSearcher.search(q, filter, tsdc);
+> 			count = tsdc.getTotalHits();
+> 			log.info("getHitsCount: count = {}",count);
+> 		} catch (ParseException ex) {
+> 			throw new LuceneServiceException("invalid lucene query:" + query, ex);
+> 		} catch (IOException e) {
+> 			throw new LuceneServiceException(" indexSearcher could be corrupted", e);
+> 		} finally {
+> 			long durationMillis = System.currentTimeMillis() - startTimeMillis;
+> 			if (durationMillis > slowQueryLimit) {
+> 				log.warn("getHitsCount: Slow query: {} ms, query={}", durationMillis, query);
+> 			}
+> 			log.debug("getHitsCount: query took {} ms", durationMillis);
+> 		}
+> 		return count;
+> 	}
+> 
+> search:
+> 	public List<Document> search(String query, Filter filter, Sort sort, int from,
+> int size) throws LuceneServiceException {
+> 		log.debug("{} search('{}', {}, {}, {}, {})", new Object[] { indexAlias, query,
+> filter, sort, from, size });
+> 		long startTimeMillis = System.currentTimeMillis();
+> 
+> 		List<Document> docs = new ArrayList<Document>();
+> 		if (indexSearcher == null) {
+> 			return docs;
+> 		}
+> 		Query q = null;
+> 		try {
+> 			if (query == null) {
+> 				log.warn("search: lucene query is null...");
+> 				return docs;
+> 			}
+> 			q = createQuery(query);
+> 			BooleanQuery.setMaxClauseCount(MAXCLAUSECOUNT);
+> 			if (size < 0 || size > maxNumHits) {
+> 				// set hard limit for numHits
+> 				size = maxNumHits;
+> 				if (log.isDebugEnabled())
+> 					log.debug("search: Size set to hardlimit: {} for query: {} with filter:
+> {}", new Object[] { size, query, filter });
+> 			}
+> 			TopFieldCollector collector = TopFieldCollector.create(sort, size + from,
+> true, false, false, true);
+> 			indexSearcher.search(q, filter, collector);
+> 			if(size > collector.getTotalHits())
+> 				size = collector.getTotalHits();
+> 			if (size > 100000)
+> 				log.info("search: size: {} bigger than 100.000 for query: {} with filter:
+> {}", new Object[] { size, query, filter });
+> 			TopDocs td = collector.topDocs(from, size);
+> 			ScoreDoc[] scoreDocs = td.scoreDocs;
+> 			for (ScoreDoc scoreDoc : scoreDocs) {
+> 				docs.add(indexSearcher.doc(scoreDoc.doc));
+> 			}
+> 		} catch (ParseException e) {
+> 			log.warn("search: ParseException: {}", e.getMessage());
+> 			if (log.isDebugEnabled())
+> 				log.warn("search: ParseException: ", e);
+> 			return Collections.emptyList();
+> 		} catch (IOException e) {
+> 			log.warn("search: IOException: ", e);
+> 			return Collections.emptyList();
+> 		} finally {
+> 			long durationMillis = System.currentTimeMillis() - startTimeMillis;
+> 			if (durationMillis > slowQueryLimit) {
+> 				log.warn("search: Slow query: {} ms, query={}, indexUsed={}",
+> 						new Object[] { durationMillis, query,
+> indexSearcher.getIndexReader().directory() });
+> 			}
+> 			log.debug("search: query took {} ms", durationMillis);
+> 		}
+> 		return docs;
+> 	}
+> 
+> I'm wondering why others are experiencing better performance with 2.9 and why
+> our implementations performance is going bad. Maybe our way of using the 2.9 api
+> is not the best and sorting is definetly expensive.
+> 
+> Any ideas are appreciated. I'm torning out my hair since hours and days to find
+> the root cause. Also hints how I could find the bottlenecks myself are appreciated.
+> 
+> Cheers,
+> Thomas
+> 
+
+-- 
+Thomas Becker
+Senior JEE Developer
+
+net mobile AG
+Zollhof 17
+40221 Düsseldorf
+GERMANY
+
+Phone:    +49 211 97020-195
+Fax:      +49 211 97020-949
+Mobile:   +49 173 5146567 (private)
+E-Mail:   mailto:thomas.becker@net-m.de
+Internet: http://www.net-m.de
+
+Registergericht:  Amtsgericht Düsseldorf, HRB 48022
+Vorstand:         Theodor Niehues (Vorsitzender), Frank Hartmann,
+                 Kai Markus Kulas, Dieter Plassmann
+Vorsitzender des
+Aufsichtsrates:   Dr. Michael Briem
+
+

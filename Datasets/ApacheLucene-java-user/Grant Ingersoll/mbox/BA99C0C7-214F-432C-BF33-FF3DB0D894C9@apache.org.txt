@@ -1,0 +1,133 @@
+FROM: Grant Ingersoll <gsing...@apache.org>
+SUBJECT: Re: get term neighbours
+DATE: 7 May 2009
+
+
+On May 7, 2009, at 9:11 AM, Adrian Dimulescu wrote:
+
+>
+> Thank you for these precisions. As I had to do something fast, I  
+> coded the thing as illustrated by the following pseudocode:
+>
+>
+> IndexReader index;
+>
+> TermPositions iterator = this.index.termPositions(t); // for each  
+> doc where this term appears
+>
+> while (iterator.next()) {
+>           int docNr = iterator.doc();
+>           int freq = iterator.freq();
+>
+>           int[] apparitionPositions = new int[freq];  // these are  
+> the positions in the crt doc of the crt term
+>           for (int i = 0; i < freq; i++) {
+>               apparitionPositions[i] = iterator.nextPosition();
+>           }
+> ...
+>          TermPositionVector tpv =  (TermPositionVector)  
+> this.index.getTermFreqVector(docNr, "text");
+> ...
+>           // for all possible terms,  see if it is close to one of  
+> the elements in apparitionPositions
+>          for (int i = 0; i < terms.length; i++) {
+>               int[] pos = tpv.getTermPositions(i);
+>               ... // for each element in pos, check close distance  
+> to the crt term
+>          }
+> }
+>
+>
+> My understanding is that this is a less object-oriented way of doing  
+> the same thing as your proposition but please correct me if I'm wrong.
+>
+
+This use case is in fact why I added the TermVectorMapper stuff into  
+Lucene.   In my case, I used SpanQuery to get me the position of the  
+term within the doc, then I materialized the vector via a  
+TermVectorMapper such that the TVM only stored the window around the  
+span.  It's not much different CPU wise, but it does save on memory, I  
+think.
+
+> I finally managed to retrieve what I wanted with this code. The  
+> problem is that it is not really parallelizable. If several threads  
+> call getTermFreqVector at the same time, they have to wait after  
+> each other. My multithreaded scenario involved a unique IndexReader  
+> on which all threads ask for term vectors. I wonder if it is  
+> possible to avoid this problem (perhaps by having a pool of  
+> IndexReaders, is this a good practice, wouldn't there be memory  
+> problems?). I welcome any ideas on this subject.
+
+Are you saying there are synchronizations happening?  Even with  
+multiple Readers, don't you end up with the disk access being a  
+problem?  Or, are you all in memory?
+
+>
+>
+> Thank you,
+> Adrian.
+>
+> Grant Ingersoll wrote:
+>> There isn't a very clean way to do this just yet, but it is  
+>> doable.  Index with positions (you might find offsets useful too)  
+>> and then use the TermVectorMapper and TermVector API call on the  
+>> IndexReader (not the termPositions).  Then, you will need to  
+>> implement a TermVectorMapper that takes in your position and then  
+>> reads in the term vector and gets just those positions around the  
+>> interested position.  Once you are outside of your window, you can  
+>> then short circuit out of the TermVM (I think).
+>>
+>> HTH,
+>> Grant
+>>
+>> On May 3, 2009, at 2:39 PM, Adrian Dimulescu wrote:
+>>
+>>> Hello,
+>>>
+>>> I am post-processing a positional index -- with a field like the  
+>>> following:
+>>>
+>>> doc.add(new Field(Constants.FIELD_TEXT, txt, Store.NO,  
+>>> Index.ANALYZED, TermVector.WITH_POSITIONS));
+>>>
+>>> At post-processing, I want to retrieve the neighbours of a given  
+>>> term within a given range. That is, if document x contains the  
+>>> sequence :
+>>>
+>>> "Alabama experienced significant /recovery as the economy of the  
+>>> state/ transitioned from agriculture to diversified interests in  
+>>> heavy manufacturing"
+>>>
+>>> for range = 3 and term = "economy", I want to retrieve "recovery  
+>>> as the *economy* of the state".
+>>>
+>>> I see there is an API call :
+>>>
+>>> IndexReader.termPositions(term)
+>>>
+>>> which retrieves the actual positions of the given term. Is there a  
+>>> quick way to retrieve its neighbours too, instead of browsing all  
+>>> terms for all document and see if their position is close to the  
+>>> position of the central term ?
+>>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+--------------------------
+Grant Ingersoll
+http://www.lucidimagination.com/
+
+Search the Lucene ecosystem (Lucene/Solr/Nutch/Mahout/Tika/Droids)  
+using Solr/Lucene:
+http://www.lucidimagination.com/search
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

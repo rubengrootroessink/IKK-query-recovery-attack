@@ -1,0 +1,190 @@
+FROM: David Black <bl...@apple.com>
+SUBJECT: Re: Newbie: PerFieldAnalyzerWrapper or Build a dynamic BooleanQuery
+DATE: 9 Feb 2004
+
+Thank you very much from the response...it was very helpful.  After 
+playing around some more, I figured out that my Keyword fields DO get 
+indexed which is why they can be retrieved with a Term query regardless 
+of the analyzer at index time.  The problem I discovered was that using 
+a search analyzer with a lower case filter / tokenizer ignores 
+numbers....hence the issue with my UID field.  The biggest help was 
+when i discovered the good toString() in the Query class...really helps 
+you see what's going on.
+
+Also, I stepped back from the problem and realized that a search on the 
+"real text" is an end-user activity while operations with my UID are 
+strictly system-level and will be used only by the implementors of the 
+framework....therefore it just made more sense for me to create another 
+cover method for retrieving documents based upon an exact Term called.  
+  I definately will be working with the PerFieldAnalyzerWrapper but I've 
+got to devise a strategy to recall my field-types at search-time 
+because my framework is completely unaware of specific fields.
+
+
+Thanks again for the response...look forward to seeing the book.
+
+
+
+On Sunday, February 8, 2004, at 07:27 PM, Erik Hatcher wrote:
+
+> On Feb 8, 2004, at 11:13 AM, David Black wrote:
+>> Let's assume I have an object that is composed of the following 
+>> fields...
+>>
+>> UID:  434      (Keyword/Stored)
+>> TITLE:  "Java For Dum Dums"   (Text/Stored)
+>> AUTHOR:  "Fred Smith"      -  Text/Stored
+>> DESCRIPTION: "This would be a big long field"   - Text/Unstored
+>> CONTEXT: "/Resources/Books/Computers & Technology/Languages/Java"   - 
+>> Keyword
+>>
+>> In order to let my code handle the dynamic definition of fields, I've 
+>> been using the MuliFieldQueryParser and have had lots of trouble with 
+>> the UID field.
+>>
+>> I experimented with this thoroughly and discovered that using the 
+>> word "dog"  as a UID works but "a1", "1", etc  doesn't.
+>
+> The trouble with QueryParser & Co. is that it simply analyzes 
+> everything.  What happens with UID in this case is very analyzer 
+> dependent.
+>
+>>   It appears that an "untokenized" field is still analyzed for "real" 
+>> words so my "UID" field which contains a code seems to get treated 
+>> differently during indexing and searching.  I'm I nuts?
+>
+> You are not nuts.  In fact, I dedicated a section of our upcoming 
+> Lucene book to this very topic.  I'm going to paste the section below.
+>
+>> 1. Is the PerFieldAnalyzerWrapper the answer to this and if so, how 
+>> do I use it?
+>
+> Yes, it is an answer.  Whether it is *the* answer I'm not sure, but 
+> PFAW comes in handy.
+>
+>> 2. Or would it be better for me to explicitly create a TermQuery for 
+>> my UID and add it to a boolean query with the MutliFieldQueryParser 
+>> output of the other fields?
+>
+> This depends on your use case.  This is really a preferable way to do 
+> things and makes it more precise.  But if users demand free form 
+> querying on all fields then life is tougher.
+>
+>> 3. Why would a field that was analyzed during indexing not be 
+>> retrievable during search with the same analyzer.
+>
+> But UID, as you said above, is a Keyword field.  Keyword fields are 
+> _not_ analyzed during indexing.  Once indexed, there is no knowledge 
+> whether a field was analyzed or not, and QueryParser blindly analyzes 
+> it all.
+>
+>> A HUGE THANKS IN ADVANCE TO ANYONE WHO CAN HELP ME UNDERSTAND / 
+>> ANSWER THIS.
+>
+> Ok, here is the section from Lucene in Action.  I'll leave the 
+> development of KeywordAnalyzer as an exercise for the reader (although 
+> its implementation is trivial, one of the simplest analyzers possible 
+> - only emit one token of the entire contents).  I hope this helps.
+>
+> 	Erik
+>
+> ---------
+> It is very easy to index a keyword, which is simply a single token 
+> added to a field that bypasses tokenization and indexed exactly 
+> as-is. It is also straightforward to query for a term through the API 
+> TermQuery. A dilemma can arise, however, if we expose QueryParser to 
+> users and attempts are made to query on Field.Keyword created 
+> fields. The “keyword”-ness of a field is only known during 
+> indexing. There is nothing special about keyword fields once indexed, 
+> as it is simply just another term.
+>
+> Let’s see the issue exposed with a straightforward test case that 
+> indexes a document with a keyword field, and then attempts to find 
+> that document again.
+>
+> public class KeywordAnalyzerTest extends TestCase {
+>  RAMDirectory directory;
+>  private IndexSearcher searcher;
+>
+>  public void setUp() throws Exception {
+>    directory = new RAMDirectory();
+>
+>    IndexWriter writer = new IndexWriter(directory,
+>                                         new SimpleAnalyzer(),
+>                                         true);
+>
+>    Document doc = new Document();
+>    doc.add(Field.Keyword("partnum", "Q36"));
+>    doc.add(Field.Text("description", "Illidium Space Modulator"));
+>    writer.addDocument(doc);
+>    writer.close();
+>
+>    searcher = new IndexSearcher(directory);
+>  }
+>
+>   public void testTermQuery() throws Exception {
+>    Query query = new TermQuery(new Term("partnum", "Q36"));
+>    Hits hits = searcher.search(query);
+>    assertEquals(1, hits.length());
+>  }
+> }
+>
+> So far so good – we’ve indexed a document and are able to retrieve it 
+> using a TermQuery. But what happens if we generate a query using 
+> QueryParser?
+>
+>  public void testBasicQueryParser() throws Exception {
+>    Query query = QueryParser.parse("partnum:Q36 AND SPACE",
+>                                    "description",
+>                                    new SimpleAnalyzer()); |#1
+>
+>    Hits hits = searcher.search(query);
+>    assertEquals("note Q36 -> q",
+>               "+partnum:q +space", query.toString("description"));
+>    assertEquals("doc not found :(", 0, hits.length());
+>  }
+>
+> We’re jumping ahead of ourselves a little by introducing QueryParser 
+> into the mix here (see section X.x for elaboration on 
+> QueryParser). This emphasizes a key point though: indexing and 
+> analysis are intimately tied to searching. The testBasicQueryParser 
+> test shows that searching for terms created using Field.Keyword when a 
+> query is analyzed is problematic. It’s problematic because QueryParser 
+> analyzed the partnum field, but it should not have. To solve this 
+> discrepancy, a KeywordAnalyzer is written to tokenize the entire 
+> stream as a single token, imitating how Field.Keyword is handled 
+> during indexing. We only want one field “analyzed” in this manner, so 
+> we leverage the PerFieldAnalyzerWrapper to apply it only to the 
+> partnumfield. First let’s look at the KeywordAnalyzer in action as it 
+> fixes the situation:
+>
+>  public void testPerFieldAnalyzer() throws Exception {
+>    PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(
+>                                              new
+SimpleAnalyzer());
+>    analyzer.addAnalyzer("partnum", new KeywordAnalyzer());   |#1
+>
+>    Query query = QueryParser.parse("partnum:Q36 AND SPACE",
+>                                    "description",
+>                                    analyzer);
+>
+>    Hits hits = searcher.search(query);
+>    assertEquals("Q36 kept as-is",
+>              "+partnum:Q36 +space", query.toString("description"));
+>    assertEquals("doc found!", 1, hits.length());
+>
+>  }
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

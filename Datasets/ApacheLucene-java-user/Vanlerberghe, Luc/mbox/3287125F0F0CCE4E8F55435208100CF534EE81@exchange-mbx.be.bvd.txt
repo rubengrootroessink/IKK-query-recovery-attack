@@ -1,0 +1,74 @@
+FROM: "Vanlerberghe, Luc" <Luc.Vanlerber...@bvdep.com>
+SUBJECT: RE: Lucene performance bottlenecks
+DATE: 7 Dec 2005
+
+Since 'byte' is signed in Java, can't the first test be simply written
+as
+if (b>0) return b;
+Doing an 'and' of two bytes and checking if the result is 0 probably
+requires masking operations on >8 bit processors...
+
+Also perhaps change to
+int b=readByte()) so that all operators use int's...
+
+Luc
+
+-----Original Message-----
+From: Yonik Seeley [mailto:yseeley@gmail.com] 
+Sent: woensdag 7 december 2005 16:11
+To: java-user@lucene.apache.org
+Subject: Re: Lucene performance bottlenecks
+
+I checked out readVInt() to see if I could optimize it any...
+For a random distribution of integers <200 I was able to speed it up a
+little bit, but nothing to write home about:
+
+                     old       new    percent
+Java14-client : 13547  12468   8%
+Java14-server:  6047     5266  14%
+Java15-client:  11688  11234    4%
+Java15-server:   5813    4875  19%
+Java16-client:   11125  10719   4%
+Java16-server:  6031     4859   24%
+
+Then I tested it with integers <128, and it was slower (up to 25%) for
+Java15-server, Java16-server, Java16-client.  Since <128 could be an
+important case, I stopped there.
+
+On a P4 2.8GHz, I was getting around 180M readVInt() calls per second
+for single byte VInts (including loop and method call overhead).
+
+Here is the fastest version I could come up with on a P4.  It's faster
+with variable length vInts, slower will single bytes.
+
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    if ((b&0x80)==0) return b;
+    b &= 0x7f;
+    byte b2 = readByte();
+    if ((b&0x80)==0) return (b2<<7) | b;
+    b2 &= 0x7f;
+    byte b3 = readByte();
+    if ((b&0x80)==0) return (b3<<14) | (b2<<7) | b;
+    b3 &= 0x7f;
+    byte b4 = readByte();
+    if ((b&0x80)==0) return (b4<<21) | (b3<<14) | (b2<<7) | b;
+    b4 &= 0x7f;
+    byte b5 = readByte();
+    return (b5<<28) | (b4<<21) | (b3<<14) | (b2<<7) | b;
+  }
+
+
+-Yonik
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

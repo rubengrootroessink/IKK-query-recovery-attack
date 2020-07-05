@@ -1,0 +1,217 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Open-ended range queries
+DATE: 11 Jun 2004
+
+On Jun 10, 2004, at 4:54 PM, Scott ganyo wrote:
+> It looks to me like Revision 1.18 broke it.
+
+It seems this could be it:
+
+revision 1.18
+date: 2002/06/25 00:05:31;  author: briangoetz;  state: Exp;  lines:  
++62 -33
+Support for new range query syntax.  The delimiter is " TO ", but is  
+optional
+for backward compatibility with previous syntax.  If the range arguments
+match the format supported by  
+DateFormat.getDateInstance(DateFormat.SHORT),
+then they will be converted into the appropriate date strings a la  
+DateField.
+
+Added Field.Keyword "constructor" for Date-valued arguments.
+
+Optimized DateField.timeToString function.
+
+
+But geez.... June 2002.... and no one has complained since?
+
+Given that this is so outdated, I'm not sure what the right course of  
+action is.  There are lots more Lucene users now than there were then.   
+Would adding NULL back be what folks want?  What about simply an  
+asterisk to denote open ended-ness?  [* TO term] or [term TO *]
+
+For completeness, here is the diff:
+
+% cvs diff -u -r 1.17 -r 1.18 QueryParser.jj
+Index: QueryParser.jj
+===================================================================
+RCS file:  
+/home/cvs/jakarta-lucene/src/java/org/apache/lucene/queryParser/ 
+QueryParser.jj,v
+retrieving revision 1.17
+retrieving revision 1.18
+diff -u -r1.17 -r1.18
+--- QueryParser.jj      20 May 2002 15:45:43 -0000      1.17
++++ QueryParser.jj      25 Jun 2002 00:05:31 -0000      1.18
+@@ -65,8 +65,11 @@
+
+  import java.util.Vector;
+  import java.io.*;
++import java.text.*;
++import java.util.*;
+  import org.apache.lucene.index.Term;
+  import org.apache.lucene.analysis.*;
++import org.apache.lucene.document.*;
+  import org.apache.lucene.search.*;
+
+  /**
+@@ -218,35 +221,30 @@
+
+    private Query getRangeQuery(String field,
+                                Analyzer analyzer,
+-                              String queryText,
++                              String part1,
++                              String part2,
+                                boolean inclusive)
+    {
+-    // Use the analyzer to get all the tokens.  There should be 1 or 2.
+-    TokenStream source = analyzer.tokenStream(field,
+-                                              new  
+StringReader(queryText));
+-    Term[] terms = new Term[2];
+-    org.apache.lucene.analysis.Token t;
++    boolean isDate = false, isNumber = false;
+
+-    for (int i = 0; i < 2; i++)
+-    {
+-      try
+-      {
+-        t = source.next();
+-      }
+-      catch (IOException e)
+-      {
+-        t = null;
+-      }
+-      if (t != null)
+-      {
+-        String text = t.termText();
+-        if (!text.equalsIgnoreCase("NULL"))
+-        {
+-          terms[i] = new Term(field, text);
+-        }
+-      }
++    try {
++      DateFormat df = DateFormat.getDateInstance(DateFormat.SHORT);
++      df.setLenient(true);
++      Date d1 = df.parse(part1);
++      Date d2 = df.parse(part2);
++      part1 = DateField.dateToString(d1);
++      part2 = DateField.dateToString(d2);
++      isDate = true;
+      }
+-    return new RangeQuery(terms[0], terms[1], inclusive);
++    catch (Exception e) { }
++
++    if (!isDate) {
++      // @@@ Add number support
++    }
++
++    return new RangeQuery(new Term(field, part1),
++                          new Term(field, part2),
++                          inclusive);
+    }
+
+    public static void main(String[] args) throws Exception {
+@@ -282,7 +280,7 @@
+  | <#_WHITESPACE: ( " " | "\t" ) >
+  }
+
+-<DEFAULT> SKIP : {
++<DEFAULT, RangeIn, RangeEx> SKIP : {
+    <<_WHITESPACE>>
+  }
+
+@@ -303,14 +301,28 @@
+  | <PREFIXTERM:  <_TERM_START_CHAR> (<_TERM_CHAR>)* "*" >
+  | <WILDTERM:  <_TERM_START_CHAR>
+                (<_TERM_CHAR> | ( [ "*", "?" ] ))* >
+-| <RANGEIN:   "[" ( ~[ "]" ] )+ "]">
+-| <RANGEEX:   "{" ( ~[ "}" ] )+ "}">
++| <RANGEIN_START: "[" > : RangeIn
++| <RANGEEX_START: "{" > : RangeEx
+  }
+
+  <Boost> TOKEN : {
+  <NUMBER:    (<_NUM_CHAR>)+ ( "." (<_NUM_CHAR>)+ )? > : DEFAULT
+  }
+
++<RangeIn> TOKEN : {
++<RANGEIN_TO: "TO">
++| <RANGEIN_END: "]"> : DEFAULT
++| <RANGEIN_QUOTED: "\"" (~["\""])+ "\"">
++| <RANGEIN_GOOP: (~[ " ", "]" ])+ >
++}
++
++<RangeEx> TOKEN : {
++<RANGEEX_TO: "TO">
++| <RANGEEX_END: "}"> : DEFAULT
++| <RANGEEX_QUOTED: "\"" (~["\""])+ "\"">
++| <RANGEEX_GOOP: (~[ " ", "}" ])+ >
++}
++
+  // *   Query  ::= ( Clause )*
+  // *   Clause ::= ["+", "-"] [<TERM> ":"] ( <TERM> | "(" Query ")" )
+
+@@ -387,7 +399,7 @@
+
+
+  Query Term(String field) : {
+-  Token term, boost=null, slop=null;
++  Token term, boost=null, slop=null, goop1, goop2;
+    boolean prefix = false;
+    boolean wildcard = false;
+    boolean fuzzy = false;
+@@ -415,12 +427,29 @@
+         else
+           q = getFieldQuery(field, analyzer, term.image);
+       }
+-     | ( term=<RANGEIN> { rangein=true; } | term=<RANGEEX> )
++     | ( <RANGEIN_START> ( goop1=<RANGEIN_GOOP>|goop1=<RANGEIN_QUOTED>
+ 
+)
++         [ <RANGEIN_TO> ] (  
+goop2=<RANGEIN_GOOP>|goop2=<RANGEIN_QUOTED> )
++         <RANGEIN_END> )
++       [ <CARAT> boost=<NUMBER> ]
++        {
++          if (goop1.kind == RANGEIN_QUOTED)
++            goop1.image = goop1.image.substring(1,  
+goop1.image.length()-1);
++          if (goop2.kind == RANGEIN_QUOTED)
++            goop2.image = goop2.image.substring(1,  
+goop2.image.length()-1);
++
++          q = getRangeQuery(field, analyzer, goop1.image, goop2.image,  
+true);
++        }
++     | ( <RANGEEX_START> ( goop1=<RANGEEX_GOOP>|goop1=<RANGEEX_QUOTED>
+ 
+)
++         [ <RANGEEX_TO> ] (  
+goop2=<RANGEEX_GOOP>|goop2=<RANGEEX_QUOTED> )
++         <RANGEEX_END> )
+         [ <CARAT> boost=<NUMBER> ]
+          {
+-          q = getRangeQuery(field, analyzer,
+-                            term.image.substring(1,  
+term.image.length()-1),
+-                            rangein);
++          if (goop1.kind == RANGEEX_QUOTED)
++            goop1.image = goop1.image.substring(1,  
+goop1.image.length()-1);
++          if (goop2.kind == RANGEEX_QUOTED)
++            goop2.image = goop2.image.substring(1,  
+goop2.image.length()-1);
++
++          q = getRangeQuery(field, analyzer, goop1.image, goop2.image,  
+false);
+          }
+       | term=<QUOTED>
+         [ slop=<SLOP> ]
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,151 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: Payloads and SpanScorer
+DATE: 19 Jul 2008
+
+I discovered this post from Karl Wettin in May about SpanNearQuery scoring:
+http://www.nabble.com/SpanNearQuery-scoring-td17425454.html#a17425454
+
+Karl apparently had the same expectations I had about the usage model of
+spans and boosts. I also found JIRA issue 533 (SpanQuery scoring: SpanWeight
+lacks a recursive traversal of the query tree), which addresses the same
+problem.
+
+So, I made an attempt to modify SpanNearQuery to expand a nested
+BoostingTermQuery, but soon realized while debugging that since
+BoostingTermQuery loads payloads from all term positions in the document,
+not just the ones constrained by the outer SpanQuery, the resulting score
+could be higher than it should be.
+
+Next, I followed Grant's idea of providing span classes that read payloads.
+I implemented a 'BoostingNearQuery' that extends 'SpanNearQuery' that
+provides term boosts on proximity queries. I will submit a patch to a JIRA
+later. This patch works but probably needs more work. I don't like the use
+of 'instanceof', but I didn't want to touch Spans or TermSpans. Also, the
+payload code is mostly a copy of what's in BoostingTermQuery and could be
+common-sourced somewhere. Feel free to throw darts at it :)
+
+Peter
+
+
+
+On Thu, Jul 10, 2008 at 2:09 PM, Peter Keegan <peterlkeegan@gmail.com>
+wrote:
+
+> I may take a crack at this. Any more thoughts you may have on the
+> implementation are welcome, but I don't want to distract you too much.
+>
+> Thanks,
+> Peter
+>
+>
+>
+> On Thu, Jul 10, 2008 at 1:30 PM, Grant Ingersoll <gsingers@apache.org>
+> wrote:
+>
+>> Makes sense.  It was always my intent to implement things like
+>> PayloadNearQuery, see http://wiki.apache.org/lucene-java/Payload_Planning
+>>
+>> I think it would make sense to develop these and I would be happy to help
+>> shepherd a patch through, but am not in a position to generate said patch at
+>> this moment in time.
+>>
+>>
+>> On Jul 10, 2008, at 9:59 AM, Peter Keegan wrote:
+>>
+>>  Suppose I create a SpanNearQuery phrase with the terms "long range
+>>> missiles"
+>>> and some slop factor. Each term is actually a BoostingTermQuery.
+>>> Currently,
+>>> the score computed by SpanNearQuery.SpanScorer is based on the sloppy
+>>> frequency of the terms and their weights (this is fine). But even though
+>>> each term is actually a BoostingTermQuery, the BoostingTermScorer (and
+>>> therefore 'processPayload') is never invoked for this type of query.
+>>>
+>>> I was looking for a way to have SpanNearQuery (also SpanOrQuery,
+>>> SpanFirstQuery) recognize that the terms in the phrase should boost the
+>>> overall score based on the payloads assigned to them. Thus the score from
+>>> the SpanNearQuery would be higher if :
+>>>
+>>> a) the terms have payloads that boost their scores
+>>> b) the terms are positionally next to each other (minimal slop - as it
+>>> works
+>>> now)
+>>>
+>>>
+>>> Does this make sense?
+>>>
+>>> Peter
+>>>
+>>> On Thu, Jul 10, 2008 at 9:21 AM, Grant Ingersoll <gsingers@apache.org>
+>>> wrote:
+>>>
+>>>  I'm not fully following what you want.  Can you explain a bit more?
+>>>>
+>>>> Thanks,
+>>>> Grant
+>>>>
+>>>>
+>>>> On Jul 9, 2008, at 2:55 PM, Peter Keegan wrote:
+>>>>
+>>>> If a SpanQuery is constructed from one or more BoostingTermQuery(s), the
+>>>>
+>>>>> payloads on the terms are never processed by the SpanScorer. It seems
+>>>>> to
+>>>>> me
+>>>>> that you would want the SpanScorer to score the document both on the
+>>>>> spans
+>>>>> distance and the payload score. So, either the SpanScorer would have
+to
+>>>>> process the payloads (duplicating the code in BoostingSpanScorer), or
+>>>>> perhaps SpanScorer could access the BoostingSpanScorers, or maybe
+>>>>> there's
+>>>>> another approach.
+>>>>>
+>>>>> Any thoughts on how to accomplish this?
+>>>>>
+>>>>> Peter
+>>>>>
+>>>>>
+>>>> --------------------------
+>>>> Grant Ingersoll
+>>>> http://www.lucidimagination.com
+>>>>
+>>>> Lucene Helpful Hints:
+>>>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+>>>> http://wiki.apache.org/lucene-java/LuceneFAQ
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>> --------------------------
+>> Grant Ingersoll
+>> http://www.lucidimagination.com
+>>
+>> Lucene Helpful Hints:
+>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+>> http://wiki.apache.org/lucene-java/LuceneFAQ
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

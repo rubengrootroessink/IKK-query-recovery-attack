@@ -1,0 +1,130 @@
+FROM: "Stanislav Jordanov" <ste...@sirma.bg>
+SUBJECT: Re: Fast access to a random page of the search results.
+DATE: 1 Mar 2005
+
+// The test source code (second attempt).
+// Just in case the .txt attachment does not pass through
+// I am pasting the code here:
+
+package index_test;
+
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+
+import java.io.*;
+import java.util.Enumeration;
+import java.util.StringTokenizer;
+import java.util.ArrayList;
+
+import com.odi.util.query.QueryParseException;
+
+public class Search {
+    public static void main(String[] args) throws Exception {
+        if (args.length != 1) {
+            throw new Exception("Usage: " + Search.class.getName() + "
+<index dir>");
+        }
+
+        File indexDir = new File(args[0]);
+
+        if (!indexDir.exists() || !indexDir.isDirectory()) {
+            throw new Exception(indexDir + " is does not exist or is not a
+directory.");
+        }
+
+        System.out.println("Using index: " + indexDir.getCanonicalPath());
+
+        BooleanQuery.setMaxClauseCount(Integer.MAX_VALUE);
+        search(indexDir);
+    }
+
+    public static void search(File indexDir)  throws Exception {
+        Directory fsDir = FSDirectory.getDirectory(indexDir, false);
+        IndexSearcher is = null;
+        BufferedReader brdr = new BufferedReader(new
+InputStreamReader(System.in));
+
+        String q;
+        Sort sort = null;
+        while (!(q = brdr.readLine()).equals("exit")) {
+            q = q.trim();
+            if (is == null || q.equals("newsearcher")) {
+                is = new IndexSearcher(fsDir);
+                if (q.equals("newsearcher")) {
+                    continue;
+                }
+            }
+            if (q.startsWith("sort ")) {
+                StringTokenizer tkz = new StringTokenizer(q);
+                tkz.nextToken(); // skip the "sort" word
+                ArrayList<SortField> sortFields = new
+ArrayList<SortField>();
+                while (tkz.hasMoreTokens()) {
+                    String tok = tkz.nextToken();
+                    boolean reverse = false;
+                    if (tok.startsWith("-")) {
+                        tok = tok.substring(1);
+                        reverse = true;
+                    }
+                    sortFields.add(new SortField(tok, reverse));
+                }
+                sort = new Sort(sortFields.toArray(new SortField[0]));
+                System.out.println("Sorting by " + sort);
+                continue;
+            }
+            if (q.equals("nosort")) {
+                sort = null;
+                System.out.println("Sorting is off");
+                continue;
+            }
+            long startTs = System.currentTimeMillis();
+            Query query = null;
+            try {
+                query  = QueryParser.parse(q, "qcontent", new
+StandardAnalyzer(new String[0]));
+            }
+            catch (QueryParseException exn) {
+                exn.printStackTrace();
+                continue;
+            }
+            Hits hits = (sort != null ? is.search(query, sort) :
+is.search(query));
+            int nHits = hits.length();//hc.nHits;
+            long stopTs  = System.currentTimeMillis();
+            System.out.println("Found " + nHits + " document(s) that matched
+query '" + q + "'");
+            System.out.println("Sorting by " + sort);
+            System.out.println("query executed in " + (stopTs - startTs) +
+"ms");
+
+            if (nHits > 0) {
+                startTs = System.currentTimeMillis();
+                dummyMethod(hits.doc(nHits - nHits));
+                stopTs = System.currentTimeMillis();
+                System.out.println("Last doc accessed in " + (stopTs -
+startTs)
+                                    + "ms");
+            }
+        }
+    }
+
+    public static double  dummyMethod(Document doc) {
+        return doc.getBoost();
+    }
+
+    private static void  dumpDocument(Document doc) throws IOException {
+        System.out.println("<DOCUMENT-DUMP>");
+        for (Enumeration e = doc.fields(); e.hasMoreElements(); ) {
+            Field f = (Field) e.nextElement();
+            System.out.println(f.name() + " ::>> '" + f.stringValue() +
+"'");
+        }
+        System.out.println("</DOCUMENT-DUMP>");
+    }
+}
+

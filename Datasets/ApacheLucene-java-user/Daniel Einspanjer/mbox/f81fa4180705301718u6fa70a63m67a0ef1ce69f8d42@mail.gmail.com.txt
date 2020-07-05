@@ -1,0 +1,171 @@
+FROM: "Daniel Einspanjer" <deinspan...@gmail.com>
+SUBJECT: Re: The values which compute scores.
+DATE: 31 May 2007
+
+This may be a five year old explaining to a four year old why the sky
+is blue, but I'll share some of the stuff I've picked up. :)
+
+My application isn't so much a search engine as a matching engine.  I
+take a large list of movie documents from a customer like a movie
+channel or a cable provider and match that list against the movies our
+company has classified.  I wrote a query parser on top of the native
+query parser that understands interpolated terms such as
++title_fuzzy_multivalued:"${LongTitle}" and it will pull the LongTitle
+field from the customer movie and plug it into that term.
+
+The huge problem I ran into was one of scoring.  Since this is
+matching not searching, and since the interpolation causes the query
+from item A to be different from item B and likely wildly different
+from the queries used in a different customer's matching, I really
+needed a good score that could be compared across the board.
+
+The solution I opted for was what I call perfect score normalization.
+Basically, I index both the customer feed and the classified feed.
+When the user of my system is adding a new feed to the system, they
+define field alignments, e.g. they map the customer's LongTitle field
+to the title field of the classified feed.  Then, they define the
+appropriate indices to use for each field alignment, e.g. they might
+index the title fields using the title_strict_string_multivalue and
+the title_fuzzy_terms_multivalue indices.
+
+Now that I have these common indices, when I perform the matching run,
+I interpolate the query using the values for the source item and get
+both the best match from the classified feed (using a Solr filter
+query to restrict the result set to only items with the classified
+feed id) and the match for the customer item (using a filter query on
+that item's ID).  Now that I have these two scores, they are
+comparable in the sense that the score of the customer item is "as
+good as it gets".  I divide the match score by the reference item
+score and if the value is greater than one for some reason, I subtract
+the amount above one from one to penalize it for being "too good".
+
+This strategy required a few tweaks in the Similarity class.  I have
+actor name phrase queries with a word slop of two so that I can match
+First Last to Last, First. I made my tf(float) function return 0 or 1
+so that the scores for those two items look the same.  tf also matters
+in the case of multiple hits of a term within a field such as title.
+If I am matching a movie with the title "Caesar Came Saw and
+Conquered", I don't want the title "Caesar Came, Caesar Saw, Caesar
+Conquered" to have a higher score just because the word Caesar is
+repeated.
+
+I customize the idf() function to always return a 1 for year fields
+because it could do funny things to a score if the source item had a
+year 1984 and my query term was year_year:[${year -1} TO ${year +1}]
+and there was only one item with a year of 1983. The 1983 would
+actually score higher than the 1984.
+
+I'm currently looking at whether overriding queryNorm() to always
+return 1 is a good thing or not.  I saw reference in a recent thread
+that doing that might cause ^ boosts in terms or clauses to not work
+right so I need to go back and study that again.
+
+The other big thing that I'm doing is that the user doesn't define the
+query in one big lump. They break it down into scoring sections. all
+the title related terms are in one section and all the year related
+terms in a different one.  The user defines weights that each of these
+sections should contribute to my "weighted score".  I run individual
+queries for each of these scoring sections against the source and
+target items and record those normalized scores then multiply them by
+their weights and add them up to get my weighted score.
+This strategy is working pretty well, but it is slow because of all
+the extra queries.  I know that I can eliminate them by getting access
+to the Explanation object and parsing out the scores I want there, but
+that is what I am in the middle of researching how to do now. :)
+
+Anyway.. some of this might be useful to you or maybe it is all
+babble. You are either welcome or asked for forgiveness respectively.
+:)
+
+Daniel
+
+On 5/30/07, Grant Ingersoll <gsingers@apache.org> wrote:
+> Hi Walt,
+>
+> One question that comes to mind, is what are you looking to do?  Are
+> you not happy with the current scoring or you just trying to better
+> understand scoring?  The calls to Similarity.tf(), etc. are call
+> backs from within the scoring algorithm (have a look at TermScorer in
+> the code) and provide a means for an application to change the score,
+> but in many cases there really isn't too much incentive to do so.
+>
+> -Grant
+>
+>
+> On May 30, 2007, at 4:45 PM, Walt Stoneburner wrote:
+>
+> > Hopefully I'm not opening myself up to public ridicule with what may
+> > be a very stupid question, but...
+> >
+> > At the moment, I'm trying to wrap my head around some of the math that
+> > happens when Lucene does scoring.  Let's put aside the big equation
+> > for a moment and focus on a simple method, such as tf().  [term
+> > frequency]
+> >
+> > I understand that tf(freq) is supposed to return larger values when
+> > freq is large, and smaller values when freq is small.  Though here's
+> > what making me scratch my head today:
+> >
+> > a) Where does freq come from?  (Not what is it, but who computes it
+> > and how?)
+> >
+> > Reason I ask is:
+> >
+> > b) How do I know what "large" and "small" is, as I don't really have a
+> > relative scale of what the max and min values are?  Should I just
+> > assume a linear scale of 1.0 to 0.0 will be passed to the method?
+> >
+> > But then that begs the question...
+> >
+> > c) What values should I be passing out of a function like this?
+> > Should I normalize my outgoing scores to some scale, or do I simply
+> > just need to provide numbers that "have the right shaped curve".
+> >
+> > I wish the documentation shed a smidgen bit more light in those areas.
+> >
+> >
+> > I look at things like idf() which returns 1+log(ratio) and then has
+> > that value squared.  Clearly that isn't on a scale of 1.0 to 0.0.
+> >
+> > I feel like there may be some mathematical trickery going on and that
+> > maybe the actual score values themselves don't matter inside the
+> > ranking code, so long as their relative values to one another.
+> >
+> > This then makes me ponder how the normalization process is done
+> > between queries, allowing for a mix'n'match of results as these
+> > numbers spill to the outside world.  Obviously normalization has to
+> > happen at that point for the mixing query results magic to work.
+> >
+> >
+> > Is there a math wizard in the group who can talk to me like I'm
+> > four years old?
+> >
+> > -wls
+> > http://www.wwco.com/~wls/blog/
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+>
+> --------------------------
+> Grant Ingersoll
+> Center for Natural Language Processing
+> http://www.cnlp.org/tech/lucene.asp
+>
+> Read the Lucene Java FAQ at http://wiki.apache.org/jakarta-lucene/
+> LuceneFAQ
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

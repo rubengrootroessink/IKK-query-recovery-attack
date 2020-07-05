@@ -1,0 +1,104 @@
+FROM: Zilverline info <i...@zilverline.org>
+SUBJECT: Re: Weighted queries
+DATE: 6 Aug 2004
+
+Hi Eric,
+
+I have implemented this in Zilverline. What I do is the following: 
+subclass QueryParser and override getFieldQuery:
+
+    protected Query getFieldQuery(String field, Analyzer analyzer, 
+String queryText) throws ParseException {
+
+        // for field that contain 'contents' add boostfactors for other 
+terms specified in BoostFactor
+        if (defaultField.equals(field)) {
+            TokenStream source = analyzer.tokenStream(field, new 
+StringReader(queryText));
+            Vector v = new Vector();
+            org.apache.lucene.analysis.Token t;
+            while (true) {
+                try {
+                    t = source.next();
+                } catch (IOException e) {
+                    t = null;
+                }
+                if (t == null)
+                    break;
+                v.addElement(t.termText());
+                log.debug(field + " , " + t.termText());
+            }
+            try {
+                source.close();
+            } catch (IOException e) { // ignore
+            }
+
+            if (v.size() == 0) {
+                return null;
+            }
+            else {
+                // create a new composed query
+                BooleanQuery bq = new BooleanQuery();
+                // get the static BoostFactors through non static getter
+                BoostFactor bf = new BoostFactor();
+                // For all boostfactors create a new PhraseQuery
+                Iterator iter = bf.getFactors().entrySet().iterator();
+                while (iter.hasNext()) {
+                    Map.Entry element = (Map.Entry) iter.next();
+                    String thisField = ((String) 
+element.getKey()).toLowerCase();
+                    Float boost = (Float) element.getValue();
+                    PhraseQuery q = new PhraseQuery();
+                    // and add all the terms of the query
+                    for (int i = 0; i < v.size(); i++) {
+                        q.add(new Term(thisField, (String) v.elementAt(i)));
+                    }
+                    // boost the query
+                    q.setBoost(boost.floatValue());
+                    // and add it to the composed query
+                    bq.add(q, false, false);
+                }
+                log.debug("Query: " + bq);
+                return bq;
+            }
+        } else {
+            return super.getFieldQuery(field, analyzer, queryText);
+        }
+    }
+
+Read the Boostfactors from an external source. Im using a object with a 
+Hashmap. see Boostfactors @ www.zilverline.org
+
+Cheers,
+
+   Michael Franken
+
+Eric Jain wrote:
+
+> Is it possible to expand a query such as
+>
+>   foo bar
+>
+> into
+>
+>   (title:foo^4 OR abstract:foo^2 OR content:foo) AND
+>   (title:bar^4 OR abstract:bar^2 OR content:bar)
+>
+> ?
+>
+> I can assign weights to individual fields when indexing, and could use 
+> the MultiFieldQueryParser - but it seems this parser can't be 
+> configured to use AND as default!
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

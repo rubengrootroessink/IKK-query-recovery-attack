@@ -1,0 +1,72 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IndexReader.close() behavior
+DATE: 26 Apr 2011
+
+The code is tricky, but it's intentional.
+
+We always set closed to true to guard against double close, ie, it's
+fine to double-close an IndexReader, ie doing so will not "steal"
+references from other places that have incRef'd the reader.
+
+Can you pass closeSubReaders=false when you create your MultiReader?
+This way, the MultiReader incRefs on init and decRefs on close.
+
+But: what Lucene version are you using...?
+
+Mike
+
+http://blog.mikemccandless.com
+
+On Tue, Apr 26, 2011 at 8:46 AM, Alexey Lef <alexey@sciquest.com> wrote:
+> This is the code in IndexReader.close():
+>
+>  public final synchronized void close() throws IOException {
+>    if (!closed) {
+>      decRef();
+>      closed = true;
+>    }
+>  }
+>
+> What strikes me as odd is that “closed” variable is set to true regardless of whether
+the index was actually closed using doClose(). It is causing a bit of a problem in the following
+setup.
+>
+> We have many indexes. Some of these indexes are kept open and IndexReader is reused for
+performance reasons, some are open just for a single search. Some of them are combined together
+at the search time depending on the user performing the search. For every search, if there
+are multiple relevant IndexReader, we create a new MultiReader instance and close it once
+the search is done. Since reference counting is already built into the IndexReader, I figured
+I can just call incRef() when using a cached IndexReader and then call close() or let MultiReader
+call close() on it once it is done. The problem is only the first close() calls decRef(),subsequent
+calls do nothing, and if there were multiple incRef() calls, the IndexReader ends up being
+left open.
+>
+> I thought of using decRef() instead of close() but MultiReader doesn’t have an option
+of calling decRef() on subreaders, only close().
+>
+> The following change to IndexReader.close() fixes the problem:
+>
+>  public final synchronized void close() throws IOException {
+>    if (refCount.get() > 0) {
+>      decRef();
+>    }
+>  }
+>
+> It seems more logical. Also it is now consistent with ensureOpen() method.
+>
+> Am I missing something here? Is there a good reason to prevent close() from doing anything
+after the first call even if the IndexReader was not actually closed? Does it even need to
+be synchronized if decRef() does all the work?
+>
+> Thanks,
+>
+> Alexey
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

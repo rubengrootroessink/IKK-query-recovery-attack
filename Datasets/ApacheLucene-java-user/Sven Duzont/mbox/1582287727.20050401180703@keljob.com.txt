@@ -1,0 +1,76 @@
+FROM: Sven Duzont <sven.duz...@keljob.com>
+SUBJECT: Re[4]: Analyzer don't work with wildcard queries, snowball analyzer.
+DATE: 1 Apr 2005
+
+EH> I presume your analyzer normalized accented characters?  Which analyzer
+EH> is that?
+
+Yes, i'm using a custom analyser for indexing / searching, ti consists
+in :
+- FrenchStopFilter
+- IsoLatinFilter (this is the one that will replace accented
+characters)
+- LowerCaseFilter
+- ApostropheFilter (in order to handle terms like with apostrophes,
+for instance "l'expérience" will be decompozed into two tokens : "l" "expérience"
+
+EH> You will need to employ some form of character normalization on 
+EH> wildcard queries too.
+
+thanks, it works succeffuly, code snippet following
+
+---
+ sven
+
+/*----------------------- CODE ----------------------------*/
+
+private static Query CreateCustomQuery(Query query)
+{
+  if(query instanceof BooleanQuery)  {
+    final BooleanClause[] bClauses = ((BooleanQuery) query).getClauses();
+    
+    // The first clause is required
+    if(bClauses[0].prohibited != true)
+      bClauses[0].required = true;
+      
+    // Will parse each clause to remove accents if needed
+    Term term;
+    for (int i = 0; i < bClauses.length; i++)    {
+      if(bClauses[i].query instanceof WildcardQuery)      {
+        term = ((WildcardQuery)bClauses[i].query).getTerm();
+        bClauses[i].query = new WildcardQuery(new Term(term.field(), 
+            ISOLatin1AccentFilter.RemoveAccents(term.text().toLowerCase())));
+      }
+      if(bClauses[i].query instanceof PrefixQuery)      {
+        term = ((PrefixQuery)bClauses[i].query).getPrefix();
+        bClauses[i].query = new PrefixQuery(new Term(term.field(), 
+            ISOLatin1AccentFilter.RemoveAccents(term.text().toLowerCase())));
+      // toLowerCase because the text is lowercased during indexation
+      }
+    }    
+  }
+  else if(query instanceof WildcardQuery)  {
+    final Term term = ((WildcardQuery)query).getTerm();
+    query = new WildcardQuery(new Term(term.field(), 
+        ISOLatin1AccentFilter.RemoveAccents(term.text().toLowerCase())));
+  }
+  else if(query instanceof PrefixQuery)  {
+    final Term term = ((PrefixQuery)query).getPrefix();
+    query = new PrefixQuery(new Term(term.field(), 
+        ISOLatin1AccentFilter.RemoveAccents(term.text().toLowerCase())));
+  }
+  return query;
+}
+
+/*----------------------- END OF CODE ----------------------------*/
+
+EH> 	Erik
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

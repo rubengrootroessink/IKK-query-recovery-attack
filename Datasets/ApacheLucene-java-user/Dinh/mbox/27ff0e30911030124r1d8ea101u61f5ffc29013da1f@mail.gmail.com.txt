@@ -1,0 +1,195 @@
+FROM: Dinh <pcd...@gmail.com>
+SUBJECT: Re: deleteDocuments() does not work
+DATE: 3 Nov 2009
+
+Hi Michael,
+
+Thank a lot for your advice
+
+> Can you verify you are in fact reopening the reader that's reading the
+> same Directory the writer is writing to?
+
+Yes. I have a single and configurable index path. So I can not make a
+mistake here
+
+> Also, you are failing to close the old reader after opening a new one.
+> This shouldn't cause the issue you're seeing, but, will lead
+> eventually to OOME or file descriptor exhaustion.
+
+I have rewritten the method as follows
+
+    /**
+     * Reloads searchers after index is changed (added, deleted or updated).
+     */
+    public static synchronized void reload() {
+
+        Set<Map.Entry<String, IndexSearcher>> set = searchers.entrySet();
+
+        for (Map.Entry<String, IndexSearcher> entry : set) {
+            try {
+                IndexSearcher searcher = entry.getValue();
+                IndexReader oldReader = searcher.getIndexReader();
+                IndexReader newReader = oldReader.reopen(true);
+
+                if (newReader != oldReader) {
+                    oldReader.close();
+                    searcher.close();
+                    searchers.put(entry.getKey(), new
+IndexSearcher(newReader));
+                }
+            } catch (Exception e) {
+                log.warn(e.getMessage(), e);
+            }
+        }
+    }
+
+And it works now.
+
+> Finally, are you sure the iteration over the Map entries, that
+> overwrites each entry, is safe?
+
+Do you think that my iteration is safe now? At least I have closed the
+previous searcher and oldReader before creating new ones. However, I don't
+know if it is a good practice to do so.
+
+Thanks
+
+Dinh
+
+On Wed, Oct 28, 2009 at 6:47 PM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> Can you not suppress the AIOOBE (just in case you're hitting that)?
+>
+> Also, you are failing to close the old reader after opening a new one.
+>  This shouldn't cause the issue you're seeing, but, will lead
+> eventually to OOME or file descriptor exhaustion.
+>
+> Can you verify you are in fact reopening the reader that's reading the
+> same Directory the writer is writing to?
+>
+> Finally, are you sure the iteration over the Map entries, that
+> overwrites each entry, is safe?
+>
+> Maybe, after writer.commit, try to simply [temporarily] open a new
+> reader on that Dir and see if the doc is deleted.
+>
+> Are you sure String.valueOf(id) is giving you the expected result?  Eg
+> does id ever have leading zeros?
+>
+> Mike
+>
+> On Wed, Oct 28, 2009 at 7:17 AM, Dinh <pcdinh@gmail.com> wrote:
+> > Hi Anshum,
+> >
+> >> Is it that your engine keeps an IndexSearcher[Reader] open all through
+> > this
+> > while?
+> >
+> > The answer is yes. I have tried to keep a singleton instance of
+> > IndexSearcher open across web requests.
+> >
+> > Regarding to your advice, I have tried to re-open the IndexReader that is
+> > associated with that IndexSearcher
+> >
+> >    public void deleteById(String id) throws IOException {
+> >        IndexWriter writer = IndexWriterFactory.factory();
+> >
+> >        try {
+> >            writer.deleteDocuments(new Term(Configuration.Field.ID,
+> > String.valueOf(id)));
+> >            writer.commit();
+> >            IndexSearcherFactory.reload();
+> >        } catch (ArrayIndexOutOfBoundsException e) {
+> >            // CHECK ignore this. Can happen if index has not been built
+> yet
+> >        } catch (IOException e) {
+> >            System.out.println(e);
+> >        }
+> >    }
+> >
+> > Here is how IndexSearcherFactory#reload is defined
+> >
+> >    public static void reload() throws CorruptIndexException, IOException
+> {
+> >
+> >        Set<Map.Entry<String, IndexReader>> set = readers.entrySet();
+> >        for (Map.Entry<String, IndexReader> entry : set) {
+> >            readers.put(entry.getKey(), entry.getValue().reopen(true));
+> >        }
+> >    }
+> >
+> > However, it does not work either.
+> >
+> > Is there any way to debug this situation?
+> >
+> > Thanks,
+> >
+> > Dinh
+> >
+> > On Wed, Oct 28, 2009 at 5:49 PM, Anshum <anshumg@gmail.com> wrote:
+> >
+> >> Hi Dinh,
+> >> Is it that your engine keeps an IndexSearcher[Reader] open all through
+> this
+> >> while? For the deleted document to actually reflect in the search
+> >> (service),
+> >> you'd need to reload the index searcher with the latest version.
+> >> --
+> >> Anshum Gupta
+> >> Naukri Labs!
+> >> http://ai-cafe.blogspot.com
+> >>
+> >> The facts expressed here belong to everybody, the opinions to me. The
+> >> distinction is yours to draw............
+> >>
+> >>
+> >> On Wed, Oct 28, 2009 at 4:15 PM, Dinh <pcdinh@gmail.com> wrote:
+> >>
+> >> > Hi all,
+> >> >
+> >> > I have a very simple method to delete a document that is indexed
+> before
+> >> >
+> >> >    /**
+> >> >     * @param id
+> >> >     */
+> >> >    public void deleteById(String id) throws IOException {
+> >> >        IndexWriter writer = IndexWriterFactory.factory();
+> >> >
+> >> >        try {
+> >> >            writer.deleteDocuments(new Term(Configuration.Field.ID,
+> >> > String.valueOf(id)));
+> >> >            writer.commit();
+> >> >        } catch (ArrayIndexOutOfBoundsException e) {
+> >> >            // CHECK ignore this. Can happen if index has not been
+> built
+> >> yet
+> >> >        } catch (IOException e) {
+> >> >            System.out.println(e);
+> >> >        }
+> >> >    }
+> >> >
+> >> > The problem is after executing this method without any exception, I
+> come
+> >> > back and try to do a search the supposed-to-be-deleted record is still
+> >> > there. I need to restart my servlet engine to have that record been
+> >> really
+> >> > deleted. How can it happen?
+> >> >
+> >> > Thanks
+> >> >
+> >> > Dinh
+> >> >
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+Spica Framework: http://code.google.com/p/spica
+http://www.twitter.com/pcdinh
+http://groups.google.com/group/phpvietnam
+

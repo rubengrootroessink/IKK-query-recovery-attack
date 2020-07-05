@@ -1,0 +1,207 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IndexWriter and memory usage
+DATE: 19 May 2010
+
+Phew!  Thank for bringing closure Ross.  Happy indexing,
+
+Mike
+
+On Wed, May 19, 2010 at 12:50 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+> Just wanted to report that Michael was able to find the issue that was plaguing us, He
+has checked fixes into the 2.9.x, 3.0.x, 3.1.x, 4.0.x branches.  Most of the issues were
+related to indexing documents larger than the indexing buffer size (16mb by default).  Now
+we no longer run out of memory during our large document indexing runs.
+>
+> Thanks for your help Michael in resolving this.
+>
+> -----Original Message-----
+> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Sent: Friday, May 14, 2010 11:23 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: IndexWriter and memory usage
+>
+> The patch looks correct.
+>
+> The 16 MB RAM buffer means the sum of the shared char[], byte[] and
+> PostingList/RawPostingList memory will be kept under 16 MB.  There are
+> definitely other things that require memory beyond this -- eg during a
+> segment merge, SegmentReaders are opened for each segment being
+> merged.  Also, if there are pending deletions, 4 bytes per doc is
+> allocated.
+>
+> Applying deletions also opens SegmentReaders.
+>
+> Also: a single very large document will cause IW to blow way past the
+> 16 MB limit, using up as much as is required to index that one doc.
+> When that doc is finished, it will then flush and free objects until
+> it's back under the 16 MB limit.  If several threads happen to index
+> large docs at the same time, the problem is that much worse (they all
+> must finish before IW can flush).
+>
+> Can you print the size of the documents you're indexing and see if
+> that correlates to when you see the memory growth?
+>
+> Mike
+>
+> On Tue, May 11, 2010 at 2:57 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>> Still working on some of the things you ask, namely searching without indexing.  I
+need to modify our code and the general indexing process takes 2 hours, so I won't have a
+quick turn around on that.  We also have a hard time answering the question about items that
+are normal but do they use more than the 16 MB.  The heap dump does not allow us to quickly
+identify specifics on objects like we show in images below, so we really don't know what the
+amount of memory is used up in objects of this sort.  We only know that byte[] total for
+all is at 197891887.
+>>
+>> However, I have provided another image that breaks down the memory usage from the
+heap.   A big question we have is that we talk about the 16 mb buffer, but is there other
+memory used by Lucene beyond that that we should expect to see?
+>>
+>> http://i39.tinypic.com/o0o560.jpg
+>>
+>> we have 197891887 used in byte[] (anyone we look at is related in some way to the
+index writer)
+>> we have 169263904 used in char[] (these are related to the index writer too)
+>> we have 72658944 used in FreqProxTermsWriter$PostingList
+>> we have 37722668 used in RawPostingList[]
+>>
+>> All of these are well over the 16mb.  So we are a little lost as to what we should
+expect to see when we look at the memory usage
+>>
+>> I've attached the patch and the CheckIndex files.  Unfortunately on the patch I
+guess my editor made some space line changes, so you get a lot of extra items in the patch
+that really are not any changes other than tab/space.
+>>
+>> If you are open to a live share again, then maybe you could look at this data quicker
+than the screen shots I send.
+>>
+>> -----Original Message-----
+>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Sent: Monday, May 10, 2010 2:27 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: IndexWriter and memory usage
+>>
+>> Hmmmm...
+>>
+>> Your usage (searching for old doc & updating it, to add new fields) is fine.
+>>
+>> But: what memory usage do you see if you open a searcher, and search
+>> for all docs, but don't open an IndexWriter?  We need to tease apart
+>> the IndexReader vs IndexWriter memory usage you are seeing.  Also, can
+>> you post the output of CheckIndex (java
+>> org.apache.lucene.index.CheckIndex /path/to/index) of your fully built
+>> index?  That may give some hints about expected memory usage of IR (eg
+>> if # unique terms is large).
+>>
+>> More comments below:
+>>
+>> On Thu, May 6, 2010 at 1:03 PM, Woolf, Ross <Ross_Woolf@bmc.com> wrote:
+>>> Sorry to be so long in getting back on this. The patch you provided has improved
+the situation but we are still seeing some memory loss.  The following are some images from
+the heap dump.  I'll share with you what we are seeing now.
+>>>
+>>> This first image shows the memory pattern.  Our fist commit takes place at about
+3:54 when the steady trend up takes a drop and the new cycle begins.   What we have found
+is the 2422 fix has made the memory in the first phase before the commit much better (and
+I'm sure throughout the entire run).  But as you can see after the commit then we then again
+begin to lose memory.  One of the pieces of info to know about this is what you are seeing,
+we have 5 threads that are pushing data to our Lucene plugin.  If we drop it down to 1 thread
+then we are much more successful and can actually index all of our data without running out
+of memory but at 5 threads it gets into trouble.  We still see a trend up in memory usage,
+but not as severe as when we use the multiple threads.
+>>> http://tinypic.com/view.php?pic=2w6bf68&s=5
+>>
+>> Can you post the output of "svn diff" on the 2.9 code base you're
+>> using?  I just want to look & verify all issues we've discussed are
+>> included in your changes.  The fact that 1 thread is fine and 5
+>> threads are not still sounds like a symptom of LUCENE-2283.
+>>
+>> Also, does that heap usage graph exclude garbage?  Or, alternatively,
+>> can you provoke an OOME w/ 512 MB heap and then capture the heap dump
+>> at that point?
+>>
+>>> There is another piece of the picture that I think might be coming into play.
+ We have plugged Lucene into a legacy app and are subject to how we can get it to deliver
+the data that we are indexing.  In some scenarios (like the one we are having this problem
+with) we are building our documents progressively (adding fields to the document through the
+process).  What you see before the first commit is the legacy system handing us the first
+field for many documents. Once we have gotten all of "field 1" for all documents then we commit
+that data into the index.  Then the system starts feeding us "field 2."  So we perform a
+search to see if the document already exists (for the scenario you are seeing it does) and
+so it retrieves the original document (we store a document ID) and it then adds the new field
+of data to the existing document and we "update" the document in the index.  After the first
+commit, the rest of the process is one where a document already exist and so the new field
+is added and and the document is updated.  It is in this process that we start rapidly losing
+memory.  The following images show some examples of common areas where memory is being held.
+>>>
+>>> http://tinypic.com/view.php?pic=11vkwnb&s=5
+>>
+>> This looks like "normal" memory usage of IndexWriter -- these are the
+>> recycled buffers used for holding stored fields.  However: the net RAM
+>> used by this allocation should not exceed your 16 MB IW ram buffer
+>> size -- does it?
+>>
+>>> http://tinypic.com/view.php?pic=abq9fp&s=5
+>>
+>> This one is the byte[] buffer used by CompoundFileReader, opened by
+>> IndexReader.  It's odd that you have so many of these (if I'm reading
+>> this correctly) -- are you certain all opened readers are being
+>> closed?  How many segments do you have in your index?  Or... are there
+>> many unique threads doing the searching?  EG do you create a new
+>> thread for every search or update?
+>>
+>>> http://tinypic.com/view.php?pic=25pskyp&s=5
+>>
+>> This one is also normal memory used by IndexWriter, but as above, the
+>> net RAM used by this allocation (summed w/ the above one) should not
+>> exceed your 16 MB IW ram buffer size.
+>>
+>>> As mentioned, we are subject to how we can have the legacy app feed us the data
+and so this is why we do it this way.  We treat this system as a real time system and at
+anytime the legacy system may send us a field that needs to be added or updated to a document.
+ So we search for the document and if found we either add or update a field if the field
+is already existing in the document.  So I started to wonder if a clue in this memory loss
+comes from the fact that we are retrieving an existing document and then adding to it and
+updating.
+>>>
+>>> Now, if we eliminate the updating and simply add each item as a new document
+(which we did just to test but won't be adequate for our running system), then we still see
+a slight trend upward in memory usage and the following images show that now most of the  memory
+is consumed in char[] rather than the byte[] we saw before.  We don't know if this is normal
+and expected, or if it is something to be concerned about as well.
+>>>
+>>> http://tinypic.com/view.php?pic=vfgkyt&s=5
+>>
+>> That memory usage is normal -- it's used by the in-RAM terms index of
+>> your opened IndexReader.  But I'd like to see the memory usage of
+>> simply opening your IndexReader and searching for documents to update,
+>> but not opening an IndexWriter at all.
+>>
+>> Mike
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

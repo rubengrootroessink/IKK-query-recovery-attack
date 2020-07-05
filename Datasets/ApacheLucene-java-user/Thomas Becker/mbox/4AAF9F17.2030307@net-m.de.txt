@@ -1,0 +1,404 @@
+FROM: Thomas Becker <thomas.bec...@net-m.de>
+SUBJECT: Re: lucene 2.9.0RC4 slower than 2.4.1?
+DATE: 15 Sep 2009
+
+Hey Mark,
+
+thanks for your reply. Will do. Results will follow in a couple of minutes.
+
+Yes the custom sorts are doing something tricky. :) I'll try to explain them in
+few words and paste the code.
+
+But even w/o them 2.9 is slower. Testcase 2 and 3 have only different lucene jars.
+
+CustomFieldComparatorPrefix.java:
+
+a field containing for example releaseDates for sorting. But there's different
+releaseDates for a single document and different countries for example. They're
+prefixed and comma separated in a single field.
+
+Here's the code:
+
+public final class CustomFieldComparatorPrefix extends FieldComparatorSource {
+
+	/**
+	 *
+	 */
+	private static final long serialVersionUID = 200907240001L;
+
+	private final String prefix;
+
+	public CustomFieldComparatorPrefix(String prefix) {
+		this.prefix = prefix;
+	}
+
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see
+	 * org.apache.lucene.search.FieldComparatorSource#newComparator(java.lang
+	 * .String, int, int, boolean)
+	 */
+	public FieldComparator newComparator(final String fieldname, final int numHits,
+int sortPos, boolean reversed) throws IOException {
+		return new FieldComparator() {
+
+			private int[] currentReaderValues;
+
+			private int[] values = new int[numHits];
+
+			private int bottom;
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#compare(int, int)
+			 */
+			public int compare(int slot1, int slot2) {
+				// TODO: there are sneaky non-branch ways to compute
+				// -1/+1/0 sign
+				// Cannot return values[slot1] - values[slot2] because that
+				// may overflow
+				final int v1 = values[slot1];
+				final int v2 = values[slot2];
+				if (v1 > v2) {
+					return 1;
+				} else if (v1 < v2) {
+					return -1;
+				} else {
+					return 0;
+				}
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#compareBottom(int)
+			 */
+			public int compareBottom(int doc) throws IOException {
+				// TODO: there are sneaky non-branch ways to compute
+				// -1/+1/0 sign
+				// Cannot return bottom - values[slot2] because that
+				// may overflow
+				final int v2 = currentReaderValues[doc];
+				if (bottom > v2) {
+					return 1;
+				} else if (bottom < v2) {
+					return -1;
+				} else {
+					return 0;
+				}
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#copy(int, int)
+			 */
+			public void copy(int slot, int doc) throws IOException {
+				values[slot] = currentReaderValues[doc];
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#setBottom(int)
+			 */
+			public void setBottom(int slot) {
+				this.bottom = values[slot];
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#sortType()
+			 */
+			public int sortType() {
+				return SortField.CUSTOM;
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#value(int)
+			 */
+			public Comparable<Integer> value(int slot) {
+				return new Integer(values[slot]);
+			}
+
+			@Override
+			public void setNextReader(IndexReader reader, int docBase) throws IOException {
+				currentReaderValues = FieldCache.DEFAULT.getInts(reader, fieldname, new
+PrefixedIntParser(prefix));
+			}
+
+		};
+	}
+}
+
+CustomFieldComparatorPosition.java:
+
+works similar to the one above. But in the field are different positions for
+different contentgroups. Example "10_1,11_5,14_1". Whereas the prefix are
+defining the contentgroup id and the digit after the underscore is the actual
+position to define the documents place in the sort order.
+This one could in theory use the same comparator as above, but the app will run
+oom due to too many different contentgroups. Since only few (~280.000) documents
+have positions set I wrote my own lucene cache implementation storing only not
+default values.
+
+Comparator Source:
+
+public final class CustomFieldComparatorPosition extends FieldComparatorSource {
+	private final Logger log = LoggerFactory.getLogger(this.getClass());
+
+	/**
+	 *
+	 */
+	private static final long serialVersionUID = 200907240001L;
+
+	private final String prefix;
+
+	private static PositionCache cache;
+
+	private StopWatch sw = new StopWatch();
+
+	public CustomFieldComparatorPosition(String prefix) {
+		if (cache == null) {
+			log.debug("CustomFieldComparatorPosition:initializing PositionCache");
+			cache = new PositionCache();
+		}
+		this.prefix = prefix;
+	}
+
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see
+	 * org.apache.lucene.search.FieldComparatorSource#newComparator(java.lang
+	 * .String, int, int, boolean)
+	 */
+	public FieldComparator newComparator(final String fieldname, final int numHits,
+int sortPos, boolean reversed) throws IOException {
+		return new FieldComparator() {
+
+			private Map<Integer, Integer> currentReaderValues;
+
+			private int[] values = new int[numHits];
+
+			private int bottom;
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#compare(int, int)
+			 */
+			public int compare(int slot1, int slot2) {
+				// TODO: there are sneaky non-branch ways to compute
+				// -1/+1/0 sign
+				// Cannot return values[slot1] - values[slot2] because that
+				// may overflow
+				final int v1 = values[slot1];
+				final int v2 = values[slot2];
+				if (v1 > v2) {
+					return 1;
+				} else if (v1 < v2) {
+					return -1;
+				} else {
+					return 0;
+				}
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#compareBottom(int)
+			 */
+			public int compareBottom(int doc) throws IOException {
+				int i;
+				try {
+					i = currentReaderValues.get(doc);
+				} catch (NullPointerException e) {
+					i = 999999;
+				}
+				// TODO: there are sneaky non-branch ways to compute
+				// -1/+1/0 sign
+				// Cannot return bottom - values[slot2] because that
+				// may overflow
+				final int v2 = i;
+				if (bottom > v2) {
+					return 1;
+				} else if (bottom < v2) {
+					return -1;
+				} else {
+					return 0;
+				}
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#copy(int, int)
+			 */
+			public void copy(int slot, int doc) throws IOException {
+				// This will be executed n times where n is the amount of
+				// documents in the index.
+				int value;
+				try{
+					value = currentReaderValues.get(doc);
+				}catch(NullPointerException e){
+					value = 999999;
+				}
+				values[slot] = value;
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#setBottom(int)
+			 */
+			public void setBottom(int slot) {
+				this.bottom = values[slot];
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#sortType()
+			 */
+			public int sortType() {
+				return SortField.CUSTOM;
+			}
+
+			/*
+			 * (non-Javadoc)
+			 *
+			 * @see org.apache.lucene.search.FieldComparator#value(int)
+			 */
+			public Comparable<Integer> value(int slot) {
+				return new Integer(values[slot]);
+			}
+
+			@Override
+			public void setNextReader(IndexReader reader, int docBase) throws IOException {
+				sw.start();
+				try {
+					currentReaderValues = cache.getInts(reader, fieldname, new
+PrefixedIntParser(prefix));
+				} catch (InterruptedException e) {
+					throw new IllegalStateException(e.getCause());
+				}
+				sw.stop();
+				if (sw.getTime() > 3000) {
+					log.info("setNextReader: Slow: Time to get currentReaderValues from cache:
+{}ms. Items in cache: {}", sw.getTime(), cache.getItemCount());
+				}
+			}
+
+		};
+	}
+}
+
+PositionCache.java:
+/**
+ * This cache implementation caches the position values of items stored as
+ * documents in lucene. This cache has a WeakHashMap with an IndexReader
+ * reference as a key thus if the indexReader reference gets deleted, the cache
+ * is marked to be gced. The innerCache is a Map containing field + parser
+ * (contracttocontentgroup prefix) as the key and as a value yet another map.
+ * The latter map finally contains the docIds as key and positionvalue for this
+ * prefix as value.
+ *
+ * @author Thomas Becker (thomas.becker@net-m.de)
+ *
+ */
+public class PositionCache {
+	final Map<Object, Map<String, Future<Map<Integer, Integer>>>> readerCache
+= new
+WeakHashMap<Object, Map<String, Future<Map<Integer, Integer>>>>();
+
+	AtomicInteger itemCount = new AtomicInteger(0); // only for debugging...only
+increasing
+
+	public Map<Integer, Integer> getInts(final IndexReader reader, final String
+field, final IntParser parser) throws InterruptedException {
+
+		String key = parser.toString();
+		// Future<Map<Integer,Integer> contains docId as key and position as
+		// value
+		HashMap<String, Future<Map<Integer, Integer>>> innerCache;
+		final Object readerKey = reader.getFieldCacheKey();
+		synchronized (readerCache) {
+			innerCache = (HashMap<String, Future<Map<Integer, Integer>>>)
+readerCache.get(readerKey);
+			if (innerCache == null) {
+				innerCache = new HashMap<String, Future<Map<Integer, Integer>>>();
+				readerCache.put(readerKey, innerCache);
+			}
+		}
+		Future<Map<Integer, Integer>> f = innerCache.get(key);
+		if (f == null) {
+			Callable<Map<Integer, Integer>> eval = new Callable<Map<Integer, Integer>>()
+{
+				public Map<Integer, Integer> call() throws InterruptedException, IOException {
+					HashMap<Integer, Integer> docPositions = new HashMap<Integer, Integer>();
+					TermDocs termDocs = reader.termDocs();
+					TermEnum termEnum = reader.terms(new Term(field));
+					try {
+						do {
+							Term term = termEnum.term();
+							if (term == null || term.field() != field)
+								break;
+							int termval = parser.parseInt(term.text());
+							termDocs.seek(termEnum);
+							while (termDocs.next()) {
+								// do not store defaults to save memory
+								if (termval < 999999) {
+									itemCount.incrementAndGet();
+									docPositions.put(termDocs.doc(), termval);
+								}
+							}
+						} while (termEnum.next());
+					} finally {
+						termDocs.close();
+						termEnum.close();
+					}
+					return docPositions;
+				}
+			};
+			FutureTask<Map<Integer, Integer>> ft = new FutureTask<Map<Integer,
+Integer>>(eval);
+			f = innerCache.put(key, ft);
+			if (f == null) {
+				f = ft;
+				ft.run();
+			}
+		}
+		try {
+			return f.get();
+		} catch (CancellationException e) {
+			innerCache.remove(key);
+		} catch (ExecutionException e) {
+			throw new IllegalStateException(e.getCause());
+		}
+		return null;
+	}
+
+
+Cheers,
+Thomas
+
+
+Mark Miller wrote:
+> Hey Thomas - any chance you can do some quick profiling and grab the
+> hotspots from the 3 configurations?
+> 
+> Are your custom sorts doing anything tricky?
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

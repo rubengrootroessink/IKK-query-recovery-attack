@@ -1,0 +1,99 @@
+FROM: Kay Roepke <kroe...@classdump.org>
+SUBJECT: Re: Making document numbers persistent
+DATE: 14 Jan 2007
+
+Hi Erick!
+
+On 13. Jan 2007, at 19:54 , Erick Erickson wrote:
+
+> Before going off into modifying things, could you expand a bit on  
+> how you
+> query to build up the filter? Perhaps providing a code snippet?
+
+We are passing in our unique ids from our database which we have to  
+translate
+to lucene document ids. This is done by an API (our own API) call,  
+because the
+main application isn't written in Java. Lucene will function as a  
+remote service
+for the other application servers.
+
+> Just to be sure we're talking about the same thing, when you say  
+> filter, are
+> you talking about Lucene filters? I'm assuming you are, in which  
+> case there
+> is probably wisdom on the list (although I won't provide very much  
+> <G>).
+> building up a Lucene filter with termenum/termdocs has been quite  
+> fast in my
+> experience, but I don't know if my experience has any relevance to  
+> your
+> situation....
+
+Yes, I was talking about Lucene filters. Here's what we do currently  
+(pretty much
+standard, if I'm correct):
+
+public class IdQueryFilter extends Filter {
+
+     Collection users;
+
+     public IdQueryFilter(Collection users) {
+         this.users = users;
+     }
+
+     public BitSet bits(IndexReader index) throws IOException {
+         BitSet result = new BitSet();
+         Iterator it = users.iterator();
+         while (it.hasNext()) {
+             Term term = new Term( "id", new Long(((User)it.next 
+()).id).toString());
+             TermDocs terms = ((IndexReader)index).termDocs( term );
+             if (terms.next()) {
+                 result.set(terms.doc());
+             }
+             terms = null; term = null;
+         }
+         return result;
+     }
+}
+
+This can take up to 30sec for a large (~500.000 elements) collections  
+of users and it
+it the thing I'm currently trying to solve.
+I can handle situations where this can take long once, since I'm  
+really asking something
+that Lucene isn't designed for, but the culprit is that I can't  
+really cache the resulting
+bitset. I can cache it on one of the Lucene servers, but can't share  
+it among the rest of
+the servers (we will eventually have way more than one for scalabilty/ 
+reliability reasons).
+We cannot afford to calculate these bitsets on all servers (think of  
+a repeated search, or
+paging, when you cannot make sure that you will hit the same Lucene  
+application to do the
+search - you might end up on a different server that hasn't seen a  
+request before).
+
+I hope this makes it more clear of what I'm up against. I'm not  
+running around to change things
+for the change's sake. If I can get around it, fine. If not, I can  
+deal :)
+
+Thanks,
+
+Kay
+-- 
+Kay Röpke
+http://classdump.org/
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,269 @@
+FROM: iouli.golova...@group.novartis.com
+SUBJECT: Re: RuntimeException: cannot determine sort type!
+DATE: 16 Jun 2004
+
+
+
+Well, I just didn't  want to overload people with too much code.
+
+Actually it's pretty much standart  from lucene perspective
+
+doc is created like this ("modified" get formated with SimpleDateFormat
+tformat = new SimpleDateFormat ("yyyyMMddhhmmss") by cashToIndex metod,
+where the IndexWriter created) :
+
+ static Document getDocument(File f, String provider, long modified, long
+published,
+                                                 String path, String title,
+String publisher, String secured )  throws
+FileNotFoundException,IOException {
+      Document doc = new Document();
+      String fname=f.getName();
+      doc.add(Field.Keyword("id", fname));
+      doc.add(Field.Keyword("provider", provider));
+
+      doc.add(Field.Keyword("modified",DateField.timeToString(modified)));
+
+      doc.add(Field.Keyword("published"
+,DateField.timeToString(published)));
+      doc.add(Field.Keyword("path", path));
+      doc.add(Field.Text("title", title));
+      doc.add(Field.Keyword("publisher", publisher));
+      doc.add(Field.Keyword("secured", secured));
+      FileInputStream is = new FileInputStream(f);
+      Reader reader = new BufferedReader(new InputStreamReader(is));
+      doc.add(Field.Text("contents", reader));
+
+      return doc;
+ }
+
+
+ private boolean cashToIndex (String provider,String rec_date, String
+pub_date, String path,
+            String title, String publisher,String secure_code,
+            String root, String type, int cash){
+      boolean res=false;
+      String full_ixpath="",file_path="";
+      SimpleDateFormat tformat = new SimpleDateFormat ("yyyyMMddhhmmss");
+      boolean create=false;
+
+      try {
+            Date recd = tformat.parse(rec_date);
+            Date pubd = new Date();
+            if (pub_date!=null && !pub_date.equals(""))     pubd =
+tformat.parse(pub_date);
+            String sroot = LuceneUtil.getSlashed(root);
+            full_ixpath=sroot+REPOSITORY+provider+"/"
++INDEX+getFolderName(recd,type);
+            file_path=sroot+REPOSITORY+provider+"/"+CONTENT+path;
+            File dir =new File(full_ixpath + SEG);
+
+        // ix creation check makes sence only if ix folder name changes
+        create= false;
+        if(!full_ixpath.equals(current_ix)){
+           if(!dir.exists()) create=true;
+        }
+
+            //try to close prev ix if opened
+        if (!full_ixpath.equals(current_ix) || flash_cnt%FLASH==0){
+                  closeIndex(cash);
+          }
+        //open ix
+            if (!full_ixpath.equals(current_ix) || create || writer==null){
+                  current_ix = full_ixpath;
+                writer = new IndexWriter(full_ixpath, new
+PorterStemAnalyzer(), create);
+                if (merge_factor!=0) writer.mergeFactor = merge_factor;
+                logdata = "New Index : "+full_ixpath + ", creation flag = "
++create+", merge factor = "+writer.mergeFactor;
+                if(log!=null)log.timePrintln(logdata);
+                System.out.println(logdata);
+            }
+
+            writer.addDocument(getDocument(new
+File(file_path),provider,recd.getTime(),pubd.getTime(),path,title,publisher,secure_code));
+
+            flash_cnt++;
+
+            res = true;
+
+      } catch (Exception e) {
+            try{ writer.close();writer = null;} catch(IOException
+e1){writer = null;}
+            res = false;
+            e.printStackTrace();
+            logdata = "cashIndex() - caught a " + e.getClass() +" with
+message: " + e.getMessage()+ "\n";
+            logdata = logdata + " Index   Name -"+ full_ixpath+"\n";
+            logdata = logdata + " Indexed File -"+ file_path+",     last
+record ["+cnt+"]";
+            if(log!=null)log.timePrintln(logdata);
+            System.out.println(logdata);
+      }
+      return res;
+ }
+
+Searcher looks like this:
+
+    private int getItems(String filter, int page)throws
+ParseException,IOException{
+            //, boolean new_frame
+            String line ="";
+
+            if (filter==null || filter.equals("")){
+                  line= getCurrentPeriod();
+                  filter=null;
+            }
+            else line= filter;
+            int first=-1, last=-1;
+            if (page==1){
+                  NeisQueryParser nqp=new NeisQueryParser();
+                  if (and)
+nqp.setOperator(NeisQueryParser.DEFAULT_OPERATOR_AND);
+                  else
+nqp.setOperator(NeisQueryParser.DEFAULT_OPERATOR_OR);
+                  // Query query = QueryParser.parse(line, "contents",
+analyzer);
+                  // default OR that's why not used
+                  Query query = nqp.parse(line);
+
+                  formated_query=query.toString();
+                  if (sort_byscore)hits = ms.search(query);
+                  else hits = ms.search(query,new Sort("modified",true));
+// here the "cannot determine.." exception generated!!!
+
+                  total_hitnum=hits.length();
+                  if (filter!=null){
+                        sdf=dformat.format(new Date(stamp_from));
+                        sdt=dformat.format(new Date(stamp_to));
+                  }
+                  log.timePrintln(DBG_PRFX+user+"Search for : " +
+formated_query+ ", Documents found : "+total_hitnum+", Documents age : ["
++sdt+"-"+sdf+"]");
+                  System.out.println(DBG_PRFX+user+"Search for : " +
+formated_query+ ", Documents found : "+total_hitnum+", Documents age : ["
++sdt+"-"+sdf+"]");
+            }
+            valid_hitnum=0;
+            // populating output interface
+        first = (page - 1)*page_size;
+        last = first + page_size;
+        if (last > total_hitnum) last = total_hitnum;
+            for (int i = first; i < last; i++) {
+                  Document doc = hits.doc(i);
+                  String path = doc.get("path");
+
+                  if (path != null) {//sure is sure
+                        valid_hitnum++;
+                        String id=doc.get("id");
+                        String modified=doc.get("modified");
+                        String title=doc.get("title");
+                        String provider = doc.get("provider");
+
+                        float score=hits.score(i);
+//
+                        if (id==null) id="unknown";
+                        if (modified==null) modified="0";
+                        if (title==null) title="no title";
+                        if (provider==null) provider="unknown";
+                        //keep modified key unique, 'cause it a timestamp
+may be same for different docs
+                        if (modified_path.containsKey(modified))
+
+modified=modified+LuceneUtil.getSep()+(++iunique);
+                        modified_path.put(modified, path);
+                        modified_id.put(modified, id);
+                path_title.put(path,title);
+                path_provider.put(path,provider);
+                path_score.put(path,Float.toString(score));
+
+                  } else {
+                        log.timePrintln(DBG_PRFX+user+"Doc "+i+",Page "
++page + ". Error - no path");
+                  }
+            }
+      return last;
+      }
+
+please find enclose full code as well
+
+(See attached file: code.rar)
+Thanks so much for your support
+J.
+
+
+
+
+                                                                                         
+                                             
+                      Erik Hatcher                                                       
+                                             
+                      <erik@ehatchersol        To:       "Lucene Users List" <lucene-user@jakarta.apache.org>
+                         
+                      utions.com>              cc:                                    
+                                                
+                                               Subject:  Re: RuntimeException: cannot determine
+sort type!                             
+                      16.06.2004 12:49                                                   
+                                             
+                      Please respond to        Category:       |-------------------------|
+                                            
+                      "Lucene Users                            | ( ) Action needed       |
+                                            
+                      List"                                    | ( ) Decision needed     |
+                                            
+                                                               | ( ) General Information |
+                                            
+                                                               |-------------------------|
+                                            
+                                                                                         
+                                             
+                                                                                         
+                                             
+
+
+
+
+
+On Jun 16, 2004, at 5:33 AM, iouli.golovatyi@group.novartis.com wrote:
+> Are you sure every document has a single "modified" indexed term?
+>
+> What do You call single? It's just one field, defined as keyword, but
+> it
+> content can be the same, because it's a timestamp. Every doc has it,
+> this I
+> garantee.
+
+Single means a single term for the entire document and that there is
+not possibly two "modified" terms for a document.
+
+> How  are you indexing it?
+>
+> I have a bulk file with entries like:
+>
+> FT¬20040219174432¬¬20040219/17/44/AUT_33957308¬Watch out for relative
+> valuations performance¬FT¬11111111¬D:¬yyyyMM
+> ...
+> where 20040219174432 is "modified" field content
+> and 20040219/17/44/AUT_33957308 relative pathname of document to be
+> indexed
+>
+> I use 1.4-rc3
+
+But how about some code?  Folks, please help us volunteers that love to
+field questions by posting *code*.  Field.Keyword?    Or Field.Text?
+Or...????  Full line of code too... not just some partial snippet of a
+line.  Your modified there doesn't look like a java.util.Date.
+
+             Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+
+
+
+

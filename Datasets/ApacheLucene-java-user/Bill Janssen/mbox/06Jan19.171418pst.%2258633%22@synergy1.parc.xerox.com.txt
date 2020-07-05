@@ -1,0 +1,100 @@
+FROM: Bill Janssen <jans...@parc.com>
+SUBJECT: Re: notification of active IndexSearchers when index is modified?
+DATE: 19 Jan 2006
+
+Daniel,
+
+Thanks for the note.  But I think you misunderstand a bit (or I do :-).
+
+These are two separate processes.  The updater (in Java) runs and
+exits, flushing its buffers, over and over again, as new info comes
+in.
+
+The query server (in Python), however, runs continuously, doing
+searches and sending back results.  It keeps its IndexReader open for
+long periods.  What I'm wondering is if the IndexReader/IndexSearcher
+will automatically update its in-memory version of the index when the
+index files change, or whether we need to do some kind of explicit
+check (like calls to getCurrentVersion()) in order to explicitly
+re-load the index.  Some postings about transactional updates make me
+hopeful that there is some automatic system at work.
+
+Bill
+
+> Bill Janssen wrote:
+> > I've got a daemon process which keeps an IndexSearcher open on an
+> > index and responds to query requests by sending back document
+> > identifiers.  I've also got other processes updating the index by
+> > re-indexing existing documents, deleting obsolete documents, and
+> > adding new documents.  Is there any way to notify the IndexSearcher
+> > that the index has changed, and to (somehow?) re-read it?  Or is that
+> > automatic?  Will it just re-load the index as necessary?
+> >   
+> We have similar index modification notification in our own application, 
+> though we use it to keep track of the state of indexing (when the index 
+> is saved, we save other files, mainly a queue which tracks what is yet 
+> to be processed.)
+> 
+> One thing you'll probably notice pretty soon is that the index writer 
+> keeps a whole lot of segments in-memory (in order to be so fast.)  So 
+> not every document added to the index will necessarily result in a write 
+> to disk.
+> 
+> What we did for ours is to make a new class extending IndexWriter, 
+> overriding this method:
+> 
+>     public void addDocument(Document doc, Analyzer analyzer) throws 
+> IOException
+>     {
+>         long lastUpdate = segmentsFile.lastModified();
+>         if (lastUpdate > lastRecordedUpdate)
+>         {
+>             fireSegmentsMerged();
+>            
+>             lastRecordedUpdate = lastUpdate;
+>         }
+>     }
+> 
+> Of course I've omitted all the event firing, adding/removing listeners, 
+> and so forth, we've just used standard JavaBeans event handling for all 
+> of this.
+> 
+> It's dirty, but it works.  If there's a better way, I'm definitely 
+> interested in hearing what it is. :-D
+> 
+> Note though, opening an index can be expensive.  It might not be 
+> particularly good for performance if you expect the index to be modified 
+> quite often... accepting a bit of lag between adding entries and having 
+> them available can help performance a lot.
+> 
+> Daniel
+> 
+> 
+> -- 
+> Daniel Noll
+> 
+> Nuix Australia Pty Ltd
+> Suite 79, 89 Jones St, Ultimo NSW 2007, Australia
+> Phone: (02) 9280 0699
+> Fax:   (02) 9212 6902
+> 
+> This message is intended only for the named recipient. If you are not
+> the intended recipient you are notified that disclosing, copying,
+> distributing or taking any action in reliance on the contents of this
+> message or attachment is strictly prohibited.
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

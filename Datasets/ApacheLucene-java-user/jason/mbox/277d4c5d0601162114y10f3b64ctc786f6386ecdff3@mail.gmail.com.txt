@@ -1,0 +1,239 @@
+FROM: jason <ginger...@gmail.com>
+SUBJECT: Re: One problem of using the lucene
+DATE: 17 Jan 2006
+
+Hi,
+
+the following code is the SynonymFilter i wrote.
+
+
+import org.apache.lucene.analysis.*;
+
+
+import java.io.*;
+import java.util.*;
+/**
+ * @author JIANG XING
+ *
+ * Jan 15, 2006
+ */
+public class SynonymFilter extends TokenFilter {
+
+    public static final String TOKEN_TYPE_SYNONYM = "SYNONYM";
+
+    private Stack synonymStack;
+    private WordNetSynonymEngine engine;
+
+    public SynonymFilter(TokenStream in, WordNetSynonymEngine engine){
+        super(in);
+        synonymStack = new Stack();
+        this.engine = engine;
+    }
+
+    public Token next () throws IOException {
+        if(synonymStack.size() > 0){
+            return (Token) synonymStack.pop();
+        }
+
+        Token token = input.next();
+
+
+        if(token == null){
+            return null;
+        }
+
+        addAliasesToStack(token);
+
+        return token;
+    }
+
+    private void addAliasesToStack(Token token) throws IOException {
+
+
+        String [] synonyms = engine.getSynonyms(token.termText());
+
+        if(synonyms == null) return;
+
+        for(int i = 0; i < synonyms.length; i++) {
+            Token synToken = new Token(synonyms[i], token.startOffset(),
+token.endOffset(), TOKEN_TYPE_SYNONYM);
+
+            synToken.setPositionIncrement(0); //
+
+            synonymStack.push(synToken);
+        }
+    }
+}
+It is adding tokens into the same position as the original token. And then,
+I used the QueryParser for searching and the snowball analyzer for parsing.
+
+the following is the SynonymAnalyzer I wrote.
+
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.standard.*;
+import org.apache.lucene.analysis.snowball.*;
+
+import java.io.*;
+import java.util.*;
+
+/**
+ * @author JIANG XING
+ *
+ * Jan 15, 2006
+ */
+public class SynonymAnalyzer extends Analyzer {
+    private WordNetSynonymEngine engine;
+    private Set stopword;
+
+    public SynonymAnalyzer(String [] word) {
+        try{
+        engine = new WordNetSynonymEngine(new
+File("C:\\PDF2Text\\SearchEngine\\WordNetIndex"));
+        stopword = StopFilter.makeStopSet(word);
+        }catch(IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    public TokenStream tokenStream(String fieldName, Reader reader){
+
+        TokenStream result = new StandardTokenizer(reader);
+        result = new StandardFilter(result);
+        result = new LowerCaseFilter(result);
+        if (stopword != null){
+          result = new StopFilter(result, stopword);
+        }
+
+        result = new SnowballFilter(result, "Lovins");
+
+        result = new SynonymFilter(result, engine);
+
+        return result;
+    }
+
+}
+I write some code in the snowballfitler (line 75-79). If i only used the
+snowballfilter, the term "support" can be found in all the 17 documents.
+However, if the code "result = new SynonymFilter(result, engine);" is used.
+The term "support" cannot be found in some documents.
+
+
+public class SnowballFilter extends TokenFilter {
+  private static final Object [] EMPTY_ARGS = new Object[0];
+
+  private SnowballProgram stemmer;
+  private Method stemMethod;
+
+  /** Construct the named stemming filter.
+   *
+   * @param in the input tokens to stem
+   * @param name the name of a stemmer
+   */
+  public SnowballFilter(TokenStream in, String name) {
+    super(in);
+    try {
+      Class stemClass =
+        Class.forName("net.sf.snowball.ext." + name + "Stemmer");
+      stemmer = (SnowballProgram) stemClass.newInstance();
+      // why doesn't the SnowballProgram class have an (abstract?) stem
+method?
+      stemMethod = stemClass.getMethod("stem", new Class[0]);
+    } catch (Exception e) {
+      throw new RuntimeException(e.toString());
+    }
+  }
+
+  /** Returns the next input Token, after being stemmed */
+  public final Token next() throws IOException {
+    Token token = input.next();
+    if (token == null)
+      return null;
+    stemmer.setCurrent(token.termText());
+    try {
+      stemMethod.invoke(stemmer, EMPTY_ARGS);
+    } catch (Exception e) {
+      throw new RuntimeException(e.toString());
+    }
+
+    Token newToken = new Token(stemmer.getCurrent(),
+                      token.startOffset(), token.endOffset(), token.type());
+    //check the tokens.
+    if(newToken.termText().equals("support")){
+        System.out.println("the term support is found");
+    }
+
+    newToken.setPositionIncrement(token.getPositionIncrement());
+    return newToken;
+  }
+}
+
+
+
+On 1/16/06, Erik Hatcher <erik@ehatchersolutions.com> wrote:
+>
+> Could you share the details of your SynonymFilter?  Is it adding
+> tokens into the same position as the original tokens (position
+> increment of 0)?   Are you using QueryParser for searching?  If so,
+> try TermQuery to eliminate the parser's analysis from the picture for
+> the time being while trouble shooting.
+>
+> If you are using QueryParser, are you using the same analyzer?  If
+> this is the case, what is the .toString of the generated Query?
+>
+>        Erik
+>
+>
+> On Jan 16, 2006, at 3:54 AM, jason wrote:
+>
+> > Hi,
+> >
+> > I got a problem of using the lucene.
+> >
+> > I write a SynonymFilter which can add synonyms from the WordNet.
+> > Meanwhile,
+> > i used the SnowballFilter for term stemming. However, i got a
+> > problem when
+> > combining the two fiters.
+> >
+> > For instance, i got 17 documents containing the Term "support"
+> > and  the
+> > following is the SynonymAnalyzer i wrote.
+> >
+> > /**
+> > *
+> > */
+> >  public TokenStream tokenStream(String fieldName, Reader reader){
+> >
+> >
+> >         TokenStream result = new StandardTokenizer(reader);
+> >         result = new StandardFilter(result);
+> >         result = new LowerCaseFilter(result);
+> >         if (stopword != null){
+> >           result = new StopFilter(result, stopword);
+> >         }
+> >
+> >         result = new SnowballFilter(result, "Lovins");
+> >
+> >        result = new SynonymFilter(result, engine);
+> >
+> >         return result;
+> >     }
+> >
+> > If i only used the SnowballFilter, i can find the "support" in the 17
+> > documents. However, after adding the SynonymFilter, the "support"
+> > can only
+> > be found in 10 documents. It seems the term "support" cannot be
+> > found in the
+> > left 7 documents. I dont know what's wrong with it.
+> >
+> > regards
+> >
+> > jiang xing
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

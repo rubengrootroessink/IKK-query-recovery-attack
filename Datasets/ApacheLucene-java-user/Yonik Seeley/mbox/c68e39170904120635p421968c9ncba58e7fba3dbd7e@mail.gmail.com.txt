@@ -1,0 +1,172 @@
+FROM: Yonik Seeley <yo...@lucidimagination.com>
+SUBJECT: Re: RangeFilter performance problem using MultiReader
+DATE: 12 Apr 2009
+
+Hmmm, something is wrong.... range queries over many terms should
+definitely be faster.
+There are some other oddities in your results...
+- the "consolidated index" shows to be slower 295ms vs 602ms... but
+patch 1596 doesn't touch that code path (a single segment index).
+- TEST2 (using searcher.search) should not be affected by this patch
+at all, set some of the results are shown to be twice as slow.  Seems
+like there may be a lot of measurement noise in these tests.
+
+Although looking at RangeFilter quickly, I do see an issue that would
+prevent the optimizations in 1596 from kicking in.  I'll put up a
+revised patch shortly.
+
+-Yonik
+http://www.lucidimagination.com
+
+
+On Sun, Apr 12, 2009 at 4:02 AM, Raf <r.ventaglio@gmail.com> wrote:
+> I am sorry,
+> but after applying this patch, the performance on my tests are worse than
+> those on lucene-2.9-dev trunk.
+>
+>
+> TEST1: using *filter.getDocIdSet(reader)*;
+>
+> *Test *results*   (Num docs = 2,940,738)  using lucene-core-2.9-dev trunk**
+>
+> 1 Original index (12 collections * 6 months = 72 indexes)*
+>
+> 1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     2,274 ms     1,477 ms     1,283 ms
+>
+> 1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     4,489 ms     3,333 ms     3,390 ms
+>
+> 1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     8,482 ms     7,471 ms     7,424 ms
+>
+>
+> *2Consolidated index (1 index)*
+>
+> 2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     492 ms     116 ms     83 ms
+>
+> 2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     640 ms     159 ms     138 ms
+>
+> 2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     817 ms     322 ms    295 ms
+>
+>
+> *Test *results*   (Num docs = 2,940,738)  using lucene-core-2.9-dev
+> trunk**+ patch 1596
+>
+> 1 Original index (12 collections * 6 months = 72 indexes)*
+>
+> 1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     3,699 ms     3,347 ms     1,368 ms
+>
+> 1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     6,508 ms     4,540 ms     6,151 ms
+>
+> 1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     15,941 ms     10,440 ms     13,622 ms
+>
+>
+> *2Consolidated index (1 index)*
+>
+> 2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     514 ms     70 ms     63 ms
+>
+> 2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     708 ms     165 ms     137 ms
+>
+> 2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     782 ms     430 ms    602 ms
+>
+>
+>
+> TEST2: using *searcher.search(query, filter, 10);*
+>
+> *Test *results*   (Num docs = 2,940,738)  using lucene-core-2.9-dev trunk
+>
+> 1 Original index (12 collections * 6 months = 72 indexes)
+> *
+> 1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     1,187 ms     273 ms     416 ms
+> 1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     1,539 ms     764 ms     571 ms
+> 1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     2,235 ms     1,503 ms     1,260 ms
+>
+>
+> *2 Consolidated index (1 index)*
+> 2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     385 ms     85 ms     73 ms
+> 2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     490 ms     208 ms     196 ms
+> 2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     707 ms     361 ms    317 ms
+>
+>
+> *Test *results*   (Num docs = 2,940,738)  using lucene-core-2.9-dev
+> trunk**+ patch 1596
+> **
+> 1 Original index (12 collections * 6 months = 72 indexes)
+> *
+> 1a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     1,181 ms     375 ms     237 ms
+> 1b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     1,670 ms     749 ms     550 ms
+> 1c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     3,379 ms     2,409 ms     2,470 ms
+>
+>
+> *2 Consolidated index (1 index)*
+> 2a Range [20090101000000 - 20090131235959] --> 379,560 docs
+>     444 ms     72 ms     72 ms
+> 2b Range [20081201000000 - 20090131235959] --> 974,754 docs
+>     576 ms     208 ms     140 ms
+> 2c Range [20081001000000 - 20090131235959] --> 2,197,590 docs
+>     907 ms     484 ms    373 ms
+>
+>
+> Raf
+>
+> On Sat, Apr 11, 2009 at 11:21 PM, Yonik Seeley
+> <yonik@lucidimagination.com>wrote:
+>
+>> OK, I think this will improve the situation:
+>> https://issues.apache.org/jira/browse/LUCENE-1596
+>>
+>> -Yonik
+>> http://www.lucidimagination.com
+>>
+>>
+>> On Fri, Apr 10, 2009 at 1:47 PM, Michael McCandless
+>> <lucene@mikemccandless.com> wrote:
+>> > We never fully explained it, but we have some ideas...
+>> >
+>> > It's only if you iterate each term, and do a TermDocs.seek for each,
+>> > that Multi*Reader seems to show the problem.  Just iterating the terms
+>> > seems OK (I have a 51 segment index, and I can iterate ~ 10M unique
+>> > terms in ~8 seconds).
+>> >
+>> > But loading FieldCache, or doing eg RangeQuery, also does a
+>> > MultiTermDocs.seek on each term, which in turn calls
+>> > SegmentTermDocs.seek for each of the sub-readers in sequence.  I
+>> > *think* maybe for highly unique terms, where typically all segments
+>> > but one actually have the term, the cost of invoking seek on those
+>> > segments without the term is high.  Really, somehow, we want to only
+>> > call seek on those segments that have the term, which we know from the
+>> > pqueue...
+>> >
+>> > Mike
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

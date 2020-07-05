@@ -1,0 +1,48 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: SQLDirectory
+DATE: 5 Feb 2004
+
+Philippe Laflamme wrote:
+> I've worked on an implementation for Postgres. I used the Large Object API
+> provided by the Postgres JDBC driver. It works fine but I doubt it is very
+> scalable because the number of open connections during indexing can become
+> very high.
+> 
+> Lucene opens many different files when writing to an index. This results in
+> opening one PG connection per open file. While working on a small index (30
+> 000 files), I saw the number of open connections become quite high (approx
+> 150). If you don't have a lot of RAM, this is problematic.
+
+A connection per file sounds very heavyweight.
+
+The way I would try to implement Directory with SQL is to have a single
+table of buffers per index, e.g., with columns ID, BLOCK_NUMBER and
+DATA.  The contents of a file are the appended DATA columns with the
+same ID, ordered by the BLOCK_NUMBER field.  This would be indexed by ID
+and BLOCK_NUMBER, together a unique key.
+
+The BLOCK_NUMBER field indicates which part of the file the row
+concerns.  Thus the DATA of BLOCK_NUMBER=0 might hold the first 1024
+bytes, the DATA of BLOCK_NUMBER=1 might hold the next 1024 bytes, and so
+on.  This would permit efficient random access.
+
+You'll need another table with NAME, ID, and MODIFIED_DATE, with a
+single entry per file.  The length of a file can be computed with a
+query that finds the length of DATA in the last BLOCK_NUMBER with an ID.
+
+I would initially cache a single connection to the database and
+serialize requests over it.  A pool of connections might be more
+efficient when multiple threads are searching, but I would benchmark
+that before investing much in such an implementation.
+
+Has anyone yet implemented an SQL Directory this way?
+
+Doug
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

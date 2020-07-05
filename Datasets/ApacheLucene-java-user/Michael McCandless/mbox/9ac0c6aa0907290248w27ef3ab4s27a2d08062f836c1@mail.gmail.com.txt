@@ -1,0 +1,36 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: deadlock in indexing
+DATE: 29 Jul 2009
+
+On Tue, Jul 28, 2009 at 5:10 PM, Chengdu
+Huang<chengdu.huang@patterninsight.com> wrote:
+
+> For the deadlock, I also think it has something to do with merging.
+
+Right, what's happening here is the ConcurrentMergeScheduler, which
+runs BG threads to do merging, has a max thread count (default 3) that
+it's allowed to run at once.
+
+Because you had sync'd on writer, each of these threads was blocked on
+trying to start its merge (they invoke a synchronized method on
+IndexWriter).
+
+Once the max number of threads is outstanding,
+ConcurrentMergeScheduler forcefully idles the main threads, waiting
+for the BG thread count to drop back down, which in your case will
+never happen.
+
+Synchronizing on your own private Object will fix it.
+
+And I agree: we should update the javadocs to spell out IndexWriter's
+thread safety, including "you shouldn't synchronize on IndexWriter
+externally".  Looks like Simon just opened the issue for this --
+thanks!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

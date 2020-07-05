@@ -1,0 +1,233 @@
+FROM: Dvora <barak.ya...@gmail.com>
+SUBJECT: RE: How to avoid huge index files
+DATE: 10 Sep 2009
+
+
+Me again :-)
+
+I'm looking at the code of FSDirectory and MMapDirectory, and found that its
+somewhat difficult for to understand how should subclass the FSDirectory and
+adjust it to my needs. If I understand correct, MMapDirectory overrides the
+openInput() method and returns MultiMMapIndexInput if the file size exceeds
+the threshold. What I'm not understand is that how the new impl should keep
+track on the generated files (or shouldn't it?..) so when searhcing Lucene
+will know in which file to search - I'm confused :-)
+
+Can I bother you so you supply some kind of psuedo code illustrating how the
+implementation should look like?
+
+Thanks again for your huge help!
+
+
+Uwe Schindler wrote:
+> 
+> The idea is just to put a layer on top of the abstract file system
+> function
+> supplied by directory. Whenever somebody wants to create a file and write
+> data to it, the methods create more than one file and switch e.g. after 10
+> Megabytes to another file. E.g. look into MMapDirectory that uses MMap to
+> map files into address space. Because MappedByteBuffer only supports 32
+> bit
+> offsets, there will be created different mappings for the same file (the
+> file is splitted up into parts of 2 Gigabytes). You could use similar code
+> here and just use another file, if somebody seeks or writes above the 10
+> MiB
+> limit. Just "virtualize" the files.
+> 
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+> 
+>> From: Dvora [mailto:barak.yaish@gmail.com]
+>> Sent: Thursday, September 10, 2009 1:23 PM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: How to avoid huge index files
+>> 
+>> 
+>> Hi again,
+>> 
+>> Can you add some details and guidelines how to implement that? Different
+>> files types have different structure, is such spliting doable without
+>> knowing Lucene internals?
+>> 
+>> 
+>> Michael McCandless-2 wrote:
+>> >
+>> > You're welcome!
+>> >
+>> > Another, bottoms-up option would be to make a custom Directory impl
+>> > that simply splits up files above a certain size.  That'd be more
+>> > generic and more reliable...
+>> >
+>> > Mike
+>> >
+>> > On Thu, Sep 10, 2009 at 5:26 AM, Dvora <barak.yaish@gmail.com> wrote:
+>> >>
+>> >> Hi,
+>> >>
+>> >> Thanks a lot for that, will peforms the experiments and publish the
+>> >> results.
+>> >> I'm aware to the risk of peformance degredation, but for the pilot I'm
+>> >> trying to run I think it's acceptable.
+>> >>
+>> >> Thanks again!
+>> >>
+>> >>
+>> >>
+>> >> Michael McCandless-2 wrote:
+>> >>>
+>> >>> First, you need to limit the size of segments initially created by
+>> >>> IndexWriter due to newly added documents.  Probably the simplest way
+>> >>> is to call IndexWriter.commit() frequently enough.  You might want
+to
+>> >>> use IndexWriter.ramSizeInBytes() to gauge how much RAM is currently
+>> >>> consumed by IndexWriter's buffer to determine when to commit.  But
+it
+>> >>> won't be an exact science, ie, the segment size will be different
+>> from
+>> >>> the RAM buffer size.  So, experiment w/ it...
+>> >>>
+>> >>> Second, you need to prevent merging from creating a segment that's
+>> too
+>> >>> large.  For this I would use the setMaxMergeMB method of the
+>> >>> LogByteSizeMergePolicy (which is IndexWriter's default merge policy).
+>> >>> But note that this max size applies to the *input* segments, so you'd
+>> >>> roughly want that to be 1.0 MB (your 10.0 MB divided by the merge
+>> >>> factor = 10), but probably make it smaller to be sure things stay
+>> >>> small enough.
+>> >>>
+>> >>> Note that with this approach, if your index is large enough, you'll
+>> >>> wind up with many segments and search performance will suffer when
+>> >>> compared to an index that doesn't have this max 10.0 MB file size
+>> >>> restriction.
+>> >>>
+>> >>> Mike
+>> >>>
+>> >>> On Thu, Sep 10, 2009 at 2:32 AM, Dvora <barak.yaish@gmail.com>
+wrote:
+>> >>>>
+>> >>>> Hello again,
+>> >>>>
+>> >>>> Can someone please comment on that, whether what I'm looking is
+>> >>>> possible
+>> >>>> or
+>> >>>> not?
+>> >>>>
+>> >>>>
+>> >>>> Dvora wrote:
+>> >>>>>
+>> >>>>> Hello,
+>> >>>>>
+>> >>>>> I'm using Lucene2.4. I'm developing a web application that using
+>> >>>>> Lucene
+>> >>>>> (via compass) to do the searches.
+>> >>>>> I'm intending to deploy the application in Google App Engine
+>> >>>>> (http://code.google.com/appengine/), which limits files length
+to
+>> be
+>> >>>>> smaller than 10MB. I've read about the various policies supported
+>> by
+>> >>>>> Lucene to limit the file sizes, but on matter which policy I
+used
+>> and
+>> >>>>> which parameters, the index files still grew to be lot more
+the
+>> 10MB.
+>> >>>>> Looking at the code, I've managed to limit the cfs files
+>> (predicting
+>> >>>>> the
+>> >>>>> file size in CompoundFileWriter before closing the file) - I
+guess
+>> >>>>> that
+>> >>>>> will degrade performance, but it's OK for now. But now the FDT
+>> files
+>> >>>>> are
+>> >>>>> becoming huge (about 60MB) and I cant identifiy a way to limit
+>> those
+>> >>>>> files.
+>> >>>>>
+>> >>>>> Is there some built-in and correct way to limit these files
+length?
+>> If
+>> >>>>> no,
+>> >>>>> can someone direct me please how should I tweak the source code
+to
+>> >>>>> achieve
+>> >>>>> that?
+>> >>>>>
+>> >>>>> Thanks for any help.
+>> >>>>>
+>> >>>>
+>> >>>> --
+>> >>>> View this message in context:
+>> >>>> http://www.nabble.com/How-to-avoid-huge-index-files-
+>> tp25347505p25378056.html
+>> >>>> Sent from the Lucene - Java Users mailing list archive at
+>> Nabble.com.
+>> >>>>
+>> >>>>
+>> >>>>
+>> ---------------------------------------------------------------------
+>> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>>>
+>> >>>>
+>> >>>
+>> >>> ---------------------------------------------------------------------
+>> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>>
+>> >>>
+>> >>>
+>> >>
+>> >> --
+>> >> View this message in context:
+>> >> http://www.nabble.com/How-to-avoid-huge-index-files-
+>> tp25347505p25380052.html
+>> >> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>> >>
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>> >
+>> 
+>> --
+>> View this message in context: http://www.nabble.com/How-to-avoid-huge-
+>> index-files-tp25347505p25381489.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>> 
+>> 
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/How-to-avoid-huge-index-files-tp25347505p25382376.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

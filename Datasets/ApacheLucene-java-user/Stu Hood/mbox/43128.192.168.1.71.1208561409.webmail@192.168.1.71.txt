@@ -1,0 +1,88 @@
+FROM: "Stu Hood" <stuh...@mailtrust.com>
+SUBJECT: Occasional Hang in IndexWriter.close()
+DATE: 18 Apr 2008
+
+Hello,
+
+I'm having an issue with the IndexWriter in Lucene 2.3.1. Specifically, the IndexWriter.close()
+method is non-deterministically hanging with the following stack:
+
+"""
+Thread 23044: (state = BLOCKED)
+ - java.lang.Object.wait(long) @bci=0 (Compiled frame; information may be imprecise)
+ - java.lang.Object.wait() @bci=2, line=485 (Interpreted frame)
+ - org.apache.lucene.index.IndexWriter.finishMerges(boolean) @bci=306, line=2063 (Interpreted
+frame)
+ - org.apache.lucene.index.IndexWriter.closeInternal(boolean) @bci=35, line=1208 (Interpreted
+frame)
+ - org.apache.lucene.index.IndexWriter.close(boolean) @bci=41, line=1178 (Interpreted frame)
+ - org.apache.lucene.index.IndexWriter.close() @bci=2, line=1153 (Interpreted frame)
+ - us.webmail.solr.merge.MergeTask.execute() @bci=234, line=237 (Interpreted frame)
+ - us.webmail.solr.merge.MergeAgent.run(java.lang.String[]) @bci=455, line=521 (Interpreted
+frame)
+ - org.apache.hadoop.util.ToolRunner.run(org.apache.hadoop.conf.Configuration, org.apache.hadoop.util.Tool,
+java.lang.String[]) @bci=38, line=65 (Interpreted frame)
+ - org.apache.hadoop.util.ToolBase.doMain(org.apache.hadoop.conf.Configuration, java.lang.String[])
+@bci=3, line=54 (Interpreted frame)
+ - us.webmail.solr.merge.MergeAgent.main(java.lang.String[]) @bci=17, line=572 (Interpreted
+frame)
+ - sun.reflect.NativeMethodAccessorImpl.invoke0(java.lang.reflect.Method, java.lang.Object,
+java.lang.Object[]) @bci=0 (Interpreted frame)
+ - sun.reflect.NativeMethodAccessorImpl.invoke(java.lang.Object, java.lang.Object[]) @bci=87,
+line=39 (Interpreted frame)
+ - sun.reflect.DelegatingMethodAccessorImpl.invoke(java.lang.Object, java.lang.Object[]) @bci=6,
+line=25 (Interpreted frame)
+ - java.lang.reflect.Method.invoke(java.lang.Object, java.lang.Object[]) @bci=161, line=597
+(Interpreted frame)
+ - org.apache.hadoop.util.RunJar.main(java.lang.String[]) @bci=538, line=155 (Interpreted
+frame)
+"""
+
+
+My IndexWriter opening code looks like this:
+"""
+// open the destination index
+this.targetDirectory = null;
+try{
+    this.targetDirectory = FSDirectory.getDirectory(getDD(this.targetInstance),
+        new NativeFSLockFactory(getDD(this.targetInstance)));
+    this.targetIndex = new IndexWriter(this.targetDirectory, null, false);
+    this.targetIndex.setMergeFactor(MERGE_FACTOR);
+    this.targetIndex.setUseCompoundFile(false);
+    // this.targetIndex.setInfoStream(System.out);
+    
+    this.targetIndex.setMergeScheduler(new SerialMergeScheduler());
+    
+
+} catch (Exception e){
+    if(this.targetDirectory != null){
+        this.targetDirectory.close();
+    }
+    throw new IOException("Could not open target instance: " + e.toString());
+}
+"""
+
+After adding a bunch of indexes with IndexWriter.addIndexes(Directory[]), I run
+"""
+System.out.println("Closing the target index...");
+this.targetIndex.close();
+System.out.println("...done.\nClosing the target directory...");
+this.targetDirectory.close();
+System.out.println("...done.");
+"""
+... and the output clearly shows that we get stuck in close.
+
+-------------------------------------------------------------
+
+Is this a known bug? Does anyone know of a workaround?
+
+Stu Hood
+Architecture Software Developer
+Mailtrust, a Division of Rackspace
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

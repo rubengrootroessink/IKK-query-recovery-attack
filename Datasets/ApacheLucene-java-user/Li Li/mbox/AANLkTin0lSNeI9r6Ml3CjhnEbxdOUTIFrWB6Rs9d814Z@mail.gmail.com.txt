@@ -1,0 +1,61 @@
+FROM: Li Li <fancye...@gmail.com>
+SUBJECT: about TokenSources.getTokenStream and highlighter
+DATE: 12 Jun 2010
+
+hi all
+   when use highlighter, We must provide a tokenStream and the
+original text. To get a tokenStream, we can either reanlyze the
+original text or use saved TermVector to reconstruct it.
+   In my application, highlight will cost average 200ms-300ms, and I
+want to optimze it to lower than 100ms. So I decided to try
+TermVector.
+
+The javadoc of public static TokenStream
+getTokenStream(TermPositionVector tpv, boolean
+tokenPositionsGuaranteedContiguous) is:
+
+Low level api. Returns a token stream or null if no offset info
+available in index. This can be used to feed the highlighter with a
+pre-parsed token stream In my tests the speeds to recreate 1000 token
+streams using this method are: - with TermVector offset only data
+stored - 420 milliseconds - with TermVector offset AND position data
+stored - 271 milliseconds (nb timings for TermVector with position
+data are based on a tokenizer with contiguous positions - no overlaps
+or gaps) The cost of not using TermPositionVector to store pre-parsed
+content and using an analyzer to re-parse the original content: -
+reanalyzing the original content - 980 milliseconds The re-analyze
+timings will typically vary depending on - 1) The complexity of the
+analyzer code (timings above were using a stemmer/lowercaser/stopword
+combo) 2) The number of other fields (Lucene reads ALL fields off the
+disk when accessing just one document field - can cost dear!) 3) Use
+of compression on field storage - could be faster due to compression
+(less disk IO) or slower (more CPU burn) depending on the content.
+
+Parameters:
+tpv
+tokenPositionsGuaranteedContiguous true if the token position numbers
+have no overlaps or gaps. If looking to eek out the last drops of
+performance, set to true. If in doubt, set to false.
+
+I have some questions
+1. it says "reanalyze depending on The number of other fields" . but
+to highlight, we must provide original text, so we will read all the
+fields of the document. So no matter we use termvector reconstruction
+or reanalyzation, we both need to read all the field of a document.
+2. to speed up, tokenPositionsGuaranteedContiguous can be set. which
+requires "contiguous positions - no overlaps or gaps". no overlaps is
+obvious, what's gaps mean? My analyzer just like
+
+ 	public final boolean incrementToken() throws IOException {
+			termAtt.setTermBuffer(context, beginIndex, length);
+			termAtt.setTermLength(length);
+			offsetAtt.setOffset(beginIndex, endIndex);
+                                                return true;
+                }
+can I set it to true?
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

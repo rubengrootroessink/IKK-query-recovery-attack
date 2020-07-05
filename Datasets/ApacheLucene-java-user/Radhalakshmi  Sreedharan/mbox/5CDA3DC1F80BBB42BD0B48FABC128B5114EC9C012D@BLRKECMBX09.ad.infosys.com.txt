@@ -1,0 +1,125 @@
+FROM: "Radhalakshmi  Sreedharan" <Radhalakshm...@infosys.com>
+SUBJECT: RE: Need help : SpanNearQuery
+DATE: 17 Apr 2009
+
+Hi Steven,
+Thanks for your reply.
+
+I tried out your approach and the problem got solved to an extent but still it remains.
+
+The problem is the score reduces quite a bit even now as bc is not found in the combinations
+ ( bc,cd) ( bc,ef) and ( ab,bc,cd,ef) etc. 
+
+The boosting infact has a negative impact and reduces the score further :(
+
+The factor which is affected by boosting is the queryNorm .
+
+With a boost of 6  - 
+
+0.015559823 = (MATCH) max of:
+  0.015559823 = (MATCH) weight(spanNear([SearchField:cd, SearchField:ef], 10, false)^6.0 in
+0), product of:
+    0.07606166 = queryWeight(spanNear([SearchField:cd, SearchField:ef], 10, false)^6.0), product
+of:
+      6.0 = boost
+      0.61370564 = idf(SearchField: cd=1 ef=1)
+      0.02065639 = queryNorm
+    0.20456855 = (MATCH) fieldWeight(SearchField:spanNear([cd, ef], 10, false)^6.0 in 0),
+product of:
+      0.33333334 = tf(phraseFreq=0.33333334)
+      0.61370564 = idf(SearchField: cd=1 ef=1)
+      1.0 = fieldNorm(field=SearchField, doc=0)
+
+Without a boost  - 
+
+0.07779912 = (MATCH) max of:
+  0.07779912 = (MATCH) weight(spanNear([SearchField:cd, SearchField:ef], 10, false) in 0),
+product of:
+    0.3803083 = queryWeight(spanNear([SearchField:cd, SearchField:ef], 10, false)), product
+of:
+      0.61370564 = idf(SearchField: cd=1 ef=1)
+      0.6196917 = queryNorm
+    0.20456855 = (MATCH) fieldWeight(SearchField:spanNear([cd, ef], 10, false) in 0), product
+of:
+      0.33333334 = tf(phraseFreq=0.33333334)
+      0.61370564 = idf(SearchField: cd=1 ef=1)
+      1.0 = fieldNorm(field=SearchField, doc=0)
+
+
+Regards,
+Radha
+-----Original Message-----
+From: Steven A Rowe [mailto:sarowe@syr.edu] 
+Sent: Thursday, April 16, 2009 10:35 PM
+To: java-user@lucene.apache.org
+Subject: RE: Need help : SpanNearQuery
+
+Hi Radha,
+
+On 4/16/2009 at 8:35 AM, Radhalakshmi Sredharan wrote:
+> I have a question related to SpanNearQuery.
+> 
+> I need a hit even if there are 2/3 terms found with the span being
+> applied for those 2 terms.
+> 
+> Is there any custom implementation in place for this? I checked
+> SrndQuery but that also doesn't work.
+> 
+> This is my workaround currently:
+> 
+> 1)      For a list of terms ( ab,bc, cd,ef) , make a set like ( ab,bc)
+> , ( bc,cd) ( ab,cd) (bc,ef) ( ab,bc,cd) ( ab,bc,cd,ef)..... and so on.
+> 
+> 2)      Create a spanNearQuery for  each of these terms
+> 
+> 3)      Add it to the booleanQuery with a  SHOULD clause.
+> 
+> However this approach gives me puzzling scores
+>  eg If my document has  only ( ab,bc,cd) the penalty for the missing ef
+> is very high and my score comes down quite a bit.
+
+Do you know about the scoring documentation on the Lucene site: <http://lucene.apache.org/java/2_4_1/scoring.html>
+?  In particular, see the link from there to the Searcher.explain() javadocs - this functionality
+will help you understand what's happening with your queries.
+
+I suspect that the penalty is due to fewer sub-queries matching; that is, not only does (ab,bc,cd,ef)
+fail to match, but (ab,bc,ef), (ab,cd,ef), (ab,ef) etc. also fail to match, and since all
+of these contribute to the final score, you will see a large drop off if you don't get a full
+match.
+
+Instead of putting all of the alternatives together in a single large disjunction, if you
+package them such that the shorter alternatives don't influence the final score when larger
+ones match, you may get something more like what you want.  I think DisjunctionMaxQuery <http://lucene.apache.org/java/2_4_1/api/org/apache/lucene/search/DisjunctionMaxQuery.html>,
+along with judicious boosting, will do the trick, e.g.:
+
+DMQ((ab,bc,cd,ef)^100,
+    ((ab,bc,cd)^10 (ab,bc,ef)^10 (ab,cd,ef)^10 ...),
+    ((ab,bc) (ab,cd) (ab,ef) ...))
+
+Steve
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+**************** CAUTION - Disclaimer *****************
+This e-mail contains PRIVILEGED AND CONFIDENTIAL INFORMATION intended solely 
+for the use of the addressee(s). If you are not the intended recipient, please 
+notify the sender by e-mail and delete the original message. Further, you are not 
+to copy, disclose, or distribute this e-mail or its contents to any other person and 
+any such actions are unlawful. This e-mail may contain viruses. Infosys has taken 
+every reasonable precaution to minimize this risk, but is not liable for any damage 
+you may sustain as a result of any virus in this e-mail. You should carry out your 
+own virus checks before opening the e-mail or attachment. Infosys reserves the 
+right to monitor and review the content of all messages sent to or from this e-mail 
+address. Messages sent to or from this e-mail address may be stored on the 
+Infosys e-mail system.
+***INFOSYS******** End of Disclaimer ********INFOSYS***
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,239 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Performance tips on searching
+DATE: 20 Mar 2009
+
+Sorry I did not read your email and the first one a lot of people did not
+understand (I read it now).
+
+Everything is rather simple:
+It makes no difference between MultiSearcher or IndexSearcher, you can
+really do everything with both. Just use them as if they are equals (in your
+declararation just use the abstract Searcher as you have done and assign a
+MultiSearcher ord IndexSearcher to it).
+
+Another possibility is to use only MultiReader on top of the IndexReaders
+and create an IndexSearcher from this *one* MultiReader (which appears to
+Lucene as a single index).
+
+For the pagination, do it like described before.
+
+I modified your code:
+
+        IndexSearcher searcher = searchers.get(indexName);
+        QueryParser parser = new QueryParser(indexName, analyzer);
+        TopDocs topDocs=null;
+        try {
+            topDocs = searcher.search(parser.parse(query), null, 10);
+        }
+        catch (ParseException e) {
+        }
+        Results results = new Results();
+        TopDocs topDocs = collector.topDocs();
+        ScoreDoc docs[] = topDocs.scoreDocs;
+        float maxScore = topDocs.getMaxScore();
+        for (int i = 0; i < docs.length; i++) {
+            Result result = new Result();
+            result.score = docs[i].score / maxScore;
+            result.doc = searcher.doc(docs[i].doc);
+            results.results.add(result);
+        }
+        return results;
+
+For the pagination just use the following to display results 20 to 29 (10
+items):
+
+        topDocs = searcher.search(parser.parse(query), null, 20+10);
+        ScoreDoc docs[] = topDocs.scoreDocs;
+        float maxScore = topDocs.getMaxScore();
+        for (int i = 20; i < 30; i++) {
+            result.score = docs[i].score / maxScore;
+            ...
+
+All complete, do the search on a single Searcher that contains all indexes
+(a MultiSearcher(IndexReader(index1),IndexReader(index2),....) or a
+IndexSearcher(MultiReader(index1,index2...)) and paginate as you want. If
+you need sorting, just use a Sort/SortField construct and pass it to
+Searcher.search().
+
+Uwe
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Amin Mohammed-Coleman [mailto:aminmc@gmail.com]
+> Sent: Friday, March 20, 2009 6:58 PM
+> To: java-user@lucene.apache.org
+> Cc: <java-user@lucene.apache.org>
+> Subject: Re: Performance tips on searching
+> 
+> Hi
+> 
+> I wrote last week about the best way to paginate. I will reply back
+> with that email if that ok. This isn't my thread and I don't want to
+> deviate from the original topic.
+> 
+> 
+> Cheers
+> 
+> Amin
+> 
+> On 20 Mar 2009, at 17:50, "Uwe Schindler" <uwe@thetaphi.de> wrote:
+> 
+> > No, the MultiSearcher also exposes all methods, IndexSearcher/Seracher
+> > exposes (it inherits it from the superclass IndexSearcher). And a
+> > call to
+> > the collector is never sortable, because the sorting is done
+> > *inside* the
+> > hit collector.
+> >
+> > Where is your problem with pagination? Normally you choose n to be
+> > paginationoffset+count and then display Scoredocs between n .. n
+> > +count-1.
+> > There is no TopDocCollector that can only collect results 100 to
+> > 109. To
+> > display results 100 to 109, you need to collect all results up to
+> > 109, so
+> > call with n=110 and then display scoredoc[100]..scoredoc[109]
+> >
+> > This is exactly how the old Hits worked.
+> >
+> > -----
+> > Uwe Schindler
+> > H.-H.-Meier-Allee 63, D-28213 Bremen
+> > http://www.thetaphi.de
+> > eMail: uwe@thetaphi.de
+> >
+> >
+> >> -----Original Message-----
+> >> From: Amin Mohammed-Coleman [mailto:aminmc@gmail.com]
+> >> Sent: Friday, March 20, 2009 6:43 PM
+> >> To: java-user@lucene.apache.org
+> >> Cc: <java-user@lucene.apache.org>; <paul_t100@fastmail.fm>
+> >> Subject: Re: Performance tips on searching
+> >>
+> >> Hi
+> >>
+> >> How do you expose a pagination without a customized hit collector.
+> >> The
+> >> multi searcher does not expose a method for hit collector and sort.
+> >> Maybe this is not an issue for people ...
+> >>
+> >> Cheers
+> >>
+> >> Amin
+> >>
+> >> On 20 Mar 2009, at 17:25, "Uwe Schindler" <uwe@thetaphi.de> wrote:
+> >>
+> >>> Why not use a MultiSearcher an all single searchers? Or a Searcher
+> >>> on a
+> >>> MultiReader consisting of all IndexReaders? With that you do not
+> >>> need to
+> >>> merge the results.
+> >>>
+> >>> By the way: instead of creating a TopDocCollector, you could also
+> >>> call
+> >>> directly,
+> >>>
+> >>> Searcher.search(Query query, Filter filter, int n, Sort sort)
+> >>> Searcher.search(Query query, Filter filter, int n)
+> >>>
+> >>> Filter can be null.
+> >>>
+> >>> It's shorter and if sorting is also involved, simplier to handle
+> >>> (you do not
+> >>> need to switch between ToDocCollector and TopFieldDocCollector).
+> >>>
+> >>> Important: With Lucene 2.9, the searches will be faster using this
+> >>> API
+> >>> (because then each index segment uses an own collector).
+> >>>
+> >>> Uwe
+> >>>
+> >>>
+> >>> -----
+> >>> Uwe Schindler
+> >>> H.-H.-Meier-Allee 63, D-28213 Bremen
+> >>> http://www.thetaphi.de
+> >>> eMail: uwe@thetaphi.de
+> >>>
+> >>>> -----Original Message-----
+> >>>> From: Paul Taylor [mailto:paul_t100@fastmail.fm]
+> >>>> Sent: Friday, March 20, 2009 6:02 PM
+> >>>> To: java-user@lucene.apache.org
+> >>>> Subject: Performance tips on searching
+> >>>>
+> >>>>
+> >>>> Hi, my code receives a search query from the web, there are 5
+> >>>> different
+> >>>> searches that can be searched on - each index is searched with a
+> >>>> single
+> >>>> IndexSearcher referenced in a map. it parses then  performs the
+> >>>> search
+> >>>> and return the best 10 results, with scores readjusted over the
+> >>>> results
+> >>>> so that the best score returns 1.0. Am I performing the optiminal
+> >>>> search
+> >>>> methods to do what I want ?
+> >>>>
+> >>>> thanks Paul
+> >>>>
+> >>>>       IndexSearcher searcher = searchers.get(indexName);
+> >>>>       QueryParser parser = new QueryParser(indexName, analyzer);
+> >>>>       TopDocCollector collector = new TopDocCollector(10);
+> >>>>       try {
+> >>>>           searcher.search(parser.parse(query), collector);
+> >>>>       }
+> >>>>       catch (ParseException e) {
+> >>>>       }
+> >>>>       Results results = new Results();
+> >>>>       results.totalHits = collector.getTotalHits();
+> >>>>       TopDocs topDocs = collector.topDocs();
+> >>>>       ScoreDoc docs[] = topDocs.scoreDocs;
+> >>>>       float maxScore = topDocs.getMaxScore();
+> >>>>       for (int i = 0; i < docs.length; i++) {
+> >>>>           Result result = new Result();
+> >>>>           result.score = docs[i].score / maxScore;
+> >>>>           result.doc = searcher.doc(docs[i].doc);
+> >>>>           results.results.add(result);
+> >>>>       }
+> >>>>       return results;
+> >>>>
+> >>>> ---
+> >>>> ------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>>
+> >>> ---
+> >>> ------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

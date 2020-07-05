@@ -1,0 +1,105 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Deleting duplicates from a Lucene index
+DATE: 27 May 2005
+
+
+: The two symptoms of this not behaving as expected are
+: 1) ir.docFreq(t) does not always equal the value returned by
+: ir.termDocs(t).read(docs, freqs) (see below for actual syntax used).
+: 2) Even after optimizing, I still have the same dupes in my index.
+
+As far as #1, i don't know much about the implimenation of TermDocs, but
+the documenation for TermDocs.read doesn't say it's garunteed to
+read/return the same number as the size of hte array you pass oit, or the
+number returned by IndexReader.docFreq ... just that it will read *up to*
+the length of the array, and reutrn the number read.  perhaps there are
+reasosn why it might be convinent for hte method to only read so many at a
+time -- stopping at buffer bounderies perhaps.  you shouldn't assume that
+just becuase it didnt' read as many, that something is wrong -- instead
+try to keep reading.  if it returns 0, and you still haven't gotten the
+cumulative amount that you expect, then i would assume soemthing is wrong.
+
+but honestly, since you need to iterate over each doc id to delete it
+anyway, you might as well just use TermDocs.next and TermDocs.doc
+
+as for your #2 .. i'm assuming you mean you did have a few casees where
+you program logged "Deleted doc id XXX for term YYY" and yet those docs
+were still in your index afterwards? ... not sure why that would happen
+unless you didn't re-open the reader you used to run that query after the
+reader used to delete them was closed.
+
+
+: =====================
+: import org.apache.lucene.index.*;
+:
+: public class LuceneDupeItemKiller {
+:    public static void main(String[] args) {
+:        String indexName = "/usr/local/cserver/search/lucene/";
+:        if (args.length > 0)
+:            indexName = args[0];
+:        IndexReader ir = null;
+:
+:        try {
+:            ir =IndexReader.open(indexName);
+:            System.out.println("Using index in : " + ir.directory());
+:            System.out.println("Number of Lucene Documents in index: " +
+: ir.numDocs());
+:            TermEnum te = ir.terms();
+:            te.skipTo(new Term("ItemId", ""));
+:            int numTerms = 0;
+:            for (Term t = te.term(); te.next(); t = te.term() ) {
+:                if (t != null && t.field().equals("ItemId")) {
+:                    int dCount = ir.docFreq(t);
+:                    if ( dCount> 1) {
+:                        TermDocs td = ir.termDocs(t);
+:                        int[] docs = new int[dCount];
+:                        int[] freqs = new int[dCount];
+:                        int rdCount = td.read(docs, freqs);
+:                        if (rdCount == dCount) {
+:                            for (int i=0; i< dCount-1;i++) {
+:                                ir.delete(docs[i]);
+:                                System.out.println("Deleted doc id "+docs[i]+
+: "for term "+t.text());
+:                            }
+:                        } else {
+:                            System.err.println("rdCount <> dCount for ItemId
+: "+t.text());
+:                        }
+:                        td.close();
+:                    }
+:                } else {
+:                    break;
+:                }
+:            }
+:            te.close();
+:            ir.close();
+:            //System.out.println("Number of ItemId Terms: " + numTerms);
+:       } catch(Exception e) {
+:          System.err.print("Exception: ");
+:          System.err.println(e.getMessage());
+:          e.printStackTrace();
+:       }
+:     }
+: }
+: ======================
+:
+:
+:  
+: Dan Climan
+:
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

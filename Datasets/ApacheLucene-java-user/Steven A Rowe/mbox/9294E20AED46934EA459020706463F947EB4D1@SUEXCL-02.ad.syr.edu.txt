@@ -1,0 +1,106 @@
+FROM: "Steven A Rowe" <sar...@syr.edu>
+SUBJECT: RE: Lucene, HTML and Hebrew
+DATE: 24 Jan 2008
+
+Hi Itamar,
+
+On 01/24/2008 at 2:55 PM, Itamar Syn-Hershko wrote:
+> > Lucene does not store proximity relations between data in different
+> > fields, only within individual fields
+> 
+> So are 2 calls for doc->add with the same field but different
+> texts are considered as 1 field (latter call being internally
+> appended into the former, merged into one field), or as two
+> instances of the same field which do not share proximity and
+> frequency data? As it seems from what you wrote later in your
+> response, it seems the case is the former.
+
+Yes.  From <http://lucene.apache.org/java/1_4_3/api/org/apache/lucene/document/Document.html#add(org.apache.lucene.document.Field)>:
+
+    Adds a field to a document. Several fields may be
+    added with the same name. In this case, if the
+    fields are indexed, their text is treated as though
+    appended for the purposes of search.
+
+> How can I inhibit this appending -- are there any more approaches than
+> appending an invalid string like "$$$"?
+
+Here's an idea, though it is entirely untested and may be completely false :) :
+
+Lucene's Tokenizers are fed a Reader (in Java - I don't know about CLucene's setup, but I
+assume the interface is similar) and emit Tokens.  Assuming that each field value from same-named
+fields gets its own Reader, then you could create a custom Tokenizer that, for the first Token
+it emits, sets a position increment greater than one - in so doing, phrase matching across
+same-named field values should be inhibited:
+
+<http://lucene.apache.org/java/1_4_3/api/org/apache/lucene/analysis/Token.html#setPositionIncrement(int)>
+
+> I've been thinking about this a bit, and I think I'd go with
+> one big field for all the content, and I'd want to incorporate
+> the headers into it as well. How would I boost those specific
+> words - so the content field can contain both all words and
+> all headers in their original order (for proximity and
+> frequency data to be valid), yet keep the terms which were
+> originally in a header or a sub-header boosted?
+
+Like I wrote in a previous response:
+
+> > One very coarse-grained boosting trick you could use is to
+> > repeat the text of headers, etc., that you want to boost.
+
+This trick adjusts the term frequency of important terms.
+
+I don't know of any other approaches besides this trick, except using field boosting, which
+would require you to have separate fields.
+
+> So, to overcome the challenges above, I was thinking about the query
+> inflation approach, having a negative boost for the inflated
+> terms as you suggested.
+
+Actually, I was referring to a reduced, but non-negative, boost - like 0.5 instead of 1.0.
+ AFAIK, Lucene does not support negative boosts.
+
+> I will appreciate any different takes on this one, as this is
+> going to be the first public Lucene Hebrew analyzer...
+
+One thought - for ambiguous terms, your stemming component could emit all of the alternatives
+at the same position.
+
+> Using this approach I only need to make sure I do not inflate those too
+> much (1024 is the standard limit, right?).
+
+1024 is the default maximum number of BooleanClause children, but you can set this higher
+(or lower) should you desire:
+
+<http://lucene.apache.org/java/1_4_3/api/org/apache/lucene/search/BooleanQuery.html#setMaxClauseCount(int)>
+
+> Also, how can I check whether a word I inflated exists in the
+> index BEFORE executing the query? Is that recommended at all?
+
+See IndexReader.terms():
+
+<http://lucene.apache.org/java/1_4_3/api/org/apache/lucene/index/IndexReader.html#terms()>
+
+If, as an offline process, you were to trim your query expansion map so that it included only
+terms known to be in the index, the resulting simpler queries should impact positively on
+performance.
+
+> > It's worth noting, as the above-linked documentation for
+> > Field.setBoost() does, that field boosts are not stored
+> > independently of other normalization factors in the index.
+> 
+> Does this mean I should stick with boosting fields in the
+> query phase only?
+
+No - I mentioned this only to alert you to the fact that field boosts are stored in the index
+only as part of the field "norm", which is an amalgam including a couple of other factors.
+
+Index-time field boosting could potentially do good things for you - it's worth trying out.
+
+Steve
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

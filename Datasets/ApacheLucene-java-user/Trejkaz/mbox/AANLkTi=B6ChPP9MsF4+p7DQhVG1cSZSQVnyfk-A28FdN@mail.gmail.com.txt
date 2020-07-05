@@ -1,0 +1,53 @@
+FROM: Trejkaz <trej...@trypticon.org>
+SUBJECT: Re: Using IndexWriterConfig repeatedly in 3.1
+DATE: 1 Apr 2011
+
+On Sat, Apr 2, 2011 at 7:07 AM, Christopher Condit <condit@sdsc.edu> wrote:
+> I see in the JavaDoc for IndexWriterConfig that:
+> "Note that IndexWriter makes a private clone; if you need to
+> subsequently change settings use IndexWriter.getConfig()."
+>
+> However when I attempt to use the same IndexWriterConfig to create
+> multiple IndexWriters the following exception is thrown:
+>
+> org.apache.lucene.util.SetOnce$AlreadySetException: The object cannot be
+> set twice!
+>        at org.apache.lucene.util.SetOnce.set(SetOnce.java:69)
+>        at org.apache.lucene.index.MergePolicy.setIndexWriter(MergePolicy.java:263)
+>        at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:1078)
+>
+> Is this the intended design? Is there a way to use the configuration
+> multiple times? I see that clone won't work since it's shallow...
+
+Looking at this, it is odd indeed.  What is the benefit of having
+clone() exposed if it isn't cloning any other sub-objects which
+maintain state?  It's almost as if IndexWriter takes a clone to try
+and prevent others modifying the object directly, but then it allows
+getting its copy anyway, and on top of that, it modifies deep state
+which affects the caller's copy of the object.
+
+Solutions from the Lucene end:
+
+  1. Remove clone() as it's misleading
+
+  2. Make MergePolicy and other mutable things which can live in the
+config Cloneable so that when the IndexWriter "takes a clone", it
+actually takes a clone instead of using objects the caller passed in.
+
+Solutions from the application end:
+
+  1. Make an IndexWriterConfigCloner / MergePolicyCloner / ...
+utility, and implement the cloning like that.
+
+  2. Make your own builder API with cloning support, and have that
+create a new IndexWriterConfig each time (but I think this was more or
+less the point of IndexWriterConfig itself, since it looks like a
+builder API already.)
+
+TX
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

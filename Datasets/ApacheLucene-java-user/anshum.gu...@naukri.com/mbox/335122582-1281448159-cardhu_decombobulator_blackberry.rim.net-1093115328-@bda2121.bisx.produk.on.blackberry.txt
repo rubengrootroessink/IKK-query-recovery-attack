@@ -1,0 +1,263 @@
+FROM: "anshum.gupta@naukri.com" <ansh...@gmail.com>
+SUBJECT: Re: Scaling Lucene to 1bln docs
+DATE: 10 Aug 2010
+
+Hey Shelly,
+If you want to get more info on lucene, I'd recommend you get a copy of lucene in action 2nd
+Ed. It'll help you get a hang of a lot of things! :)
+
+--
+Anshum
+http://blog.anshumgupta.net
+
+Sent from BlackBerry®
+
+-----Original Message-----
+From: Shelly_Singh <Shelly_Singh@infosys.com>
+Date: Tue, 10 Aug 2010 19:11:11 
+To: java-user@lucene.apache.org<java-user@lucene.apache.org>
+Reply-To: java-user@lucene.apache.org
+Subject: RE: Scaling Lucene to 1bln docs
+
+Hi folks,
+
+Thanks for the excellent support n guidance on my very first day on this mailing list...
+At end of day, I have very optimistic results. 100bln search in less than 1ms and the index
+creation time is not huge either ( close to 15 minutes).
+
+I am now hitting the 1bln mark with roughly the same settings. But, I want to understand Norms
+and TermFilters.
+
+Can someone explain, why or why not should one use each of these and what tradeoffs does it
+have. 
+
+Regards,
+Shelly
+
+-----Original Message-----
+From: Danil ŢORIN [mailto:torindan@gmail.com] 
+Sent: Tuesday, August 10, 2010 6:52 PM
+To: java-user@lucene.apache.org
+Subject: Re: Scaling Lucene to 1bln docs
+
+That won't work...if you'll have something like "A Basic Crazy
+Document E-something F-something G-something....you get the point" it
+will go to all shards so the whole point of shards will be
+compromised...you'll have 26 billion documents index ;)
+
+Looks like the only way is to search all shards.
+Depending on available hardware (1 Azul...50 EC2), expected
+traffic(1qps...1000qps), expected query time(10 msec ... 3 sec),
+redundancy (it's a large dataset, I don't think you want to loose it),
+and so on...you'll have to decide how many partitions do you want.
+
+It may work with 8-10, it may need 50-64. (I usually use 2^n as it's
+easier to split each shard in 2 when index grows too much)
+
+On such large datasets it's a lot of tuning, custom code, and no
+one-size-fits-all solution.
+Lucene is just a tool (a fine one) but you need to use it wisely to
+archive great results.
+
+On Tue, Aug 10, 2010 at 15:55, Shelly_Singh <Shelly_Singh@infosys.com> wrote:
+> Hmm..I get the point. But, in my application, the document is basically a descriptive
+name of a particular thing. The user will search by name (or part of name) and I need to pull
+out all info pointed to by that name. This info is externalized in a db.
+>
+> One option I can think of is-
+> I can shard based on starting alphabet of any name. So, "Alan Mathur of New Delhi" may
+go to shard "A". But since the name will have 'n' tokens, and the user may type any one token,
+this will not work. I can further tweak this such that I index the same document into multiple
+indices (one for each token). So, the same document may be indexed into Shard"A", "M", "N"
+and "D".
+> I am not able to think of another option.
+>
+> Comments welcome.
+>
+>
+> -----Original Message-----
+> From: Danil ŢORIN [mailto:torindan@gmail.com]
+> Sent: Tuesday, August 10, 2010 6:11 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Scaling Lucene to 1bln docs
+>
+> I'd second that.
+>
+> It doesn't have to be date for sharding. Maybe every query has some
+> specific field, like UserId or something, so you can redirect to
+> specific shard instead of hitting all 10 indices.
+>
+> You have to have some kind of narrowing: searching 1bn documents with
+> queries that may hit all documents is useless.
+> An user won't look on more than let say 100 results (if presented
+> properly..maybe 1000)
+>
+> Those fields that narrow the result set are good candidates for sharding keys.
+>
+>
+> On Tue, Aug 10, 2010 at 15:32, Dan OConnor <doconnor@acquiremedia.com> wrote:
+>> Shelly:
+>>
+>> You wouldn't necessarily have to use a multisearcher. A suggested alternative is:
+>>
+>> - shard into 10 indices. If you need the concept of a date range search, I would
+assign the documents to the shard by date, otherwise random assignment is fine.
+>> - have a pool of IndexSearchers for each index
+>> - when a search comes in, allocate a Searcher from each index to the search.
+>> - perform the search in parallel across all indices.
+>> - merge the results in your own code using an efficient merging algorithm.
+>>
+>> Regards,
+>> Dan
+>>
+>>
+>>
+>>
+>> -----Original Message-----
+>> From: Shelly_Singh [mailto:Shelly_Singh@infosys.com]
+>> Sent: Tuesday, August 10, 2010 8:20 AM
+>> To: java-user@lucene.apache.org
+>> Subject: RE: Scaling Lucene to 1bln docs
+>>
+>> No sort. I will need relevance based on TF. If I shard, I will have to search in
+al indices.
+>>
+>> -----Original Message-----
+>> From: anshum.gupta@naukri.com [mailto:anshumg@gmail.com]
+>> Sent: Tuesday, August 10, 2010 1:54 PM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Scaling Lucene to 1bln docs
+>>
+>> Would like to know, are you using a particular type of sort? Do you need to sort
+on relevance? Can you shard and restrict your search to a limited set of indexes functionally?
+>>
+>> --
+>> Anshum
+>> http://blog.anshumgupta.net
+>>
+>> Sent from BlackBerry(r)
+>>
+>> -----Original Message-----
+>> From: Shelly_Singh <Shelly_Singh@infosys.com>
+>> Date: Tue, 10 Aug 2010 13:31:38
+>> To: java-user@lucene.apache.org<java-user@lucene.apache.org>
+>> Reply-To: java-user@lucene.apache.org
+>> Subject: RE: Scaling Lucene to 1bln docs
+>>
+>> Hi Anshum,
+>>
+>> I am already running with the 'setCompoundFile' option off.
+>> And thanks for pointing out mergeFactor. I had tried a higher mergeFactor couple
+of days ago, but got an OOM, so I discarded it. Later I figured that OOM was because maxMergeDocs
+was unlimited and I was using MMap. U r rigt, I should try a higher mergeFactor.
+>>
+>> With regards to the multithreaded approach, I was considering creating 10 different
+threads each indexing 100mln docs coupled with a Multisearcher to which I will feed these
+10 indices. Do you think this will improve performance.
+>>
+>> And just FYI, I have latest reading for 1 bln docs. Indexing time is 2 hrs and search
+time is 15 secs.. I can live with indexing time but the search time is highly unacceptable.
+>>
+>> Help again.
+>>
+>> -----Original Message-----
+>> From: Anshum [mailto:anshumg@gmail.com]
+>> Sent: Tuesday, August 10, 2010 12:55 PM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Scaling Lucene to 1bln docs
+>>
+>> Hi Shelly,
+>> That seems like a reasonable data set size. I'd suggest you increase your
+>> mergeFactor as a mergeFactor of 10 says, you are only buffering 10 docs in
+>> memory before writing it to a file (and incurring I/O). You could actually
+>> flush by RAM usage instead of a Doc count. Turn off using the Compound file
+>> structure for indexing as it generally takes more time creating a cfs index.
+>>
+>> Plus the time would not grow linearly as the larger the size of segments
+>> get, the more time it'd take to add more docs and merge those together
+>> intermittently.
+>> You may also use a multithreaded approach in case reading the source takes
+>> time in your case, though, the indexwriter would have to be shared among all
+>> threads.
+>>
+>> --
+>> Anshum Gupta
+>> http://ai-cafe.blogspot.com
+>>
+>>
+>> On Tue, Aug 10, 2010 at 12:24 PM, Shelly_Singh <Shelly_Singh@infosys.com>wrote:
+>>
+>>> Hi,
+>>>
+>>> I am developing an application which uses Lucene for indexing and searching
+>>> 1 bln documents. (the document size is very small though. Each document has
+>>> a single field of 5-10 words; so I believe that my data size is within the
+>>> tested limits).
+>>>
+>>> I am using the following configuration:
+>>> 1.      1.5 gig RAM to the jvm
+>>> 2.      100GB disk space.
+>>> 3.      Index creation tuning factors:
+>>> a.      mergeFactor = 10
+>>> b.      maxFieldLength = 10
+>>> c.      maxMergeDocs = 5000000 (if I try with a larger value, I get an
+>>> out-of-memory)
+>>>
+>>> With these settings, I am able to create an index of 100 million docs (10
+>>> pow 8)  in 15 mins consuming a disk space of 2.5gb. Which is quite
+>>> satisfactory for me, but nevertheless, I want to know what else can be done
+>>> to tune it further. Please help.
+>>> Also, with these settings, can I expect the time and size to grow linearly
+>>> for 1bln (10 pow 9) documents?
+>>>
+>>> Thanks and Regards,
+>>>
+>>> Shelly Singh
+>>> Center For KNowledge Driven Information Systems, Infosys
+>>> Email: shelly_singh@infosys.com<mailto:shelly_singh@infosys.com>
+>>> Phone: (M) 91 992 369 7200, (VoIP)2022978622
+>>>
+>>>
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+**************** CAUTION - Disclaimer *****************
+This e-mail contains PRIVILEGED AND CONFIDENTIAL INFORMATION intended solely 
+for the use of the addressee(s). If you are not the intended recipient, please 
+notify the sender by e-mail and delete the original message. Further, you are not 
+to copy, disclose, or distribute this e-mail or its contents to any other person and 
+any such actions are unlawful. This e-mail may contain viruses. Infosys has taken 
+every reasonable precaution to minimize this risk, but is not liable for any damage 
+you may sustain as a result of any virus in this e-mail. You should carry out your 
+own virus checks before opening the e-mail or attachment. Infosys reserves the 
+right to monitor and review the content of all messages sent to or from this e-mail 
+address. Messages sent to or from this e-mail address may be stored on the 
+Infosys e-mail system.
+***INFOSYS******** End of Disclaimer ********INFOSYS***

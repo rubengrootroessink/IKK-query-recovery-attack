@@ -1,0 +1,147 @@
+FROM: Jacob Rhoden <jrho...@unimelb.edu.au>
+SUBJECT: Re: Wrapping IndexSearcher so that it is safe?
+DATE: 12 Nov 2009
+
+The source code for SearcherManager is even downloadable for free:
+    http://www.manning.com/hatcher3/LIAsourcecode.zip
+
+The example source code does some things that is beyond my level of  
+understanding
+of lucene. ie:
+1) To me it looks like an IndexSearcher never gets closed.
+2) I don't understand what happens if the indexreader is reopened  
+while a thread
+     in the middle of a search using an indexsearcher.
+
+So I am going for something a bit simpler:
+
+If a thread wants to use the "SafeIndexSearcher", it first calls  
+retain() and then calls
+release() when its done.
+
+If a thread wants to close the "SafeIndexSearcher" , the close is  
+deferred until all threads
+have called release():
+
+
+public class SafeIndexSearcher {
+
+	private boolean finish = false;
+	private int retainCount = 0;
+	private IndexSearcher searcher;
+
+	public SafeIndexSearcher(IndexSearcher searcher) {
+		this.searcher = searcher;
+	}
+
+	public TopDocs search(Query query, int limit) throws IOException {
+		TopDocs result = searcher.search(query, limit);
+		return result;
+	}
+
+	public Document doc(int doc) throws CorruptIndexException,  
+IOException {
+		return searcher.doc(doc);
+	}
+
+	public synchronized void close() {
+		finish = true;
+	}
+
+	public synchronized SafeIndexSearcher retain() throws IOException {
+		if(finish)
+			throw new IOException("SafeIndexSearcher used after close has been  
+called.");
+		retainCount++;
+		return this;
+	}
+
+	public synchronized SafeIndexSearcher release() {
+		retainCount--;
+		if(finish && retainCount==0)
+			try {
+				searcher.close();
+			} catch (IOException e) {
+				System.err.println("IndexSearcher.close() unexpected error: " +  
+e.getMessage());
+			}
+		return this;
+	}
+
+}
+
+On 12/11/2009, at 9:53 AM, Erick Erickson wrote:
+
+> If you want to spend a few bucks, here's part of a reply to a similar
+> question
+> from Mike McCandless a day or so ago....
+>
+> <<<
+> You can get the book here http://www.manning.com/hatcher3 (NOTE: I'm
+> one of the authors!).
+>
+> Chapter 11 in the book has a class called SearcherManager, that
+> handles the details of reopen/closing the IndexReader while queries
+> are still in flight, that might be useful here.
+>>>>
+>
+> The book is Lucene In Action II. Manning has an "early access program"
+> (MEAP) that lets you get a PDF version. That class is considerably  
+> more
+> extensive and handles the edge cases as I remember it....
+>
+> Best
+> Erick
+>
+>
+> On Wed, Nov 11, 2009 at 5:41 PM, Jacob Rhoden  
+> <jrhoden@unimelb.edu.au>wrote:
+>
+>> I knew I would have overlooked something, thanks for the help!
+>>
+>> On 12/11/2009, at 9:21 AM, Uwe Schindler wrote:
+>>
+>> ....simply do not catch and rethrow the IOException, instead put  
+>> release
+>>> in a
+>>>
+>>> finally block and let the IOException automatically go upwards.
+>>>
+>>>                this.retain();
+>>>>               try {
+>>>>                       TopDocs result = searcher.search(query,  
+>>>> limit);
+>>>>                       return result;
+>>>>               } finally {
+>>>>                       this.release();
+>>>>               }
+>>>>
+>>>
+>>> Less code more secure and effective :-)
+>>>
+>>
+>>
+>> ____________________________________
+>> Information Technology Services,
+>> The University of Melbourne
+>>
+>> Email: jrhoden@unimelb.edu.au
+>> Phone: +61 3 8344 2884
+>> Mobile: +61 4 1095 7575
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+
+____________________________________
+Information Technology Services,
+The University of Melbourne
+
+Email: jrhoden@unimelb.edu.au
+Phone: +61 3 8344 2884
+Mobile: +61 4 1095 7575
+
+

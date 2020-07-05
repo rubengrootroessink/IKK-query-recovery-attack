@@ -1,0 +1,223 @@
+FROM: "Ariel Isaac Romero Cartaya" <isaacr...@gmail.com>
+SUBJECT: Re: Full disk space during indexing process with 120 gb of free disk space
+DATE: 5 Dec 2006
+
+  Here is my source code where I convert pdf files to text for indexing, I
+got this source code from lucene in action examples and adapted it for my
+convenience, I hop you could help me to fix this problem, anyway if you know
+another more efficient way to do it please tell me how to:
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Iterator;
+import java.util.List;
+
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.pdfbox.cos.COSDocument;
+import org.pdfbox.encryption.DecryptDocument;
+import org.pdfbox.exceptions.CryptographyException;
+import org.pdfbox.exceptions.InvalidPasswordException;
+import org.pdfbox.pdfparser.PDFParser;
+import org.pdfbox.pdmodel.PDDocument;
+import org.pdfbox.pdmodel.PDDocumentInformation;
+import org.pdfbox.util.PDFTextStripper;
+
+import cu.co.cenatav.kernel.parser.DocumentHandler;
+import cu.co.cenatav.kernel.parser.DocumentHandlerException;
+import cu.co.cenatav.kernel.parser.schema.SchemaExtractor;
+
+public class PDFBoxPDFHandler implements DocumentHandler {
+
+  public static String password = "-password";
+
+  public Document getDocument(InputStream is)
+    throws DocumentHandlerException {
+
+    COSDocument cosDoc = null;
+    try {
+      cosDoc = parseDocument(is);
+    }
+    catch (IOException e) {
+      closeCOSDocument(cosDoc);
+      throw new DocumentHandlerException(
+        "Cannot parse PDF document", e);
+    }
+
+    // decrypt the PDF document, if it is encrypted
+    try {
+      if (cosDoc.isEncrypted()) {
+        DecryptDocument decryptor = new DecryptDocument(cosDoc);
+        decryptor.decryptDocument(password);
+      }
+    }
+    catch (CryptographyException e) {
+      closeCOSDocument(cosDoc);
+      throw new DocumentHandlerException(
+        "Cannot decrypt PDF document", e);
+    }
+    catch (InvalidPasswordException e) {
+      closeCOSDocument(cosDoc);
+      throw new DocumentHandlerException(
+        "Cannot decrypt PDF document", e);
+    }
+    catch (IOException e) {
+      closeCOSDocument(cosDoc);
+      throw new DocumentHandlerException(
+        "Cannot decrypt PDF document", e);
+    }
+
+    // extract PDF document's textual content
+    String bodyText = null;
+    try {
+      PDFTextStripper stripper = new PDFTextStripper();
+      bodyText = stripper.getText(new PDDocument(cosDoc));
+    }
+    catch (IOException e) {
+      closeCOSDocument(cosDoc);
+      throw new DocumentHandlerException(
+        "Cannot parse PDF document", e);
+//       String errS = e.toString();
+//       if (errS.toLowerCase().indexOf("font") != -1) {
+//       }
+    }
+
+    Document doc = new Document();
+    if (bodyText != null) {
+
+        PDDocument pdDoc = null;
+        PDDocumentInformation docInfo = null;
+
+        try {
+          pdDoc = new PDDocument(cosDoc);
+          docInfo = pdDoc.getDocumentInformation();
+        }
+        catch (Exception e) {
+          closeCOSDocument(cosDoc);
+          closePDDocument(pdDoc);
+          System.err.println("Cannot extraxt metadata from PDF: " +
+e.getMessage());
+        }
+
+          SchemaExtractor schemaExtractor = new SchemaExtractor(bodyText);
+
+          String author = null;
+          if (docInfo != null)
+                  author   =  docInfo.getAuthor();
+
+          if (author == null || author.equals("")){
+
+              //TODO Hacer el componente schemaExtractor
+
+              List Authors = schemaExtractor.getAuthor();
+
+              Iterator I = Authors.iterator();
+
+              while (I.hasNext()){
+                   String Author = (String)I.next();
+               doc.add(new Field("author", Author, Field.Store.YES ,
+Field.Index.TOKENIZED, Field.TermVector.YES));
+              }
+          }else{
+              doc.add(new Field("author", author, Field.Store.YES ,
+Field.Index.TOKENIZED, Field.TermVector.YES));
+          }
+          String title = null;
+          if (docInfo != null)
+                 title = docInfo.getTitle();
+
+          if (title == null || title.equals("")){
+                      title = schemaExtractor.getTitle();
+          }
+
+          String keywords = null;
+
+          if (docInfo != null)
+             keywords = docInfo.getKeywords();
+          if (keywords == null)
+              keywords = "";
+
+          String summary = null;
+
+          if (docInfo != null)
+                      summary  = docInfo.getProducer() + " " +
+docInfo.getCreator() + " " +  docInfo.getSubject();
+
+          if (summary == null || summary.equals("")){
+                      summary = schemaExtractor.getAbstract();
+          }
+
+          String content = schemaExtractor.getContent();
+
+          Field fieldTitle = new Field("title", title, Field.Store.YES ,
+Field.Index.TOKENIZED,Field.TermVector.YES);
+          //fieldTitle.setBoost(new Float(1.5));
+          doc.add(fieldTitle);
+
+          Field fieldSumary = new Field("sumary", summary, Field.Store.YES ,
+Field.Index.TOKENIZED,Field.TermVector.YES);
+         //fieldSumary.setBoost(new Float(1.3));
+          doc.add(fieldSumary);
+
+
+          doc.add(new Field("content", content, Field.Store.YES ,
+Field.Index.TOKENIZED,Field.TermVector.YES));
+
+          doc.add(new Field("keywords", keywords, Field.Store.YES ,
+Field.Index.UN_TOKENIZED,Field.TermVector.YES));
+
+          closePDDocument(pdDoc);
+    }
+
+
+    // extract PDF document's meta-data
+
+    closeCOSDocument(cosDoc);
+
+    return doc;
+  }
+
+  private static COSDocument parseDocument(InputStream is)
+    throws IOException {
+    PDFParser parser = new PDFParser(is);
+    parser.parse();
+    return parser.getDocument();
+  }
+
+  private void closeCOSDocument(COSDocument cosDoc) {
+    if (cosDoc != null) {
+      try {
+        cosDoc.close();
+      }
+      catch (IOException e) {
+        // eat it, what else can we do?
+      }
+    }
+  }
+
+  private void closePDDocument(PDDocument pdDoc) {
+    if (pdDoc != null) {
+      try {
+        pdDoc.close();
+      }
+      catch (IOException e) {
+        // eat it, what else can we do?
+      }
+    }
+  }
+
+  public static void main(String[] args) throws Exception
+  {
+    PDFBoxPDFHandler handler = new PDFBoxPDFHandler();
+
+    Document doc = handler.getDocument(new FileInputStream(new
+File(args[0])));
+
+    System.out.println(doc);
+  }
+}
+
+Could you help me please.
+

@@ -1,0 +1,98 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: IndexReader.Terms - internals
+DATE: 11 May 2009
+
+No, there is no other way to do this. And if you think, the TermEnum takes
+too much RAM when returning all terms and also from different, you can be
+sure, that there is no wasted memory, as the term enum does not allocate the
+whole terms (like normal Java iterators). The term enum is iterated on disk
+and terms are loaded from there (this is why it throws IOException).
+
+The reason behind this behaviour is simple:
+IR.terms(term) returns all terms >= the given term (see javadoc), not all
+terms starting with a specific field. Terms are ordered by fieldname and
+then text. Because of this it looks like the TermEnum would only return
+terms of this field. One special case is:
+If the field name does not exist in the Index, IR.terms(term) would also be
+positioned on the first term >= the given one, but as the field does not
+exist, it would be the first term of the alphabetically next field name.
+
+So in gernal you stop iterating when no more terms are available or the
+field name of the current term != the requested field. Almost all internal
+algorithms inside Lucene (PrefixQuery, RangeQuery,...) work in this way!
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: David Causse [mailto:dcausse@spotter.com]
+> Sent: Monday, May 11, 2009 6:21 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: IndexReader.Terms - internals
+> 
+> Hi,
+> We noticed this behaviour also, so we do like this :
+> 
+> Map<Term, Integer> result = new HashMap<Term, Integer>();
+> TermEnum all;
+> if(matcher.fullScan()) {
+>         all = reader.terms(new Term(field));
+> } else {
+>         all = reader.terms(new Term(field, matcher.prefix()));
+> }
+> if(all == null) return result;
+> Term t;
+> do {
+>         t = all.term();
+>         if(t != null && matcher.match(t.text()))
+>                 result.put(t,all.docFreq());
+> 
+> } while(all.next() && all.term().field() == field && (matcher.fullScan()
+> ? true : t.text().startsWith(matcher.prefix())));
+> return result;
+> 
+> matcher is an application level object it is designed to match complex
+> word. So we loop on the TermEnum until we consider we reached the end of
+> interesting information.
+> To summarize: you stop the loop when
+> 1. there is no more data in TermEnum
+> 2. the field is not the same (don't forget to intern String field if it
+> comes from outside)
+> 3. you reached non-matching Terms by checking a prefix.
+> 
+> If there is better way to do I'd be glad to hear of.
+> 
+> David.
+> 
+> Ian Vink a écrit :
+> >             IndexReader rdr = IndexReader.Open(myFolder);
+> >             TermEnum terms = rdr.Terms((new Term(myTermName, "")));
+> >
+> > (from .NET land, but it's all the same)
+> >
+> > This code works great, I can loop thru the terms nicely, but after it
+> > returns all the myTermName terms, it goes into all other terms.
+> >
+> > Is there a way to limit the rdr.Terms to return only those whose field
+> is
+> > myTermName
+> >
+> >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

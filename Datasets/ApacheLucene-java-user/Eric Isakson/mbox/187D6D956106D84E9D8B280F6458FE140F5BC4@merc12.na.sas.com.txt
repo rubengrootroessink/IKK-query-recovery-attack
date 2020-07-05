@@ -1,0 +1,147 @@
+FROM: "Eric Isakson" <Eric.Isak...@sas.com>
+SUBJECT: RE: Analyzer use at search time?
+DATE: 30 Apr 2003
+
+When looking into something similar to this in the past, I noticed that when an anlalyzer returns
+multiple tokens the query parser treated them like a phrase, so when your document was indexed
+with the word:
+
+foo
+
+Then your search analyzer turns foo into the tokens:
+
+foo
+bar
+
+Your query object will be looking for the phrase "foo bar" and your document only has the
+token foo so you get no hits.
+
+I noticed this when I was running the unit tests against a modified version of the query parser.
+
+I suspect this is what is causing your trouble, though I don't know how to "fix" it, you might
+consider taking the query parser code as a baseline and roll your own that behaves a little
+differently.
+
+Here is the snip of code from QueryParser that does this:
+
+protected Query org.apache.lucene.queryParser.QueryParser.getFieldQuery(String field,
+                                Analyzer analyzer,
+                                String queryText) {
+    // Use the analyzer to get all the tokens, and then build a TermQuery,
+    // PhraseQuery, or nothing based on the term count
+
+    TokenStream source = analyzer.tokenStream(field,
+                                              new StringReader(queryText));
+    Vector v = new Vector();
+    org.apache.lucene.analysis.Token t;
+
+    while (true) {
+      try {
+        t = source.next();
+      }
+      catch (IOException e) {
+        t = null;
+      }
+      if (t == null)
+        break;
+      v.addElement(t.termText());
+    }
+    if (v.size() == 0)
+      return null;
+    else if (v.size() == 1)
+      return new TermQuery(new Term(field, (String) v.elementAt(0)));
+    else {
+      PhraseQuery q = new PhraseQuery();
+      q.setSlop(phraseSlop);
+      for (int i=0; i<v.size(); i++) {
+        q.add(new Term(field, (String) v.elementAt(i)));
+      }
+      return q;
+    }
+  }
+
+
+Eric
+--
+Eric D. Isakson        SAS Institute Inc.
+Application Developer  SAS Campus Drive
+XML Technologies       Cary, NC 27513
+(919) 531-3639         http://www.sas.com
+
+
+
+-----Original Message-----
+From: Karsten Konrad [mailto:Karsten.Konrad@xtramind.com] 
+Sent: Wednesday, April 30, 2003 5:21 AM
+To: Lucene Users List
+Subject: AW: Analyzer use at search time?
+
+
+
+Hi,
+
+I had (and have) exactly the same problem: My postfix reducer returns an unstemmend and a
+stemmed version of the word; but using this analyzer during search will give 
+me either less than expected or no hits.
+
+However, using analyzers during indexing that produce more than one token has 
+other disadvantages anyway: the index gets much larger and searches therefore slower. 
+I would like to use this kind of analyzer therefore only during search, but the 
+behavior described above prevents this too.
+
+So, again, is this a bug or did we overlook something?
+
+Regards,
+
+Karsten
+
+-----Ursprüngliche Nachricht-----
+Von: Armbrust, Daniel C. [mailto:Armbrust.Daniel@mayo.edu]
+Gesendet: Dienstag, 29. April 2003 23:49
+An: 'Lucene Users List'
+Betreff: Analyzer use at search time?
+
+
+I've written an analyzer which uses a filter which I wrote which invokes LVG's (http://umlslex.nlm.nih.gov/lvg/2003/index.html)
+norm function on each token, and then, if there is more than one result for the token, it
+puts all of the results into the same position as the original term (via setPositionIncrement(0)).
+ This works great while indexing documents.
+
+When my filter is run, LVG's norm turns the word "leaves" into "leaf" and "leave".  My filter
+returns 3 tokens - leaves (position increment 1) leaf (0) and leave(0).
+
+Now, when I search, if I provide the same LVG enabled analyzer, when I search for the word
+"leaves" I get 0 hits.  I can see that it calls the norm function, and this returns the same
+three words again as I would expect it to.  But I get 0 hits, even though all 3 words are
+in the index.
+
+If I search with an analyzer that does not have LVG in its flow, I get the correct hits each
+of these searches - 
+
+leaves
+leaf
+leave
+
+So, is there a bug in the way that analyzers are used during a search - in that it does not
+expect the analyzer to return more than one word in a single spot - or am I misusing lucene?
+
+
+Thanks, 
+
+Dan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

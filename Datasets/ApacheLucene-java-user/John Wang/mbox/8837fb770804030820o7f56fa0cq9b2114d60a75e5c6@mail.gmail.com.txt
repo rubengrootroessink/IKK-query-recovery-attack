@@ -1,0 +1,108 @@
+FROM: "John Wang" <john.w...@gmail.com>
+SUBJECT: Re: payload performance wrt fieldcache
+DATE: 3 Apr 2008
+
+I am loading both from disk.
+But I found the culprit:
+
+My code:
+
+while (tp.next())
+
+          {
+
+          //assert tp.doc() < maxDoc;
+
+          tp.nextPosition();          <-- this call is the problem
+
+          tp.getPayload(payloadBuffer, 0);
+
+          byter.load(_array, tp.doc(), payloadBuffer);
+
+      }
+
+The way I stored it, there is one position per doc. Removed call to
+tp.nextPosition, performance improved by a factor of multiple digits.
+
+I would think this call should be free.
+
+
+
+Thanks
+
+-John
+
+On Thu, Apr 3, 2008 at 8:16 AM, Chris Lu <chris.lu@gmail.com> wrote:
+
+> If your index size grows larger, payload method would be more slower.
+> It's because Payload are read from hard disk. Fieldcache is in the
+> memory, which is much faster.
+>
+> Unless you are going with Solid State Disk, you'd better go with
+> Fieldcache for faster search.
+>
+> --
+> Chris Lu
+> -------------------------
+> Instant Scalable Full-Text Search On Any Database/Application
+> site: http://www.dbsight.net
+> demo: http://search.dbsight.com
+> Lucene Database Search in 3 minutes:
+>
+> http://wiki.dbsight.com/index.php?title=Create_Lucene_Database_Search_in_3_minutes
+> DBSight customer, a shopping comparison site, (anonymous per request)
+> got 2.6 Million Euro funding!
+>
+>
+> On Thu, Apr 3, 2008 at 7:36 AM, John Wang <john.wang@gmail.com> wrote:
+> > Sorry, gmail was screwy and accidentally sent the msg.
+> >  Anyway,
+> >
+> >  I have a large index, about 30M docs.
+> >  I have a date field (by days) and there are about 1000 of them, every
+> doc
+> >  has a date field filled in.
+> >
+> >  So out of curiosity I index the date field two ways:
+> >  1) using "date" as a field, and set the date value for each doc.
+> >  2) new term: "_payload:_val" and added the date (as a long or 8 byte
+> array)
+> >  into the payload of each doc.
+> >
+> >  loading into an array long[] of length maxdoc of dates, the performance
+> was
+> >  surprising:
+> >  using payload is 7 times slower than using fieldcache.
+> >
+> >  At first I thought it was because of the conversion between byte[8] to
+> a
+> >  long for each doc, I changed it so it loads into byte[8*maxdoc] without
+> >  doing the conversion, and the result is the same.
+> >
+> >  I then did another experiment:
+> >  lower the number of dates down to a small number, e.g. 50, and timed
+> field
+> >  cache load, and it took much longer than when it had 1000.
+> >
+> >  I did some profiling and the profiler is pointing to TermPositions.next
+> >  and TermPositions.nextPosition and TermPositions.getPayload as the
+> culprit.
+> >
+> >  I would think payload would always be faster. Any ideas?
+> >
+> >  Thanks
+> >  -John
+> >
+> >  On Thu, Apr 3, 2008 at 7:27 AM, John Wang <john.wang@gmail.com> wrote:
+> >
+> >  > Hi:
+> >  >
+> >  >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

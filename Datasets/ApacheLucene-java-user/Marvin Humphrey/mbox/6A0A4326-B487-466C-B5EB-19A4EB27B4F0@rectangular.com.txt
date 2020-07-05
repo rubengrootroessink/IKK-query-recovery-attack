@@ -1,0 +1,94 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: Memory Usage
+DATE: 18 Nov 2005
+
+
+On Nov 17, 2005, at 4:16 PM, Daniel Noll wrote:
+
+> Doug Cutting wrote:
+>
+>> Daniel Noll wrote:
+>>
+>>> I actually did throw a lot of terms in, and eventually chose  
+>>> "one" for the tests because it was the slowest query to complete  
+>>> of them all (hence I figured it was already spending some fairly  
+>>> long time in I/O, and would be penalised the most.)  Every other  
+>>> query was around 7ms before tweaking, and the tweak increased  
+>>> them all to somewhere around 10ms but that's still a lot faster  
+>>> than "one" was even at its fastest.
+>>
+>>
+>> Different terms are affected differently by this tweak, so results  
+>> for a single term don't reveal much.
+>
+> Hence why I just said: "I actually did throw a lot of terms in".
+
+I'd thought of the point Doug raises when first examining your data.   
+I suspect that your hypothesis will be borne out in time, but I agree  
+with Doug that corroborating experimentation is required.  You're in  
+the company of people who know how hard it is to design and execute a  
+rigorous, scientifically valid experiment; let me reiterate my thanks  
+for the work you've done so far.
+
+It's unlikely that the time range for the query would have been so  
+steady over skip ranges of 1-32 if location from the index point were  
+a factor.  You'd have to be say, 127 terms out from the index point  
+with IndexIntervals of 128, 256, 512, 1024, 2048, and 4096.  Maybe...  
+but probably not.  Especially since the data extends out on a smooth  
+curve after that.
+
+> Timings for a simple TermQuery on the term "one" (docFreq = 22):
+>
+>    skip    time range for query (ms)    approx mem usage of JVM (MB)
+>      1      28 ~  30                     49.2
+>      2      28 ~  30
+>      4      28 ~  30
+>      8      29 ~  31
+>     16      29 ~  32                     15.9 (!!)
+>     32      29 ~  33
+>     64      38 ~  42
+>    128      59 ~  61
+>    256      99 ~ 102                     14.1
+
+However, there's still the unexplained disparity between the minimum  
+time for "test" (28-30) and the minimum time for "one" (6.8-7.6).   
+I'd really like to hunt that down and kill it.
+
+> Timings for a simple TermQuery on the term "test" (docFreq = 31,356):
+>
+>    skip    time range for query (ms)
+>      1       6.8 ~  7.6
+>     16       9.7 ~ 10.2
+>    256      69   ~ 72
+
+It may be possible to code up an experiment in isolation -- without  
+needing to launch a full Lucene search app.  All we need is a  
+TermInfosReader (and the stuff it takes to build a TermInfosReader: a  
+Directory, a CompoundFileReader, and a FieldInfos IIRC).  Assemble a  
+bunch of random terms, using next() if you have to, and seek to them.
+
+Any existing .tii and .tis files will do.  The size of the index  
+should hardly matter after a certain point, because finding the .tis  
+pointer data via the pre-loaded .tii index information is just an  
+array divide-and-conquer operation.  The first limiting factor is  
+probably HD-seek time.  Decompressing a Lucene term dictionary file  
+isn't *that* intense.
+
+I hope you won't mind if I don't volunteer to do the actual coding or  
+data collection, though, as I have my hands full porting all of  
+Lucene. :)
+
+Any critiques out there for this proposed experiment?
+
+Cheers,
+
+Marvin Humphrey
+Rectangular Research
+http://www.rectangular.com/
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

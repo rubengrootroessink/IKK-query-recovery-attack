@@ -1,0 +1,83 @@
+FROM: Chris Schilling <ch...@cellixis.com>
+SUBJECT: new to lucene, non standard index
+DATE: 5 May 2011
+
+Hi,
+
+I am trying to figure out how to solve this problem:
+
+I have about 500,000 files that I would like to index, but the files are structured.  So,
+each file has the following layout:
+
+doc1
+token1, weight11, frequency1, weight21
+token2, weight12, frequency2, weight22
+.
+.
+.
+
+etc for 500,000 docs. 
+
+Basically, I would like to index the tokens for each doc.  When I search for a token, I would
+like to be able to return the top docs sorted by weight1, frequency, or weight2.
+
+So, in my naive setup, I loop through the files in the directory, then I loop through the
+lines of the file.   In side of the loop through each file, I call this function:
+
+	public Document processKeywords(Document doc, String keyword, Float weight1, Float weight2,
+Integer frequency) throws Exception {
+			Document doc = new Document();
+			doc.add(new Field("keywords", keyword, Field.Store.NO, Field.Index.ANALYZED));			
+			doc.add(new NumericField(keyword+"weight1", Field.Store.YES, true).setFloatValue(weight1));
+		
+			doc.add(new NumericField(keyword+"weight2", Field.Store.YES, true).setFloatValue(weight2));
+		
+			doc.add(new NumericField(keyword+"frequency", Field.Store.YES, true).setFloatValue(frequency));
+		
+			return doc;
+	}
+
+So, for each token, I create 3 new fields each time. Notice how I am trying to index the keyword
+in the "keywords" field.  For the weights and frequency, I create a new field with a name
+based on the keyword.  On average, I have 100 tokens per document, so each document will have
+about 300 distinct fields.  
+
+When running my program, the lucene portion eats up tons of memory and when it gets to the
+max alloted by the JVM (I have tried allowing up to 4 Gb), the program slows to a crawl. 
+I assume it is spending all of its time in garbage collection due to all these fields. 
+
+My code above seems like a very hacky way of accomplishing what I want (sorting documents
+based on keyword search using different numeric fields associated with that keyword).  
+
+FYI, here is the main search code, where q is the token I am searching for and sortby is the
+field I want to use to sort.  I setup a QP to search for the keyword in the "keywords" field.
+ Then, I can extract the stats that I indexed for the given query keyword.
+
+	private static final QueryParser parser = new QueryParser(Version.LUCENE_30, "keywords",
+new StandardAnalyzer(Version.LUCENE_30));
+
+	public void search(String q, String sortby) throws IOException, ParseException {
+		Query query = parser.parse(q);
+		long start = System.currentTimeMillis();
+		TopDocs hits = this.is.search(query, null, 10, new Sort(new SortField(q+"sortby", SortField.FLOAT,
+true)));
+		long end = System.currentTimeMillis();
+		System.out.println("Found " + hits.totalHits +
+				" document(s) (in " + (end - start) +
+				" milliseconds) that matched query '" +
+				q + "':");
+		for(ScoreDoc scoreDoc : hits.scoreDocs) {
+			Document doc = this.is.doc(scoreDoc.doc);
+			String hash = doc.get("hash");
+			System.out.println(hash + " " + doc.get(q+"sortby") + " " + hash);
+		}
+	}
+
+I am pretty new to Lucene, so I hope this makes sense.  I tried to pare my problem down as
+much as possible.  Like I said, the main problem I am running into is that after processing
+about 30000 documents, the indexing slows to a crawl and seems to spend all of its time in
+the garbage collector.  I am looking for a more efficient/effective way of solving this problem.
+ Code tidbits would help, but are not necessary :)
+
+Thanks for your help,
+Chris S.

@@ -1,0 +1,194 @@
+FROM: Eran Sevi <erans...@gmail.com>
+SUBJECT: Re: score from spans
+DATE: 26 Aug 2009
+
+I've done some work and would like to post it to the list in order to get
+some opinions and try to reach something that is satisfactory for everyone.
+
+One problem is that i'm actually using Lucene.Net and have written the code
+in c#.
+Anothe problem is that I'm using version 2.3.2 which might be a bit
+different than current 2.9 version.
+
+How do you suggest we should proceed?
+
+Here's a description of what i've done:
+
+I've managed to create some sort of solution to this problem -
+
+The result is that we can get an equal score for a SpanOrQuery as a regular
+BooleanQuery with only SHOULD clauses.
+We can also get an equal score for a SpanNearQuery as a regular BooleanQuery
+with only MUST clauses.
+
+The good is that the score is calculated recursively and the boosts of the
+inner queries are taken into account.
+The bad in my solution is that the span distance is not taken into account
+and that the spans are fetched for each sub query which can really affect
+performance.
+
+My solution is as follows:
+
+1. Create a derived class for each "complex" span*Query that inherit from
+SpanWeight (e.g. SpanNearWeight).
+2. The new weight class is initialized with the SpanNearQuery and creates a
+weight for each of the query's clauses - this gives us the recursive pass.
+3. override the "SumOfSquaredWeights","Normalize" methods as the
+BooleanWeight implementation.
+4.  override the "Scorer" method as follows: create a BooleanScorer and add
+the scorers from the weights of the sub queries. for SpanOrQuery add them as
+not required and not prohibited. for SpanNearQuery add them as required and
+not prohibited.
+5. Override the "CreateWeight" method in the Span*Query to return the new
+Weight class instead of the old SpanWeight class (the SpanWeight class will
+still be returned for SpanTermQuery which doesn't contain any sub queries
+and shouldn't be overriden).
+6. SpanWeight - multiply queryNorm in query.GetBoost() in Normalize method.
+7. optional - change the "SetFreqCurrentDoc" method in SpanScorer to sum the
+freq in each doc instead of running SloppyFreq.
+
+
+I hope you can understand the main idea from my complicated description.
+The problem with the current spans implementation is that by the time you
+have the spans you don't know how they were created - the span of a
+complicated query or a simple query looks the same and treated the same.
+
+With this method you can at least get a score for span queries which is not
+the most accurate but at least take into account sub queries and boosts.
+Thanks,
+Eran.
+
+
+On Tue, Aug 11, 2009 at 4:28 AM, Mark Miller <markrmiller@gmail.com> wrote:
+
+> Hey Eran,
+>
+> I've started work on this in the past - you are right, it gets complicated
+> quick! Its also likely to bring with it a sizable performance cost.
+>
+> We already have an issue in JIRA for this that is quite old:
+> https://issues.apache.org/jira/browse/LUCENE-533
+>
+> If you get any work going, don't be shy to start posting code there, and
+> perhaps you can get some additional eyes/help as you go.
+>
+> I think in the end, it might have to be an optional mode, if we get the
+> code produced.
+>
+> --
+> - Mark
+>
+> http://www.lucidimagination.com
+>
+>
+>
+>
+> Eran Sevi wrote:
+>
+>> Thanks for the answer.
+>>
+>> I tried to further understand the weight and score mechanism when running
+>> a
+>> span query search.
+>> I noticed that indeed the SpanScorer and SpanWeight are being called and
+>> some score is returned but it seems to me that these basic implementations
+>> are more appropriate for the basic SpanTermQuery.
+>> For the other types of span queries, the inner queries scores and weights
+>> are not taken into account - for example if I run a simple SpanOrQuery and
+>> boost one of it's child SpanTermQuery, the boost is not taken into
+>> account.
+>>
+>> It seems to me that some recursive calculation is required in order to
+>> take
+>> into account all the weights and scores of the span's sub queries.
+>> I'm trying to come up with a correct implementation for SpanOrQuery,
+>> SpanNearQuery, SpanNotQuery based on similiar calculations of
+>> BooleanQuery.
+>>
+>> Do you have a better idea on how to achieve the correct scoring? the score
+>> calculations are quite complex for each case of span queries so any help
+>> is
+>> appreciated.
+>>
+>> Thanks, Eran.
+>>
+>> On Tue, Aug 4, 2009 at 8:51 PM, Grant Ingersoll <gsingers@apache.org>
+>> wrote:
+>>
+>>
+>>
+>>> A SpanQuery is a Query, so if you do a search for it, you will get
+>>> scores.
+>>>  However, the mechanism is a bit complicated, b/c actually getting the
+>>> Spans
+>>> is separate from doing the query.  I agree there could be tighter
+>>> integration.  However, what you could do is use Spans.skipTo to move to
+>>> the
+>>> document you are examining in the search results.
+>>>
+>>> -Grant
+>>>
+>>>
+>>> On Aug 2, 2009, at 11:30 AM, Eran Sevi wrote:
+>>>
+>>> Hi,
+>>>
+>>>
+>>>> How can I get the score of a span that is the result of
+>>>> SpanQuery.getSpans()
+>>>> ? The score should can be the same for each document, but if it's unique
+>>>> per
+>>>> span, it's even better.
+>>>>
+>>>> I tried looking for a way to expose this functionality through the Spans
+>>>> class but it looks too complicated.
+>>>> I'm not even sure that by default some score calculation is even
+>>>> performed
+>>>> when using span queries.
+>>>>
+>>>> I've noticed that some calculations are made using payloads and
+>>>> BoostingTermQuery but the score result is used internally and can't be
+>>>> accessed from the Spans results.
+>>>> I don't want to re-run the query again using a HitCollector and since
+>>>> the
+>>>> reader is passed to getSpans, I think it should be possible to do what I
+>>>> want.
+>>>>
+>>>> Any help on the correct way to expose the span score will be
+>>>> appreciated.
+>>>>
+>>>> Thanks,
+>>>> Eran.
+>>>>
+>>>>
+>>>>
+>>> --------------------------
+>>> Grant Ingersoll
+>>> http://www.lucidimagination.com/
+>>>
+>>> Search the Lucene ecosystem (Lucene/Solr/Nutch/Mahout/Tika/Droids) using
+>>> Solr/Lucene:
+>>> http://www.lucidimagination.com/search
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>>
+>>
+>>
+>>
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

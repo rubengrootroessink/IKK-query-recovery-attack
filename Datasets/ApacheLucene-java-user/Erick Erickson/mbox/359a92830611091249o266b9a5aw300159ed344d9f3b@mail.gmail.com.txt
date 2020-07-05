@@ -1,0 +1,104 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Searching by bit masks
+DATE: 9 Nov 2006
+
+Let me see if I have a clue what you're trying to do. Warning: I'm a bit
+confused since "filter" has a very specific meaning in Lucene, so when you
+talk about filters I'm assuming that you're NOT talking about Lucene
+filters, but rather just a set of flags you're associating with each
+document, and then a set of flags with the same semantics at search time.
+
+If that's all true, here's the first approach I would take...
+
+Don't store a bitmask in Lucene. Rather, index a field for each flag with
+each document. NOTE: you do NOT have to have the same fields for all
+documents....
+
+Something like
+Document doc = new Document();
+doc.add("flag1", "Y");
+doc.add("flag2", "Y");
+IndexWriter.add(doc);
+
+Document doc = new Document();
+doc.add("flag1", "Y");   // NOTE: no "flag2" field. No problem.
+IndexWriter.add(doc);
+
+Now your searches are simple. Just search for the "or" of the fields with
+the flags you're interested in. i.e. "flag1=Y" or "flag2="Y".....
+
+If you want to get fancy, you can use TermDocs to enumerate the document IDs
+with values for specified fields and perhaps even create a Lucene filter
+based on that enumeration. This is much faster than you may think.
+
+You probably want to index but not store such flags.
+
+I suspect that this will be waaaaay faster than trying to inspect a binary
+field in each document and then see if the bits were set, because that would
+require you to read each document rather than just look at the terms in the
+index.
+
+I doubt that this will add much in the way of size to your index, and
+anyway, disk space is cheap.
+
+NOTE: the down side here is that you must delete and re-add a document to
+modify it, which may be slow. But you'd have to do that when you updated
+your bit mask anyway.....
+
+
+Another approach: create a set of Lucene Filters (really, these are just
+Java bitsets), one for each flag. All this is a bitset with one bit for each
+document, or about 1M of memory per flag with 8M docs. So you'd populate
+flag1Filter, flag2Filter... and have these ready whenever you needed them.
+
+You should very rapidly be able to do any of the logical operations on these
+bitsets (OR in your case) and use the resulting Lucene filter in your query.
+It's up to you whether you create these filters as part of server warm-up or
+just create them when needed, letting the first user who encounters them pay
+the price for creating them. This is kind of the Solr warm-up idea. The
+CachingWrapperFilter class should keep these around for you. Creating a
+Lucene filter is much faster than I thought. See Lucene In Action for a
+sample.
+
+Of course, I may be entirely misunderstanding your problem, in which case
+I'd ask you to explain a bit more <G>.
+
+Best
+Erick
+
+On 11/9/06, Larry Taylor <ltaylor@employon.com> wrote:
+>
+> Hello,
+>
+> I am currently evaluating Lucene to see if it would be appropriate to
+> replace my company's current search software. So far everything has been
+> looking great, however there is one requirement that I am not too
+> certain about.
+>
+> What we need to do is to be able to store a bit mask specifying various
+> filter flags for a document in the index and then search this field by
+> specifying another bit mask with desired filters, returning documents
+> that have any of the specified flags set. In other words, we are doing a
+> bitwise OR on the stored filter bit mask and the specified filter bit
+> mask and if it is non-zero, we want to return the document.
+>
+> Before I started toying around with various options myself, I wanted to
+> see if any of you good folks in the Lucene community had some
+> suggestions for an efficient way to implement this.
+>
+> We currently need to index ~8,000,000 documents. We have several filter
+> flag fields, the most important of which currently has 7 possible flags
+> with any combination of the flags being valid. The number of flags is
+> expected to increase rather rapidly in the near future.
+>
+> My preemptive thanks for your suggestions,
+>
+>
+> Lawrence Taylor
+> Senior Software Engineer
+> Employon
+> Message was edited by: ltaylor.employon
+>
+>
+>
+

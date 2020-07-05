@@ -1,0 +1,264 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: 2 phase commit with external data
+DATE: 9 Nov 2009
+
+OK, thanks for the tests... this test also reproduces it:
+
+  public void testPrepareCommitIsCurrent() throws Throwable {
+    Directory dir = new MockRAMDirectory();
+    IndexWriter writer = new IndexWriter(dir, new
+WhitespaceAnalyzer(), IndexWriter.MaxFieldLength.UNLIMITED);
+    Document doc = new Document();
+    writer.addDocument(doc);
+    IndexReader r = IndexReader.open(dir, true);
+    assertTrue(r.isCurrent());
+    writer.addDocument(doc);
+    writer.prepareCommit();
+    assertTrue(r.isCurrent());
+    writer.commit();
+    assertFalse(r.isCurrent());
+    writer.close();
+    r.close();
+    dir.close();
+  }
+
+I see the problem -- the issue is that DirectoryReader just reads up
+to the version, out of the segments file, without fully reading the
+rest of the file to confirm it's done being written (committed).  This
+is simple to fix -- I'll open an issue.  OK I opened:
+
+    https://issues.apache.org/jira/browse/LUCENE-2046
+
+Thanks for catching and reporting this Peter!
+
+Mike
+
+On Sun, Nov 8, 2009 at 6:23 PM, Peter Keegan <peterlkeegan@gmail.com> wrote:
+> Here is some stand-alone code that reproduces the problem. There are 2
+> classes. jvm1 creates the index, jvm2 reads the index. The system console
+> input is used to synchronize the 4 steps.
+>
+> jvm1:
+> --------------
+> import java.io.File;
+> import java.util.Scanner;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.store.FSDirectory;
+> import org.apache.lucene.store.SingleInstanceLockFactory;
+> import org.apache.lucene.search.DefaultSimilarity;
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+>
+>
+>
+> public class jvm1 {
+>
+>    /**
+>     * @param args
+>     */
+>    public static void main(String[] args) {
+>        String indexPath;
+>
+>        try {
+>            Scanner in = new Scanner(System.in);
+>
+>            // create index
+>            indexPath = (args.length > 0) ? args[0] : "index";
+>            File idxFile  = new File(indexPath);
+>            idxFile.mkdirs();
+>            FSDirectory dir = FSDirectory.open(idxFile);
+>            SingleInstanceLockFactory lockFactory = new
+> SingleInstanceLockFactory();
+>            dir.setLockFactory(lockFactory);
+>            IndexWriter writer = new IndexWriter(dir, new
+> WhitespaceAnalyzer(), true, IndexWriter.MaxFieldLength.UNLIMITED);
+>            writer.setUseCompoundFile(false);
+>            writer.setSimilarity(new DefaultSimilarity());
+>            // Add some docs
+>            Document doc = new Document();
+>            doc.add(new Field("field", "aaa", Field.Store.YES,
+> Field.Index.ANALYZED, Field.TermVector.WITH_POSITIONS_OFFSETS));
+>            for(int i=0;i<1000;i++) {
+>              writer.addDocument(doc);
+>            }
+>            writer.commit(); // flush to disk
+>            // Now wait for jvm2 to create reader
+>            System.out.println("Index created. Start jvm2 then hit 'Enter'
+> after jvm2 displays doc count");
+>            String input = in.nextLine();
+>            // Add some more docs, the prepare to commit
+>            for(int i=0;i<1000;i++) {
+>                  writer.addDocument(doc);
+>            }
+>            writer.prepareCommit();
+>            System.out.println("Index 'prepareCommit' called. Go to jvm2 and
+> hit 'Enter' (it should then call 'isCurrent')");
+>            System.out.println("Hit 'Enter' here to commit changes and close
+> index");
+>            input = in.nextLine();
+>            System.out.println("jvm1 about to commit/close index");
+>            writer.commit();
+>            writer.close();
+>            System.out.println("jvm1 done");
+>
+>        } catch (Exception  e) {
+>            // TODO Auto-generated catch block
+>            e.printStackTrace();
+>        }
+>
+>    }
+>
+> }
+>
+> jvm2:
+> -------------
+> import java.util.Scanner;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.store.FSDirectory;
+>
+>
+> public class jvm2 {
+>
+>    /**
+>     * @param args
+>     */
+>    public static void main(String[] args) {
+>        String indexPath;
+>        try {
+>            Scanner in = new Scanner(System.in);
+>            indexPath = (args.length > 0) ? args[0] : "index";
+>            FSDirectory dir = FSDirectory.open(new java.io.File(indexPath));
+>            IndexReader reader  = IndexReader.open(dir, false);
+>            System.out.println("jvm2 running,  index doc count:
+> "+reader.numDocs());
+>            boolean isCurrent = reader.isCurrent();
+>            System.out.println("jvm2 isCurrent="+isCurrent);
+>            System.out.println("waiting for jvm1 to 'prepareCommit'. Hit
+> 'Enter' when this happens");
+>            String input = in.nextLine();;
+>            isCurrent = reader.isCurrent();
+>            System.out.println("jvm2 isCurrent="+isCurrent);
+>            reader.close();
+>            System.out.println("done");
+>
+>        } catch (Exception  e) {
+>            // TODO Auto-generated catch block
+>            e.printStackTrace();
+>        }
+>
+>    }
+>
+> }
+>
+> Peter
+>
+>
+>
+> On Sat, Nov 7, 2009 at 4:17 AM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>> Hmm... for step 4 you should have gotten "true" back from isCurrent.
+>> You're sure there were no intervening calls to IndexWriter.commit?
+>> Are you using Lucene 2.9?   If not, you have to make sure autoCommit
+>> is false when opening the IndexWriter.
+>>
+>> Mike
+>>
+>> On Fri, Nov 6, 2009 at 2:46 PM, Peter Keegan <peterlkeegan@gmail.com>
+>> wrote:
+>> > Here's a new scenario:
+>> >
+>> > 1. JVM 1 creates IndexWriter, version 1
+>> > 2. JVM 2 creates IndexReader, version 1
+>> > 3. JVM 1 IndexWriter calls prepareCommit()
+>> > 4. JVM 2 IndexReader.isCurrent() returns false
+>> >
+>> > In step 4, I expected 'isCurrent' to return true until the IndexWriter
+>> had
+>> > committed in JVM 1. Is this the correct behavior?
+>> >
+>> > Peter
+>> >
+>> >
+>> > On Fri, Nov 6, 2009 at 11:40 AM, Michael McCandless <
+>> > lucene@mikemccandless.com> wrote:
+>> >
+>> >> It will always return a reader reflecting every change done with that
+>> >> writer (plus, the index as it was when the writer was opened) before
+>> >> getReader was called.
+>> >>
+>> >> It's unaffected by the call to prepareCommit.
+>> >>
+>> >> Mike
+>> >>
+>> >> On Fri, Nov 6, 2009 at 11:35 AM, Peter Keegan <peterlkeegan@gmail.com>
+>> >> wrote:
+>> >> > Which version of the index will IndexWriter.getReader() return if
+>> there
+>> >> have
+>> >> > been updates, but no call to 'prepareCommit'?
+>> >> >
+>> >> >
+>> >> > On Fri, Nov 6, 2009 at 11:33 AM, Michael McCandless <
+>> >> > lucene@mikemccandless.com> wrote:
+>> >> >
+>> >> >> On Fri, Nov 6, 2009 at 11:22 AM, Peter Keegan <
+>> peterlkeegan@gmail.com>
+>> >> >> wrote:
+>> >> >> >>Can you use IndexWriter.getReader() to get the reader for
+step 2
+>> >> >> > Yes - perfect! I didn't think that would be different than
+>> refreshing
+>> >> or
+>> >> >> > recreating an IndexReader.
+>> >> >>
+>> >> >> Great!
+>> >> >>
+>> >> >> getReader() searches the full index, plus uncommitted changes.
+>> >> >>
+>> >> >> > I don't need to keep the old commit alive. The goal is to
+keep the
+>> >> >> external
+>> >> >> > file in synch with the index, so a separate searcher process
+will
+>> see
+>> >> >> > consistent data. By postponing both commits, the window where
+they
+>> are
+>> >> >> out
+>> >> >> > of synch is very small (2 file renames). I record the Lucene
+index
+>> >> >> version
+>> >> >> > in the external file for checking synchcronization.
+>> >> >>
+>> >> >> OK.
+>> >> >>
+>> >> >> Mike
+>> >> >>
+>> >> >> ---------------------------------------------------------------------
+>> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >>
+>> >> >>
+>> >> >
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

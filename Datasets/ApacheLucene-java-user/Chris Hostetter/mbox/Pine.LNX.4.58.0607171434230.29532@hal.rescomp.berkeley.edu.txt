@@ -1,0 +1,63 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: RE: PrefixQuery rewrite() bug, ignores max clause count
+DATE: 17 Jul 2006
+
+
+: I understand the concern for resources, but by throwing an exception you
+: have also preempted a legitimate query.  How then should one go about
+: performing a query for all document where a field begins with char X?
+
+that's the rub .. the "legitimacy" of the query is based on the index it
+is executed against, and the maxClauseCount configured for that app .. a
+prefix query for b* may be perfectly legitimate in a small index, but very
+very bad in another ... that's what that exception is warning you about:
+for your index, and your current maxClauseCount configuration, that query
+is not legal.
+
+: IMHO, both your concern for resources and the ability to query for
+: "name:b*" are legitimate.  Perhaps PrefixeQuery should be able to
+: gracefully degrade when it hits resource limits.  I admit I am at the
+
+this has been discussed before, and the crux of the issue is that by
+throwing this exception, PrefixQuery (or any other query that rewrites to
+a BooleanQUery) is giving you the information you need to make your app
+degrade in whatever way you want (gracefull or otherwise).  In apps like
+Solr, RangeQueries are by based completely to prevent this problem,
+PrefixQueries could likewise be avoided ... i believe Nutch may acutally
+have something like what you describe (where if a query cases a toomancy
+clauses exception, it rewrites that clause into a filter)
+
+: limit of my Lucene knowledge here, but I assume that rewrite() is an
+: optimization of the query and can be skipped (with some additional code)
+: at the cost of performance.
+
+nope.  In Lucene, there are two types of queries: primative, and
+non-primative.  Primative queries are query classes that can create
+Weights/Scorers to execute them, non-primate queries are just containers
+that make it easy to model a particular type of search, but in the context
+of particular index, "rewrite" themselves into primative queries.
+(primative queries rewrite to themselves).  a PrefixQuery *must* rewrite
+itself into a BooleanQuery containing one TermQuery for each term in the
+index matching that prefix.
+
+: We do not rank or score results at all (Lucene is a high speed index for
+: us).  As a result, I am blissfully ignorant of scoring results.  Out of
+: curiosity though, does the depth of a term in a query tree affect its
+: score?
+
+in a nut shell: yes.  not becuse "depth" really has any meaning to how
+scoring works, but because the score produced by a boolean query when some
+of it's clauses match depends on the number of clauses, so a boolean query
+contaiing 10 terms scores differnetly then a boolean query cotaining 5
+boolean queries each containing 2 term queries.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

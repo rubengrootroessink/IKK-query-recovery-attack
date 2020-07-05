@@ -1,0 +1,78 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: File Handles issue
+DATE: 11 Oct 2001
+
+> From: Scott Ganyo [mailto:scott.ganyo@eTapestry.com]
+> 
+> We're having a heck of a time with too many file handles 
+> around here.  When
+> we create large indexes, we often get thousands of temporary 
+> files in a given index!
+
+Thousands, eh?  That seems high.
+
+The maximum number of segments should be f*log_f(N), where f is the
+IndexWriter.mergeFactor and N is the number of documents.  The default merge
+factor is ten.  There are seven files per segment, plus one per field.  If
+we assume that you have three fields per document, then its ten files per
+segment.  So to get 1000 files in an index with three fields and a
+mergeFactor of ten, you'd need 10 billion documents, which I doubt you have.
+(Lucene can't handle more than 2 billion anyway...)
+
+How many fields do you have?  (How many different .f files are there per
+segment?)
+
+Have you lowered IndexWriter.maxMergeDocs?  If you, e.g. lowered this to
+10,000, then with a million documents you'd have 100 segments, which would
+give you 1000 files.  So, to minimize the number of files, keep maxMergeDocs
+at Integer.MAX_VALUE, its default.
+
+Another possibility is that you're running on Win32 and obsolete files are
+being kept open by IndexReaders and cannot be deleted.  Could that be the
+case?
+
+> Even worse, we just plain run out of file 
+> handles--even on
+> boxes where we've upped the limits as much as we think we 
+> can!
+
+You should endevour to keep just one IndexReader at a time for an index.
+When it is out of date, don't close it, as this could break queries running
+in other threads, just let it get garbage collected.  The finalizers will
+close things and free the file handles.
+
+> I'm not very familiar with the Lucene file system yet, so can someone
+> briefly explain how Lucene works on creating an index?  How does it
+> determine when to create a new temporary file in the index 
+> and when does it
+> decide to compress the index?
+
+Assume mergeFactor is ten, the default.  A new segment is created on disk
+for every ten documents added, or sooner if IndexWriter.close() is called
+before ten have been added.  When the tenth segment of size ten is added,
+all ten are merged into a single segment of size 100.  When ten such
+segments of size 100 have been added, these are merged into a single segment
+containing 1000 documents, and so on.  So at any time there can be no more
+than nine segments in each power-of-ten index size.  When optimize() is
+called all segments are merged into a single segment.
+
+The exception is that no segments will be created larger than
+IndexWriter.maxMergeDocs.  So if this were set to 1000, then when you add
+the 10,000th document, instead of merging things into a single segment of
+10,000, it would add a tenth segment of size 1000, and keep adding segments
+of size 1000 for every 1000 documents added.
+
+> Also, is there any way we 
+> could limit the
+> number of file handles used by Lucene?
+
+An IndexReader keeps all files in all segments open while it is open.  So to
+minimize the number of file handles you should minimize the number of
+segments, minimize the number of fields, and minimize the number of
+IndexReaders open at once.
+
+An IndexWriter also has all files in all segments open at once.  So updating
+in a separate process would also buy you more file handles.
+
+Doug
+

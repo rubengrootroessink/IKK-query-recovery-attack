@@ -1,0 +1,109 @@
+FROM: "Anders Nielsen" <and...@visator.dk>
+SUBJECT: RE: prefix query with multiple words
+DATE: 4 Dec 2001
+
+I've made a "hack"-solution for this. It basically makes a BooleanQuery with
+alot of OR-branches. Each OR option corresponds to a complete phrase, and
+like in the code for PrefixQuery I take the last term in the phrase I want
+to search for and make a TermEnumeration and find all the terms that has the
+search-term as the prefix. For each of those I make a complete PhraseQuery.
+
+A solution where it was possible to add an array of terms instead of a
+single term, to a PhraseQuery would most likely perform alot better.
+
+
+-------------------------------------
+
+public
+class PhrasePrefixQuery
+{
+    public static Query getQuery(IndexReader reader, Term[] terms)
+    {
+        Term prefixTerm = terms[terms.length-1];
+        TermEnum enum = null;
+
+        BooleanQuery result = new BooleanQuery();
+
+        try {
+            enum = reader.terms(prefixTerm);
+
+            do {
+                Term term = enum.term();
+                if (term != null &&
+term.text().startsWith(prefixTerm.text()) && term.field() ==
+prefixTerm.field()) {
+                    PhraseQuery pq = new PhraseQuery();
+                    for (int i=0;i<terms.length;i++) {
+                        if (i == terms.length-1)
+                            pq.add(term);
+                        else
+                            pq.add(terms[i]);
+                    }
+
+                    result.add(pq, false, false);
+                }
+                else
+                    break;
+                }
+            while (enum.next());
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
+        finally {
+            if (enum != null)
+                try {
+                    enum.close();
+                }
+                catch (IOException e) {
+                    e.printStackTrace();
+                }
+        }
+
+        return result;
+    }
+}
+
+-----Original Message-----
+From: Tom Barrett [mailto:barrett_tom@yahoo.com]
+Sent: 4. december 2001 00:42
+To: lucene-user@jakarta.apache.org
+Subject: prefix query with multiple words
+
+
+Hey all-
+
+Wondering if it's possible to a prefix query, but with multiple words;
+basically trying to get
+
++artist:"eric clap*"
+
+to return documents with artists "eric clap", "eric clapton", "eric
+claptonean", etc.
+
+You can get close by parsing into multiple words first and prefixing the
+last word (i.e. "Eric Clap" -> +artist:eric +artist:clap*), but this also
+gives you results that have the phrase in the wrong order (i.e. returns
+results with artist "clap eric")
+
+Is there any way to do this right?
+
+Thanks,
+
+Tom
+
+ _________________________________________________________ Do You Yahoo!?
+Get your free @yahoo.com address at http://mail.yahoo.com
+--
+To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

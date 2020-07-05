@@ -1,0 +1,169 @@
+FROM: "Nadav Har'El" <...@il.ibm.com>
+SUBJECT: solution: RangeQuery with floating point numbers
+DATE: 9 Apr 2006
+
+
+Hi all,
+
+As Lucene's documentation explain, RangeQuery (and ConstantScoreRangeQuery)
+require their key to be strings which are lexicographically
+(alphabetically) ordered.
+"Lucene in Action", section 6.3.3 ("Handling numeric field-range queries")
+explains
+what to do when you need to range search in positive integers: in that
+case,
+you have to pad the numbers with leading zeros, so they all have the same
+length and sort correctly.
+Other people on this list suggested how to extend this trick for when you
+have
+signed integers.
+
+But I wanted to go all the way to general "double"s, and do a RangeQuery
+on them. Converting doubles into strings which sort in the correct
+order is a non-trivial exercise, but is in fact doable. To prevent others
+from needing to repeat this exercise, here is an example code that I wrote,
+that does this. The code below isn't as long as it looks: most of it is
+comments
+which hopefull explain what I've done.
+
+By the way, it is worth repeating the warning that appears everywhere
+(including Lucene In Action): while this sort of trick works, RangeQuery
+is extremely inefficient (and might not even work) when the number of
+different values that are included in the range is very large.
+ConstantScoreRangeQuery is better, but also inefficient. My code allows
+you to use these queries for floating point values, but in no way makes this
+use efficient :-(
+
+P.S. I wonder if anyone can suggest an alternative implementation for
+mantissaFormat() below, which doesn't require a DecimalFormat
+object creation.
+
+
+/**
+ *  The doubleToSortableString function does a transformation which is
+ *  currently necessary for implementing Range Constaints using Lucene's
+ *  RangeQuery. This function converts floating-point numbers into strings
+ *  which can be sorted in lexicographical order.
+ *
+ *  This conversion is easy for positive integers (which can be padded
+ *  with leading zero), but much more complicated to do right for doubles
+ *  which can be positive or negative, and have large ranges (1e-74 and
+ *  1e74 are both perfectly fine as doubles, and we should handle them).
+ *  We correctly handle numbers in double's entire range, but limit
+ *  precision to 10 significant digits (this was a deliberate choice - 10
+ *  decimal digits is enough to distinguish between 32 bit integers).
+ *
+ *  Unfortunately, we are not aware of a way of doing this sort of
+ *  conversion while keeping the numbers readable. The result of the
+ *  conversion (even for positive integers) will be unreadable to casual
+ *  readers. It is therefore recommended to "STORE" the original number
+ *  in the index, rather than the result of this conversion. It is
+ *  possible to do this with the aid of a special Analyzer, which will
+ *  carry out this conversion for the purpose of indexing (but will
+ *  leave the un-analyzed value STOREd).
+ *
+ *  The conversion we carry out is one-to-one (up to the 10 decimal
+ *  significant digits of precision), and it should be easy to carry
+ *  out the reverse conversion. However, we haven't implmented this yet
+ *  (because it shouldn't be necessary).
+ */
+
+/* Our string representation of a floating point number will look as
+ * follows:
+ *   SEEENN...
+ * Where:
+ *  1. S is the sign of the number, "n" for negative, "p" for positive.
+ *     This ensures that all negative numbers come before all positive
+ *     numbers. (In the alphabet, "n" comes before "p").
+ *  2. EEE is the base-10 exponent leaving a mantissa between >=0.1, <1.0.
+ *     We add 500 to it, to get all the negative and positive exponents
+ *     into 3 digits (typically, a double's exponent can be between -308
+ *     and 308). For negative numbers, we negate their exponent first.
+ *     The idea is that positive numbers with lower exponent come before
+ *     (are less) than those with higher exponent (1e-1 is smaller than
+ *     1e2) and for negative numbers, this is reversed (-1e-1 is larger
+ *     than -1e2).
+ *     We assume that for Java doubles, the maximum exponent is around 300,
+ *     so our addition of 500 is more than enough, and ensures that the
+ *     result doesn't even need padding with zeros.
+ *  3. NN... is the mantissa, >=0.1 and <1.0. When the original number is
+ *     positive, we output the mantissa as a base 10 floating point without
+ *     the initial "0.". For negative numbers, 1 minus the mantissa is
+ *     printed instead (the result is <=0.9, >0). The mantissa is printed
+ *     with a certain precision (up to 15 digits makes sense on most
+ *     computers, but we don't need this sort of precision and we'll settle
+ *     with 10 - enough for accurate representation of Java ints).
+ *     Trailing zeros are not printed, which is ok, because "0.1" is
+ *     lexicographically before "0.11".
+ * Positive and negative Infinities are also supported, and generate
+ * strings "pinf" and "n-inf", respectively, which sort after and before
+ * all numbers, respectively. NaNs (Not-a-Number) are not supported,
+ * because their sorting order relative to other numbers is undefined.
+ *
+ * Note that we chose base 10 representation because it was more convinient
+ * to code and debug, as well as giving a shorter representation for
+ * floating point numbers with a short decimal representation (say, 0.12).
+ * However, using a larger base would have yielded a more compact
+ * representation. It particular, it should be easy to half the length
+ * of this function's output by converting its output to base 100.
+ */
+public static String doubleToSortableString(double d){
+      boolean negative = d<0;
+      if(negative)
+            d= -d; // continue to work on the positive number
+      int exponent = (int)Math.floor(Math.log(d)/log10 + 1);
+      double mantissa = d * Math.exp(-exponent * log10);
+
+      // If the exponent is very negative, we're at 0 - just print "p0",
+      // which will sort before any positive number, but after every
+      // negative number.
+      if(exponent <= -400)
+            return "p0";
+      // If the exponent is too high, we're at infinity, either positive
+      // or negative. Print "n-inf" (sorts before all negative numbers we
+      // print) or "pinf" (sorts after all positive numbers we print).
+      if(exponent >= 400)
+            return negative ? "n-inf" : "pinf";
+
+      if(negative)
+            exponent = -exponent;
+      exponent += 500;
+
+      if(negative)
+            return "n"+Integer.toString(exponent)+
+                  mantissaFormat(1.0-mantissa);
+      else
+            return "p"+Integer.toString(exponent)+
+                  mantissaFormat(mantissa);
+}
+private static final double log10 = Math.log(10);
+// This function limits the number's precision to 10 significant decimal
+// digits. See comment above for the rationale for this choice.
+private static String mantissaFormat(double m){
+      // Unfortunately, we need to create a new "DecimalFormat" object
+      // every time, because that object is not thread safe. This may
+      // be a performance bottleneck.
+      DecimalFormat mantFormatter = new DecimalFormat(".##########");
+                                                                          //  1234567890
+      String result = mantFormatter.format(m);
+      if(result.charAt(0)=='.')
+            return result.substring(1); // remove initial "."
+      else // 0.999.. was printed as 1.0. We don't want that.
+            return "9999999999"; // we could have also printed "x" or anything that comes
+after all numbers.
+                 // 1234567890
+}
+
+
+
+--
+Nadav Har'El
+nyh@il.ibm.com
++972-4-829-6326
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

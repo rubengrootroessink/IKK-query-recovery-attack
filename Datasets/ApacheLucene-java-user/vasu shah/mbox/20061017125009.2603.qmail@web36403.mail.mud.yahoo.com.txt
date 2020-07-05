@@ -1,0 +1,101 @@
+FROM: vasu shah <vasusha...@yahoo.com>
+SUBJECT: Re: PrefixFilter and WildcardQuery
+DATE: 17 Oct 2006
+
+Thanks for all your help. 
+   
+  I used PrefixFilter, ChainedFilter, CachingWrapperFilter, ConstantScoreQuery and the search
+speed has been dramatically improved. I am just doing wildcard search like abc*. 
+   
+  It used to give me OOM problem with WildcardQuery. Will I get the same problem with the
+new approach. Is the PrefixFilter designed to take care of OOM problem due to expanding of
+the boolean queries.
+   
+  Thanks,
+  -Vasu
+
+Erick Erickson <erickerickson@gmail.com> wrote:
+  Well, depending on what you mean by wildcard, a prefixfilter isn't
+necessarily what you want. If wildcard means abc*, then prefixfilter is
+right. If it means ab*cd?fg, a prefix filter isn't useful unless you want to
+do some fancy indexing.
+
+Think about writing your own filter. Wrap it in a ConstantScoreQuery and put
+as many of these together in a BooleanQuery as you want, anding and oring
+and notting as you see fit.
+
+It's a good thing you don't want scoring, since ConstantScoreQueriy doesn't
+support it .
+
+You could also do something similar with regular expressions (there are
+classes to support this in the 1.9 API, contrib section).
+
+There's also CachingWrapperFilter if you think your filters will be re-used.
+
+Here's an example of a wildcard filter (Lucene 1.9) ...
+
+public class WildcardTermFilter
+extends Filter {
+private static final long serialVersionUID = 1L;
+
+
+protected BitSet bits = null;
+private String field;
+private String value;
+
+public WildcardTermFilter(String field, String value) {
+this.field = field;
+this.value = value;
+}
+
+public BitSet bits(IndexReader reader)
+throws IOException {
+bits = new BitSet(reader.maxDoc());
+
+TermDocs termDocs = reader.termDocs();
+WildcardTermEnum wildEnum = new WildcardTermEnum(reader, new
+Term(field, value));
+
+for (Term term = null; (term = wildEnum.term()) != null;
+wildEnum.next()) {
+termDocs.seek(term);
+
+while (termDocs.next()) {
+bits.set(termDocs.doc());
+}
+}
+
+return bits;
+}
+}
+
+Hope this helps
+Erick
+
+On 10/16/06, vasu shah wrote:
+>
+> Hi,
+>
+> I have have multiple fields that I need to search on. All these fields
+> need to support wildcard search. I am ANDing these search fields using
+> BooleanQuery. There is no need for score in my search.
+>
+> How do I implement these. I have seen PrefixFilter and it sounds
+> promising. But then how do I implement search for multiple fields (AND) and
+> using PrefixFilter. I could not find any discussion related to these.
+>
+> Any help would be highly appreciated.
+>
+> Thanks,
+> -Vasu
+>
+>
+> ---------------------------------
+> Do you Yahoo!?
+> Everyone is raving about the all-new Yahoo! Mail.
+>
+
+
+ 		
+---------------------------------
+Stay in the know. Pulse on the new Yahoo.com.  Check it out. 

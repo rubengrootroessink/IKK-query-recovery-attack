@@ -1,0 +1,164 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Design questions
+DATE: 9 Jan 2008
+
+You can do several things:
+
+Rather than index one doc per page, you could index a special
+token between pages. Say you index $$$$$$$$$ as the special
+token. So your index looks like this:
+last of page 1 $$$$$$$$ first of page 2.... last of page 2 $$$$$$$$ first of
+page 3
+
+and so on. Now, if you used SpanNearQuery with a slop of 0, you would never
+match across pages.
+
+Now, you can call SpanNear.getSpans() to get the offsets of all your
+matches.
+You can then correlate these to pages by using TermPositions (?) or similar
+interface and determine what pages you matched on.
+
+This is not as expensive as it sounds, since you're not reading the
+document,
+just the indexes.
+
+This is a possibility, I'd think that it would be easier to keep track of if
+there's
+a 1-to-1 correspondence between your documents in the two indexes.
+
+As an aside, note that you don't *require* two separate indexes. There's no
+requirement that all documents in an index have the same fields. So you
+could
+index your meta-data with an ID of, say, "meta_doc_id" and your page text
+with "text_id" where these are your unique (external to Lucene) IDs. Then
+you could delete with a term delete on "meta_doc_id"........
+
+So a meta-doc looks something like:
+meta_doc_id:453
+field1:
+field2:
+field3:
+
+and the text doc (the one and only) would be
+text_id:543
+text: (all 10,000 pages with page delimiters, maybe (see below)).
+
+You could even store all of the page offsets in your meta-data document
+in a special field if you wanted, then lazy-load that field rather than
+dynamically counting. You'd have to be careful that your offsets
+corresponded to the data *after* it was analyzed, but that shouldn't
+be too hard. You'd have to read this field before deleting the doc
+and make sure it was stored with the replacement.....
+
+One caution: Lucene by default only stores the first 10,000 tokens for
+a field in a document. So be sure to bump this limit with
+IndexWrite.setMaxFieldLength
+
+If you stored all the offsets of page breaks, you wouldn't have to store the
+special
+token since you'd have no reason to have to count them later. Be aware that
+you'd get a match for a phrase that spanned the last word of one page and
+the first word of the next. Which may be good, but you'll have to decide
+that. You
+should be able to do this pretty easily with a custom Analyzer.
+
+One more point: I once determined that the following two actions are
+identical:
+1> create one really big string with all the page data concatenated together
+    and then add it to a document
+
+and
+
+2> just add successive fragments to the same document. That is,
+
+Document doc;
+doc.add(new Field("text", <all the text in all the pages>
+
+
+is just like
+Document doc;
+while (more pages) {
+    doc.add(new Field("text", <text for this page>
+}
+
+********I like this variant better********
+And, since I'm getting random ideas anyway, here's another.
+The PositionIncrementGap is the "distance" (measured in
+terms) between two tokens. Let's claim that you have no
+page with more than 10,000 (or whatever) tokens. Just
+bump the positionincrementgap to the next 10,000 at the
+start of each page. So, the first term on the first page
+has an offset of 0. the first term on the second page
+has an offset of 10,000. The first term on the third
+page has an offset of 20,000.
+
+Now, with the SpanNearQuery trick from above, your
+term position modulo 10,000 is also your page. This would
+also NOT match across pages. Hmmmm, I kind of like that
+idea.
+
+
+I guess my last question is "How often will a document change"?
+The added complexity of keeping two documents per unique ID
+may be unnecessary if your documents don't change all that often.....
+
+Anyway, all FWIW
+Best
+Erick
+
+On Jan 9, 2008 4:39 PM, <spring@gmx.eu> wrote:
+
+> Hi,
+>
+> I have to index (tokenized) documents which may have very much pages, up
+> to 10.000.
+> I also have to know on which pages the search phrase occurs.
+> I have to update some stored index fields for my document.
+> The content is never changed.
+>
+> Thus I think I have to add one lucene document with the index fields and
+> one lucene document per page.
+>
+> Mapping
+> =======
+>
+> MyDocument
+> -ID
+> -Field 1-N
+> -Page 1-N
+>
+>
+> Lucene
+> -Lucene Document with ID, page number 0 and Field1 - N (stored fields)
+> -Lucene Document 1 with ID, page number 1 and tokenized content of Page 1
+> ...
+> -Lucene Document N with ID, page number N and tokenized content of Page N
+>
+> Delete of MyDocument -> IndexWriter#deleteDocuments(Term:ID=foo)
+>
+> Update of stored index fields -> IndexWriter#updateDocument(Term: ID=foo,
+> page number = 0)
+>
+> Search with index and content.
+>
+> Step 1: Search on stored index fields -> List of IDs
+> Step 2: Search on ID field (list from above OR'ed together) and content ->
+> List of IDs and page numbers
+>
+> Does this work?
+>
+> What drawbacks has this approch?
+> Is there another way to achieve what I want?
+>
+> Thank you.
+>
+> P.S.
+>
+> There are millions of documents with a page range from 1 to 10.000.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

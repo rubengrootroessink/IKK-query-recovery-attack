@@ -1,0 +1,193 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: RE: IndexSearcher memory leak?
+DATE: 6 Jul 2006
+
+My two bits...
+
+If you consider (say) the 2nd pass of the loop...
+
+	Searcher searcher = null;
+	for(int i = 0; i < 5; ++i){			
+		RAMDirectory ramdir = new RAMDirectory( db );
+                        // <- Consider this moment
+		searcher = new IndexSearcher( ramdir );
+	}
+
+... you will have two references to RAMDirectory objects in existence. The
+Searcher retains a reference to the previously constructed RAMDirectory.
+
+You could nullify the Searcher before contructing the new RAMDirectory to
+avoid this.
+
+	Searcher searcher = null;
+	for(int i = 0; i < 5; ++i){
+		searcher = null;   <- No searcher now to retain the
+reference
+		RAMDirectory ramdir = new RAMDirectory( db );
+                        // <- Consider this moment
+		searcher = new IndexSearcher( ramdir );
+	}
+
+-----Original Message-----
+From: Heng Mei [mailto:heng.mei@gmail.com] 
+Sent: 06 July 2006 06:32
+To: java-user@lucene.apache.org
+Subject: Re: IndexSearcher memory leak?
+
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.store.RAMDirectory;
+
+/**
+ *  Index is ~100mb.
+ *  Run with -Xmx256m on Windows XP
+ *
+ *  OutOfMemoryException encountered after repeatedly
+ *      opening/searching/closing an index.
+ *  Seems to only occur when Searcher scope is outside the loop  */ public
+class TestOpenClose {
+	public static void main(String[] args) throws Exception {
+		String db = "C:/data/index";
+		String field = "field";
+		String term = "keywords";
+
+		//Normal behavior - no memory exceptions
+		//The Searcher's scope is inside the loop
+		for(int i = 0; i < 5; ++i){			
+			System.out.println(i);
+			RAMDirectory ramdir = new RAMDirectory( db );
+		    	Searcher searcher = new IndexSearcher( ramdir );
+	        	searcher.search(new TermQuery( new Term(field,
+term)));
+		        searcher.close();
+		        ramdir.close();
+		}
+
+		//OutOfMemoryException after a few iterations
+		//Search scope is outside the loop
+		Searcher searcher = null;
+		for(int i = 0; i < 5; ++i){			
+			System.out.println(i);
+			RAMDirectory ramdir = new RAMDirectory( db );
+			searcher = new IndexSearcher( ramdir );
+		        searcher.search(new TermQuery( new Term(field,
+term)));
+	        	searcher.close();
+		        ramdir.close();
+		}
+	}
+}
+
+On 7/5/06, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+>
+> The mailing list server doesn't allow most attachments (i think the 
+> magic incantation is to make sure your mail client indicates that the 
+> attachments are plain text -- not some fancy type like 
+> text/x-java-source or application/x-java)
+>
+> try including it inline in your email.
+>
+>
+>
+> : Date: Wed, 5 Jul 2006 21:50:35 -0700
+> : From: Heng Mei <heng.mei@gmail.com>
+> : Reply-To: java-user@lucene.apache.org
+> : To: java-user@lucene.apache.org
+> : Subject: Re: IndexSearcher memory leak?
+> :
+> : Thanks for the fast response -- you're right, I had a typo in the code
+snippet.
+> :
+> : I've attached the test code that reproduces the OutOfMemoryException.
+> : The code is a simple main method that repeatedly 
+> opens/searches/closes
+> : an index using RAMDirectory.  Maybe there's something I'm 
+> overlooking,
+> : but it appears that when the Searcher is declared outside of the 
+> loop,
+> : that's when the OutOfMemoryException occurs.  If the searcher is
+> : declared inside of the loop, then there's no memory problem.
+> :
+> : The motivation for this test code is that I plan to write a
+> : long-running server that periodically reopens an index -- so clearly
+> : I'd want to be able to close and open the index without leaking any
+> : memory.
+> :
+> : Any insight on why the memory exception occurs and how to resolve it
+> : would be greatly appreciated.
+> :
+> :
+> : Thanks!
+> : ~Heng
+> :
+> : On 7/5/06, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+> : > : I get an OutOfMemoryException after a few iterations of the
+following loop:
+> : > : LOOP:
+> : > :       ramdir = new RAMDirectory( "path/to/my/directory" );
+> : > :       searcher = new IndexSearcher( reader );
+> : > :         searcher.search(new TermQuery( new Term( "field",
+"keyword")));
+> : > :         searcher.close();
+> : > :         ramdir.close();
+> : > : END LOOP:
+> : > : Note, ramdir and searcher are both instance variables.
+> : >
+> : > But what is "reader" ?  .. where is it initialized ?
+> : >
+> : > I'm guessing this isn't hte exact code that gives you an OOM 
+> (since there
+> : > seems to be some code missing)
+> : >
+> : > if you can post a complete small example program (with main 
+> method) that
+> : > demonstrates this problem -- or even better a self contained JUNit 
+> test --
+> : > then people can try to reproduce it.
+> : >
+> : > (if the root of the issue is opening a RAMDirectory based on an
+> : > FSDirectory you can create the on disk directory using the system 
+> tmpdir
+> : > in your JUnit setUp method)
+> : >
+> : > I suspect that somewhere in there you have another line that looks
+like...
+> : >
+> : >      reader = IndexReader.open( ramdir );
+> : >
+> : > ...and that may be causing your problem.   If you open an IndexReader
+> : > explicitly, then IndexSearcher.close() won't close it for you
+> : >
+> : >
+> : >
+> : >
+> : >
+> : > -Hoss
+> : >
+> : >
+> : > 
+> ---------------------------------------------------------------------
+> : > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : > For additional commands, e-mail: java-user-help@lucene.apache.org
+> : >
+> : >
+> :
+> :
+>
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+

@@ -1,0 +1,167 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: Recommended values for mergeFactor, minMergeDocs, maxMergeDocs
+DATE: 4 Dec 2004
+
+We've found something interesting about mergeFactors.
+
+We are indexing a million documents with a batch of 1000.
+We first set the mergeFactor to 1000.
+
+What we found is at every 10th commit, we see a significant spike in
+indexing time.
+
+The reason is that the indexer is trying to merge the segments every
+10th commit, e.g 10*mergeFactor, since the mergeFactor is large, the
+merge time is also long.
+
+The example given in the previous email thread indexes identical
+documents, merge time is very fast since no new terms are introduced
+as indexing proceeds. Hence it may hide this overhead.
+
+We found mergeFactor=100 worked well for our application.
+
+Cheers
+
+-John
+
+On Fri, 3 Dec 2004 16:38:34 -0800 (PST), Otis Gospodnetic
+<otis_gospodnetic@yahoo.com> wrote:
+> In my experiments with mergeFactor I found the point of diminishing/no
+> returns.  If I remember correctly, I hit the limit at mergeFactor of
+> 50.
+> 
+> But here is something from Lucene in Action that you can use to play
+> with various index tuning factors and see their effect on indexing
+> performance.  It's simple, and if you want to test all 3 of your
+> scenarios, you will have to modify it.
+> 
+> package lia.indexing;
+> 
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.analysis.Analyzer;
+> import org.apache.lucene.analysis.SimpleAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.FSDirectory;
+> 
+> /**
+> *
+> */
+> public class IndexTuningDemo {
+> 
+>  public static void main(String[] args) throws Exception {
+>    int docsInIndex  = Integer.parseInt(args[0]);
+> 
+>    // create an index called 'index-dir' in a temp directory
+>    Directory dir = FSDirectory.getDirectory(
+>      System.getProperty("java.io.tmpdir", "tmp") +
+>      System.getProperty("file.separator") + "index-dir", true);
+>    Analyzer analyzer = new SimpleAnalyzer();
+>    IndexWriter writer = new IndexWriter(dir, analyzer, true);
+> 
+>    // set variables that affect speed of indexing
+>    writer.mergeFactor   = Integer.parseInt(args[1]);
+>    writer.maxMergeDocs  = Integer.parseInt(args[2]);
+>    writer.minMergeDocs  = Integer.parseInt(args[3]);
+>    writer.infoStream    = System.out;
+> 
+>    System.out.println("Merge factor:   " + writer.mergeFactor);
+>    System.out.println("Max merge docs: " + writer.maxMergeDocs);
+>    System.out.println("Min merge docs: " + writer.minMergeDocs);
+> 
+>    long start = System.currentTimeMillis();
+>    for (int i = 0; i < docsInIndex; i++) {
+>      Document doc = new Document();
+>      doc.add(Field.Text("fieldname", "Bibamus"));
+>      writer.addDocument(doc);
+>    }
+>    writer.close();
+>    long stop = System.currentTimeMillis();
+>    System.out.println("Time: " + (stop - start) + " ms");
+>  }
+> }
+> 
+> Otis
+> 
+> 
+> 
+> 
+> --- Chuck Williams <chuck@manawiz.com> wrote:
+> 
+> > I'm wondering what values of mergeFactor, minMergeDocs and
+> > maxMergeDocs
+> > people have found to yield the best performance for different
+> > configurations.  Is there a repository of this information anywhere?
+> >
+> >
+> >
+> > I've got about 30k documents and have 3 indexing scenarios:
+> >
+> > 1.       Full indexing and optimize
+> >
+> > 2.       Incremental indexing and optimize
+> >
+> > 3.       Parallel incremental indexing without optimize
+> >
+> >
+> >
+> > Search performance is critical.  For both cases 1 and 2, I'd like the
+> > fastest possible indexing time.  For case 3, I'd like minimal pauses
+> > and
+> > no noticeable degradation in search performance.
+> >
+> >
+> >
+> > Based on reading the code (including the javadocs comments), I'm
+> > thinking of values along these lines:
+> >
+> >
+> >
+> > mergeFactor:  1000 during Full indexing, and during optimize (for
+> > both
+> > cases 1 and 2); 10 during incremental indexing (cases 2 and 3)
+> >
+> > minMergeDocs:  1000 during Full indexing, 10 during incremental
+> > indexing
+> >
+> > maxMergeDocs:  Integer.MAX_VALUE during full indexing, 1000 during
+> > incremental indexing
+> >
+> >
+> >
+> > Do these values seem reasonable?  Are there better settings before I
+> > start experimenting?
+> >
+> >
+> >
+> > Since mergeFactor is used in both addDocument() and optimize(), I'm
+> > thinking of using two different values in case 2:  10 during the
+> > incremental indexing, and then 1000 during the optimize.  Is changing
+> > the value like this going to cause a problem?
+> >
+> >
+> > Thanks for any advice,
+> >
+> >
+> >
+> > Chuck
+> >
+> >
+> >
+> >
+> >
+> >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

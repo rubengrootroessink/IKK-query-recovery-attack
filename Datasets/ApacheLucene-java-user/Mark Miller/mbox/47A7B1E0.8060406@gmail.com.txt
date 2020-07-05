@@ -1,0 +1,292 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: DefaultIndexAccessor
+DATE: 5 Feb 2008
+
+I replied to the wrong thread -- sorry about that:
+
+You still have to be careful if you want to alternate a search and 
+write. If you are loading a lot of docs this way, you would want to hold 
+the Writer to batch the docs, but while you are holding it, you will not 
+have a fresh view of the index - so you could add the same doc twice if 
+it came twice in a batch. The only way to be sure you avoid this is to 
+reopen readers after you add every doc. This is just not going to be a 
+fast way of doing things...but if you have a high mergefactor, the new 
+reopen method will prob make it *much* faster. Or if you are sure that 
+the batch won't contain duplicates, you can batch load.
+
+Cam Bazz wrote:
+> Hello Mark,
+>
+> Thank you for your lengthy and valuable clarification. I have the case -
+> before adding to the index, i must check if a document exist with the
+> same key (actually, double key) - or before deleting a document - I must
+> ensure it exists in the index.
+>
+> Currently I am doing it with my custom caching routine. It works quite well
+> upto 32M documents. but after that something happens and it really slows
+> down.
+>
+> I will experiment with your implementation, as soon as I can. It is very
+> cool by the way. Will it be included in the next release?
+>
+> Best,
+> -C.B.
+>
+> On Feb 4, 2008 7:15 PM, Mark Miller <markrmiller@gmail.com> wrote:
+>
+>   
+>> The purpose of IndexAccessor is to coordinate Readers/Writers for a
+>> Lucene index. Readers and Writers in Lucene are multi-threaded in that
+>> multiple threads may use them at the same time, but they must/should be
+>> shared and there are special rules (You cannot delete with a Reader
+>> while a Writer is working on the index). Also, you need to refresh
+>> Reader views every so often; this is expensive (though usually much less
+>> so with the new reopen method).
+>>
+>> IndexAccessor enforces the rules and controls Reader refreshing. Instead
+>> of worrying about caching or index interaction rules, you just ask for
+>> your Reader/Writer, use it to search or add a doc, and then return it.
+>> The rest is taken care of for you.
+>>
+>> This is done by keeping a cached Writer and Searcher(s) that all threads
+>> share. References to the Searchers are counted so that after a Writer is
+>> returned (and no other thread has a reference to the Writer),
+>> IndexAccessor waits for all of the current Searchers to come back and
+>> then reopens their Readers.
+>>
+>> In this regard, you get a  similar setup to what Solr might give: from
+>> any thread you just add docs and run searches -- you don't have to worry
+>> about refreshing Readers or sharing Writers/Readers or one thread
+>> deleting with a Reader while another thread tries to write with a Writer.
+>>
+>> This setup allows you to do other cool things, like warm Searchers
+>> before putting them into action. Thats what the code I am posting soon
+>> is be capable of - when the Readers are reopened, search requests will
+>> still be handled by the old Readers while the new Searchers run a sample
+>> query with optional sort fields. This will make sure the Reader is open
+>> and its sort caches are loaded before the first thread tries to use it.
+>> Much faster response to applications.
+>>
+>> You must  open a new Reader or reopen a Reader to see recently added
+>> docs...IndexAccessor provides no real way around that. But it does make
+>> the reopening much easier -- and your application that just wants to add
+>> docs and search at will from multiple threads, won't have to worry about
+>> it.
+>>
+>> You can bail out here, or if you want further clarification I will
+>> include an alternate attempt at what IndexAccessor is below.
+>>
+>> - Mark
+>>
+>>
+>> ----------------------------------------------------------------------------------------------------
+>> When accessing a Lucene index from multiple threads, there are a variety
+>> of issues that you must address.
+>>
+>> 1. The Readers/Writer should be shared across threads.
+>> 2. Readers must periodically be refreshed, either be creating new
+>> instances or using the new reopen method.
+>> 3. A Reader that writes needs to be properly coordinated with a Writer
+>> eg they cannot be used at the same time.
+>>
+>> IndexAccessor addresses each of these issues.
+>>
+>> How it works:
+>>
+>> A single Writer is shared among threads that try to concurrently
+>> retrieve and use a Writer. Once all of these threads release their
+>> reference
+>> to the Writer, it is closed and upon the next request a new one is
+>> created.
+>>
+>> A single Searcher for each Similarity is also shared across threads.
+>> Upon first request, a new Searcher is created. This Searcher is then
+>> returned
+>> upon every request. A count of every Searcher reference retrieved is
+>> maintained.
+>>
+>> When all references to a Writer are released, the Writer is closed and
+>> after waiting for all of the Searchers to be returned, the Searchers are
+>> reopened. Without warming enabled, new requests for Searchers/Readers
+>> must wait for this reopen to complete. If warming is enabled, the old
+>> Searchers/Readers continue handling Searcher requests until the Readers
+>> have been reopened and any requested sort caches have been loaded.
+>>
+>> If you ask for a writing Reader, you will not get it until a Writer is
+>> released and vice versa.
+>>
+>> The result is that you can freely use Writers/Readers/Searchers from any
+>> thread without considering thread interactions. ***
+>>
+>> If you want to add docs, just ask for a Writer, add the docs, and
+>> release the Writer. If you want to search, get a Searcher, search,
+>> and release the Searcher. You don't have to worry about reopening
+>> Readers or coordinating access.
+>>
+>>
+>> ***
+>> You still do have to consider things like hogging the Writer/Readers -
+>> if you don't occasionally release them, things will not stay very
+>> interactive.
+>> The best method is to just get the object, use it, and then return it in
+>> a finally block. Batch load multiple docs, but if your just randomly
+>> adding
+>> a doc, get the Writer, add it, and then release the Writer in a finally
+>> block. If you are batch loading a million docs and you want to be able
+>> to see them
+>> as they are added: get the writer and add 10,000 docs (or something),
+>> release the Writer, get the Writer and add 10,000 docs, etc.
+>>
+>> Cam Bazz wrote:
+>>     
+>>> Hello Mark,
+>>>
+>>> I have been reading the code - and honestly I have not understood how it
+>>> works. I was hoping that this was a solution to the case when you are
+>>>       
+>> adding
+>>     
+>>> documents - in a multithreaded way, it allows other non-writer threads
+>>>       
+>> to be
+>>     
+>>> able to see documents added without refreshing the indexsearcher - by
+>>>       
+>> using
+>>     
+>>> some caching mechanism.
+>>>
+>>> Could you elaborate what IndexAccessor does and how it does it a little
+>>>       
+>> bit
+>>     
+>>> more?
+>>>
+>>> Best Regards,
+>>> -C.B.
+>>>
+>>> On Feb 4, 2008 3:06 PM, Mark Miller <markrmiller@gmail.com> wrote:
+>>>
+>>>
+>>>       
+>>>> IndexAccessor-1.26.2008.zip is the latest one. I will be dating a zip
+>>>>         
+>> from
+>>     
+>>>> now on.
+>>>>
+>>>> I hope to post new code with the warming either tonight or tomorrow
+>>>>         
+>> night.
+>>     
+>>>> I would be ecstatic to have some help vetting that.
+>>>>
+>>>> Also, I am thinking of making a change so that when you release the
+>>>>         
+>> Writer
+>>     
+>>>> the thread that releases does not block until reopen. I think the
+>>>>         
+>> original
+>>     
+>>>> author did this so that if you add a doc with a thread and then
+>>>>         
+>> immediately
+>>     
+>>>> search from the same thread, you are guaranteed to find the doc.
+>>>>         
+>> However,
+>>     
+>>>> this gaurentee did not hold -- if another thread had a reference to the
+>>>> Writer and a new thread grabbed a Writer and then quicly released
+>>>>         
+>> before the
+>>     
+>>>> first thread, you will have added a doc but it will not be visible
+>>>>         
+>> until the
+>>     
+>>>> first thread releases its reference to the Writer...since the concept
+>>>>         
+>> is not
+>>     
+>>>> enforced anyway, you might as well not block for the final thread that
+>>>> releases the Writer either. Instead I will grab a thread from a thread
+>>>>         
+>> pool
+>>     
+>>>> to do the reopening with that thread, and return right after closing
+>>>>         
+>> the
+>>     
+>>>> Writer. The result is that you cannot add a doc and search and expect
+>>>>         
+>> to
+>>     
+>>>> find it without waiting a second or too. But this way things will be
+>>>> consistent, and an app that adds docs will be a bit more
+>>>>         
+>> responsive....eg it
+>>     
+>>>> wont hang as Readers are being reopened.
+>>>>
+>>>> I also have to bring the AccessProvider classes back. No easy way to
+>>>>         
+>> use
+>>     
+>>>> your own custom Readers without it...I shouldn't have stripped it out.
+>>>>
+>>>> - Mark
+>>>>
+>>>>
+>>>>
+>>>> Cam Bazz wrote:
+>>>>
+>>>>         
+>>>>> Hello,
+>>>>>
+>>>>> Regarding https://issues.apache.org/jira/browse/LUCENE-1026 , this
+>>>>>           
+>> seems
+>>     
+>>>>> very interesting. I have read the discussion on the page, but I could
+>>>>>
+>>>>>           
+>>>> not
+>>>>
+>>>>         
+>>>>> figure out which set of files is the latest.
+>>>>> Is it the IndexAccessor-1.26.2008.zip file?
+>>>>>
+>>>>> I will read through the code, make my own tests, and send some
+>>>>>           
+>> feedback.
+>>     
+>>>>> Best.
+>>>>> -C.B.
+>>>>>
+>>>>>
+>>>>>
+>>>>>           
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>>>         
+>>>       
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>     
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,68 @@
+FROM: Karl Wettin <karl.wet...@gmail.com>
+SUBJECT: Payloads
+DATE: 27 Dec 2008
+
+I would very much like to hear how people use payloads.
+
+Personally I use them for weight only. And I use them a lot, almost in  
+all applications. I factor the weight of synonyms, stems,  
+dediacritization and what not. I create huge indices that contains  
+lots tokens at the same position but with different weights. I might  
+for instance create the stream "(1)motörhead^1", "(0)motorhead^0.7"  
+and I'll do this at both index and query time, i.e. I use the payload  
+weight to calculate both payload weight used by the BoostingTermQuery  
+scorer AND to set the boost in the query at the same time.
+
+In order to handle this I use an interface that looks something like  
+this:
+
+public interface PayloadWeightHandler {
+   public void setWeight(Token token, float weight);
+   public float getWeight(Token token);
+}
+
+In order to use this I had to patch pretty much any filter I use and  
+pass down a weight factor, something like:
+
+TokenStream ts = analyzer.tokenStream(f, new StringReader("motörhead  
+ace of spaces"));
+ts = new SynonymTokenFilter(ts, synonyms, 0.7f);
+ts = new StemmerFilter(ts, 0.7f);
+ts = new ASCIIFoldingFilter(ts, 0.5f);
+
+All these filters would, if applicable, create new synonym tokens with  
+slightly less weight than the input rather than replace token content:
+
+"(1)mötorhead^1", "(0)motorhead^0.5", "(1)ace^1", "(1)of^1",  
+"(1)spades^1", "(1)spad^0.7"
+
+I usually use 4 byte floats while creating the stream and then convert  
+it to 8 bit floats in a final filter before adding it to the document.
+
+Is anyone else doing something similar? It would be nice to normalize  
+this and perhaps come up with a reusable API for this. It would also  
+be cool if all the existing filters could be rewritten to handle this  
+stuff.
+
+I find it to be extemely useful when creating indices with rather  
+niched content such as song titles, names of people, street addresses,  
+et c. For the last year or so I've done several (3) commercial  
+implementations where I try to extend the index with incorrect typed  
+queries but unique enough that it does not interfere with the quality  
+of the results. It has been very successful, people get great  
+responses in great time even though they enter an "incorrect" query.
+
+On a side note, in these implementaions I've completely replaced  
+phrase queries using shingles. ShingleMatrixQuery has some built in  
+goodies for calculating weight. Combined with SSD I see awesome  
+results with very short response time even in fairly large indices  
+(10M-100M documents). I'm talking about 100ms-500ms for rather complex  
+queries under heavy load.
+
+
+       karl
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

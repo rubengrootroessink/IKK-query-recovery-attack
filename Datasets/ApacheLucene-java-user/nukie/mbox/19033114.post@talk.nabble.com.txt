@@ -1,0 +1,166 @@
+FROM: nukie <stas.band...@gmail.com>
+SUBJECT: Search Result Filtering
+DATE: 18 Aug 2008
+
+
+Hi! I've made a sample program for testing lucene :
+package indexer;
+
+import com.sun.xml.internal.bind.v2.schemagen.xmlschema.Occurs;
+
+import com.sun.xml.internal.ws.util.StringUtils;
+
+import java.io.BufferedWriter;
+import java.io.File;
+
+import java.io.FileWriter;
+
+import java.util.Random;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.MultiFieldQueryParser;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RangeFilter;
+import org.apache.lucene.search.RangeQuery;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.TermQuery;
+
+public class LuceneToster
+{
+  String [] makes  = {"BMW", "AUDI", "LAMBOGINI", "FIAT", "SUZUKI",
+"SUBARU", "OPEL"};
+  String [] models = {"QUATTRO", "A1", "A4", "M1", "PANDA", "GyBSY",
+"BuzzZ", "Defender"};
+  String [] milleages = {"1000", "2000", "3000", "5000", "6000", "7000",
+"8000", "9000"};
+  
+  public LuceneToster()
+  {
+  }
+  
+  private Document generateRandomDocument()
+  {
+    Document doc = new Document();
+    Random r = new Random();
+    doc.add(new Field("Make", makes[r.nextInt(makes.length)],
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+    doc.add(new Field("Model", models[r.nextInt(models.length)],
+Field.Store.NO, Field.Index.UN_TOKENIZED));
+    doc.add(new Field("Milleage", String.valueOf(r.nextInt(10000)),
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+    for(int i = 0; i < 5; i++)
+    {
+      doc.add(new Field("asdasdDDDa_^^asd(8"+String.valueOf(r.nextInt(15)),
+models[r.nextInt(models.length)], Field.Store.NO,
+Field.Index.UN_TOKENIZED));
+    }
+    return doc;
+  }
+  
+  public void generateIndex(String dir)
+  {
+    try
+    {
+      IndexWriter luceneWriter = new IndexWriter(dir, new
+StandardAnalyzer(), true);
+      long time = System.currentTimeMillis();
+      for(int i = 0; i < 2000000; i++)
+      {
+        if(i%10000 == 0) 
+        {
+          luceneWriter.close();
+          luceneWriter = new IndexWriter(dir, new StandardAnalyzer(),
+false);
+          System.out.println("Current i : " + String.valueOf(i));
+        }
+        luceneWriter.addDocument(generateRandomDocument());
+      }
+      long timeEst = System.currentTimeMillis() - time;
+      System.out.println("Generation time : " + String.valueOf(timeEst));
+      luceneWriter.optimize();
+      luceneWriter.close();
+    }catch(Exception e)
+    {
+      e.printStackTrace();
+    }
+  }
+  
+  public void doSearch(String indexDir)
+  {
+    try
+    {
+      IndexSearcher searcher = new IndexSearcher(indexDir);
+      
+      TermQuery audiTerm = new TermQuery(new Term("Make", "AUDI"));
+      
+      BooleanQuery someAudi = new BooleanQuery();
+      someAudi.add(audiTerm, BooleanClause.Occur.MUST);
+      Hits hits;      
+      long time = System.currentTimeMillis();
+      hits = searcher.search(someAudi, new RangeFilter("Milleage", "5000",
+"5100", true, true));
+
+      long newTime = System.currentTimeMillis();
+      System.out.println("Search time : " + String.valueOf(newTime - time) +
+" RESULT SIZE : " + String.valueOf(hits.length()));
+      
+      File f = new File("newf.txt");
+      BufferedWriter bw = new BufferedWriter(new FileWriter("out.txt"));
+      
+      for(int i = 0; i < hits.length(); i++)
+      {
+        bw.write("Document : " +
+hits.doc(i).getField("Milleage").stringValue() + "  Make: "
++hits.doc(i).get("Make") + "\n");
+      }
+      bw.close();
+      
+    }catch(Exception e)
+    {
+      e.printStackTrace();
+    }
+    
+  }
+
+  public static void main(String[] args)
+  {
+    LuceneToster luceneToster = new LuceneToster();
+    String indexDir = args[0];
+    
+    if(args[1].equals("index_mode"))
+    {
+      luceneToster.generateIndex(indexDir);
+    }else if(args[1].equals("search_mode"))
+    {
+      luceneToster.doSearch(indexDir);
+    }else
+    {
+      System.out.println("Invalid arguments!");
+    }
+  }
+}
+
+It should give results with Milleage field being in range from 5000 to 5100
+, but i have results included with 509 "Milleage" for example. As i suppose
+it not correct filtering criteria ? Or it's a bug ? 
+Thanks
+-- 
+View this message in context: http://www.nabble.com/Search-Result-Filtering-tp19033114p19033114.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

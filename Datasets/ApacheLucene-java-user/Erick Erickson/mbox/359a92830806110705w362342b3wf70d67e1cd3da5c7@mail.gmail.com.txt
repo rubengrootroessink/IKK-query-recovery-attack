@@ -1,0 +1,121 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: retrieve all docs efficiently - just one field
+DATE: 11 Jun 2008
+
+<<<I have read a little about the hitcollector class and the fieldselector
+api,
+but I am still not sure how they may help me or even if they can.>>>
+
+I infer from this that you're using a Hits object to get your IDs to insert
+in
+your temporary table. Here's the problem with Hits... It re-executes
+the query every 100 (200?) hits. So you can think of it as
+
+while (more hits) {
+   if ((count % 100) == 0) execute the search and throw away the first
+<count> items
+   work with the document
+}
+
+It can be a major bottleneck to re-execute the query every 100 hits you look
+at. HitCollector avoids this re-execution, and can result in very
+significant
+speedups when iterating through many documents.
+
+FieldSelector will allow lazy fetching. That is, when you do something
+like Reader.document(idx, selector) you'll be able to only load those
+fields from the document that you specify with the selector. In your case,
+you would only load the ID you care about and insert that in your temporary
+table. This can also result in very significant savings, especially if you
+only want to load a very small field from a document that has very large
+fields. See a writeup I did for one of my projects on the Lucene Wiki
+
+http://wiki.apache.org/lucene-java/FieldSelectorPerformance?highlight=(FieldSelector)
+
+
+Hope this helps
+Erick
+
+
+
+On Tue, Jun 10, 2008 at 6:35 PM, 1world1love <jd_cowan@yahoo.com> wrote:
+
+>
+> Greetings all. I have read many posts concerning similar use cases, but I
+> am
+> still a little hazy on the best way to achieve what I need to do. Here is
+> the background:
+>
+> 2 million documents with multiple sections, some sections contain
+> structured
+> data, some unstructured.
+>
+> We parse the docs and place the structured stuff in oracle where each
+> section is a table and one master table to relate them all.
+>
+> We index the unstructured sections with lucene where each section is a
+> document (meaning a total of about ~30 million documents) with extra fields
+> including one for the primary key of the master table and then some meta
+> fields to describe the section - type, date, etc.
+>
+> For a common use case, say we have a table called demographics with a
+> number
+> field that represents age (overly simplistic but gets the point across).
+>
+> So say we want all people over the age of 50 who may have visited Panama:
+>
+> --
+> We have our lucene index and we want to search the section text for the
+> word
+> "panama"
+>
+> AND
+>
+> We want to select from the demographics table where age > 50.
+> --
+>
+> Now I need to intersect the master table IDs from my lucene hits and my
+> table results.
+>
+> I have a java stored procedure that runs the lucene query and creates a
+> temporary table with a single column where I insert the master id from the
+> hits of my lucene query. I then can do a join with my structured query
+> results.
+>
+> The problem here is obviously the speed of iterating through the hits to
+> extract the single field that I need.
+>
+> Notes:
+> - I must be able to get a full set of results, though I only need the one
+> id
+> field
+> - We originally went with Oracle text which was simple, but limited and
+> quite slow for most queries
+>
+>
+> I have read a little about the hitcollector class and the fieldselector
+> api,
+> but I am still not sure how they may help me or even if they can.
+>
+> I have also tooled around with the idea of using termdocs, but the queries
+> may get a little complex with various ors/ands/nots, though probably not
+> spans and so forth.
+>
+> Any suggestions will be greatly apreciated.
+>
+> Thanks,
+>
+> J
+>
+> --
+> View this message in context:
+> http://www.nabble.com/retrieve-all-docs-efficiently---just-one-field-tp17766268p17766268.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

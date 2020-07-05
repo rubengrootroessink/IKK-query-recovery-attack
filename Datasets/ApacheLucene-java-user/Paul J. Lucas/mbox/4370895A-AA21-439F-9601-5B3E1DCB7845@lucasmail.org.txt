@@ -1,0 +1,71 @@
+FROM: "Paul J. Lucas" <p...@lucasmail.org>
+SUBJECT: IndexWriter.deleteDocuments(Query[]) not deleting
+DATE: 22 Aug 2010
+
+Hi -
+
+Using Lucene 2.9.3, I'm indexing the metadata in image files.  For each image ("document"
+in Lucene), I have 2 additional special fields: "FILE-PATH" (containing the full path of the
+file) and "DIR-PATH" (containing the full path of the directory the file is in).
+
+The FILE-PATH Field is created only once like:
+
+    private final Field m_fieldFilePath = new Field(
+        "FILE-PATH", "INIT", Field.Store.YES, Field.Index.NOT_ANALYZED
+    );
+
+and reused; the DIR-PATH Field is created once per document like:
+
+    new Field(
+        "DIR-PATH", file.getParentFile().getAbsolutePath(),
+        Field.Store.NO, Field.Index.NOT_ANALYZED
+    )
+
+(The reason the DIR-PATH Field is created once per document is because it's part of indexing
+the rest of the image metadata and isn't a special-case like FILE-PATH.  I don't believe this
+is relevant to the problem at hand, however.)
+
+If an image file (or an entire directory of image files) gets deleted, I need to delete it
+(them) from the index.  When deleting a single image, I could do:
+
+	Term fileTerm = new Term( "FILE-PATH", file.getAbsolutePath() );
+	writer.deleteDocuments( new TermQuery( fileTerm ) );
+
+When deleting an entire directory of images, I could do:
+
+	Term dirTerm = new Term( "DIR-PATH", file.getAbsolutePath() );
+	writer.deleteDocuments( new TermQuery( dirTerm ) );
+
+However, at the time of deletion, I don't know whether "file" refers to a single image file
+or to a directory of images files.  I can't do file.isFile() or file.isDirectory() because
+"file" no longer exists (it was deleted).  So to cover both cases, I do:
+
+	Query[] queries = new Query[]{
+	    new TermQuery( fileTerm ),
+	    new TermQuery( dirTerm )
+	};
+	writer.deleteDocuments( queries );
+
+I have non-Lucene code that monitors the filesystem for changes.  For Mac OS X, I can only
+get directory-level change notifications.  So if a file is deleted from a directory, I get
+a notification that the directory has changed.  So I delete all the documents in that directory
+then re-add them.
+
+However (and here's the problem), the deletes never happen.  If I delete a file from a directory,
+the directory (looks like) its unindexed and reindexed, but a query for that image file still
+returns a result.  So it's like the delete never happened.
+
+Why not?
+
+Additional information: I create/close a new IndexWriter for the delete.  Even if I quit the
+application, relaunch, and run the query, the result still shows up (hence it's not that the
+current reader isn't seeing the deletion change).
+
+- Paul
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

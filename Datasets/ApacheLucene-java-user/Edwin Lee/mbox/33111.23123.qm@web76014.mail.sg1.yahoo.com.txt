@@ -1,0 +1,231 @@
+FROM: Edwin Lee <edwin11_1...@yahoo.com.sg>
+SUBJECT: Re: ClassCastException when writing to index writer
+DATE: 4 Oct 2008
+
+Hi Paul,
+
+The clone() in SegmentInfos is correct. The best practice of clone is to
+delegate the clone to the super class (if you look at the source code for
+Vector, it too delegates to its super class, which is the Object) to create a
+shallow copy, and then do a cloning of each of its mutable fields/elements to
+get a deep copy.
+
+May sound counter-intuitive, but the delegated call to Vector.clone actually
+does return an instance of SegmentInfos. This is because when the clone is
+eventually delegated to Object.clone, it is a native call which does a "native
+copying" of the instance (in this case, a SegmentInfos instance).
+
+i have tried running a test, and SegmentInfos.clone does work for me. You may
+want to try running the following programme using the same classpath settings
+that you used with the actual programme:
+
+package org.apache.lucene.index;
+
+public class Test {
+    
+    public static final void main(String[] args) {
+        
+        SegmentInfos sis = new SegmentInfos();
+
+        SegmentInfos sis2 = (SegmentInfos) sis.clone();
+
+        System.out.println("done");
+    }
+}
+
+
+
+HTH,
+Edwin
+
+
+
+--- Paul Chan <wayofdragon@gmail.com> wrote:
+
+> I am using Sun's JRE 1.6.0_02 on Windows XP
+> 
+> Actually...are you sure it would work?  java.util.Vector has the following
+> clone() method:
+> 
+> public Object <http://java.sun.com/j2se/1.4.2/docs/api/java/lang/Object.html>
+> *clone*()
+> {
+> }
+> 
+> I didn't think you can cast a base class (Vector) to its derived class
+> (SegmentInfos) in Java?
+> 
+> On Fri, Oct 3, 2008 at 6:16 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+> 
+> >
+> > That's Sun's JRE?  That should be fine, unless there's something seriously
+> > wrong with it's java.util.Vector implementation.
+> >
+> > But, this is an exceptionally strange exception.  Maybe try a different
+> > version of the JRE?
+> >
+> > Any odd JARs on your CLASSPATH?
+> >
+> > What hardware/OS?
+> >
+> >
+> > Mike
+> >
+> > Paul Chan wrote:
+> >
+> >  I am using Java 1.6.0_02.  Is this a problem?
+> >>
+> >> On Fri, Oct 3, 2008 at 5:35 PM, Michael McCandless <
+> >> lucene@mikemccandless.com> wrote:
+> >>
+> >>
+> >>> Which Java environment are you running?
+> >>>
+> >>> super.clone() from SegmentInfos should produce a new SegmentInfos object.
+> >>>
+> >>> It seems like in your case it's somehow producing a Vector instead?
+> >>>
+> >>> Mike
+> >>>
+> >>>
+> >>> Paul Chan wrote:
+> >>>
+> >>> Hi Mike,
+> >>>
+> >>>>
+> >>>> I am actually using the Compass Search Engine which in turn makes use
+of
+> >>>> Lucene.  They are doing the following in their code:
+> >>>>
+> >>>>     IndexWriter indexWriter = new IndexWriter(dir, autoCommit, analyzer,
+> >>>> create, deletionPolicy);
+> >>>>
+> >>>> where autoCommit = false.
+> >>>>
+> >>>> In turn, Lucene will do the following:
+> >>>>
+> >>>> public class IndexWriter {
+> >>>>
+> >>>>   public IndexWriter(Directory d, boolean autoCommit, Analyzer a,
+> >>>> boolean create, IndexDeletionPolicy deletionPolicy)
+> >>>>    throws CorruptIndexException, LockObtainFailedException, IOException
+> >>>> {
+> >>>>       init(d, a, create, false, deletionPolicy, autoCommit);
+> >>>>   }
+> >>>>
+> >>>>   private void init(Directory d, Analyzer a, final boolean create,
+> >>>> boolean closeDir,                   IndexDeletionPolicy deletionPolicy,
+> >>>> boolean autoCommit)
+> >>>>   {
+> >>>>      ...
+> >>>>      ..
+> >>>>      if (!autoCommit) {
+> >>>>        rollbackSegmentInfos = (SegmentInfos) segmentInfos.clone();
+> >>>>      }
+> >>>>   }
+> >>>> }
+> >>>>
+> >>>> which calls the clone() method that causes the exception because
+> >>>> autoCommit
+> >>>> = false.
+> >>>>
+> >>>> On Fri, Oct 3, 2008 at 4:54 PM, Michael McCandless <
+> >>>> lucene@mikemccandless.com> wrote:
+> >>>>
+> >>>>
+> >>>>  Can you describe what led up to this exception?  Ie, what calls you
+> >>>>> made
+> >>>>> to
+> >>>>> Lucene before this.
+> >>>>>
+> >>>>> Mike
+> >>>>>
+> >>>>>
+> >>>>> Paul Chan wrote:
+> >>>>>
+> >>>>> I think I know what the problem is looking at the code:
+> >>>>>
+> >>>>>
+> >>>>>> In SegmentInfos.java (line 321):
+> >>>>>>
+> >>>>>> class SegmentInfos extends Vector
+> >>>>>> {
+> >>>>>> public Object clone() {
+> >>>>>>  SegmentInfos sis = (SegmentInfos) super.clone();
+> >>>>>>  for(int i=0;i<sis.size();i++) {
+> >>>>>>    sis.setElementAt(((SegmentInfo) sis.elementAt(i)).clone(),
+i);
+> >>>>>>  }
+> >>>>>>  return sis;
+> >>>>>> }
+> >>>>>> }
+> >>>>>>
+> >>>>>> We see that it is trying to cast a Vector into SegmentInfos
+which
+> >>>>>> explains
+> >>>>>> the ClassCastException.  This is definitely a bug.
+> >>>>>>
+> >>>>>>
+> >>>>>> On Fri, Oct 3, 2008 at 3:40 PM, Paul Chan <wayofdragon@gmail.com>
+> >>>>>> wrote:
+> >>>>>>
+> >>>>>> Hi,
+> >>>>>>
+> >>>>>>
+> >>>>>>> I am using lucene 2.3.2 and I encounter the following exception
+when
+> >>>>>>> I
+> >>>>>>> try
+> >>>>>>> to insert a object into the index.
+> >>>>>>>
+> >>>>>>> Caused by: java.lang.ClassCastException: java.util.Vector
+cannot be
+> >>>>>>> cast
+> >>>>>>> to
+> >>>>>>> org.apache.lucene.index.SegmentInfos
+> >>>>>>> at org.apache.lucene.index.SegmentInfos.clone(SegmentInfos.java:321)
+> >>>>>>> at org.apache.lucene.index.IndexWriter.init(IndexWriter.java:715)
+> >>>>>>> at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:666)
+> >>>>>>>
+> >>>>>>> Has Anyone seen this problem before?  What seems to be the
+problem?
+> >>>>>>>
+> >>>>>>> Thanks!
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> >>>>>>> ---------------------------------------------------------------------
+> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>>
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+
+
+
+      New Email addresses available on Yahoo!
+Get the Email name you&#39;ve always wanted on the new @ymail and @rocketmail. 
+Hurry before someone else does!
+http://mail.promotions.yahoo.com/newdomains/sg/
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

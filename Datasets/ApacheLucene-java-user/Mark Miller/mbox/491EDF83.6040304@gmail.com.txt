@@ -1,0 +1,239 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: LUCENE-831 (complete cache overhaul) -> mem use
+DATE: 15 Nov 2008
+
+Like I said, its pretty easy to add this, but its also going to suck. 
+Kind of exposes the fact that its missing the right extensibility at the 
+moment. Things are still a bit ugly overall.
+
+
+Your going to need new CacheKeys for the data types you want to support. 
+A CacheKey builds and provides access to the field data and is simply:
+
+
+*public* *abstract* *class* CacheKey {
+
+*public* *abstract* CacheData buildData(IndexReader r);
+
+*public* *abstract* *boolean* equals(Object o);
+
+*public* *abstract* *int* hashCode();
+
+*public* *boolean* isMergable();
+
+*public* CacheData mergeData(*int*[] starts, CacheData[] data) ;
+
+*public* *boolean* usesObjectArray();
+
+
+For a sparse storage implementation you would use an object array, so 
+have usesObjectArray return true and isMergable can then be false and 
+you dont have to support the mergeData method.
+
+
+In buildData you will load your object array and return it. Here is an 
+array backed IntObjectArrayCacheKey build method:
+
+*public* CacheData buildData(IndexReader reader) *throws* IOException {
+
+   *final* *int*[] retArray = getIntArray(reader);
+
+   ObjectArray fieldValues = *new* ObjectArray() {
+
+     *public* Object get(*int* index) {
+
+       *return* *new* Integer(retArray[index]);
+
+     }
+
+   };
+
+   *return* *new* CacheData(fieldValues);
+
+}
+
+
+*protected* *int*[] getIntArray(IndexReader reader) *throws* IOException {
+
+   *final* *int*[] retArray = *new* *int*[reader.maxDoc()];
+
+   TermDocs termDocs = reader.termDocs();
+
+   TermEnum termEnum = reader.terms(*new* Term(field, ""));
+
+   *try* {
+
+     *do* {
+
+       Term term = termEnum.term();
+
+       *if* (term == *null* || term.field() != field)
+*        break*;
+*     
+      int* termval = parser.parseInt(term.text());
+
+       termDocs.seek(termEnum);
+
+       *while* (termDocs.next()) {
+        retArray[termDocs.doc()] = termval;
+      }
+
+     } *while* (termEnum.next());
+
+   } *finally* {
+
+     termDocs.close();
+
+     termEnum.close();
+
+   }
+
+   *return* retArray;
+
+}
+
+
+So it should be fairly straightforward to return a sparse implementation 
+backed object array from your new CacheKey (SparseIntObjectArrayCacheKey 
+or something).
+
+Now some more ugliness: You can turn on the ObjectArray cachekeys by 
+setting the system property 'use.object.array.sort' to true. This will 
+cause FieldSortedHitQueue to return ScoreDocComparators that use the 
+standard ObjectArray CacheKeys, IntObjectArrayCacheKey, 
+FloatObjectArrayCacheKey, etc.The method that builds each comparator 
+type knows what type to build for and whether to use primitive arrays or 
+ObjectArrays ie (from FieldSortedHitQueue):
+
+
+*static* ScoreDocComparator comparatorDoubleOA(*final* IndexReader 
+reader, *final* String fieldname)
+
+
+does this (it has to provide the CacheKey and know the return type):
+
+
+*final* ObjectArray fieldOrder = (ObjectArray) 
+reader.getCachedData(*new* 
+DoubleObjectArrayCacheKey(field)).getCachePayload();
+
+
+So you have to either change all of the ObjectArray comparator builders 
+to use your CacheKeys:
+
+
+*final* ObjectArray fieldOrder = (ObjectArray) 
+reader.getCachedData(*new* 
+SparseIntObjectArrayCacheKey(field)).getCachePayload();
+
+
+Or you have to add more options in 
+FieldSortedHitQueue.CacheEntry.buildData(IndexReader reader) and more 
+static comparator builders in FieldSortedHitQueue that use the right 
+CacheKeys. Obviously not very extensibility friendly at the moment. I'm 
+sure with some thought, things could be much better. If you decided to 
+jump into any of this, let me know if you have any suggestions, feedback.
+
+
+- Mark
+
+
+
+Britske wrote:
+> That ArrayObject suggestion makes sense to me. It amost seemed to be as if
+> you were referring as this option (or at least the interfaces needed to
+> implement this) were already available as 1 out of 2 options available in
+> 831? 
+>
+> Could you give me a hint at were I have to be looking to extend what you're
+> suggesting? 
+> a new Cache, CacheFactory and Cachekey implementaiton for all types of
+> cachekeys? This may sound a bit ignorant, but it would be my first time to
+> get my head around the internals of an api instead of merely using it to
+> imbed in a client application so any help is highly appreciated.  
+>
+> Thanks for your help,
+>
+> Geert-Jan
+>
+>
+>
+> markrmiller wrote:
+>   
+>> Its hard to predict the future of LUCENE-831. I would bet that it will 
+>> end up in Lucene at some point in one form or another, but its hard to 
+>> say if that form will be whats in the available patches (I'm a contrib 
+>> committer so I won't have any real say in that, so take that prediction 
+>> with a grain of salt). It has strong ties to other issues and a 
+>> committer hasn't really had their whack at it yet.
+>>
+>> Having said that though, LUCENE-831 allows for two types for dealing 
+>> with field values: either the old style int/string/long/etc arrays, or 
+>> for a small speed hit and faster reopens, an ArrayObject type that is 
+>> basically an Object that can provide access to one or two real or 
+>> virtual arrays. So technically you could use an ArrayObject that had a 
+>> sparse implementation behind it. Unfortunately, you would have to 
+>> implement new CachKeys to do this. Trivial to do, but reveals our 
+>> LUCENE-831 problem of exponential cachkey increases with every new 
+>> little option/idea and the juggling of which to use. I havn't thought 
+>> about it, but I'm hoping an API tweak can alleviate some of this.
+>>
+>> - Mark
+>>
+>> Britske wrote:
+>>     
+>>> Hi, 
+>>>
+>>> I recently saw activity on LUCENE-831 (Complete overhaul of FieldCache
+>>> API/Implementation) which I have interest in. 
+>>> I posted previously on this with my concern that given the current
+>>> default
+>>> cache I sometimes get OOM-errors because I have a lot of fields which are
+>>> sorted on, which ultimately causes the fieldcache to grow greater then
+>>> available RAM. 
+>>>
+>>> ultimately I want to subclass the new pluggable Fieldcache of lucene-831
+>>> to
+>>> offload to disk (using ehcache or memcachedB or something) but havn't
+>>> found
+>>> the time yet. 
+>>>
+>>> What I would like to know for now is if perhaps the newly implemented
+>>> standard cache in LUCENE-831 uses another strategy of caching than the
+>>> standard Fieldcache in Lucene. 
+>>>
+>>> i.e: The normal cache consumes memory while generating a fieldcache for
+>>> every document in lucene even though the document hasn't got that field
+>>> set. 
+>>>
+>>> Since my documents are very sparse in these fields I want to sort on it
+>>> would differ a_lot when documents that don't have the field in question
+>>> set
+>>> don't add up in the used memory. 
+>>>
+>>> So am I lucky? Or would I indeed have to cook up something myself? 
+>>> Thanks and best regards,
+>>>
+>>> Geert-Jan
+>>>
+>>>
+>>>   
+>>>       
+>> I'm
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>     
+>
+>   
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

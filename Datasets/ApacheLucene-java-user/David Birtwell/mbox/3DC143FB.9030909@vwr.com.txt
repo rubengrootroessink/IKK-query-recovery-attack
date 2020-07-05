@@ -1,0 +1,91 @@
+FROM: David Birtwell <David_Birtw...@vwr.com>
+SUBJECT: Re: Alphabetical sorting of results
+DATE: 31 Oct 2002
+
+Eoin,
+
+There is a technique for predifining an ordering of results at index 
+time that might be applicable here.  It involves making slight 
+modifications to the Lucene source.  Here's a summary from another mail 
+I had written on the subject:
+
+---
+I was faced with a similar problem.  We wanted to have a numeric rank 
+field in each document influence the order in which the documents were 
+returned by lucene.  While investigating a solution for this, I wanted 
+to see if I could implement strict sorting based on this numeric value. 
+I was able to accomplish this using document boosting, but not without 
+modifying the lucene source.  Our "ranking" field is an integer value 
+from one to one hundred.  I'm not sure if this will help you, but I'll 
+include a summary of what I did.
+
+In DocumentWriter remove the normalization by field length:
+   float norm = fieldBoosts[n] * 
+Similarity.normalizeLength(fieldLengths[n]);
+to
+   float norm = fieldBoosts[n];
+
+In TermScorer and PhraseScorer, modify the score() method to ignore the 
+lucene base score:
+   score *= Similarity.decodeNorm(norms[d]);
+to
+   score = Similarity.decodeNorm(norms[d]);
+
+In Similarity.java, make byteToFloat() public.
+
+At index time, use Similarity.byteToFloat() to determine your boost 
+value as in the following pseudocode:
+   Document d = new Document();
+   ... add your fields ...
+   int rank = d.getField("RANK"); (range of rank can be 0 to 255)
+   float sortVal = Similarity.byteToFloat(rank)
+   d.setBoost(sortVal)
+---
+
+In your situation, perhaps you could define a rank based on the 
+alphabetic ordering value of your title field.  With only 256 discreet 
+boost values currently available to you, though, you'll probably have to 
+group your titles alphabetically into buckets.
+
+You also might want to investigate modifying the lucene source to return 
+the same score for each hit, then index your files in alphabetical 
+order.  I *believe* that, independent of score, lucene will return the 
+results in the order in which they were indexed.
+
+DaveB
+
+
+Eoin O'Toole wrote:
+
+> I am indexing documents (about 7 different document types) and must 
+> display the results alphabetically by title field... which is 
+> generally not one of the search fields.
+>
+> Currently I am calling hits.get(i) on each document to find the title, 
+> and then sorting by title. Sort is fast, but calling hits.get(i)  n 
+> times is too slow beyond about 400 objects... and this approach means 
+> I have to do a "full scan" of the Hits collection.
+>
+> Anyone have any suggestions/strategies on solving this? (Or is there 
+> functionality already in place I have overlooked?)
+>
+> Thanks for any input,
+>
+> Eoin
+>
+>
+> -- 
+> To unsubscribe, e-mail:   
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail: 
+> <mailto:lucene-user-help@jakarta.apache.org>
+>
+>
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

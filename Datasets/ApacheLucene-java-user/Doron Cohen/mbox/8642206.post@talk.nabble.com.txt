@@ -1,0 +1,97 @@
+FROM: Doron Cohen <DOR...@il.ibm.com>
+SUBJECT: Re: corrupt index: .fdx and stored norms
+DATE: 25 Jan 2007
+
+
+Hi Nick, 
+
+Have you managed to solve/recreate this issue?
+
+There has been a recent progress on index corruption issues:
+http://issues.apache.org/jira/browse/LUCENE-140
+http://issues.apache.org/jira/browse/LUCENE-784
+
+In those cases an application created FSDirectory with create=false 
+and created IndexWriter with create=true. Apparently this was 
+not sufficient for starting from fresh, and the newly created index
+was possibly using remaining files from an older index.
+
+I cannot see a straight path where this would lead to the 
+error in the line you pointed. 
+
+It might add info to know, for your test application:
+- is it deleting docs?
+- FSDirectory/IndexWriter create=?
+- is it modifying norms?
+
+Regards,
+Doron
+
+
+Nick Puz wrote:
+> 
+>>>> I am working on the development of a product that is using Lucene. A
+>>>> corrupt index was reported by testers and it is in an odd state.
+>>>> The indexes are built in batches (to multiple ram indexes in parallel)
+>>>> and then eventually merged into a disk index with
+>>>> IndexWriter.addIndexes(Directory[]).
+>>>> Somehow the index got corrupted, there were no indications of a crash
+>>>> or errors in log. The failure in SegmentMerger.mergeNorms:
+>>>>   private void mergeNorms() throws IOException {
+>>>>     for (int i = 0; i < fieldInfos.size(); i++) {
+>>>>       FieldInfo fi = fieldInfos.fieldInfo(i);
+>>>>       if (fi.isIndexed && !fi.omitNorms) {
+>>>>         IndexOutput output = directory.createOutput(segment + ".f" +
+>> i);
+>>>>         try {
+>>>>           for (int j = 0; j < readers.size(); j++) {
+>>>>             IndexReader reader = (IndexReader) readers.elementAt(j);
+>>>>             int maxDoc = reader.maxDoc();
+>>>>             byte[] input = new byte[maxDoc];
+>>>>             reader.norms(fi.name, input, 0);  <==== ERROR HERE
+>>>>             for (int k = 0; k < maxDoc; k++) {
+>>>>               if (!reader.isDeleted(k)) {
+>>>>                 output.writeByte(input[k]);
+>>>>               }
+>>>>             }
+>>>>           }
+>>>>         } finally {
+>>>>           output.close();
+>>>>         }
+>>>>       }
+>>>>     }
+>>>>   }
+>>>>
+>>>> The problem is that the maxDoc() returned by the indexReader
+>>>> (FieldsReader in this case) is larger then the size, in bytes, of the
+>>>> norms file. then there is an error in IndexInput.read(byte[], int,
+>>>> int) because there is not enough data in file to read.
+>>>> Here is part of the directory listing (there are many stored fields of
+>>>> the same size so omitting all but first 3):
+>>>>
+>>>> -rw-r--r--  1 icmadmin db2grp1        811 Sep 27 20:48 _a4.fnm
+>>>> -rw-r--r--  1 icmadmin db2grp1    1451696 Sep 27 20:49 _a4.fdx
+>>>> -rw-r--r--  1 icmadmin db2grp1   12736304 Sep 27 20:49 _a4.fdt
+>>>> -rw-r--r--  1 icmadmin db2grp1 5648544509 Sep 27 21:30 _a4.prx
+>>>> -rw-r--r--  1 icmadmin db2grp1 1695149231 Sep 27 21:30 _a4.frq
+>>>> -rw-r--r--  1 icmadmin db2grp1   45688880 Sep 27 21:30 _a4.tis
+>>>> -rw-r--r--  1 icmadmin db2grp1     673588 Sep 27 21:30 _a4.tii
+>>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f2
+>>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f1
+>>>> -rw-r--r--  1 icmadmin db2grp1     181159 Sep 27 21:30 _a4.f0
+>>>>
+>>>> from looking at the code the sizeof(.fdx)/8 should equal sizeof(.f0)
+>>>> but it doesn't in this case.
+>>>>
+> 
+
+-- 
+View this message in context: http://www.nabble.com/corrupt-index%3A-.fdx-and-stored-norms-tf2418902.html#a8642206
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

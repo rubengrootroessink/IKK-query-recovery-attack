@@ -1,0 +1,115 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: {SPAM 05.2 _____} IOException: Access is denied from  IndexWriter.Optimize
+DATE: 5 Dec 2006
+
+trond.lindanger@dkdigital.no wrote:
+> Hi, 
+> In my test case, four Quartz jobs are starting each third minute storing 
+> records in a database followed by an index update.
+> After doing a test run over a period of 16 hours, I got this exception 
+> after 10 hours:
+> 
+> java.io.IOException: Access is denied
+>         at java.io.RandomAccessFile.writeBytes(Native Method)
+>         at java.io.RandomAccessFile.write(RandomAccessFile.java:456)
+>         at 
+> org.apache.lucene.store.FSIndexOutput.flushBuffer(FSDirectory.java:575)
+>         at 
+> org.apache.lucene.store.BufferedIndexOutput.flush(BufferedIndexOutput.java:85)
+>         at 
+> org.apache.lucene.store.BufferedIndexOutput.writeBytes(BufferedIndexOutput.java:75)
+>         at 
+> org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java:212)
+>         at 
+> org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java:169)
+>         at 
+> org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java:148)
+>         at 
+> org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:962)
+>         at 
+> org.apache.lucene.index.IndexWriter.flushRamSegments(IndexWriter.java:833)
+>         at 
+> org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:569)
+>  
+> Here is the relevant method:
+> 
+>   public void indexItems(boolean createNewIndex, Collection items)
+>     throws java.io.IOException {
+>         if (IndexReader.indexExists(indexDir)) {
+>                 while (IndexReader.isLocked(indexDir)) {
+>                         try {
+>                                 logger.info(indexDir+" is locked, 
+> waiting...");
+>                                 Thread.sleep(1000); 
+>                         } catch (InterruptedException e) {
+>                                 e.printStackTrace();
+>                         }
+>                 }
+>         }
+>         logger.info(indexDir+" lock is open."); 
+>     logger.info("Start writing index located at "+indexDir);
+>     IndexWriter writer = new IndexWriter(indexDir, analyzer, 
+> createNewIndex);
+>     writer.setWriteLockTimeout(10000);
+>     writer.setUseCompoundFile(true);
+>  
+>     Iterator itI = items.iterator();
+>     while (itI.hasNext()) {
+>       ItemIF item = (ItemIF) itI.next();
+>       logger.info("Add item " + item + " to index.");
+>       writer.addDocument(ItemDocument.makeDocument(item));
+>     }
+>     writer.optimize(); // This is where the exception is thrown
+>     nrOfIndexedItems = writer.docCount();
+>     writer.close();
+>     logger.info("Finished writing index.");
+>   } 
+> 
+> 
+> The following environment is used:
+> WinXP
+> JDK 1.5
+> Tomcat 5.5
+> Lucene 2.0.0
+> HSQLdb 1.8.0
+> Quartz 1.6.0
+> Hibernate 2.1.8
+
+It seems like this may be another case of writer creating new index
+while reader(s) are reading from the same index (which won't work in
+2.0 but does work in trunk/next release).
+
+But, this exception is rather mysterious.  I can't fully explain it.
+
+The optimize method first flushes all documents in the in-memory
+buffer (a RAMDirectory) to disk.  It's in this flush, specifically
+when building the resulting compound file, that you hit the Access is
+denied IOException.
+
+What's spooky is you hit it during writeBytes.  Meaning, the file was
+in fact successfully opened for writing.  I would have expected this
+exception to occur on opening (if for example a reader was reading
+the file at that time, and, if somehow the commit lock wasn't working
+properly).
+
+Is this process the only one that's doing writing to the index?  For
+example, why do you have the loop up-front to pause for 1.0 seconds if
+the index is locked?  Is this just to check the commit lock (in case a
+reader is opening the index at that moment)?
+
+It sounds like you may have 4 Quartz jobs running, and each of them
+wants to write to the index?  (So maybe your loop that pauses if index
+is locked is really trying to wait for another writer to finish its
+indexing before it starts?)  Lucene only allows one writer on the
+index at a time.
+
+Is this exception easily repeated?  EG, it always happens many hours
+into your runs?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

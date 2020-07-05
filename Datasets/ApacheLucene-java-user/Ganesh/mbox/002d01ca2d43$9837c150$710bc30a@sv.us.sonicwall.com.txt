@@ -1,0 +1,163 @@
+FROM: "Ganesh" <emailg...@yahoo.co.in>
+SUBJECT: Re: too many file descriptors opened by Lucene shows (deleted) in /proc
+DATE: 4 Sep 2009
+
+I doing the following way.
+
+if (!reader.isCurrent()) {
+//reOpen 
+}
+
+I tried debugging and my log shows the correct reference count. Any other idea?
+
+Regards
+Ganesh
+
+----- Original Message ----- 
+From: "Uwe Schindler" <uwe@thetaphi.de>
+To: <java-user@lucene.apache.org>
+Sent: Friday, September 04, 2009 1:12 PM
+Subject: RE: too many file descriptors opened by Lucene shows (deleted) in /proc 
+
+
+> One general trap with reopen(): Reopen() returns a *new* IndexReader. If
+> this new IndexReader is different from the actual one, you have to close the
+> old reader when you are finished working on it. If you only have one thread
+> working on this IndexReader that is reopened, you can close the old reader
+> directly after reopening:
+> 
+> IndexReader new = actualReader.reopen();
+> if (new != actualReader) {
+> actualReader.close();
+> actualReader = new;
+> }
+> 
+> If you have some multithreaded architecture, you have to keep the old reader
+> open as long as there are accesses (which you can manage by refcounting).
+> 
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+> 
+>> -----Original Message-----
+>> From: Ganesh [mailto:emailgane@yahoo.co.in]
+>> Sent: Friday, September 04, 2009 9:35 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: too many file descriptors opened by Lucene shows (deleted) in
+>> /proc
+>> 
+>> I am having only one process using Lucene DB. The same process writes and
+>> reads. I do re-open indexreader. I am maintaing ref count for each
+>> reader/searcher and closing it if it is not used. I am not able to
+>> understand, why the file descriptor is showing as (deleted)?
+>> 
+>> I guessing some issues? Could any one tell me what are the other part of
+>> code to look in to (related to Lucene)? Any other way to identify the root
+>> cause?
+>> 
+>> Regards
+>> Ganesh
+>> 
+>> 
+>> ----- Original Message -----
+>> From: "Uwe Schindler" <uwe@thetaphi.de>
+>> To: <java-user@lucene.apache.org>
+>> Sent: Friday, September 04, 2009 11:56 AM
+>> Subject: RE: too many file descriptors opened by Lucene shows (deleted) in
+>> /proc
+>> 
+>> 
+>> > This is normal. When you open an IndexReader/IndexSearcher, it opens
+>> various
+>> > file handles. If you additionally update/add/delete documents in
+>> parallel
+>> > (even in other process), or optimize the index, the original IndexReader
+>> > stays on using the "old" state of the index. IndexWriter deletes some
+>> files,
+>> > but IndexReader still have them open (this is our segment based
+>> > "transaction" handling of IndexWriter). If you reopen your IndexReader
+>> to
+>> > get the last updates of the underlying index, these "deleted" files will
+>> > disappear, as they can be closed. As long as they are open, they
+>> disappear
+>> > from directory listing, but they still consume space on disk (because
+>> they
+>> > are still used). This is why you see this deleted files.
+>> >
+>> > -----
+>> > Uwe Schindler
+>> > H.-H.-Meier-Allee 63, D-28213 Bremen
+>> > http://www.thetaphi.de
+>> > eMail: uwe@thetaphi.de
+>> >
+>> >> From: Ganesh [mailto:emailgane@yahoo.co.in]
+>> >> Sent: Friday, September 04, 2009 8:11 AM
+>> >> To: java-user@lucene.apache.org
+>> >> Subject: too many file descriptors opened by Lucene shows (deleted) in
+>> >> /proc
+>> >>
+>> >> Hello all,
+>> >>
+>> >> In my linux pc, there are too many fd counts for lucene database.
+>> >> /proc/<processid>/fd shows very big list. I have provided sample below.
+>> >>
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 360 ->
+>> >> /opt/ganesh/lucenedb/_2w5.tvf (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 361 ->
+>> >> /opt/ganesh/lucenedb/_hr.frq (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 362 ->
+>> >> /opt/ganesh/lucenedb/_hr.prx (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 363 ->
+>> >> /opt/ganesh/lucenedb/_hr.tvx (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 21:01 364 ->
+>> >> /opt/ganesh/lucenedb/_hr.tvd (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 365 ->
+>> >> /opt/ganesh/lucenedb/_hr.tvf (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 366 ->
+>> >> /opt/ganesh/lucenedb/_2w4.fdt (deleted)
+>> >> lr-x------    1 root     root           64 Sep  3 17:02 367 ->
+>> >> /opt/ganesh/lucenedb/_2w4.fdx (deleted)
+>> >>
+>> >> These files not exist in the disk but why it is showing as (deleted) in
+>> >> the /proc. This means the process is still holding the fd. Please
+>> provide
+>> >> me more information on this. I am using Fedora Linux, ext-3 file
+>> system,
+>> >> Lucene 2.4.1.
+>> >>
+>> >> Regards
+>> >> Ganesh
+>> >> Send instant messages to your online friends
+>> http://in.messenger.yahoo.com
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> Send instant messages to your online friends http://in.messenger.yahoo.com
+>> 
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+Send instant messages to your online friends http://in.messenger.yahoo.com 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

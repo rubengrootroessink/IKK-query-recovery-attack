@@ -1,0 +1,226 @@
+FROM: "Ramana Jelda" <ramana.je...@ciao-group.com>
+SUBJECT: RE: How can I use SortComparator in my case?
+DATE: 27 Mar 2007
+
+Thanks for all your help.
+Here I am coming with the best solution I can see and I am planning to
+implement this.
+
+Suppose 20 unique customers && 90,000 results found && to be returned offset
+results 0-20
+
+I can think of only following solution.. 
+//Hope pseudo code is self understandable..
+
+Public MyCollector extends TopFieldDocCollector{
+ private Hashtable<String, FieldSortedHitQueue> hitQueues = new
+Hashtable<String, FieldSortedHitQueue>();
+
+ public void collect(int docId, float score) {
+            super.collect(doc, score);
+            String c = cachedCustomerKeywordTerms.getGroupTerm("customer",
+docId); //like FielCache etc.
+            FieldSortedHitQueue hitQueue = hitQueues.get(c);
+            if(hitQueue == null){
+                hitQueue = new FieldSortedHitQueue(reader, sort, numHits);
+                hitQueues.put(c, hitQueue);
+            }
+            hitQueue.insert(new FieldDoc(docId, score));
+
+    }
+
+/** 
+    Topdocs implementation overridden.
+    Probably needs some improvements in sorting customers by score..
+*/
+
+ public TopDocs topDocs() {
+       //just preparing Vector to be able to sort easily    
+        Vector<FieldSortedHitQueue> actualHitQueues = new
+Vector<FieldSortedHitQueue>();
+        Enumeration<FieldSortedHitQueue> e = hitQueues.elements();
+        while(e.hasMoreElements()){
+            FieldSortedHitQueue fq = e.nextElement();
+            actualHitQueues.addElement(fq);
+        }
+
+        //sort Vector by maxScore.. 
+        Collections.sort(actualHitQueues, new
+Comparator<FieldSortedHitQueue>() {
+                    public int compare(FieldSortedHitQueue o1,
+FieldSortedHitQueue o2) {
+                        return Float.compare(o1.getMaxScore(),
+o2.getMaxScore());
+                    }
+                });
+        
+        TopDocs topDocs = super.topDocs();
+        
+        int i=0;
+        while(i < topDocs.scoreDocs.length){
+            for(int j = 0; j < actualHitQueues.size(); j++){
+                FieldSortedHitQueue fq = actualHitQueues.get(j);
+                FieldDoc fd = (FieldDoc) fq.pop();
+                if(fd != null){
+                    topDocs.scoreDocs[i] = fd;
+                    i =i+1;
+                    if(i==topDocs.scoreDocs.length) break;
+                }
+            }
+        }
+
+        return topDocs;
+    }
+}
+
+
+I would really appreciate your suggestions or improvements .
+
+Thx in advance,
+Jelda
+
+
+> -----Original Message-----
+> From: Doron Cohen [mailto:DORONC@il.ibm.com] 
+> Sent: Monday, March 05, 2007 10:22 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: How can I use SortComparator in my case?
+> 
+> I too cannot think of an indexing configuration that would help this.
+> 
+> However it seems that all the required information exists at 
+> search time, more precisely at hits collection time:
+> - the doc-id and doc-score are known, and used when hits are 
+> collected.
+> - The value of that certain field of interested can be 
+> computed - similar to how it is computed for sorting by a 
+> field - but its use is different - sorting should not be by 
+> the value of the field, but rather by how many docs with the 
+> same value for this field were "collected" so far.
+> 
+> This seems to call for a tailored hit collector. The search 
+> API allows for providing a customized hit collector, where 
+> this counting logic could be added. (The challenge is in 
+> avoiding calling
+> reader.document(id,fieldSelector) in collect() because this 
+> would be quite bad for performance in a large collection - 
+> see javadocs for
+> HitCollector.collect() - but it must be a large collection, 
+> otherwise, for a small collection, the post process approach 
+> proposed here would do.)
+> 
+> Doron
+> 
+> "Erick Erickson" <erickerickson@gmail.com> wrote on 
+> 05/03/2007 04:48:10:
+> 
+> > There's a discussion recently where someone pointed me to 
+> > FieldSortedHitQueue, you might trysearchinng for that. Also, try 
+> > "buckets" which was the header of that discussion.
+> >
+> > You can also think about clever indexing schemes with fields that 
+> > allow you to sort however you really need to, although I confess 
+> > nothing jumps out at me given your example.
+> >
+> > Best
+> > Erick
+> >
+> >
+> > On 3/5/07, Ramana Jelda <ramana.jelda@ciao-group.com> wrote:
+> > >
+> > > This will then be a big hastle. The results are in 100s and 
+> > > sometimes
+> in
+> > > 1000s.
+> > > Hum.. No other better way?
+> > >
+> > > Jelda
+> > >
+> > > > -----Original Message-----
+> > > > From: Mordo, Aviran (EXP N-NANNATEK) 
+> > > > [mailto:aviran.mordo@lmco.com]
+> > > > Sent: Friday, March 02, 2007 8:02 PM
+> > > > To: java-user@lucene.apache.org
+> > > > Subject: RE: How can I use SortComparator in my case?
+> > > >
+> > > > You'll need to do it manually and not with Lucene.
+> > > >
+> > > > Just grab all the results from Lucene and process them yourself.
+> > > >
+> > > > Aviran
+> > > > http://aviransplace.com
+> > > >
+> > > > -----Original Message-----
+> > > > From: Ramana Jelda [mailto:ramana.jelda@ciao-group.com]
+> > > > Sent: Friday, March 02, 2007 5:45 AM
+> > > > To: java-user@lucene.apache.org
+> > > > Subject: How can I use SortComparator in my case?
+> > > >
+> > > > Hi,
+> > > > I have a requirement to sort search results in a round robin.
+> > > > Ex:sorting results by field "customer"
+> > > > suppose following customers are found (number of results in
+> > > > brackets) and results are sorted by customer.
+> > > >
+> > > > Amazon(10)
+> > > > Dell(2)
+> > > > EBay(4)
+> > > > Yahoo(20)
+> > > >
+> > > > but I want to sort them in the following way,
+> > > > Amazon(1)
+> > > > Dell(1)
+> > > > EBay(1)
+> > > > Yahoo(1)
+> > > >
+> > > > Amazon(1)
+> > > > Dell(1)
+> > > > EBay(1)
+> > > > Yahoo(1)
+> > > >
+> > > > Amazon(1)
+> > > > EBay(1)
+> > > > Yahoo(1)
+> > > >
+> > > > Amazon(1)
+> > > > EBay(1)
+> > > > Yahoo(1)
+> > > >
+> > > > etc.. etc..
+> > > >
+> > > >
+> > > > You think I can use somehow SortComparator here?
+> > > > any suggestions?
+> > > >
+> > > > Thx,
+> > > > Jelda
+> > > >
+> > > >
+> > > > 
+> ------------------------------------------------------------------
+> > > > --- To unsubscribe, e-mail: 
+> > > > java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: 
+> java-user-help@lucene.apache.org
+> > > >
+> > >
+> > >
+> > > 
+> --------------------------------------------------------------------
+> > > - To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

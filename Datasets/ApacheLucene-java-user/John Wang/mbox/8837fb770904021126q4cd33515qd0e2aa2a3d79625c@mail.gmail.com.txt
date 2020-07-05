@@ -1,0 +1,79 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: IndexWriter.deleteDocuments(Query query)
+DATE: 2 Apr 2009
+
+Hi Michael:
+    Thanks for looking into this.
+
+    Approach 2 has a dependency on how fast the delete set performs a check
+on a given id, approach one doesn't. After replacing my delete set with a
+simple bitset, approach 2 gets a 25-30% improvement.
+
+   I understand if the delete set is small, approach 1 would be faster,
+while approach two has a more constant/deterministic performance. I would
+also save from indexing the UID term into the index if going with approach
+two.
+
+   I don't however see how column-stride fields would help here, isn't it a
+generalization of what I am doing?
+
+  BTW, can you shine some light on why would IndexWriter move docids around
+when it is opened and no docs has been added to it?
+
+Thanks
+
+-John
+
+On Thu, Apr 2, 2009 at 2:20 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> On Wed, Apr 1, 2009 at 6:37 PM, John Wang <john.wang@gmail.com> wrote:
+> > a code snippet is worth 1000 words :)
+>
+> Here here!
+>
+> OK, now I understand the difference.
+>
+> With approach 1, for each of N UIDs you use a TermDocs to find the
+> postings for that UID, and retrieve the one docID corresponding to
+> that UID.  You retrieve UID -> docID.
+>
+> With approach 2, you iterate through all docs in the index, using a
+> single full walk through the single TermPositions instance for your
+> special UID_TERM, and retrieve the UID stored in the 4-byte payload.
+> You retrieve docID -> UID.
+>
+> Approach 1 is expected to be more costly, per UID - Lucene must
+> consult the terms dict (binary search on the terms index, followed by
+> scan on disk within the 128 term block) to find the posting, then seek
+> to the posting and read that.
+>
+> Approach 2 is an efficient "bulk" walk, but it loads all docID -> UIDs
+> into RAM (ie, you cannot be selective about which UIDs you load).
+>
+> So if the number of UIDs you need to process is small, approach 1
+> should win; but after that number crosses X (apparently X < 10000 for
+> you), approach 2's "bulk walk" will win.
+>
+> Approach 1 will get faster with the "pulsing" approach for inlining
+> low-frequency postings directly into the terms dict (discussed on
+> java-dev and implemented as a codec in the experimental flexible
+> indexing patch on LUCENE-1458), because we save the second seek.
+>
+> Approach 2 will get much faster with column-stride fields
+> (LUCENE-1231).
+>
+> Though we may want to take this even further and allow inversion for
+> special fields ("primary key int" field, ie your UID) to be stored as
+> a column-stride field.  Probably this could simply be another codec in
+> LUCENE-1458.  Then, delete-by-Term would be exceptionally fast for
+> such fields.
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

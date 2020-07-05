@@ -1,0 +1,169 @@
+FROM: Michael McCandless <mmcc...@us.ibm.com>
+SUBJECT: Re: using lucene Lock inter-jvm
+DATE: 21 Jun 2006
+
+CC'ing java-dev to talk about details of locking.
+
+I can reproduce this on Windows XP, Java 1.4.2: two separate JVMs are able 
+to get the Lock at the same time.
+
+The code looks correct to me.
+
+Strangely, if I make a separate standalone test that just uses 
+java.io.File.createNewFile directly, it works correctly (this is what 
+FSDirectory.makeLock uses).  If I hardwire the lock filename inside 
+FSDirectory.makeLock, it also fails, unless I use a very short filename, 
+then it seems to work.  Something intermittent is going on.
+
+Then in looking at the docs for java.io.File.createNewfile():
+
+ http://java.sun.com/j2se/1.5.0/docs/api/java/io/File.html#createNewFile()
+
+There is this spooky comment:
+
+       Note: this method should not be used for file-locking, as the 
+resulting protocol cannot be made to work reliably. The FileLock facility 
+should be used instead. 
+
+Finally, it looks like Hadoop's LocalFileSystem class is already using 
+FileLock's.  One benefit of FileLocks is if JVM crashes, the OS should 
+handle removing the lock correctly.  I know this has been an issue in the 
+past with "commit lock timeout" errors due to the lock file remaining in 
+the filesystem, with the current approach.
+
+Does anyone know of any reasons not to switch Lucene's FSDirectory locking 
+to the java.nio.channels.FileLock?  EG, are there any performance issues 
+that people are aware of?  It's available since Java 1.4.
+
+Mike
+
+
+
+
+jm <jmuguruza@gmail.com> 
+06/20/2006 01:19 PM
+Please respond to
+java-user@lucene.apache.org
+
+
+To
+java-user@lucene.apache.org
+cc
+
+Subject
+using lucene Lock inter-jvm
+
+
+
+
+
+
+Hi,
+
+I am trying to peruse lucene's Lock for my own purposes, I need to
+lock several java processes and I thought I could reuse the Lock
+stuff. I understand lucene locks work across jvm.
+
+But I cannot make it work. I tried to reproduce my problem in a small 
+class:
+
+public class SysLock {
+    private static final Logger logger = Logger.getLogger(SysLock.class);
+
+    private int id;
+
+    public SysLock(int i) {
+        id = i;
+    }
+
+//    public static void main(String[] args) throws Exception {
+//        System.setProperty("org.apache.lucene.lockDir", 
+"C:\\temp\\todel");
+//        SysLock l1 = new SysLock(1);
+//        SysLock l2 = new SysLock(2);
+//
+//        TransferThread t = l1.new TransferThread(l1);
+//        t.start();
+//        TransferThread t2 = l2.new TransferThread(l2);
+//        t2.start();
+//
+//        logger.info("Finished.");
+//    }
+
+    public static void main(String[] args) throws Exception {
+        System.setProperty("org.apache.lucene.lockDir", 
+"C:\\temp\\todel");
+        SysLock l1 = new SysLock(new Date().getSeconds());
+
+        TransferThread t = l1.new TransferThread(l1);
+        t.start();
+
+        logger.info("Finished.");
+    }
+
+    private void forever() throws IOException {
+        FSDirectory directory = FSDirectory.getDirectory("C:\\temp\\a", 
+true);
+        try {
+            new Lock.With(directory.makeLock("COMMIT_LOCK_NAME"),
+COMMIT_LOCK_TIMEOUT) {
+                public Object doBody() throws IOException {
+                    while (true) {
+                        System.out.println("i'm " + id);
+                        try {
+                            Thread.sleep(2000);
+                        }
+                        catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }.run();
+        }
+        catch (Exception e) {
+            System.out.println(id + " could not get lock");
+        }
+    }
+
+    class TransferThread extends Thread {
+        public TransferThread(SysLock sl) {
+            this.sl = sl;
+        }
+
+        public void run() {
+            try {
+                sl.forever();
+            }
+            catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        }
+
+        private SysLock sl;
+    }
+}
+
+When I run the main() that is commented (that is, the lock works with
+two threads in the same jvm) it works ok, the second TransferThread
+cannot get the lock.
+
+But when I run the uncommented main() twice, both processes adquire a
+lock, even if only one lock file exists in the lockdir. Something I am
+missing probably....
+
+Many thanks
+javi
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

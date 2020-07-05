@@ -1,0 +1,67 @@
+FROM: Michael van Rooyen <mich...@loot.co.za>
+SUBJECT: java.io.IOException: read past EOF since migration to 2.9.1
+DATE: 17 Feb 2010
+
+Hello all!
+
+We've been using Lucene for a few years and it's worked without a 
+murmur.  I recently upgraded from version 2.3.2 to 2.9.1.  We didn't 
+need to make any code changes for the upgrade - apart from the 
+deprecation warnings, the code compiled cleanly and 2.9.1 worked fine in 
+testing.
+
+Since going live a few days ago, however, we've twice had read past EOF 
+exceptions.  The first time it happened, I checked the index and an 
+error had crept into the deleted docs count on the main segment:
+
+Segments file=segments_cefg numSegments=4 version=FORMAT_DIAGNOSTICS 
+[Lucene 2.9]
+   1 of 4: name=_abtf8 docCount=9710072
+     compound=true
+     hasProx=true
+     numFiles=2
+     size (MB)=4,254.56
+     has deletions [delFileName=_abtf8_df.del]
+     test: open reader.........FAILED
+     WARNING: fixIndex() would remove reference to this segment; full 
+exception:
+java.lang.RuntimeException: delete count mismatch: info=263213 vs 
+deletedDocs.count()=260032
+         at 
+org.apache.lucene.index.CheckIndex.checkIndex(CheckIndex.java:499)
+         at org.apache.lucene.index.CheckIndex.main(CheckIndex.java:903)
+
+I checked the logs for the our process that updates the index and there 
+were no exceptions logged.  I then optimized the index and checked it 
+again and it was all okay, so obviously the optimize / merge process is 
+happy to work on an index where the deletions file is in error.
+
+Today, we got the second read past EOF exception.  This time I checked 
+the index again and no errors were detected.  I think that whatever 
+error there was that led to the EOF exception was on a small segment 
+file that got merged into a larger one as more updates were made, before 
+I had time to check the index.
+
+Does anyone have any ideas as to what could cause this, or what we could 
+do to avoid it happening?  The stack trace for the EOF exception is below.
+
+Thanks,
+Michael.
+
+Caused by: java.io.IOException: read past EOF
+	org.apache.lucene.index.CompoundFileReader$CSIndexInput.readInternal(CompoundFileReader.java:245)
+	org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.java:157)
+	org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.java:38)
+	org.apache.lucene.store.IndexInput.readInt(IndexInput.java:70)
+	org.apache.lucene.store.IndexInput.readLong(IndexInput.java:93)
+	org.apache.lucene.index.FieldsReader.doc(FieldsReader.java:210)
+	org.apache.lucene.index.SegmentReader.document(SegmentReader.java:948)
+	org.apache.lucene.index.DirectoryReader.document(DirectoryReader.java:506)
+	org.apache.lucene.index.IndexReader.document(IndexReader.java:947)
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

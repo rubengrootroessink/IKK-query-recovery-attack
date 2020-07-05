@@ -1,0 +1,74 @@
+FROM: "Goddard, Michael J." <MICHAEL.J.GODD...@saic.com>
+SUBJECT: Question on highlighting of nested SpanQuery instances
+DATE: 17 Feb 2010
+
+Hello,
+
+I'm seeking some help with a highlighting issue involving the SpanQuery family.  To illustrate
+my issue, I added a test to the existing HighlighterTest (see diff, below, against tags/lucene_2_9_1).
+ When this test runs, it fails and the System.out.println yields this:
+
+Expected: "Sam dislikes most of the food and has to order <B>fish</B> and <B>chips</B>
+- however the fish is <B>frozen</B>, not fresh.
+Observed: "Sam dislikes most of the food and has to order <B>fish</B> and <B>chips</B>
+- however the <B>fish</B> is <B>frozen</B>, not fresh.
+
+That second "fish" doesn't satisfy the query, so I don't expect it to be highlighted.  Can
+anyone out there offer a good starting point on this one?
+
+Regards,
+
+  Mike
+
+
+Index: contrib/highlighter/src/test/org/apache/lucene/search/highlight/HighlighterTest.java
+===================================================================
+--- contrib/highlighter/src/test/org/apache/lucene/search/highlight/HighlighterTest.java	(revision
+908726)
++++ contrib/highlighter/src/test/org/apache/lucene/search/highlight/HighlighterTest.java	(working
+copy)
+@@ -173,7 +173,40 @@
+         "Query in a named field does not result in highlighting when that field isn't in
+the query",
+         s1, highlightField(q, FIELD_NAME, s1));
+   }
++  
++  /*
++   * TODO: Why is that second instance of the term "fish" highlighted?  It is not
++   * followed by the term "chips", so it should not be highlighted.
++   */
++  public void testHighlightingNestedSpans() throws Exception {
+ 
++	    String pubText = "Sam dislikes most of the food and has to order"
++			+ " fish and chips - however the fish is frozen, not fresh.";
++	    
++	    String fieldName = "SOME_FIELD_NAME";
++
++	    SpanOrQuery spanOr = new SpanOrQuery(
++				new SpanTermQuery[] {
++						new SpanTermQuery(new Term(fieldName, "fish")),
++						new SpanTermQuery(new Term(fieldName, "term1")),
++						new SpanTermQuery(new Term(fieldName, "term2")),
++						new SpanTermQuery(new Term(fieldName, "term3")) });
++	    
++		SpanNearQuery innerSpanNear = new SpanNearQuery(new SpanQuery[] {
++				spanOr,
++				new SpanTermQuery(new Term(fieldName, "chips")) }, 2, true);
++		
++		SpanNearQuery query = new SpanNearQuery(new SpanQuery[] {
++				innerSpanNear,
++				new SpanTermQuery(new Term(fieldName, "frozen")) }, 8, true);
++		
++	    String expected = "Sam dislikes most of the food and has to order"
++			+ " <B>fish</B> and <B>chips</B> - however the fish is <B>frozen</B>,
+not fresh.";
++	    String observed = highlightField(query, fieldName, pubText);
++	    System.out.println("Expected: \"" + expected + "\n" + "Observed: \"" + observed);
++	    assertEquals("Why is that second instance of the term \"fish\" highlighted?", expected,
+observed);
++  }
++
+   /**
+    * This method intended for use with <tt>testHighlightingWithDefaultField()</tt>
+  * @throws InvalidTokenOffsetsException 
+

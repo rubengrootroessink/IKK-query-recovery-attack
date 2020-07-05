@@ -1,0 +1,140 @@
+FROM: Tim Brennan <...@zimbra.com>
+SUBJECT: Re: More IndexDeletionPolicy questions
+DATE: 5 Mar 2008
+
+No, I have multiple readers in the same VM.  I track open readers within my VM and save those
+reader's commit points until the readers are gone.
+
+--tim
+
+
+
+----- "Michael McCandless" <lucene@mikemccandless.com> wrote:
+
+> OK got it.  Yes, sharing an index over NFS requires your own  
+> DeletionPolicy.
+> 
+> So presumably you have readers on different machines accessing the  
+> index over NFS, and then one machine that does the writing to that  
+> index?  How so you plan to get which commit point each of these  
+> readers is currently using back to the single writer?
+> 
+> Mike
+> 
+> Tim Brennan wrote:
+> 
+> > The bigger picture here is NFS-safety.  When I run a search, I hand 
+> 
+> > off the search results to another thread so that they can be  
+> > processed as necessary -- in particular so that they can be JOINed 
+> 
+> > with a SQL DB -- but I don't want to completely lock the index from 
+> 
+> > writes while doing a bunch of SQL calls.  Using the commit point  
+> > tracking I can make sure my appropriate snapshot stays around until 
+> 
+> > I'm completely done with it, even if I'm using an NFS mounted  
+> > filesystem that doesn't have delete-last semantics.
+> >
+> > --tim
+> >
+> >
+> >
+> >
+> >>> It seems like it should be pretty simple -- keep a list of open
+> >>> IndexReaders, track what Segment files they're pointing to, and
+> in
+> >>
+> >>> onCommit don't delete those segments.
+> >>
+> >> This implies you have multiple readers in a single JVM?  If so,
+> you
+> >> should not need to make a custom deletion policy to handle this
+> case
+> >>
+> >> -- the OS should be properly protecting open files from deletion.  
+> 
+> >> Can you  shed more light on the bigger picture here?
+> >>
+> >>> Unfortunately it ends up being very difficult to directly
+> determine
+> >>> what Segment an IndexReader is pointing to.  Is there some
+> >>> straightforward way that I'm missing -- all I've managed to do so
+> >>> far is to remember the most recent one from onCommit/onInit and
+> use
+> >>
+> >>> that one....that works OK, but makes bootstrapping a pain if you
+> >>> try to open a Reader before you've opened the writer once.
+> >>>
+> >>> Also, when I use IndexReader.reopen(), can I assume that the
+> newly
+> >>
+> >>> returned reader is pointing at the "most recent" segment?  I
+> think
+> >>
+> >>> so...
+> >>
+> >> Yes, except you have a synchronization challenge: if the writer is
+> in
+> >>
+> >> the process of committing just as your reader opens you can't be
+> >> certain whether the reader got the new commit or the previous one.
+> >> If you have external synchronization to ensure reader only
+> re-opens
+> >> after writer has fully committed then this isn't an issue.
+> >>
+> >>>
+> >>> Here's a sequence of steps that happen in my app:
+> >>>
+> >>> 0) open writer, onInit tells me that seg_1 is the most recent
+> >> segment
+> >>>
+> >>> 1) Open reader, assume it is pointing to seg_1 from (0)
+> >>>
+> >>> 2) New write commits into seg_2, don't delete seg_1 b/c of (1)
+> >>>
+> >>> 3) Call reader.reopen() on the reader from (1)....new reader is
+> >>> pointing to seg_2 now?
+> >>>
+> >>> 4) seg_1 stays around until the next time I open or commit a
+> >>> writer, then it is removed.
+> >>>
+> >>>
+> >>> Does that seem reasonable?
+> >>>
+> >>>
+> >>> --tim
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>
+> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscri
+> >>
+> >>
+> >>
+> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

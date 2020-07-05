@@ -1,0 +1,142 @@
+FROM: Simon Willnauer <simon.willna...@googlemail.com>
+SUBJECT: Re: deadlock in indexing
+DATE: 29 Jul 2009
+
+On Tue, Jul 28, 2009 at 11:32 PM, Chengdu
+Huang<chengdu.huang@patterninsight.com> wrote:
+> Thanks Uwe!
+>
+> I was looking at javadoc of IndexWriter in Lucene 2.4.0 and didn't
+> find anything about thread safety.  The wiki page does have that
+> though.  Thanks.
+http://wiki.apache.org/lucene-java/LuceneFAQ#head-c0e6aac25806df3a9402b398e7679987b8e78cf5
+Is the IndexWriter class, and especially the method
+addIndexes(Directory[]) thread safe?
+
+Yes, IndexWriter.addIndexes(Directory[]) method is thread safe (it is
+a synchronized method). IndexWriter in general is thread safe, i.e.
+you should use the same IndexWriter object from all of your threads.
+Actually it's impossible to use more than one IndexWriter for the same
+index directory, as this will lead to an exception trying to create
+the lock file.
+
+But I agree that the first place I would look for such an information
+is the javadoc. We should add a note to javadoc that the indexwriter
+is in general threadsafe. Stuff like that belongs into the module
+documentation in my eyes. I will raise an issue.
+
+simon
+
+>
+> Chengdu
+>
+> On Tue, Jul 28, 2009 at 2:20 PM, Uwe Schindler<uwe@thetaphi.de> wrote:
+>>> By "IndexWriter is threadsafe" do you mean that I can have to two
+>>> threads, one calls IndexWriter.addDocument(), the other calls
+>>> IndexWriter.deleteDocuments() & IndexWriter.optimize(), without any
+>>> synchronization?
+>>
+>> Exactly.
+>>
+>>> For the deadlock, I also think it has something to do with merging.
+>>> Below are stacktraces of some of the relevant threads:
+>>
+>>
+>> ...
+>>
+>>> It seems that the last thread has locked the ConcurrentMergeScheduler,
+>>> but then wait on it too.  Is that the problem?
+>>
+>> The problem is that IndexWriter does its own synchronization. By adding
+>> extra synchronized() blocks around these code parts you break the complete
+>> locking logic inside IW. You can fix this by either:
+>>
+>> a) use another object as monitor (not the IndexWriter), if your own code
+>> needs some locking.
+>> b) remove extra locking at all, as IndexWriter is threadsafe (which is
+>> explained n IndexReaders/Writers JavaDocs and Wiki)
+>>
+>>> Chengdu
+>>>
+>>> On Tue, Jul 28, 2009 at 12:28 AM, Simon
+>>> Willnauer<simon.willnauer@googlemail.com> wrote:
+>>> > I can not help you to figure out your exact problem but you can use an
+>>> > the same indexwriter instance without synchronization. IndexWriter is
+>>> > threadsafe so you synchronized block seems obsolet.
+>>> > I could imagine that there is a backgroud merge going on while you try
+>>> > to access the critical section ( you synchronized block) which could
+>>> > block you code for a while until the merge has finished. Can you
+>>> > figure out if a merger-thread is running? The threads name should be
+>>> > set to something like "Lucene Merge Thread #n"
+>>> >
+>>> > simon
+>>> >
+>>> > On Tue, Jul 28, 2009 at 6:27 AM, Chengdu
+>>> > Huang<chengdu.huang@patterninsight.com> wrote:
+>>> >> Hi,
+>>> >>
+>>> >> I have an application in which documents are added upon receiving a
+>>> >> user request and a background thread is needed to remove old
+>>> >> documents.  I have an IndexWriter opened on a Directory that adds
+>>> >> documents and commits but never closes.  The background thread that
+>>> >> removes documents uses the same instance of IndexWriter.  So the code
+>>> >> looks like
+>>> >>
+>>> >> // Thread to add document:
+>>> >> synchronized(writer) {
+>>> >>  try {
+>>> >>    Document doc = new Document();
+>>> >>    doc.add();
+>>> >>    ...
+>>> >>    writer.commit();
+>>> >>  } catch (Exception e) {
+>>> >>    writer.rollback();
+>>> >>  }
+>>> >> }
+>>> >>
+>>> >> Now looks like I run into some kind of deadlock here even *WITHOUT*
+>>> >> the background thread of removing documents.  The symptom is that the
+>>> >> whole java process is on sleeping state and jstack shows that the
+>>> >> thread to add document is blocked on waiting an object.  Unfortunately
+>>> >> I'm unable to reproduce this in unittests.
+>>> >>
+>>> >> My guess is that the outer synchronized(writer) {} block is causing
+>>> >> the problem, but can't figure out why.  Any idea?
+>>> >>
+>>> >> Chengdu
+>>> >>
+>>> >> ---------------------------------------------------------------------
+>>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >>
+>>> >>
+>>> >
+>>> > ---------------------------------------------------------------------
+>>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> >
+>>> >
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

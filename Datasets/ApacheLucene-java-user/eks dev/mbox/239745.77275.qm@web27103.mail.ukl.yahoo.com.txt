@@ -1,0 +1,85 @@
+FROM: eks dev <eks...@yahoo.co.uk>
+SUBJECT: Re: Analyzing performance and memory consumption for boolean queries
+DATE: 24 Jun 2009
+
+
+We've also had the same Problem on 150Mio doc setup (Win 2003, java 1.6). After monitoring
+response time distribution over time for couple of weeks, it was clear that such long running
+response times were due to bad warming-up. There were peeks short after index reload (even
+comprehensive warming-up did not help?! Maybe we did something wrong) ... We did not use relaod().
+  After loading index into RAMDisk the problems disapeared (proof that this was not gc() related).
+We have tried MMAP as well, but MMAP had the same problems (you cannot force OS to load as
+much as possible into RaM, will soon be possible ). 
+
+What helped us a lot before "RAM luxury" was to give less memory to jvm in order to leave
+more for OS, lucene is fine with less memory.
+
+remaining long runners happen selten, could be that these are due to the gc()...
+
+as you do not care about scoring, I guess you set omitNorms() and omitTf() during indexing
+for all fields? If not, try this. It helps a lot 
+
+good luck, 
+eks 
+
+
+
+
+----- Original Message ----
+> From: Uwe Schindler <uwe@thetaphi.de>
+> To: java-user@lucene.apache.org
+> Sent: Wednesday, 24 June, 2009 9:33:08
+> Subject: RE: Analyzing performance and memory consumption for boolean queries
+> 
+> > 1. For search time to vary from < 1 second => 20 seconds, the only
+> > two things I've seen are:
+> > 
+> > * Serious JVM garbage collection problems.
+> > * You're in Linux swap hell.
+> > 
+> > We tracked similar issued down by creating a testbed that let us run
+> > a set of real-world queries, such that we could trigger these types
+> > of problems when we had appropriate instrumentation on and recording.
+> 
+> I had similar problems with our configuration, too. Suddenly sometimes the
+> server even did not respond. The problem was (I think is the same here): the
+> GC. The standard Java GC is not multithreaded, so if you have lots of
+> traffic at some time, the JVM halts all threads and starts to GC, which can
+> take very long time with so big heap sizes.
+> 
+> On our server with indexes of similar disk space size (not documents), I
+> changed the JVM options to use:
+> 
+> -Xms4096M -Xmx8192M -XX:MaxPermSize=512M -Xrs -XX:+UseConcMarkSweepGC
+> -XX:+UseParNewGC -verbosegc -XX:+PrintGCDetails -XX:+UseLargePages
+> 
+> This also turns on GC debugging and the ParNewGC and ConcMarkSweepGC works
+> much better here (but please do not simply copy these settings, read about
+> them in the JVM docs, exact settings depend on your use-case!). I had no
+> hangs anymore since this change. The JVM prints information about garbage
+> collection to stderr (which you should study, there is a paper from sun
+> about it). Our web server (Sun Java System Webserver 7.0, Solaris 10 x64)
+> also reports the time used in complete for GC, during a server uptime of 11
+> days it used about 4 hours to GC in parallel threads. This config works good
+> with multiple CPUs, in our case, one could say: "one CPU is GCing the whole
+> time" :-)
+> 
+> There is also a howto on the lucid imagination page about different GCs and
+> Lucene.
+> 
+> Uwe
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

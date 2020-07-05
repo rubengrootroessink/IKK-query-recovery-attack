@@ -1,0 +1,45 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Seeking advice on index parameter settings for large index
+DATE: 30 Mar 2005
+
+Chuck Williams wrote:
+>        index.setMaxBufferedDocs(10);  // Buffer 10 documents at a time 
+> in memory (they could be big)
+
+You might use a larger value here for the index with the small 
+documents.  I've sucessfully used values as high as a 1000 when indexing 
+documents that average a few kilobytes with a few hundred megabyte heap. 
+  This can make indexing a lot faster.  Note that this is the number of 
+single document indexes that are buffered, not document text.  Indexes 
+are typically smaller than the text.
+
+>        index.setMaxMergeDocs(100000);  // Yields about 75 large segments 
+> for 7.5 million docs (plus log2 smaller segments) = 100 total
+
+This is reasonable while incrementally indexing, in order to bound the 
+delay while adding documents.  But I would use Integer.MAX_VALUE during 
+the initial build.  75 segments are much slower to search than one 
+segment.  I think this is also a realistic assumption for most systems 
+that are incrementally updated.  For example, if you have "scheduled 
+downtime" you can optimize the index.  Or perhaps you can optimize at 
+midnight every night, queing updates while this operates.  If there's 
+never downtime, and updates must always be prompt, you can, as a 
+background process, periodically copy the index, optimize it and apply 
+queued updates until it is in sync with the live index, then swap them. 
+  There are lots of ways to implement this, but, in short, you should 
+never need to have 75 segments, but only ever 1 + 
+log2(#updates_since_optimize).
+
+>        index.setUseCompoundFile(true);  // false could improve 
+> performance but will consume more file handles    
+
+If you don't have 75 big segments, then you can probably afford to set 
+this false.
+
+Doug
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

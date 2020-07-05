@@ -1,0 +1,61 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Wildcard query with untokenized punctuation (again)
+DATE: 13 Jun 2007
+
+After taking a quick look, I don't see how you can do this without 
+modifying the QueryParser. In QueryParser.jj you will find the conflict 
+of interest at line 891. This line will cause a match on smith,ann* and 
+trigger a wildcard term match on the whole piece.
+
+This is again caused by the fact that the QueryParser parses your query 
+string and breaks it up before sending pieces to the analyzer. This is a 
+much different scenario than when you feed your analyzer for indexing -- 
+in the indexing case, the analyzer gets fed the text all in one piece. 
+To further aggravate matters, the analyzer that you pass to the 
+QueryParser does not even get to see smith,ann* -- when that pattern is 
+found, the term is sent to getWildcardQuery and the analyzer is 
+completely skipped.
+
+You might think of a clever way to override getWildcardQuery and check 
+the input string for punctuation. If you find some, you might find a way 
+produce an appropriate query.
+
+A more invasive suggestion would be to recompile QueryParser.jj and 
+change line 868: <#_TERM_CHAR: ( <_TERM_START_CHAR> | <_ESCAPED_CHAR> | 
+"-" | "+" ) > so that a comma will not be recognized as a TERM_CHAR.
+
+- Mark
+
+
+Renaud Waldura wrote:
+> My very simple analyzer produces tokens made of digits and/or letters only.
+> Anything else is discarded. E.g. the input "smith,anna" gets tokenized as 2
+> tokens, first "smith" then "anna".
+>  
+> Say I have indexed documents that contained both "smith,anna" and
+> "smith,annanicole". To find them, I enter the query <<smith,ann*>>. The
+> stock Lucene 2.0 query parser produces a PrefixQuery for the single token
+> "smith,ann". This token doesn't exist in my index, and I don't get a match.
+>  
+> I have found some references to this:
+> http://www.nabble.com/Wildcard-query-with-untokenized-punctuation-tf3378386.
+> html
+> but I don't understand how I can fix it. Comma-separated terms like this can
+> appear in any field; I don't think I can create an untokenized field.
+>  
+> Really what I would like in this case is for the comma to be considered
+> whitespace, and the query to be parsed to <<+smith +ann*>>. Any way I can
+do
+> that?
+>  
+> --Renaud
+>  
+>  
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

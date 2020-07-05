@@ -1,0 +1,86 @@
+FROM: Saurabh Gokhale <saurabhgokh...@gmail.com>
+SUBJECT: Re: Separating IndeWriter with NRT
+DATE: 24 Jul 2011
+
+Hi,
+
+I am performing the same activity that you have specified. I have indexer as
+a thread which starts at the server start up and searcher as a web app.
+
+I am managing the index reader and writer objects using a factory. This
+factory is a singleton instance which maintains one writer, reader and a
+searcher object. If the objects are null, I create them and if they exists I
+return the same objects back.
+
+Now regarding NRT indexed access, currently whenever a new request for the
+searcher object comes in, before I return a searcher object, I reopen reader
+and check if the old reader and the new readers are same, if not, I assigned
+the newly created reader to instance reader object and since by searcher
+object is created using reader object, searchers gets access to not yet
+committed data.
+
+Code example:
+searcher = new IndexSearcher(getIndexReader());
+
+Reader:
+getReader()
+{
+   if (reader == null)
+   {
+        reader = writer.getReader();
+    }
+   else
+   {
+        IndexReader newReader = reader.reopen();
+        if(newReader != reader)
+        {
+          //reader.close(); --> Reader.close() may give you errors elsewhere
+if you have loosely coupled code, like other thread using that reader for
+some other job like MoreLikeThis class
+          reader = newReader;
+        }
+   return reader;
+
+
+I am able to get newly indexed, not yet committed data in my search results
+with this change. I am not checking isCurrent on the reader though that I
+will try before opening the reader.
+
+Thanks
+
+Saurabh
+
+
+On Fri, Jul 22, 2011 at 2:33 PM, duschhaube <duschhaube@gmx.net> wrote:
+
+> Hi,
+>
+> I think you have to use IndexReader.isCurrent and then reopen the reader if
+> there are changes.
+> You will need an automatism that periodically checks if any changes where
+> made to the index. If that happens und need to reopen the your reader.
+>
+> But a real lucene expert maybe can give you a better advice.
+>
+> greets
+> Thorsten
+>
+> Am 22.07.2011 18:36, schrieb Mihai Caraman:
+>
+>  I trust that some of you had to run the indexing as a service/jar and the
+>> search as a servlet/war. How can i obtain this while still keeping the
+>> search near real time(this is difficult because IndexReader needs direct
+>> access to the IndexWriter instance). If no lucene users know this, where
+>> else should i ask this question?
+>>
+>> Thank you,
+>> Mihai
+>>
+>>
+>
+> ------------------------------**------------------------------**---------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.**apache.org<java-user-unsubscribe@lucene.apache.org>
+> For additional commands, e-mail: java-user-help@lucene.apache.**org<java-user-help@lucene.apache.org>
+>
+>
+

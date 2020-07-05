@@ -1,0 +1,435 @@
+FROM: Itamar Syn-Hershko <ita...@code972.com>
+SUBJECT: Re: Index size and performance degradation
+DATE: 13 Jun 2011
+
+Since there should only be one writer, I'm not sure why you'd need 
+transactional storage for that? deletions made by readers merely mark it 
+for deletion, and once a doc has been marked for deletions it is deleted 
+for all intents and purposes, right? But perhaps I need to refresh my 
+memory on the internals, it has been a while.
+
+Does the N in NRT represent only the cost of reopening a searcher? 
+meaning, if I could ensure reopening always happens fast and returns a 
+searcher for the correct index revision, would it guarantee a real 
+real-time search? or is there anything else standing in between? the 
+only thing that comes to mind is the IW unflushed buffer - which only 
+Twitter's approach seem to handle (not even Zoie).
+
+Itamar.
+
+On 14/06/2011 01:00, Michael McCandless wrote:
+> Yes, adding deletes to Twitter's approach will be a challenge!
+>
+> I don't think we'd do the post-filtering solution, but instead maybe
+> resolve the deletes "live" and store them in a transactional data
+> structure of some kind... but even then we will pay a perf hit to
+> lookup del docs against it.
+>
+> So, yeah, there will presumably be a tradeoff with this approach too.
+> However, turning around changes from the adds should be faster (no
+> segment gets flushed).
+>
+> Mike McCandless
+>
+> http://blog.mikemccandless.com
+>
+> On Mon, Jun 13, 2011 at 5:06 PM, Itamar Syn-Hershko<itamar@code972.com>  wrote:
+>> Thanks Mike, much appreciated.
+>>
+>>
+>> Wouldn't Twitter's approach fall for the exact same pit-hole you described
+>> Zoie does (or did) when it'll handle deletes too? I don't thing there is any
+>> other way of handling deletes other than post-filtering results. But perhaps
+>> the IW cache would be smaller than Zoie's RAMDirectory(ies)?
+>>
+>>
+>> I'll give all that a serious dive and report back with results or if more
+>> input will be required...
+>>
+>>
+>> Itamar.
+>>
+>>
+>> On 13/06/2011 19:01, Michael McCandless wrote:
+>>
+>>> Here's a blog post describing some details of Twitter's approach:
+>>>
+>>>
+>>> http://engineering.twitter.com/2010/10/twitters-new-search-architecture.html
+>>>
+>>> And here's a talk Michael did last October (Lucene Revolutions):
+>>>
+>>>
+>>> http://www.lucidimagination.com/events/revolution2010/video-Realtime-Search-With-Lucene-presented-by-Michael-Busch-of-Twitter
+>>>
+>>> Twitter's case is simpler since they never delete ;)  So we have to
+>>> fix that to do it in Lucene... there are also various open issues that
+>>> begin to explore some of the ideas here.
+>>>
+>>> But this ("immediate consistency") would be a deep and complex change,
+>>> and I don't see many apps that actually require it.
+>>>
+>>> Mike McCandless
+>>>
+>>> http://blog.mikemccandless.com
+>>>
+>>> On Sun, Jun 12, 2011 at 4:46 PM, Itamar Syn-Hershko<itamar@code972.com>
+>>>   wrote:
+>>>> Thanks for your detailed answer. We'll have to tackle this and see whats
+>>>> more important to us then. I'd definitely love to hear Zoie has overcame
+>>>> all
+>>>> that...
+>>>>
+>>>>
+>>>> Any pointers to Michael Busch's approach? I take this has something to do
+>>>> with the core itself or index format, probably using the Flex version?
+>>>>
+>>>>
+>>>> Itamar.
+>>>>
+>>>>
+>>>> On 12/06/2011 23:12, Michael McCandless wrote:
+>>>>
+>>>>>>   From what I understand of Zoie (and it's been some time since I
+last
+>>>>> looked... so this could be wrong now), the biggest difference vs NRT
+>>>>> is that Zoie aims for "immediate consistency", ie index changes are
+>>>>> always made visible to the very next query, vs NRT which is
+>>>>> "controlled consistency", a blend between immediate and eventual
+>>>>> consistency where your app decides when the changes must become
+>>>>> visible.
+>>>>>
+>>>>> But in exchange for that, Zoie pays a price: each search has a higher
+>>>>> cost per collected hit, since it must post-filter for deleted docs.
+>>>>> And since Zoie necessarily adds complexity, there's more risk; eg
+>>>>> there were some nasty Zoie bugs that took quite some time to track
+>>>>> down (under https://issues.apache.org/jira/browse/LUCENE-2729).
+>>>>>
+>>>>> Anyway, I don't think that's a good tradeoff, in general, for our
+>>>>> users, because very few apps truly require immediate consistency from
+>>>>> Lucene (can anyone give an example where their app depends on
+>>>>> immediate consistency...?).  I think it's better to spend time during
+>>>>> reopen so that searches aren't slower.
+>>>>>
+>>>>> That said, Lucene has already incorporated one big part of Zoie
+>>>>> (caching small segments in RAM) via the new NRTCachingDirectory (in
+>>>>> contrib/misc).  Also, the upcoming NRTManager
+>>>>> (https://issues.apache.org/jira/browse/LUCENE-2955) adds control over
+>>>>> visibility of specific indexing changes to queries that need to see
+>>>>> the changes.
+>>>>>
+>>>>> Finally, even better would be to not have to make any tradeoff
+>>>>> whatsoever ;)  Twitter's approach (created by Michael Busch) seems to
+>>>>> bring immediate consistency with no search performance hit, so if we
+>>>>> do anything here likely it'll be similar to what Michael has done
+>>>>> (though, those changes are not simple either!).
+>>>>>
+>>>>> Mike McCandless
+>>>>>
+>>>>> http://blog.mikemccandless.com
+>>>>>
+>>>>> On Sun, Jun 12, 2011 at 2:25 PM, Itamar Syn-Hershko<itamar@code972.com>
+>>>>>   wrote:
+>>>>>> Mike,
+>>>>>>
+>>>>>>
+>>>>>> Speaking of NRT, and completely off-topic, I know: Lucene's NRT
+>>>>>> apparently
+>>>>>> isn't fast enough if Zoie was needed, and now that Zoie is around
+are
+>>>>>> there
+>>>>>> any plans to make it Lucene's default? or: why would one still use
+NRT
+>>>>>> when
+>>>>>> Zoie seem to work much better?
+>>>>>>
+>>>>>>
+>>>>>> Itamar.
+>>>>>>
+>>>>>>
+>>>>>> On 12/06/2011 13:16, Michael McCandless wrote:
+>>>>>>
+>>>>>>> Remember that memory-mapping is not a panacea: at the end of
+the day,
+>>>>>>> if there just isn't enough RAM on the machine to keep your full
+>>>>>>> "working set" hot, then the OS will have to hit the disk, regardless
+>>>>>>> of whether the access is through MMap or a "traditional" IO request.
+>>>>>>>
+>>>>>>> That said, on Fedora Linux anyway, I generally see better performance
+>>>>>>> from MMap than from NIOFSDir; eg see the 2nd chart here:
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> http://blog.mikemccandless.com/2011/06/lucenes-near-real-time-search-is-fast.html
+>>>>>>>
+>>>>>>> Mike McCandless
+>>>>>>>
+>>>>>>> http://blog.mikemccandless.com
+>>>>>>>
+>>>>>>> On Sun, Jun 12, 2011 at 4:10 AM, Itamar
+>>>>>>> Syn-Hershko<itamar@code972.com>
+>>>>>>>   wrote:
+>>>>>>>> Thanks.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> The whole point of my question was to find out if and how
+to make
+>>>>>>>> balancing
+>>>>>>>> on the SAME machine. Apparently thats not going to help and
+at a
+>>>>>>>> certain
+>>>>>>>> point we will just have to prompt the user to buy more hardware...
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Out of curiosity, isn't there anything that we can do to
+avoid that?
+>>>>>>>> for
+>>>>>>>> instance using memory-mapped files for the indexes? anything
+that
+>>>>>>>> would
+>>>>>>>> help
+>>>>>>>> us overcome OS limitations of that sort...
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Also, you mention a scheduled job to check for performance
+>>>>>>>> degradation;
+>>>>>>>> any
+>>>>>>>> idea how serious such a drop should be for sharding to be
+really
+>>>>>>>> beneficial?
+>>>>>>>> or is it application specific too?
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> Itamar.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> On 12/06/2011 06:43, Shai Erera wrote:
+>>>>>>>>
+>>>>>>>>> I agree w/ Erick, there is no cutoff point (index size
+for that
+>>>>>>>>> matter)
+>>>>>>>>> above which you start sharding.
+>>>>>>>>>
+>>>>>>>>> What you can do is create a scheduled job in your system
+that runs a
+>>>>>>>>> select
+>>>>>>>>> list of queries and monitors their performance. Once
+it degrades, it
+>>>>>>>>> shards
+>>>>>>>>> the index by either splitting it (you can use IndexSplitter
+under
+>>>>>>>>> contrib)
+>>>>>>>>> or create a new shard, and direct new documents to it.
+>>>>>>>>>
+>>>>>>>>> I think I read somewhere, not sure if it was in Solr
+or
+>>>>>>>>> ElasticSearch
+>>>>>>>>> documentation, about a Balancer object, which moves shards
+around in
+>>>>>>>>> order
+>>>>>>>>> to balance the load on the cluster. You can implement
+something
+>>>>>>>>> similar
+>>>>>>>>> which tries to balance the index sizes, creates new shards
+>>>>>>>>> on-the-fly,
+>>>>>>>>> even
+>>>>>>>>> merge shards if suddenly a whole source is being removed
+from the
+>>>>>>>>> system
+>>>>>>>>> etc.
+>>>>>>>>>
+>>>>>>>>> Also, note that the 'largest index size' threshold is
+really a
+>>>>>>>>> machine
+>>>>>>>>> constraint and not Lucene's. So if you decide that 10
+GB is your
+>>>>>>>>> cutoff,
+>>>>>>>>> it
+>>>>>>>>> is pointless to create 10x10GB shards on the same machine
+--
+>>>>>>>>> searching
+>>>>>>>>> them
+>>>>>>>>> is just like searching a 100GB index w/ 10x10GB segments.
+Perhaps
+>>>>>>>>> it's
+>>>>>>>>> even
+>>>>>>>>> worse because you consume more RAM when the indexes are
+split (e.g.,
+>>>>>>>>> terms
+>>>>>>>>> index, field infos etc.).
+>>>>>>>>>
+>>>>>>>>> Shai
+>>>>>>>>>
+>>>>>>>>> On Sun, Jun 12, 2011 at 3:10 AM, Erick
+>>>>>>>>> Erickson<erickerickson@gmail.com>wrote:
+>>>>>>>>>
+>>>>>>>>>> <<<We can't assume anything about the machine
+running it,
+>>>>>>>>>> so testing won't really tell us much>>>
+>>>>>>>>>>
+>>>>>>>>>> Hmmm, then it's pretty hopeless I think. Problem
+is that
+>>>>>>>>>> anything you say about running on a machine with
+>>>>>>>>>> 2G available memory on a single processor is completely
+>>>>>>>>>> incomparable to running on a machine with 64G of
+>>>>>>>>>> memory available for Lucene and 16 processors.
+>>>>>>>>>>
+>>>>>>>>>> There's really no such thing as an "optimum" Lucene
+index
+>>>>>>>>>> size, it always relates to the characteristics of
+the
+>>>>>>>>>> underlying hardware.
+>>>>>>>>>>
+>>>>>>>>>> I think the best you can do is actually test on various
+>>>>>>>>>> configurations, then at least you can say "on configuration
+>>>>>>>>>> X this is the tipping point".
+>>>>>>>>>>
+>>>>>>>>>> Sorry there isn't a better answer that I know of,
+but...
+>>>>>>>>>>
+>>>>>>>>>> Best
+>>>>>>>>>> Erick
+>>>>>>>>>>
+>>>>>>>>>> On Sat, Jun 11, 2011 at 3:37 PM, Itamar
+>>>>>>>>>> Syn-Hershko<itamar@code972.com>
+>>>>>>>>>> wrote:
+>>>>>>>>>>> Hi all,
+>>>>>>>>>>>
+>>>>>>>>>>> I know Lucene indexes to be at their optimum
+up to a certain size
+>>>>>>>>>>> -
+>>>>>>>>>>> said
+>>>>>>>>>> to
+>>>>>>>>>>> be around several GBs. I haven't found a good
+discussion over
+>>>>>>>>>>> this,
+>>>>>>>>>>> but
+>>>>>>>>>> its
+>>>>>>>>>>> my understanding that at some point its better
+to split an index
+>>>>>>>>>>> into
+>>>>>>>>>> parts
+>>>>>>>>>>> (a la sharding) than to continue searching on
+a huge-size index. I
+>>>>>>>>>>> assume
+>>>>>>>>>>> this has to do with OS and IO configurations.
+Can anyone point me
+>>>>>>>>>>> to
+>>>>>>>>>>> more
+>>>>>>>>>>> info on this?
+>>>>>>>>>>>
+>>>>>>>>>>> We have a product that is using Lucene for various
+searches, and
+>>>>>>>>>>> at
+>>>>>>>>>>> the
+>>>>>>>>>>> moment each type of search is using its own Lucene
+index. We plan
+>>>>>>>>>>> on
+>>>>>>>>>>> refactoring the way it works and to combine all
+indexes into one -
+>>>>>>>>>>> making
+>>>>>>>>>>> the whole system more robust and with a smaller
+memory footprint,
+>>>>>>>>>>> among
+>>>>>>>>>>> other things.
+>>>>>>>>>>>
+>>>>>>>>>>> Assuming the above is true, we are interested
+in knowing how to do
+>>>>>>>>>>> this
+>>>>>>>>>>> correctly. Initially all our indexes will be
+run in one big index,
+>>>>>>>>>>> but
+>>>>>>>>>>> if
+>>>>>>>>>> at
+>>>>>>>>>>> some index size there is a severe performance
+degradation we would
+>>>>>>>>>>> like
+>>>>>>>>>> to
+>>>>>>>>>>> handle that correctly by starting a new FSDirectory
+index to flush
+>>>>>>>>>>> into,
+>>>>>>>>>> or
+>>>>>>>>>>> by re-indexing and moving large indexes into
+their own Lucene
+>>>>>>>>>>> index.
+>>>>>>>>>>>
+>>>>>>>>>>> Are there are any guidelines for measuring or
+estimating this
+>>>>>>>>>>> correctly?
+>>>>>>>>>>> what we should be aware of while considering
+all that? We can't
+>>>>>>>>>>> assume
+>>>>>>>>>>> anything about the machine running it, so testing
+won't really
+>>>>>>>>>>> tell
+>>>>>>>>>>> us
+>>>>>>>>>>> much...
+>>>>>>>>>>>
+>>>>>>>>>>> Thanks in advance for any input on this,
+>>>>>>>>>>>
+>>>>>>>>>>> Itamar.
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>> ---------------------------------------------------------------------
+>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>
+>>>>>>>>
+>>>>>>> ---------------------------------------------------------------------
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>> ---------------------------------------------------------------------
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

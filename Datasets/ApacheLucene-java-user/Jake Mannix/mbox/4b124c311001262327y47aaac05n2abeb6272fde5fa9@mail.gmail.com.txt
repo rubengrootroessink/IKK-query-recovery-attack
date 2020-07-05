@@ -1,0 +1,76 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: file open handles?
+DATE: 27 Jan 2010
+
+On Tue, Jan 26, 2010 at 11:13 PM, Jamie <jamie@stimulussoft.com> wrote:
+
+>
+> Hi Jake
+>
+> Thanks for the info. Are you specifically referring to
+> http://issues.apache.org/jira/browse/LUCENE-2120?
+>
+
+Yep, that's the issue I'm referring to.
+
+
+> Our app indexes about 170 50k documents per second in heavy load. In any
+> case, I doubt it is the
+> realtime IndexReader issue since when we ran the test, no searching was
+> taking place.
+>
+
+You were indexing but not searching?  So you are never calling getReader()
+in the first place?
+
+
+> We have been using Lucene search on a real time basis for years and have
+> not experienced any problems
+> until now.
+
+
+How have you been doing search in a realtime fashion with Lucene before
+2.9's introduction of
+IndexWriter.getReader()?
+
+
+> Thanks for the tip on Zoie, but we cannot use any additional frameworks on
+> top of Lucene
+> as Lucene is now deeply integrated into our app.
+>
+
+Zoie is a library, it integrates right at the lowest layer in search apps -
+you give it the directory
+in which your index lives (on a per-shard level, if you have a distributed
+setup), and the inputs /
+outputs are simple:
+
+ * wherever you used to call IndexWriter.addDocument(), you instead pass the
+Document
+wrapped in a thin wrapper to ZoieSystem.consume()
+ * whenever you want an IndexReader (possibly a subclass of IndexReader
+which is one of
+your own custom classes) which will get wrapped in an IndexSearcher or
+whatnot, just do
+new MultiReader(ZoieSystem.getReaders()).
+
+The real-timeyness is handled inside of ZoieSystem, but you control your own
+Analyzer
+choices, how you create your IndexReader (and what class it is, and how it
+should be
+initialized or warmed up, etc...).  It's pretty non-invasive - your index
+format doesn't change
+at all (there's an extra field added - "_UID_", but it only adds one 8-byte
+long per document
+to the index as a Payload), and you can have your own custom search code all
+over the
+place (Collectors, custom sorts, DIY faceting, whatever), because at the end
+of the day,
+Zoie just sucks in your documents, indexes them and makes them immediately
+available
+in the form of a couple of IndexReader instances, which you can search with
+in whatever
+low-level way you wish.
+
+  -jake
+

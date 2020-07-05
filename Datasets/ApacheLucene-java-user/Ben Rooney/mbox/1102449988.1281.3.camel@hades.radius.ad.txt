@@ -1,0 +1,190 @@
+FROM: Ben Rooney <ben.roo...@blastradius.com>
+SUBJECT: QueryFilter vs CachingWrapperFilter vs RangeQuery
+DATE: 7 Dec 2004
+
+hello, hope someone can help explain things to me. 
+
+i've been searching for sometime and i have not been able to find
+anything to answer my questions.
+
+i'm trying to understand the difference/effects between QueryFilter vs
+CachingWrapperFilter and when you would use one vs the other and how
+they work exactly.  
+
+also, when exactly will the cache be cleared.  looking at the source
+code, it appears when the IndexReader is released it would be cleared.
+does this mean i should keep a reference to the SearchIndexer until i
+want the results to be cleared?  for example, in a class file the
+executes the search, i would keep a static reference to SearchIndexer
+and then when i want to invalidate the cache, set it to null or create a
+new instance of it?
+
+on top of this, using the RangeQuery object in a search does not seem to
+be prudent as the time is almost 4 times that of using a filter.  i
+basically can dig on this as when doing a query, lucene needs to do
+scoring for all the documents that match where as using a filter it
+ignores scoring.
+
+to test them out, i created an index against a 20000 document repository
+where the files in the repository are simply properties files.  in the
+properties files, i set the publishDate property so that all documents
+are of year 2004.
+
+my test runs 4 queries.  the first test is a basic one that returns all
+documents in the index that contains the word 'document'.  the second
+test adds the query from the first test to a BooleanQuery along with a
+RangeQuery for the year 2004.  the third test uses the query from the
+first test along with QueryFilter constructed using the RangeQuery.  the
+final test is the same as the third query but the QueryFilter is wrapped
+in a CachingWrapperFilter class.  each test runs a search against the
+index 100 times with the same configuration.
+
+the output from my test is as follows:
+
+
+        2004-12-07 20:30:03,888 DEBUG (SearchManager.java:
+        main:138) - 20000 total matching documents
+        2004-12-07 20:30:04,602 INFO  (SearchManager.java:
+        main:141) - query 1 - all docs - total time (ms): 768
+        2004-12-07 20:30:04,653 DEBUG (SearchManager.java:
+        main:146) - 20000 total matching documents
+        2004-12-07 20:30:06,598 INFO  (SearchManager.java:
+        main:149) - query 2 - 2004 range query - no cache - total time
+        (ms): 1996
+        2004-12-07 20:30:06,614 DEBUG (SearchManager.java:
+        main:155) - 20000 total matching documents
+        2004-12-07 20:30:07,223 INFO  (SearchManager.java:
+        main:158) - query 3 - 2004 docs filter - no cache - total time
+        (ms): 623
+        2004-12-07 20:30:07,230 DEBUG (SearchManager.java:
+        main:164) - 20000 total matching documents
+        2004-12-07 20:30:07,838 INFO  (SearchManager.java:
+        main:167) - query 4 - 2004 docs filter - cached - total time
+        (ms): 613
+
+
+as can be seen, there is not much different between the third and fourth
+queries and hence my confusion with the two types of filters.  looking
+at the source code, there is not much different between them either.
+
+the following is the test source code:
+
+
+        package com.blastradius.search;
+        
+        import java.io.File;
+        import java.util.Date;
+        
+        import org.apache.commons.logging.Log;
+        import org.apache.commons.logging.LogFactory;
+        import org.apache.lucene.analysis.Analyzer;
+        import org.apache.lucene.analysis.standard.StandardAnalyzer;
+        import org.apache.lucene.document.Document;
+        import org.apache.lucene.index.IndexWriter;
+        import org.apache.lucene.index.Term;
+        import org.apache.lucene.queryParser.QueryParser;
+        import org.apache.lucene.search.BooleanQuery;
+        import org.apache.lucene.search.CachingWrapperFilter;
+        import org.apache.lucene.search.Hits;
+        import org.apache.lucene.search.IndexSearcher;
+        import org.apache.lucene.search.Query;
+        import org.apache.lucene.search.QueryFilter;
+        import org.apache.lucene.search.RangeQuery;
+        import org.apache.lucene.search.Searcher;
+        
+        import com.blastradius.search.parsers.PropertiesParser;
+        
+        /**
+        * 
+        * @author brooney
+        */
+        public class SearchManager {
+        
+        public final static String INDEX_DIR = "index";
+        public final static String ROOT_DIR = "webroot";
+        
+        public final static File rootDir = new
+        File(SearchManager.ROOT_DIR); 
+        private final static Log logger =
+        LogFactory.getLog(SearchManager.class);
+        
+        public static void main(String[] args) {
+        
+        Date start = null;
+        Date end = null;
+        Hits hits = null;
+        
+        try {
+        Searcher searcher = new IndexSearcher(SearchManager.INDEX_DIR);
+        Analyzer analyzer = new StandardAnalyzer();
+        
+        Query query = QueryParser.parse("document", "contents",
+        analyzer);
+        Query rangeQuery = new RangeQuery(new Term("publishDate",
+        "20040101"), new Term("publishDate", "20041231"), true);
+        
+        BooleanQuery query2004 = new BooleanQuery();
+        query2004.add(query, true, false);
+        query2004.add(rangeQuery, true, false);
+        
+        start = new Date();
+        for (int i = 0; i < 100; i++) {
+        hits = searcher.search(query);
+        if (i == 0) logger.debug(hits.length() + " total matching 
+        documents");
+        }
+        end = new Date();
+        logger.info("query 1 - all docs - total time (ms): " +
+        (end.getTime() - start.getTime()));
+        
+        start = new Date();
+        for (int i = 0; i < 100; i++) {
+        hits = searcher.search(query2004);
+        if (i == 0) logger.debug(hits.length() + " total matching
+        documents");
+        }
+        end = new Date();
+        logger.info("query 2 - 2004 range query - no cache - total time
+        (ms): " + (end.getTime() - start.getTime()));
+        
+        QueryFilter filter2004 = new QueryFilter(rangeQuery);
+        start = new Date();
+        for (int i = 0; i < 100; i++) {
+        hits = searcher.search(query, filter2004);
+        if (i == 0) logger.debug(hits.length() + " total matching
+        documents");
+        }
+        end = new Date();
+        logger.info("query 3 - 2004 docs filter - no cache - total time
+        (ms): " + (end.getTime() - start.getTime()));
+        
+        CachingWrapperFilter cache2004 = new
+        CachingWrapperFilter(filter2004);
+        start = new Date();
+        for (int i = 0; i < 100; i++) {
+        hits = searcher.search(query, cache2004);
+        if (i == 0) logger.debug(hits.length() + " total matching
+        documents");
+        }
+        end = new Date();
+        logger.info("query 4 - 2004 docs filter - cached - total time
+        (ms): " + (end.getTime() - start.getTime()));
+        
+        } catch (Exception e) {
+        logger.error("unexpected excpetion trying to execute search",
+        e);
+        }
+        
+        }
+        }
+
+
+
+thanks in advance for any help
+ben
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

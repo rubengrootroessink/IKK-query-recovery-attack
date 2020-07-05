@@ -1,0 +1,63 @@
+FROM: "J.J. Larrea" <...@panix.com>
+SUBJECT: Merging with IndexWriter.addIndexes(...)
+DATE: 29 Nov 2005
+
+My application needs to simultaneously process record additions and 
+updates with one pass through a database. That's not in itself a 
+problem: I open an IndexReader on the existing index to mark the 
+prior versions of updated records as deleted Documents, and an 
+IndexWriter on a new empty index to accept the new and updated 
+records as new Documents.  Then it's simply a matter of merging the 
+two indexes into one.
+
+One possibility is to directly merge from the IndexReader (existing 
+index) into the IndexWriter (new index).  The problem is that it 
+takes a very long time, on the order of several hours, since it must 
+replicate everything in the old index (2.7Gb, 2.2M Documents) in the 
+new one.  Since the update consists of a small number of records, 
+typically under 1000 and sometimes just a handful, this is a waste of 
+cycles.
+
+Anticipating that, my code reverses the relationship, closing the 
+index objects at the end of the loop then opening an IndexWriter on 
+the existing (target) index and an IndexReader on the index which has 
+the new records, which gets merged into the target.  It functions as 
+expected and desired, but is also far more time-consuming than 
+reasonable.
+
+For example, if I take an empty (no Document) or small (100 
+Documents) index and merge one or other via IndexWriter.addIndexes() 
+into an already optimized single-segment index, what should in theory 
+be a null or trivial operation ends up in practice unpacking the 
+destination index into many segments, and then repacking them into a 
+single segment. For that 2.7Gb index it takes over an hour.
+
+In contrast, it only a few seconds to add those same 100 Documents 
+directly to the index via addDocument(), as long as one doesn't 
+optimize.
+
+So... I notice that both IndexWriter.addIndexes(...) merge methods 
+start and end with calls to optimize() on the target index.  I'm not 
+sure whether that is causing the unpacking and repacking I observe, 
+but it does wonder whether they truly need to be there:
+
+- Is starting off with zero or 1 segment (per a comment in the source 
+code) truly a precondition for successful merging?
+
+- Since one can open an unoptimized index and add millions of 
+Documents (creating potentially hundreds of segments) via 
+addDocument, with optimization left entirely optional and up to the 
+user, why is optimization required as a postcondition for merging?
+
+Any advice on this or the general application design, would be appreciated.
+
+Thanks,
+J.J. Larrea
+
+PS: This was tested against SVN trunk revision 329490
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,27 @@
+FROM: Robert Stewart <Robert.Stew...@INFONGEN.COM>
+SUBJECT: when do internal doc IDs change?
+DATE: 12 Aug 2008
+
+We have a problem where using FieldCache (or using TermEnum/TermDocs directly) in order to
+pre-cache several fields.  It is a bottleneck, because we open a new searchable index snapshot
+very frequently (every minute).  Each time we get a new snapshot of our master index (basically
+a copy using hard links), we use a background thread to reload a bunch of fields using FieldCache-style
+loading, then switch incoming queries over to the new searchable index.  For current index
+size (18M docs), it is taking about 90 seconds to load all the fields we need cached.  90
+seconds is too long.  I understand the issue is because it is doing 2 I/O seeks for each term,
+even though these are terms which are unique (or almost unique such as timestamp) for each
+document.  I am familiar with using field pay loads as an alternative, but we cannot use them,
+and we also have an existing index which we cant modify.
+
+One idea I have is to maintain a set of binary on-disk files (one for each field we want to
+cache) on our master index server and replicate these files with each index snapshot, so that
+they are directly read into memory, which would be much faster than using FieldCache on each
+snapshot.  These would be binary arrays whose indices need to correspond by internal doc ID
+to the index snapshots.  As new documents arrive, we could just append field values to these
+files (for unique fields).  The big question is when do internal doc IDs change?  We do periodically
+expire documents from the master index (delete), and do unfrequent optimization (monthly).
+ When we schedule an optimization of the master index, we can regenerate all these files.
+ So, I know doc IDs can change then, but the big question is: in normal indexing with no optimizations,
+will doc IDs change due some low-level segments merging as we add new documents, due to existence
+of deleted documents?
+

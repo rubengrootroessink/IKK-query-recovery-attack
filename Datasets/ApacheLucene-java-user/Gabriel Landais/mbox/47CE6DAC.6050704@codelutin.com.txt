@@ -1,0 +1,76 @@
+FROM: Gabriel Landais <land...@codelutin.com>
+SUBJECT: Re: Security filtering from external DB
+DATE: 5 Mar 2008
+
+Jake Mannix a écrit :
+> Gabriel,
+>   You can make this search much more efficient as follows: say that you have
+> a method
+> 
+> public BooleanQuery createQuery(Collection<String> allowedUUIDs);
+> 
+>   that works as you describe.  Then you can easily create a useful reusable
+> filter as follows:
+> 
+>   Filter filter = new CachingWrapperFilter(new
+> QueryFilter(createQuery(uuidCollection)));
+> 
+>   this filter will cache BitSets keyed on IndexReader instances, so hang
+> onto it and use it for
+> the entire time your uuidCollection doesn't change.
+> 
+>    Hope this helps.
+> 
+>   -jake
+
+Hi,
+  yes it helps!
+  As a result, I will not use my own BitSet cache mechanism. I have been 
+dumb when I believed that I couldn't create a SHOULD query on >1024 
+terms, as I can create inner BooleanQuery...
+  Just as note, QueryFilter is deprecated, QueryWrapperFilter replaces it.
+
+The new code :
+
+     private Query createQuery(Collection<String> visibleItems) {
+         int maxTerms = BooleanQuery.getMaxClauseCount() - 1;
+         int i = 0;
+         boolean subQueryIsQuery = true;
+
+         BooleanQuery query = new BooleanQuery();
+
+         BooleanQuery subQuery = new BooleanQuery();
+         for (String string : visibleItems) {
+             subQuery.add(new TermQuery(new Term(KEY_UUID, string)), 
+BooleanClause.Occur.SHOULD);
+             if (i % maxTerms == 0) {
+                 subQueryIsQuery = false;
+                 query.add(new BooleanClause(subQuery, 
+BooleanClause.Occur.SHOULD));
+                 subQuery = new BooleanQuery();
+             }
+             i++;
+         }
+
+         if (subQueryIsQuery) {
+             return subQuery;
+         }
+         return query;
+     }
+
+     private Filter createFilter(Collection<String> visibleItems) throws 
+SimExplorerTechnicalException {
+         Filter filter = new CachingWrapperFilter(new 
+QueryWrapperFilter(createQuery(visibleItems)));
+         return filter;
+     }
+
+  Not tested yet, but looks good.
+  Thanks a lot!
+Gabriel
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

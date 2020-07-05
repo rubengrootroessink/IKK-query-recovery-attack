@@ -1,0 +1,260 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Performance problems with Lucene 2.9
+DATE: 30 Nov 2009
+
+> And sorting is done by the
+> collector, Lucene has no idea how to sort.
+
+Sorting is done by the internal collector behind the
+Top(Field)Docs-returning method (your own collectors would have to do it
+themselves). If you call search(Query, n,... Sort), internally an collector
+is created that does the sorting for you and throws away all results that do
+not fall into the first 200 hits (if n=200).
+
+> If you use Sort, the returned
+> TopDocs will be sorted.
+> 
+> If you do not sort at all and do not score your results, TopDocs is not
+> very
+> useful, because the first 200 hits cannot be ranked.
+> 
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+> 
+> > -----Original Message-----
+> > From: Michel Nadeau [mailto:akaris@gmail.com]
+> > Sent: Monday, November 30, 2009 5:35 PM
+> > To: java-user@lucene.apache.org
+> > Subject: Re: Performance problems with Lucene 2.9
+> >
+> > I'll definitely switch to a Collector.
+> >
+> > It's just not clear for me if I should use BooleanQueries or
+> > MatchAllDocuments+Filters ?
+> >
+> > And should I write my own collector or the TopDocs one is perfect for me
+> ?
+> >
+> > - Mike
+> > akaris@gmail.com
+> >
+> >
+> > On Mon, Nov 30, 2009 at 11:30 AM, Erick Erickson
+> > <erickerickson@gmail.com>wrote:
+> >
+> > > The problem with hits is that a it re-executes the query
+> > > every N documents where N is 100 (?).
+> > >
+> > > So, a loop like
+> > > for (int idx : hits.length) {
+> > >   do something....
+> > > }
+> > >
+> > > Assuming my memory is right and it's every 100, your query will
+> > > re-execute (length/100) times. Which is unfortunate.
+> > >
+> > > The very quick test to see where to concentrate first would be to take
+> > > a time stamp just before you hit your loop.....
+> > >
+> > > This will tell you whether this loop is the culprit, but it really
+> > doesn't
+> > > matter because you'll follow the advice from Uwe and Shai anyway <G>.
+> > >
+> > > Filtering and Sorting are applied to Collectors before you see
+> them.....
+> > >
+> > > The other bit would be to investigate your sorting. Remember that the
+> > > first sort or two take quite a while since the relevant caches are
+> > > populated with first used, so second+ queries should be faster. The
+> > > Wiki has some timing/speedup advice.....
+> > >
+> > > Best
+> > > Erick
+> > >
+> > >
+> > > On Mon, Nov 30, 2009 at 11:10 AM, Michel Nadeau <akaris@gmail.com>
+> > wrote:
+> > >
+> > > > What is the main difference between Hits and Collectors?
+> > > >
+> > > > - Mike
+> > > > akaris@gmail.com
+> > > >
+> > > >
+> > > > On Mon, Nov 30, 2009 at 11:03 AM, Uwe Schindler <uwe@thetaphi.de>
+> > wrote:
+> > > >
+> > > > > And if you only have a filter and apply it to all documents, make
+> a
+> > > > > ConstantScoreQuery on top of the filter:
+> > > > >
+> > > > > Query q=new ConstantScoreQuery(cluCF);
+> > > > >
+> > > > > Then remove the filter from your search method call and only
+> execute
+> > > this
+> > > > > query.
+> > > > >
+> > > > > And if you iterate over all results never-ever use Hits! (its
+> > already
+> > > > > deprecated). Write a Collector instead (as you are not interested
+> in
+> > > > > scoring).
+> > > > >
+> > > > > And: If you replace a relational database with Lucene, be sure not
+> > to
+> > > > think
+> > > > > in a relational sense with foreign keys / primary keys and so on.
+> In
+> > > > > general
+> > > > > you should flatten everything.
+> > > > >
+> > > > > Uwe
+> > > > >
+> > > > > -----
+> > > > > Uwe Schindler
+> > > > > H.-H.-Meier-Allee 63, D-28213 Bremen
+> > > > > http://www.thetaphi.de
+> > > > > eMail: uwe@thetaphi.de
+> > > > >
+> > > > >
+> > > > > > -----Original Message-----
+> > > > > > From: Shai Erera [mailto:serera@gmail.com]
+> > > > > > Sent: Monday, November 30, 2009 4:56 PM
+> > > > > > To: java-user@lucene.apache.org
+> > > > > > Subject: Re: Performance problems with Lucene 2.9
+> > > > > >
+> > > > > > Hi
+> > > > > >
+> > > > > > First you can use MatchAllDocsQuery, which matches all
+> documents.
+> > It
+> > > > will
+> > > > > > save a HUGE posting list (TAG:TAG), and performs much faster.
+> For
+> > > > example
+> > > > > > TAG:TAG computes a score for each doc, even though you don't
+> need
+> > it.
+> > > > > > MatchAllDocsQuery doesn't.
+> > > > > >
+> > > > > > Second, move away from Hits ! :) Use Collectors instead.
+> > > > > >
+> > > > > > If I understand the chain of filters, do you think you can code
+> > them
+> > > > with
+> > > > > > a
+> > > > > > BooleanQuery that is added BooleanClauses, each with is Term
+> > > > > > (field:value)?
+> > > > > > You can add clauses w/ OR, AND, NOT etc.
+> > > > > >
+> > > > > > Note that in Lucene 2.9, you can avoid scoring documents very
+> > easily,
+> > > > > > which
+> > > > > > is a performance win if you don't need scores (i.e. if you just
+> > want
+> > > to
+> > > > > > match everything, not caring for scores).
+> > > > > >
+> > > > > > Shai
+> > > > > >
+> > > > > > On Mon, Nov 30, 2009 at 5:47 PM, Michel Nadeau
+> <akaris@gmail.com>
+> > > > wrote:
+> > > > > >
+> > > > > > > Hi,
+> > > > > > >
+> > > > > > > we use Lucene to store around 300 millions of records.
+We use
+> > the
+> > > > index
+> > > > > > > both
+> > > > > > > for conventional searching, but also for all the system's
+data
+> -
+> > we
+> > > > > > > replaced
+> > > > > > > MySQL with Lucene because it was simply not working at
+all
+> with
+> > > MySQL
+> > > > > > due
+> > > > > > > to
+> > > > > > > the amount or records. Our problem is that we have HUGE
+> > performance
+> > > > > > > problems... whenever we search, it takes forever to return
+> > results,
+> > > > and
+> > > > > > > Java
+> > > > > > > uses 100% CPU/RAM.
+> > > > > > >
+> > > > > > > Our index fields are like this:
+> > > > > > >
+> > > > > > > TYPE
+> > > > > > > PK
+> > > > > > > FOREIGN_PK
+> > > > > > > TAG
+> > > > > > > ...other information depending on type...
+> > > > > > >
+> > > > > > > * All fields are Field.Index.UN_TOKENIZED
+> > > > > > > * The field "TAG" always contains the value "TAG".
+> > > > > > >
+> > > > > > > Whenever we search in the index, our query is "TAG:TAG"
+to
+> match
+> > > all
+> > > > > > > documents, and we do the search like this:
+> > > > > > >
+> > > > > > >        // Search
+> > > > > > >        Hits h = searcher.search(q, cluCF, cluSort);
+> > > > > > >
+> > > > > > > cluCF is a ChainedFilter containing all the other filters
+> (like
+> > > > > > > FOREIGN_PK=12345, TYPE=a, etc.).
+> > > > > > >
+> > > > > > > I know that the method is probably crazy because "TAG:TAG"
+is
+> > > > matching
+> > > > > > all
+> > > > > > > 300M documents and then it applies filters; so that's probably
+> > why
+> > > > > every
+> > > > > > > little query is taking 100% CPU/RAM.... but I don't know
+how
+> to
+> > do
+> > > it
+> > > > > > > properly.
+> > > > > > >
+> > > > > > > Help ! Any advice is welcome.
+> > > > > > >
+> > > > > > > - Mike
+> > > > > > > akaris@gmail.com
+> > > > > > >
+> > > > >
+> > > > >
+> > > > > ------------------------------------------------------------------
+> --
+> > -
+> > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > > >
+> > > > >
+> > > >
+> > >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

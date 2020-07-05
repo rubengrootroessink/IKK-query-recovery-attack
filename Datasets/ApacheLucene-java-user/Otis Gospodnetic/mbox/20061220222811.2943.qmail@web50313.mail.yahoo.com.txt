@@ -1,0 +1,195 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: First search is slow after updating index .. subsequent searches very fast
+DATE: 20 Dec 2006
+
+To populate FieldCache, the number of matches doesn't matter.  There is no need to be scrimy
+there - you don't really save anything by running a query that matches only a few docs.  Just
+run something that looks like a common query.
+
+For warming up new indices, one can also use the `dd' trick under UNIX.
+
+Otis
+
+----- Original Message ----
+From: Bryan Dotzour <BDotzour@widen.com>
+To: java-user@lucene.apache.org
+Sent: Wednesday, December 20, 2006 5:23:40 PM
+Subject: RE: First search is slow after updating index .. subsequent searches very fast
+
+One question about this, Otis... When "warming up" the new searcher,
+should the query return a lot of results, or does it matter?  Can I just
+do like an ID = X query and get one document back?  Is that sufficient
+or is it better to run a query that will get lots of hits?
+
+Thanks again,
+Bryan
+
+-----Original Message-----
+From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com] 
+Sent: Wednesday, December 20, 2006 3:28 PM
+To: java-user@lucene.apache.org
+Subject: Re: First search is slow after updating index .. subsequent
+searches very fast
+
+All sounds good.  Opening a new IndexReader can take a bit of time.  If
+you use sorting of any kind other than default sorting by relevance,
+this delay on the first search is also probably caused by the lazy
+FieldCache population.  The cure for that is to open a new
+IndexReader/Searcher before you close the old one, warm it up with a
+query + sort, and then switch IndexReader/Searchers, closing the old
+one.
+
+Otis
+
+----- Original Message ----
+From: Bryan Dotzour <BDotzour@widen.com>
+To: java-user@lucene.apache.org
+Sent: Wednesday, December 20, 2006 3:59:19 PM
+Subject: First search is slow after updating index .. subsequent
+searches very fast
+
+I'm investigating some performance issues with the way we're using
+Lucene in our web app and am interested if anyone could shed some light
+on what might be going on.  Hopefully I can provide enough information,
+please let me know if there's more I can give.
+
+ 
+
+We're using Lucene 2.0.0 and I'm currently working with disk-based
+indexing (although in production I'll want to be using RAM indexing).
+In our environment, we build up our Lucene index at application start up
+time and then we optimize the index.  From then on, updates and deletes
+to the index occur fairly frequently but we don't optimize until the
+middle of the night when the impact would be at its minimum.  After a
+while, what I see is that searches will be very fast (~400 ms) until I
+make a modification that will require a single document to be
+re-indexed.  Immediately after that has occurred, the next search will
+take substantially longer (sometimes up to ~25s).  After that search has
+run, the next search will be back at the ~400ms time.
+
+ 
+
+Our algorithm for handling the updates is as follows:
+
+1.       open an IndexReader on the directory
+
+2.       delete the document using the reader
+
+3.       close the reader
+
+4.       open an IndexWriter
+
+5.       add the new document using the writer
+
+6.       close the writer
+
+ 
+
+For searches:
+
+1.    We cache off an IndexReader for the index, as well as an
+IndexSearcher, which uses that reader
+2.    When a search is initiated we check to see if the version of the
+index has changed using getCurrentVersion()
+3.    If it has changed, we close our IndexSearcher, close the
+IndexReader and re-open them both
+
+ 
+
+ 
+
+Anything sound non-standard in that workflow?  Does anyone have an idea
+of what might be happening during that slow down?
+
+ 
+
+Thanks for your time,
+
+Bryan
+
+ 
+
+ 
+
+ 
+
+(For a little more info, here is a very common stack trace snippet that
+I gather when the "slow search" is running.  It seems much of the time
+is spent in MultiReader or MultiTermDocs)
+
+ 
+org.apache.lucene.index.CompoundFileReader$CSIndexInput.readInternal(Com
+poundFileReader.java:214)
+ 
+org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.jav
+a:64)
+ 
+org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.j
+ava:33)
+      org.apache.lucene.store.IndexInput.readVInt(IndexInput.java:56)
+      org.apache.lucene.index.TermBuffer.read(TermBuffer.java:62)
+ 
+org.apache.lucene.index.SegmentTermEnum.next(SegmentTermEnum.java:117)
+ 
+org.apache.lucene.index.SegmentTermEnum.scanTo(SegmentTermEnum.java:148)
+ 
+org.apache.lucene.index.TermInfosReader.scanEnum(TermInfosReader.java:15
+7)
+ 
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:151)
+ 
+org.apache.lucene.index.SegmentTermDocs.seek(SegmentTermDocs.java:50)
+ 
+org.apache.lucene.index.MultiTermDocs.termDocs(MultiReader.java:392)
+      org.apache.lucene.index.MultiTermDocs.next(MultiReader.java:348)
+      org.apache.lucene.index.MultiTermDocs.next(MultiReader.java:349)
+      org.apache.lucene.index.MultiTermDocs.next(MultiReader.java:349)
+      org.apache.lucene.index.MultiTermDocs.next(MultiReader.java:349)
+ 
+org.apache.lucene.search.FieldCacheImpl.getInts(FieldCacheImpl.java:171)
+ 
+org.apache.lucene.search.FieldCacheImpl.getInts(FieldCacheImpl.java:153)
+ 
+org.apache.lucene.search.FieldCacheImpl.getAuto(FieldCacheImpl.java:349)
+ 
+org.apache.lucene.search.FieldSortedHitQueue.comparatorAuto(FieldSortedH
+itQueue.java:346)
+ 
+org.apache.lucene.search.FieldSortedHitQueue.getCachedComparator(FieldSo
+rtedHitQueue.java:189)
+ 
+org.apache.lucene.search.FieldSortedHitQueue.(FieldSortedHitQueue.java:5
+8)
+ 
+org.apache.lucene.search.TopFieldDocCollector.(TopFieldDocCollector.java
+:40)
+ 
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:108)
+      org.apache.lucene.search.Hits.getMoreDocs(Hits.java:65)
+      org.apache.lucene.search.Hits.(Hits.java:52)
+      org.apache.lucene.search.Searcher.search(Searcher.java:53)
+
+ 
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

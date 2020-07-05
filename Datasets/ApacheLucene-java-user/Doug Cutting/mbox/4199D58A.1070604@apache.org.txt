@@ -1,0 +1,39 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Backup strategies
+DATE: 16 Nov 2004
+
+Christoph Kiehl wrote:
+> I'm curious about your strategy to backup indexes based on FSDirectory. 
+> If I do a file based copy I suspect I will get corrupted data because of 
+> concurrent write access.
+> My current favorite is to create an empty index and use 
+> IndexWriter.addIndexes() to copy the current index state. But I'm not 
+> sure about the performance of this solution.
+> 
+> How do you make your backups?
+
+A safe way to backup is to have your indexing process, when it knows the 
+index is stable (e.g., just after calling IndexWriter.close()), make a 
+checkpoint copy of the index by running a shell command like "cp -lpr 
+index index.YYYMMDDHHmmSS".  This is very fast and requires little disk 
+space, since it creates only a new directory of hard links.  Then you 
+can separately back this up and subsequently remove it.
+
+This is also a useful way to replicate indexes.  On the master indexing 
+server periodically perform "cp -lpr" as above.  Then search slaves can 
+use rsync to pull down the latest version of the index.  If a very small 
+mergefactor is used (e.g., 2) then the index will have only a few 
+segments, so that searches are fast.  On the slave, periodically find 
+the latest index.YYYMMDDHHmmSS, use "cp -lpr index/ index.YYYMMDDHHmmSS" 
+and 'rsync --delete master:index.YYYMMDDHHmmSS index.YYYMMDDHHmmSS' to 
+efficiently get a local copy, and finally "ln -fsn index.YYYMMDDHHmmSS 
+index" to publish the new version of the index.
+
+Doug
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,280 @@
+FROM: liat oren <oren.l...@gmail.com>
+SUBJECT: Re: Scores between words. Boosting?
+DATE: 17 Mar 2009
+
+Thanks for all the answers.
+
+I am new to Lucene and in the emails its the first time I heard of the
+bigrams and thus read about them a bit.
+
+Question - if I query for "cat animal" - or use boosting - "cat^2
+animal^0.5" - will the results return ONLY documents that contain both?
+>From what I saw until now - it can also show documents that contain one of
+them, no?
+
+Can you please elaborate a bit more on your suggestion?
+
+I read a bit on the synonyms and the wordNet package.
+Isn't there a way to use an index that is structured in the same way the
+index of the wordNet (any idea how is this index built?), but stores other
+values?
+
+Thanks a lot,
+Liat
+
+2009/3/17 Babak Farhang <farhang@gmail.com>
+
+> Ahh! forgot about the "synonym" (floabw) part of the problem.
+>
+> Take 2: how about unigram and bigram tokens in the same field? e.g.
+> new NGramTokenizer(Reader, 1, 2)
+>
+> The PrefixQuery strategy should be slower, I think, because the "cat"
+> --> "cat dog" relationship is one-to-many, so there will be a lot of
+> [bigram] terms to iterate over (and a lot of redundant hits).
+>
+> On Mon, Mar 16, 2009 at 3:36 PM, Grant Ingersoll <gsingers@apache.org>
+> wrote:
+> > Yeah, I was going to suggest a combination of bi-grams and payloads and
+> the
+> > BoostingTermQuery.  There is an NGram TokenFilter in contrib/analysis
+> that
+> > can do the bi-gram part, but the payloads would be extra.
+> >
+> > the piece I'm not sure about is how to handle the "synonyms" (they aren't
+> > really, but for lack of a better word), i.e. get when the query is "cat
+> dog"
+> > also get those docs w/ just cat.  You might be able to do something with
+> a
+> > PrefixQuery on the n-grams or a separate field that doesn't do bigrams.
+> >
+> > Still, that feels like a stretch for some reason.
+> >
+> > -Grant
+> >
+> >
+> > On Mar 16, 2009, at 3:39 PM, Babak Farhang wrote:
+> >
+> >> Since you're configuring/writing your own analyzer, why not generate a
+> >> token stream that emits bi-grams? Sure, you're expanding the number of
+> >> terms in the index, so there's some overhead there.  On the plus side,
+> >> however, your bi-grams, as you've described them, are ordered--which
+> >> reduces the potential # of bi-grams in your data set by a factor of
+> >> 1/2.
+> >>
+> >> -Babak
+> >>
+> >> Tangent: Liat's example brings up an interesting issue about n-grams,
+> >> namely that indexing only internally sorted n-grams is a good strategy
+> >> for economizing on the number of terms in an index of n-grams--by a
+> >> factor of 1/n!, I think.  No?
+> >>
+> >> On Mon, Mar 16, 2009 at 4:55 AM, liat oren <oren.liat@gmail.com> wrote:
+> >>>
+> >>> Hi,
+> >>> Is there any idea of how to make it work?
+> >>> Many thanks,
+> >>> Liat
+> >>>
+> >>> 2009/3/9 liat oren <oren.liat@gmail.com>
+> >>>
+> >>>> I have an index that has for every two words a score.
+> >>>> I would like my analyzer - that is a combination of whitespace
+> >>>> tokenizer, a
+> >>>> stop words analyzer and stemming.
+> >>>>
+> >>>> The regular score of Lucene takes into account the position of the
+> >>>> words.
+> >>>>
+> >>>> I would like to add another factor to that score which is these score
+> >>>> between words.
+> >>>> Instead of having score 0 to words that are not equal, I would like
+to
+> >>>> use
+> >>>> this index in the calculation.
+> >>>>
+> >>>> Is it better explained?
+> >>>>
+> >>>> Thanks a lot,
+> >>>> Liat
+> >>>>
+> >>>> 2009/3/9 Grant Ingersoll <gsingers@apache.org>
+> >>>>
+> >>>> Hmmm, I have some inklings of an idea, but can we take a step back?
+>  Can
+> >>>>>
+> >>>>> you explain the problem you are trying to solve at a higher level
+> >>>>> (instead
+> >>>>> of the current solution)?  I imagine it is something related to
+> >>>>> co-occurrence analysis.
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>> On Mar 8, 2009, at 8:05 AM, liat oren wrote:
+> >>>>>
+> >>>>> Hi Grant,
+> >>>>>>
+> >>>>>> No, you can only have two words - the score is between two words.
+> >>>>>>
+> >>>>>> "cat dog" and "dog cat" is equivalent, it will actually always
+be
+> "cat
+> >>>>>> dog"
+> >>>>>> - going by alphabetic order.
+> >>>>>>
+> >>>>>> About the boosting, I read a bit about it - but couldn't find
+how it
+> >>>>>> can
+> >>>>>> help me, unless I change every appearance of the word dog to
+have
+> also
+> >>>>>> cat
+> >>>>>> and animal using the weight of the score.
+> >>>>>> So, for example, every word will appear 10 times from what it
+is -
+> if
+> >>>>>> apple
+> >>>>>> appears 1, I will do the boosting so it appears 10 times.
+> >>>>>> If dog appears, then it will also have cat twice (0.2*10) and
+animal
+> 5
+> >>>>>> times(0.5*10).
+> >>>>>>
+> >>>>>> But I hope to have another better solution.
+> >>>>>>
+> >>>>>>
+> >>>>>> Thanks
+> >>>>>> 2009/3/8 Grant Ingersoll <gsingers@apache.org>
+> >>>>>>
+> >>>>>> Hi Liat,
+> >>>>>>>
+> >>>>>>> Some questions inline below.
+> >>>>>>>
+> >>>>>>> On Mar 8, 2009, at 5:49 AM, liat oren wrote:
+> >>>>>>>
+> >>>>>>> Hi,
+> >>>>>>>
+> >>>>>>>>
+> >>>>>>>> I have scores between words, for example - dog and animal
+have a
+> >>>>>>>> score
+> >>>>>>>> of
+> >>>>>>>> 0.5 (and not 0), dog and cat have a score of 0.2, etc.
+> >>>>>>>> These scores are stored in an index:
+> >>>>>>>> Doc1: field words: dog animal
+> >>>>>>>>    field score: 0.5
+> >>>>>>>> Doc2: field words: dog cat
+> >>>>>>>>    field score: 0.2
+> >>>>>>>>
+> >>>>>>>> If the user searches for the word dog - I would like
+that
+> documents
+> >>>>>>>> that
+> >>>>>>>> contain the word animal or cat will also get a good
+score (that
+> will
+> >>>>>>>> take
+> >>>>>>>> into account the 0.5 and 0.2).
+> >>>>>>>>
+> >>>>>>>>
+> >>>>>>> Is it always the case that these come in pairs?  In other
+words,
+> >>>>>>> would
+> >>>>>>> you
+> >>>>>>> ever have:
+> >>>>>>> field words: dog cat animal
+> >>>>>>> score: 0.9
+> >>>>>>>
+> >>>>>>> Also, is the following equivalent, or would it have a different
+> >>>>>>> score:
+> >>>>>>> field words: cat dog
+> >>>>>>> score: 0.2
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>> Basically what I do is: for every document in the database,
+I loop
+> >>>>>>>> over
+> >>>>>>>> the
+> >>>>>>>> words that appear in the query (the query is long in
+a size of an
+> >>>>>>>> article)
+> >>>>>>>> and for every word that appears in each document I take
+the score
+> >>>>>>>> from
+> >>>>>>>> the
+> >>>>>>>> index mentioned above and calculating a score between
+the query
+> and
+> >>>>>>>> each
+> >>>>>>>> document.
+> >>>>>>>>
+> >>>>>>>> Any suggestion how to do it using Lucene search? How
+to add these
+> >>>>>>>> values
+> >>>>>>>> to
+> >>>>>>>> the searcher?
+> >>>>>>>>
+> >>>>>>>>
+> >>>>>>> Thinking...
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>> I looked at the boosting option, but couldn't really
+see how it
+> >>>>>>>> helps
+> >>>>>>>> me
+> >>>>>>>> to
+> >>>>>>>> that matter.
+> >>>>>>>>
+> >>>>>>>>
+> >>>>>>> What "boosting option" did you look at?  Can you explain
+a bit
+> more?
+> >>>>>>>
+> >>>>>>>
+> >>>>>>> --------------------------
+> >>>>>>> Grant Ingersoll
+> >>>>>>> http://www.lucidimagination.com/
+> >>>>>>>
+> >>>>>>> Search the Lucene ecosystem (Lucene/Solr/Nutch/Mahout/Tika/Droids)
+> >>>>>>> using
+> >>>>>>> Solr/Lucene:
+> >>>>>>> http://www.lucidimagination.com/search
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> ---------------------------------------------------------------------
+> >>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>>>>
+> >>>>>>>
+> >>>>>>>
+> >>>>>
+> >>>>> ---------------------------------------------------------------------
+> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>>
+> >>>>>
+> >>>>
+> >>>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

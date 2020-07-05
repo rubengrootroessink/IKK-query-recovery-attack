@@ -1,0 +1,328 @@
+FROM: Doron Cohen <DOR...@il.ibm.com>
+SUBJECT: Re: discontinuous range query
+DATE: 5 Oct 2006
+
+I sometimes find it helpful to think of the query parts as applying
+'filtering' logic, helping to understand how query components play together
+in determining the acceptable set of results (mostly ignoring scoring here,
+which would usually sort the candidate results).
+
+Consider a set of 10 douments with a single field having the following
+simplistic content:
+  doc 0  content:  a z 0
+  doc 1  content:  a z 1
+  doc 2  content:  a z 2
+  doc 3  content:  a z 3
+  doc 4  content:  a z 4
+  doc 5  content:  b z 5
+  doc 6  content:  b z 6
+  doc 7  content:  b z 7
+  doc 8  content:  b z 8
+  doc 9  content:  b z 9
+
+And consider the following queries on that single field:
+
+query = 3
+Only 3 is a valid result.
+
+query = +3
+Only docs containing 3 are valid candidates (docs not containing 3 are not
+valid candidates).
+So, again, only 3 is a valid result.
+
+query = 2 3
+Only docs containing any of 2 3 are valid candidates.
+So both 2 and 3 are valid results.
+
+query = 2 +3
+Only docs containing 3 are valid candidates (docs not containing 3 are not
+valid).
+Docs that contain 2, are valid candidates (but only if they also contain
+3).
+So only 3 is a valid result.
+
+query = 2 6 b
+Only docs containing at least one of 2 6 b are valid candidates.
+So valid results are: 2 5 6 7 8 9
+
+query = 2 6 +b
+Only docs containing b are valid candidates (docs not containing b are not
+valid).
+Docs containing 2, 6, or both are valid candidates (but ony if they also
+contain b).
+So valid results are: 5 6 7 8 9
+
+As you can now see, for any query with <should> as well as <must/not>
+parts:
+  query = <should-part> +<must-part>
+  query = <should-part> -<must-not-part>
+The <should part> only affects the scoring of the valid documents. It does
+not define the set of valid documents. In other words, documents that do
+not meet the <should-part> can find their way to the query result set. On
+the other hand, documents that do not meet the <must-part> or the
+<must-not-part> can never find their way to the result set.
+
+To complete the picture, maybe worth noting is that (1) the <must-part>
+also contributes to the score of result documents; (2) filters can be used
+for having a <must-logic> without affecting scoring; and (3)
+<must-not-part> does not affect the scoring of result documents
+(obviously).
+
+The examples in your test case would be:
+
+query =  3 4 5 6
+query = (3 4 5 6)
+Docs containing any of 3 4 5 6 are valid.
+So valid results are 3 4 5 6.
+
+query = +(3 4 5 6)
+Docs containing any of 3 4 5 6 are valid (and only these docs are valid).
+So again valid results are 3 4 5 6.
+
+query = (3 4 5 6) +x
+Docs containing any of 3 4 5 6 are valid.
+Only docs containing x are valid candidates (docs not containing x are not
+valid).
+So valid results are all docs: 0 1 2 3 4 5 6 7 8 9
+
+query = +(3 4 5 6) +x
+Only Docs containing any of 3 4 5 6 are valid (docs not containing any of 3
+4 5 6 are not valid).
+Only docs containing x are valid candidates (docs not containing x are not
+valid).
+So valid results are: 3 4 5 6
+
+query = +(3 4 5 6) +b
+Only Docs containing any of 3 4 5 6 are valid (docs not containing any of 3
+4 5 6 are not valid).
+Only docs containing b are valid candidates (docs not containing b are not
+valid).
+So valid results are: 5 6
+
+- Doron
+
+Erik Hatcher <erik@ehatchersolutions.com> wrote on 05/10/2006 02:58:02:
+
+>
+> On Oct 5, 2006, at 4:59 AM, Tom Hill wrote:
+> > It's clear that my problem here comes from a lack of understanding
+> > of the semantics of SHOULD, MUST, and MUST_NOT.
+> >
+> > I haven't found a clear description of this (except for a brief
+> > comment here http://mail-archives.apache.org/mod_mbox/lucene-java-
+> > dev/200408.mbox/%3C41267191.6060905@apache.org%3E). Most of the
+> > other descriptions I have found discuss it as if it they were
+> > boolean operators, which they aren't, quite.
+> >
+> > Can someone explain to me what the semantics of SHOULD and MUST
+> > are, to the point that I could see from the explanation that
+> > Query: +(name:[A TO C] name:[Q TO Z]) +PHB:NO
+> > would produce the results that I wanted, and
+> > Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+> > does not?
+>
+> With the latter query, since you later said PHB is "NO" for all
+> documents, you're getting all documents back regardless of the name
+> field, because you didn't require (MUST) the first clause.   The
+> first query is requiring that PHB:NO __AND__ the name is in those
+> ranges.  The second query is requiring PHB:NO __OR__ the name is in
+> those ranges.
+>
+> > Or why
+> > Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+>
+> Again, this one selects all documents regardless of the first SHOULD
+> clause because PHB is "NO" for all documents and the first clause is
+> a SHOULD, so it does not matter what it matches other than for
+> ranking purposes.
+>
+> > returns different results than
+> > Query: (name:[A TO C] name:[Q TO Z])
+> > even though PHB is NO for all docs
+>
+> This is only selecting documents that match either of those ranges.
+>
+> Thanks for submitting the code example to show exactly what you're
+> doing.
+>
+> > Obviously, nesting makes it much harder (for me) to understand.
+> > What does it mean to nest a SHOULD nested in a MUST (nested in a ...).
+>
+> +(name:A OR name:B) +PHB:NO
+>
+> means that name must be A __OR__ B (has to be one or the other, or
+> potentially both even), and PHB has to be "NO".
+>
+>    Erik
+>
+>
+> >
+> > Thanks again,
+> >
+> > Tom
+> >
+> >
+> >
+> >
+> > -----------------------------------------------------------Sample
+> > import java.io.IOException;
+> >
+> > import org.apache.lucene.analysis.Analyzer;
+> > import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> > import org.apache.lucene.document.*;
+> > import org.apache.lucene.index.*;
+> > import org.apache.lucene.search.*;
+> > import org.apache.lucene.store.*;
+> >
+> > public class Should
+> > {
+> >         public static final String NAME_FIELD = "name";
+> >
+> >         public static final String MANAGER_FIELD = "PHB";
+> >
+> >         public static Document createDoc(String name, String manager)
+> >         {
+> >                 Document d = new Document();
+> >                 d.add(new Field(NAME_FIELD, name, Field.Store.YES,
+> > Field.Index.UN_TOKENIZED));
+> >                 d.add(new Field(MANAGER_FIELD, manager,
+> > Field.Store.YES, Field.Index.UN_TOKENIZED));
+> >                 return d;
+> >         }
+> >
+> >         static BooleanQuery buildQuery(BooleanClause.Occur occur)
+> >         {
+> >                 BooleanQuery bq = new BooleanQuery();
+> >                 Term lower;
+> >                 Term upper;
+> >                 lower = new Term(NAME_FIELD, "A");
+> >                 upper = new Term(NAME_FIELD, "C");
+> >                 bq.add(new RangeQuery(lower, upper, true), occur);
+> >                 lower = new Term(NAME_FIELD, "Q");
+> >                 upper = new Term(NAME_FIELD, "Z");
+> >                 bq.add(new RangeQuery(lower, upper, true), occur);
+> >                 return bq;
+> >         }
+> >
+> >         static BooleanQuery buildQuery2()
+> >         {
+> >                 BooleanQuery mainq = buildQuery
+> > (BooleanClause.Occur.SHOULD);
+> >                 mainq.add(new TermQuery(new Term(MANAGER_FIELD,
+> > "NO")), BooleanClause.Occur.MUST);
+> >                 return mainq;
+> >         }
+> >
+> >         static BooleanQuery buildQuery3(BooleanClause.Occur occur)
+> >         {
+> >                 BooleanQuery mainq = new BooleanQuery();
+> >                 BooleanQuery subq = new BooleanQuery();
+> >                 Term lower;
+> >                 Term upper;
+> >                 lower = new Term(NAME_FIELD, "A");
+> >                 upper = new Term(NAME_FIELD, "C");
+> >                 subq.add(new RangeQuery(lower, upper, true),
+> > BooleanClause.Occur.SHOULD);
+> >                 lower = new Term(NAME_FIELD, "Q");
+> >                 upper = new Term(NAME_FIELD, "Z");
+> >                 subq.add(new RangeQuery(lower, upper, true),
+> > BooleanClause.Occur.SHOULD);
+> >                 mainq.add(subq, occur);
+> >                 mainq.add(new TermQuery(new Term(MANAGER_FIELD,
+> > "NO")), BooleanClause.Occur.MUST);
+> >                 return mainq;
+> >         }
+> >
+> >         private static void runQuery(IndexSearcher is, Query q)
+> > throws IOException
+> >         {
+> >                 Hits hits;
+> >                 System.out.println("Query: " + q);
+> >                 hits = is.search(q);
+> >                 System.out.println("Hits: " + hits.length());
+> >                 for (int docNo = 0; docNo < hits.length(); docNo++)
+> >                 {
+> >                         System.out.println("DOC: " + hits.doc(docNo));
+> >                 }
+> >                 System.out.println();
+> >         }
+> >
+> >         public static void main(String[] args) throws Exception
+> >         {
+> >                 Directory dir = new RAMDirectory();
+> >                 Analyzer analyzer = new StandardAnalyzer();
+> >                 IndexWriter iw = new IndexWriter(dir, analyzer, true);
+> >                 iw.addDocument(createDoc("Asok", "NO"));
+> >                 iw.addDocument(createDoc("Dogbert", "NO"));
+> >                 iw.addDocument(createDoc("Ratbert", "NO"));
+> >                 iw.close();
+> >
+> >                 IndexSearcher is = new IndexSearcher(dir);
+> >                 Query q;
+> >                 q = buildQuery(BooleanClause.Occur.SHOULD);
+> >                 runQuery(is, q);
+> >                 q = buildQuery(BooleanClause.Occur.MUST);
+> >                 runQuery(is, q);
+> >                 q = buildQuery2();
+> >                 runQuery(is, q);
+> >                 q = buildQuery3(BooleanClause.Occur.SHOULD);
+> >                 runQuery(is, q);
+> >                 q = buildQuery3(BooleanClause.Occur.MUST);
+> >                 runQuery(is, q);
+> >                 is.close();
+> >         }
+> > }
+> > ----------------Output (I trying to get two results back)
+> > Query: name:[A TO C] name:[Q TO Z]
+> > Hits: 2
+> > DOC: Document<stored/uncompressed,indexed<name:Asok> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Ratbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> >
+> > Query: +name:[A TO C] +name:[Q TO Z]
+> > Hits: 0
+> >
+> > Query: name:[A TO C] name:[Q TO Z] +PHB:NO
+> > Hits: 3
+> > DOC: Document<stored/uncompressed,indexed<name:Asok> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Ratbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Dogbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> >
+> > Query: (name:[A TO C] name:[Q TO Z]) +PHB:NO
+> > Hits: 3
+> > DOC: Document<stored/uncompressed,indexed<name:Asok> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Ratbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Dogbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> >
+> > Query: +(name:[A TO C] name:[Q TO Z]) +PHB:NO
+> > Hits: 2
+> > DOC: Document<stored/uncompressed,indexed<name:Asok> stored/
+> > uncompressed,indexed<PHB:NO>>
+> > DOC: Document<stored/uncompressed,indexed<name:Ratbert> stored/
+> > uncompressed,indexed<PHB:NO>>
+> >
+> > ------------------
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

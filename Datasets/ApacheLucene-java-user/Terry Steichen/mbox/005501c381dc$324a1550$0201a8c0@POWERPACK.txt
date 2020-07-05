@@ -1,0 +1,243 @@
+FROM: "Terry Steichen" <te...@net-frame.com>
+SUBJECT: Re: Confusion over wildcard search logic
+DATE: 23 Sep 2003
+
+Erik's analysis is comprehensive and useful.  I think this example reflects
+a common (and understandable) oversight - that wildcards do *not* work with
+a phrase.  Got caught on that many times myself.  Also there may be
+confusion about the format -> field:(term1 term2), in that the examples
+provided don't seem to make use a parentheses.  Finally, as I recall, there
+was some bug(s) with some wildcard patterns with 1.2.
+
+Regards,
+
+Terry
+
+----- Original Message -----
+From: "Erik Hatcher" <erik@ehatchersolutions.com>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Monday, September 22, 2003 10:33 PM
+Subject: Re: Confusion over wildcard search logic
+
+
+> Ah, this is a fun one.... lots of fiddly issues with how queries work
+> and how QueryParser works.  I'll take a stab at some of these inline
+> below....
+>
+> On Monday, September 22, 2003, at 08:26  PM, Dan Quaroni wrote:
+> > I have a simple command line interface for testing.
+>
+> Interesting interface.  Looks like something that if made generic
+> enough would be handy to have at least in the sandbox.
+>
+> >   I'm getting some odd
+> > results, though, with certain logic of wildcard searches.
+>
+> not all your queries are truly "WildcardQuery"'s though.  look at the
+> class it constructed to get a better idea of what is happening.
+>
+> >   It seems like
+> > depending on what order I put the fields of the query in alters the
+> > results
+> > drastically when I AND them together.
+>
+> Not quite the right explanation of what is happening.  More below....
+>
+> > ***************************
+> > This one makes sense
+> >
+> > Query> name:amb*
+> > State> california
+> > name:amb*
+> > org.apache.lucene.search.PrefixQuery@2d086a
+> > amb*
+> > 2819 total matching documents
+>
+> Right.... QueryParser does a little optimization here and anything with
+> a simple trailing * turns into a PrefixQuery, meaning all name fields
+> that begin with "amb".
+>
+> > ***************************
+> > This is the REALLY confusing one.  We know there's a company named AMB
+> > Property Corporation.  Why do I get NO hits?
+> >
+> > Query> name:"amb prop*"
+> > State> california
+> > name:"amb prop*"
+> > org.apache.lucene.search.PhraseQuery@20dda
+> > "amb prop"
+> > 0 total matching documents
+>
+> Notice you're now in PhraseQuery land.  Wildcards don't work like you
+> seem to expect here.  What is really happening here is a query for
+> documents that have "amb" and "prop" terms side by side in that order.
+> The asterisk got axed by the analyzer.  If you said "name:amb
+> name:prop*" you'd get some hits I believe, as it would turn into a
+> boolean query with a term and wildcard queries either OR'd or AND'd
+> together.  PhraseQuery does not support wildcards.  A custom subclass
+> of QueryParser could do some interesting things here and expand
+> wildcard-like terms like this in a phrase into PhrasePrefixQuery, but
+> that is probably overkill here (although maybe not).  Look at the test
+> case for PhrasePrefixQuery for some hints.
+>
+> > Ok, so I get some results with this (I know the * isn't neccessary at
+> > the
+> > end of property, but bear with me for the next example where it goes
+> > all
+> > screwy)
+> >
+> > Query> name:amb property*
+> > State> california
+> > name:amb property*
+> > org.apache.lucene.search.BooleanQuery@10b053
+> > amb name:amb property*:property*
+> > 56 total matching documents
+>
+> your default field for QueryParser is "property*"?  Odd field name, or
+> is the output fishy?  I'm a bit confused by the "property*:" there.
+> I'm assuming you're outputting the Query.toString here.
+>
+> See above for a different way to phrase the query.
+>
+> > ***************************
+> > south san francisco is an exact match to the city.  Why does this find
+> > 0
+> > results??!
+> >
+> > Query> name:amb property* AND city:south san francisco
+> > State> california
+> > name:amb property* AND city:south san francisco
+> > org.apache.lucene.search.BooleanQuery@283b8a
+> > amb +name:amb property* AND city:south san francisco:property*
+> > +city:south
+> > name:
+> > amb property* AND city:south san francisco:san name:amb property* AND
+> > city:south
+> >  san francisco:francisco
+> > 0 total matching documents
+>
+> with all the AND's going on, this makes sense because "san" and
+> "francisco" end up as separate term queries.  you'd have to say
+> city:"south san francisco" to turn it into a PhraseQuery.
+>
+> > ****************************
+> > Do this and suddenly I get matches
+> >
+> > Query> name:amb propert* and city:"south san fran*"
+> > State> california
+> > name:amb propert* and city:"south san fran*"
+> > org.apache.lucene.search.BooleanQuery@3ee284
+> > amb name:amb propert* and city:"south san fran*":propert* city:"south
+> > san
+> > fran"56 total matching documents
+>
+> you're getting hits on the wildcard match at least, and probably on
+> name field "amb" as well.  again, phrase queries don't support
+> wildcards like you've done here with "south san fran*" so you're not
+> matching anything with that.
+>
+> > *****************************
+> > And look, this gets matches too:
+> >
+> > Query> name:"amb propert*" and city:"south san*"
+> > State> california
+> > name:"amb propert*" and city:"south san*"
+> > org.apache.lucene.search.BooleanQuery@a32b
+> > "amb propert" city:"south san"
+> > 10732 total matching documents
+>
+> my guess here is you're getting hits on "south san" as a phrase query.
+> are there that many in that area?
+>
+> > *****************************
+> > Yet do this and we're back to 0 results:
+> >
+> > Query> name:"amb propert*" and city:"south san fran*"
+> > State> california
+> > name:"amb propert*" and city:"south san fran*"
+> > org.apache.lucene.search.BooleanQuery@58957f
+> > "amb propert" city:"south san fran"
+> > 0 total matching documents
+>
+> you're getting zero hits from "amb propert*" since * is getting
+> stripped by the analyzer and there is no "amb propert" phrase match,
+> and with the AND (which should be all uppercase, right?) definitely not
+> getting hits.
+>
+> > ******************************
+> > Now flip the query around and it works:
+> >
+> > Query> city:"south san fran*" and name:amb propert*
+> > State> california
+> > city:"south san fran*" and name:amb propert*
+> > org.apache.lucene.search.BooleanQuery@965fb
+> > city:"south san fran" amb city:"south san fran*" and name:amb
+> > propert*:propert*
+> > 56 total matching documents
+>
+> You didn't quite flip it around, you took off some quotes too, which
+> removed a PhraseQuery and you're getting your hits from name:amb here
+> as well as probably the wildcard of propert*.  I'm still confused by
+> the output of propert*: here - are you using the CVS version of Lucene?
+>   the toString looks ok there, maybe there was a bug in that method in
+> earlier code?
+>
+> > *******************************
+> > Finally, using the prefix of the metaphone name with quotes around it
+> > produces no results:
+> >
+> > Query> metaph_name:"ambprp*"
+> > State> california
+> > metaph_name:"ambprp*"
+> > org.apache.lucene.search.TermQuery@67b241
+> > metaph_name:ambprp
+> > 0 total matching documents
+>
+> Notice this is a TermQuery - thats the clue... the asterisk is taken
+> literally there, so no matches.
+>
+> > *******************************
+> > But take away the quotes and it works:
+> >
+> > Query> metaph_name:ambprp*
+> > State> california
+> > metaph_name:ambprp*
+> > org.apache.lucene.search.PrefixQuery@21c887
+> > metaph_name:ambprp*
+> > 6 total matching documents
+>
+> Now you kicked it into an optimized wildcard query, which turns into a
+> prefix query, hence the matches.
+>
+> > ********************************
+> > But quotes don't seem to matter in this complex wildcard:
+> >
+> > Query> metaph_name:ambprp* and city:"sou* or san or fra*"
+> > State> california
+> > metaph_name:ambprp* and city:"sou* or san or fra*"
+> > org.apache.lucene.search.BooleanQuery@7ffe01
+> > metaph_name:ambprp* city:"sou san fra"
+> > 6 total matching documents
+>
+> your clue here is that the toString output has the asterisks removed,
+> so your analyzer stripped them.  again quotes mean phrase query.
+> phrase queries don't support wildcards.
+>
+> > So...  Can someone help me nail down the logic for these things so we
+> > can
+> > construct some good queries?
+>
+> I hope my above analysis helps.  I may not be perfectly right on
+> everything, but should be relatively close at identifying the issues.
+> Fixing it is more up to how you want to deal with it.  Perhaps a custom
+> QueryParser is more what you're after.
+>
+> Erik
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+
+

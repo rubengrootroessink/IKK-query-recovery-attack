@@ -1,0 +1,167 @@
+FROM: "Chuck Williams" <ch...@manawiz.com>
+SUBJECT: RE: A question about scoring function in Lucene
+DATE: 16 Dec 2004
+
+I'll try to address all the comments here.
+
+The normalization I proposed a while back on lucene-dev is specified.
+Its properties can be analyzed, so there is no reason to guess about
+them.
+
+Re. Hoss's example and analysis, yes, I believe it can be demonstrated
+that the proposed normalization would make certain absolute statements
+like x and y meaningful.  However, it is not a panacea -- there would be
+some limitations in these statements.
+
+To see what could be said meaningfully, it is necessary to recall a
+couple detailed aspects of the proposal:
+  1.  The normalization would not change the ranking order or the ratios
+among scores in a single result set from what they are now.  Only two
+things change:  the query normalization constant, and the ad hoc final
+normalization in Hits is eliminated because the scores are intrinsically
+between 0 and 1.  Another way to look at this is that the sole purpose
+of the normalization is to set the score of the highest-scoring result.
+Once this score is set, all the other scores are determined since the
+ratios of their scores to that of the top-scoring result do not change
+from today.  Put simply, Hoss's explanation is correct.
+  2.  There are multiple ways to normalize and achieve property 1.  One
+simple approach is to set the top score based on the boost-weighted
+percentage of query terms it matches (assuming, for simplicity, the
+query is an OR-type BooleanQuery).  So if all boosts are the same, the
+top score is the percentage of query terms matched.  If there are
+boosts, then these cause the terms to have a corresponding relative
+importance in the determination of this percentage.
+
+More complex normalization schemes would go further and allow the tf's
+and/or idf's to play a role in the determination of the top score -- I
+didn't specify details here and am not sure how good a thing that would
+be to do.  So, for now, let's just consider the properties of the simple
+boost-weighted-query-term percentage normalization.
+
+Hoss's example could be interpreted as single-term phrases "Doug
+Cutting" and "Chris Hostetter", or as two-term BooleanQuery's.
+Considering both of these cases illustrates the absolute-statement
+properties and limitations of the proposed normalization.
+
+If single-term PhraseQuery's, then the top score will always be 1.0
+assuming the phrase matches (while the other results have arbitrary
+fractional scores based on the tfidf ratios as today).  If the queries
+are BooleanQuery's with no boosts, then the top score would be 1.0 or
+0.5 depending on whether 1 or two terms were matched.  This is
+meaningful.
+
+In Lucene today, the top score is not meaningful.  It will always be 1.0
+if the highest intrinsic score is >= 1.0.  I believe this could happen,
+for example, in a two-term BooleanQuery that matches only one term (if
+the tf on the matched document for that term is high enough).
+
+So, to be concrete, a score of 1.0 with the proposed normalization
+scheme would mean that all query terms are matched, while today a score
+of 1.0 doesn't really tell you anything.  Certain absolute statements
+can therefore be made with the new scheme.  This makes the
+absolute-threshold monitored search application possible, along with the
+segregating and filtering applications I've previously mentioned (call
+out good results and filter out bad results by using absolute
+thresholds).
+
+These analyses are simplified by using only BooleanQuery's, but I
+believe the properties carry over generally.
+
+Doug also asked about research results.  I don't know of published
+research on this topic, but I can again repeat an experience from
+InQuira.  We found that end users benefited from a search experience
+where good results were called out and bad results were downplayed or
+filtered out.  And we managed to achieve this with absolute thresholding
+through careful normalization (of a much more complex scoring
+mechanism).  To get a better intuitive feel for this, think about you
+react to a search where all the results suck, but there is no visual
+indication of this that is any different from a search that returns
+great results.
+
+Otis raised the patch I submitted for MultiSearcher.  This addresses a
+related problem, in that the current MultiSearcher does not rank results
+equivalently to a single unified index -- specifically it fails Daniel
+Naber's test case.  However, this is just a simple bug whose fix doesn't
+require the new normalization.  I submitted a patch to fix that bug,
+along with a caveat that I'm not sure the patch is complete, or even
+consistent with the intentions of the author of this mechanism.
+
+I'm glad to see this topic is generating some interest, and apologize if
+anything I've said comes across as overly abrasive.  I use and really
+like Lucene.  I put a lot of focus on creating a great experience for
+the end user, and so am perhaps more concerned about quality of results
+and certain UI aspects than most other users.
+
+Chuck
+
+  > -----Original Message-----
+  > From: Doug Cutting [mailto:cutting@apache.org]
+  > Sent: Wednesday, December 15, 2004 12:35 PM
+  > To: Lucene Users List
+  > Subject: Re: A question about scoring function in Lucene
+  > 
+  > Chris Hostetter wrote:
+  > > For example, using the current scoring equation, if i do a search
+for
+  > > "Doug Cutting" and the results/scores i get back are...
+  > >       1:   0.9
+  > >       2:   0.3
+  > >       3:   0.21
+  > >       4:   0.21
+  > >       5:   0.1
+  > > ...then there are at least two meaningful pieces of data I can
+glean:
+  > >    a) document #1 is significantly better then the other results
+  > >    b) document #3 and #4 are both equaly relevant to "Doug
+Cutting"
+  > >
+  > > If I then do a search for "Chris Hostetter" and get back the
+following
+  > > results/scores...
+  > >       9:   0.9
+  > >       8:   0.3
+  > >       7:   0.21
+  > >       6:   0.21
+  > >       5:   0.1
+  > >
+  > > ...then I can assume the same corrisponding information is true
+about
+  > my
+  > > new search term (#9 is significantly better, and #7/#8 are equally
+as
+  > good)
+  > >
+  > > However, I *cannot* say either of the following:
+  > >   x) document #9 is as relevant for "Chris Hostetter" as document
+#1
+  > is
+  > >      relevant to "Doug Cutting"
+  > >   y) document #5 is equally relevant to both "Chris Hostetter" and
+  > >      "Doug Cutting"
+  > 
+  > That's right.  Thanks for the nice description of the issue.
+  > 
+  > > I think the OP is arguing that if the scoring algorithm was
+modified
+  > in
+  > > the way they suggested, then you would be able to make statements
+x &
+  > y.
+  > 
+  > And I am not convinced that, with the changes Chuck describes, one
+can
+  > be any more confident of x and y.
+  > 
+  > Doug
+  > 
+  >
+---------------------------------------------------------------------
+  > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+  > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

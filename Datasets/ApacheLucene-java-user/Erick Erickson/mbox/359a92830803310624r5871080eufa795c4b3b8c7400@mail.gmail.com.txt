@@ -1,0 +1,199 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: setPositionIncrement questions
+DATE: 31 Mar 2008
+
+See below...
+
+On Mon, Mar 31, 2008 at 7:02 AM, Itamar Syn-Hershko <itamar@divrei-tora.com>
+wrote:
+
+>
+> Chris,
+>
+> Thanks for your input.
+>
+> Please let me make sure that I get this right: while iterating through the
+> words in a document, I can use my tokenizer to setPositionIncrement(150)
+> on
+> a specific token, what would make it be more distant from the previous
+> token
+> than it should have been. The next token will already have position
+> increment of 1 and therefore will immediately follow that token, with no
+> extra handling. If I get this right, the best way to achieve that is by
+> appending a predefined string like $$$, such that will not occur
+> accidently
+> in my documents, and have my tokenizer set the position increment as well
+> instead of just tokenizing upon it.
+
+
+Not really. Somewhere in the indexing code is something that behaves like
+this...
+
+say you have the following lines...
+doc.add("field", "word1 word2 word3", blah, blah)
+doc.add("field", "word4 word5 word6", blah, blah)
+doc.add("field", "word7 word8 word9", blah, blah)
+IndexWriter.add(doc).
+
+Now say your analyzer returns 100 for getPositionIncrementGap. The
+words will have the following offsets
+word1 - 0
+word2 - 1
+word3 - 2
+word4 - 103 (perhaps 102, but you get the idea)
+word5 - 104
+word6 - 105
+word7 - 206
+word8 - 207
+word9 - 208
+
+There's no need to have any special tokens for this to occur.
+
+
+>
+>
+> >>>  Lucene will call the "getPositionIncrementGap" method on your
+> Analyzer
+> to determine how much positionIncreiment to put in between the last token
+> of
+> the first Field and the first token of the second Field -- so you could
+> just
+> pass each paragraph as a seperate Field instance
+>
+> This sounds good, but is risky, since I will have to concatenate my
+> paragraphs that I DO want to have proximity data in between, and if I
+> forget
+> to, or accidently don't do that this will corrupt proximity-based
+> searches.
+> My documents can become very big as well. I guess what I was looking for
+> was
+> a simpler way - say tell Lucene when I do doc.add(new Field) to set the
+> position increment for the last token. The "magic char sequence" will do,
+> but I was wondering if there is a way to do that without ammending my
+> Tokenizer?
+>
+
+No, you must deal with your tokenizer, but this is pretty trivial. You can
+simply
+subclass whichever one you choose and override getPositionIncrementGap.
+
+This seems no riskier that adding your special token since you have to deal
+with differentiating between paragraphs you *do* want to be adjacent and
+ones
+you *don't* in that case as well. Or am I missing something?
+
+As to size of documents, somewhere you do need to worry about exceeding
+a position of 2^31, but if that's really an issue you have other problems
+<G>.
+Although this somewhat depends upon how far you need the paragraphs to be
+apart. Are you going to allow proximity searches of 10,000,000? Or 10?
+
+
+
+>
+> >>> it means the words appear at the same position
+>
+> ... And what does this mean exactly? How can this affect standard
+> searches?
+> What I might do with this is store stems side-by-side with the original
+> word. From what I've heard so far this is NOT how you do this for English
+> texts - you rather store them in a different field, why is that? I thought
+> if you store them side-by-side you could write a Scorer (or similar) that
+> will return all relevant results for the stem of a given word, boosting
+> words with the same exact syntax more than others. Any ideas on that?
+>
+
+I don't really understand what you're trying to accomplish, a use case would
+help. So this may be totally off base....
+
+the words "in the same position" means that if you store, say, blivet and
+blort
+at the same position, and the next token is bonkers, then the following two
+matches will be found:
+"blivet bonkers" "blort bonkers" (these are as exact pharses). You can
+answer
+much of this by getting a copy of Luke and examining test indexes you build.
+
+To boost exact matches, you have to do some fancy dancing. For instance, you
+could store the original word with a special token (say $) at the end, and
+*also* the
+stemmed version at the same position. Then you have to mangle your queries
+to produce something like (word$^10 OR <stemmed version of word>) for each
+search term.
+
+Best
+Erick
+
+
+
+>
+> Itamar.
+>
+> -----Original Message-----
+> From: Chris Hostetter [mailto:hossman_lucene@fucit.org]
+> Sent: Sunday, March 30, 2008 8:56 AM
+> To: Lucene Users
+> Subject: Re: setPositionIncrement questions
+>
+>
+> : Breaking proximity data has been discussed several times before, and
+> : concluded that setPositionIncrement is the way to go. In regards of it:
+> :
+> : 1. Where should it be called exactly to create the gap properly?
+>
+> any part of your Analyzer can set the position increment on any token to
+> indicate how far after the previous token it should be.
+>
+> : 2. Is there a way to call it directly somehow while indexing (e.g. after
+> : adding a new paragraph to an existing field) instead of appending $$$
+> : for example after the new string I'm indexing, and having to update my
+> : tokenizer and filters so they will retain the $$$ chars, indicating the
+> : gap request?
+>
+> if you add multiple Fields with the same name, Lucene will call the
+> "getPositionIncrementGap" method on your Analyzer to determine how much
+> positionIncreiment to put in between the last token of the first Field and
+> the first token of the second Field -- so you could just pass each
+> paragraph
+> as a seperate Field instance .. alternately you can have a single Field
+> instance, and your Analyzer can use whatever mechanims it wants to decide
+> to
+> set the position incriment to something high (a line break, a magic char
+> sequence you put in the string, ... whatever you want)
+>
+> : 3. What is the recommended value to pass setPositionIncrement to create
+> : a reasonable gap, and not risk large documents being indexed improperly
+> : (I mean, is there some sort of high-bound for the position value?).
+>
+> MAX_INT .. pick gaps based on your data and the queries you expect (if you
+> want gaps betwen paragraps, and your paragraphs tend to be under 200 words
+> long, make the gap 500 so "lucene java"~300 can find those words in the
+> same
+> paragram, but can never span multiple paragraphs
+>
+> : 4. What are the consequences of setting PositionIncrement to 0? Does
+> : this mean I can index synonyms or stems aside of the "real" words
+> : without risking data corruption?
+>
+> it means the words appear at the same position - synonyms is a great
+> example
+> of this use case.
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,259 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: lucene 2.9.0RC4 slower than 2.4.1?
+DATE: 16 Sep 2009
+
+See my mail about the CachingWrapperFilter and QueryWrapperFilter, I think
+it explains this behaviour (and Thomas ran some warming queries before).
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Mark Miller [mailto:markrmiller@gmail.com]
+> Sent: Wednesday, September 16, 2009 7:23 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: lucene 2.9.0RC4 slower than 2.4.1?
+> 
+> Nevermind. I see advance wasn't around in 2.4. This is part of the
+> DocIdSetIterator changes.
+> 
+> Anyway - either these are just not comparable runs, or there is a major
+> bug (which seems unlikely).
+> 
+> Just to keep pointing out the obvious:
+> 
+> 2.4 calls doc 195,000 times
+> 2.9 calls docId 1.4 million times
+> 
+> That just doesn't jive.
+> 
+> Mark Miller wrote:
+> > Notice that while DisjunctionScorer.advance and
+> > DisjuntionScorer.advanceAfterCurrent appear to be called
+> > in 2.9, in 2.4, I am only seeing DisjuntionScorer.advanceAfterCurrent
+> > called.
+> >
+> > Can someone explain that?
+> >
+> > Mark Miller wrote:
+> >
+> >> Something is very odd about this if they both cover the same search and
+> >> the environ for both is identical. Even if one search was done twice,
+> >> and we divide the numbers for the new api by 2 - its still *very* odd.
+> >>
+> >> With 2.4, ScorerDocQueue.topDoc is called half a million times.
+> >> With 2.9, its called over 4 million times.
+> >>
+> >> Huh?
+> >>
+> >> Thomas Becker wrote:
+> >>
+> >>
+> >>> No it's only a single segment. But two calls. One doing a getHitsCount
+> first and
+> >>> the other doing the actual search. I'll paste both methods below if
+> someone's
+> >>> interested.
+> >>>
+> >>> Will dig into lucene's sources and compare 2.4 search behaviour for my
+> case with
+> >>> 2.9 tomorrow. It was about time to get more into lucene-core sources
+> anyhow. :)
+> >>>
+> >>> See you tomorrow guys and thanks a lot again! It's a pleasure.
+> >>>
+> >>> 	public int getHitsCount(String query, Filter filter) throws
+> >>> LuceneServiceException {
+> >>> 		log.debug("getHitsCount('{}, {}')", query, filter);
+> >>> 		if (StringUtils.isBlank(query)) {
+> >>> 			log.warn("getHitsCount: empty lucene query");
+> >>> 			return 0;
+> >>> 		}
+> >>> 		long startTimeMillis = System.currentTimeMillis();
+> >>> 		int count = 0;
+> >>>
+> >>> 		if (indexSearcher == null) {
+> >>> 			return 0;
+> >>> 		}
+> >>>
+> >>> 		BooleanQuery.setMaxClauseCount(MAXCLAUSECOUNT);
+> >>> 		Query q = null;
+> >>> 		try {
+> >>> 			q = createQuery(query);
+> >>> 			TopScoreDocCollector tsdc =
+> TopScoreDocCollector.create(1, true);
+> >>> 			indexSearcher.search(q, filter, tsdc);
+> >>> 			count = tsdc.getTotalHits();
+> >>> 			log.info("getHitsCount: count = {}",count);
+> >>> 		} catch (ParseException ex) {
+> >>> 			throw new LuceneServiceException("invalid lucene
+query:"
+> + query, ex);
+> >>> 		} catch (IOException e) {
+> >>> 			throw new LuceneServiceException(" indexSearcher
+could
+> be corrupted", e);
+> >>> 		} finally {
+> >>> 			long durationMillis = System.currentTimeMillis() -
+> startTimeMillis;
+> >>> 			if (durationMillis > slowQueryLimit) {
+> >>> 				log.warn("getHitsCount: Slow query: {} ms,
+> query={}", durationMillis, query);
+> >>> 			}
+> >>> 			log.debug("getHitsCount: query took {} ms",
+> durationMillis);
+> >>> 		}
+> >>> 		return count;
+> >>> 	}
+> >>>
+> >>> 	public List<Document> search(String query, Filter filter, Sort sort,
+> int from,
+> >>> int size) throws LuceneServiceException {
+> >>> 		log.debug("{} search('{}', {}, {}, {}, {})", new Object[] {
+> indexAlias, query,
+> >>> filter, sort, from, size });
+> >>> 		long startTimeMillis = System.currentTimeMillis();
+> >>>
+> >>> 		List<Document> docs = new ArrayList<Document>();
+> >>> 		if (indexSearcher == null) {
+> >>> 			return docs;
+> >>> 		}
+> >>> 		Query q = null;
+> >>> 		try {
+> >>> 			if (query == null) {
+> >>> 				log.warn("search: lucene query is null...");
+> >>> 				return docs;
+> >>> 			}
+> >>> 			q = createQuery(query);
+> >>> 			BooleanQuery.setMaxClauseCount(MAXCLAUSECOUNT);
+> >>> 			if (size < 0 || size > maxNumHits) {
+> >>> 				// set hard limit for numHits
+> >>> 				size = maxNumHits;
+> >>> 				if (log.isDebugEnabled())
+> >>> 					log.debug("search: Size set to
+hardlimit: {}
+> for query: {} with filter:
+> >>> {}", new Object[] { size, query, filter });
+> >>> 			}
+> >>> 			TopFieldCollector collector =
+> TopFieldCollector.create(sort, size + from,
+> >>> true, false, false, true);
+> >>> 			indexSearcher.search(q, filter, collector);
+> >>> 			if(size > collector.getTotalHits())
+> >>> 				size = collector.getTotalHits();
+> >>> 			if (size > 100000)
+> >>> 				log.info("search: size: {} bigger than
+100.000 for
+> query: {} with filter:
+> >>> {}", new Object[] { size, query, filter });
+> >>> 			TopDocs td = collector.topDocs(from, size);
+> >>> 			ScoreDoc[] scoreDocs = td.scoreDocs;
+> >>> 			for (ScoreDoc scoreDoc : scoreDocs) {
+> >>> 				docs.add(indexSearcher.doc(scoreDoc.doc));
+> >>> 			}
+> >>> 		} catch (ParseException e) {
+> >>> 			log.warn("search: ParseException: {}",
+e.getMessage());
+> >>> 			if (log.isDebugEnabled())
+> >>> 				log.warn("search: ParseException: ", e);
+> >>> 			return Collections.emptyList();
+> >>> 		} catch (IOException e) {
+> >>> 			log.warn("search: IOException: ", e);
+> >>> 			return Collections.emptyList();
+> >>> 		} finally {
+> >>> 			long durationMillis = System.currentTimeMillis() -
+> startTimeMillis;
+> >>> 			if (durationMillis > slowQueryLimit) {
+> >>> 				log.warn("search: Slow query: {} ms,
+query={},
+> indexUsed={}",
+> >>> 						new Object[] {
+durationMillis, query,
+> >>> indexSearcher.getIndexReader().directory() });
+> >>> 			}
+> >>> 			log.debug("search: query took {} ms",
+durationMillis);
+> >>> 		}
+> >>> 		return docs;
+> >>> 	}
+> >>>
+> >>>
+> >>> Uwe Schindler wrote:
+> >>>
+> >>>
+> >>>
+> >>>>>> http://ankeschwarzer.de/tmp/lucene_29_newapi_mmap_singlereq.png
+> >>>>>>
+> >>>>>> Have to verify that the last one is not by accident more than
+one
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> request.
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> Will
+> >>>>>> do the run again and then post the required info.
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> The last figure shows, that IndexSearcher.searchWithFilter was
+> called
+> >>>>> twice
+> >>>>> in contrast to the first figure, where IndexSearcher.search was
+> called
+> >>>>> only
+> >>>>> once.
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> I forgot, searchWithFilter it is called per segment in 2.9. If it was
+> only
+> >>>> one search, you must have two segments and therefore no optimized
+> index for
+> >>>> this to be correct?
+> >>>>
+> >>>> Uwe
+> >>>>
+> >>>>
+> >>>> ---------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>
+> >>>
+> >>>
+> >>
+> >>
+> >
+> >
+> >
+> 
+> 
+> --
+> - Mark
+> 
+> http://www.lucidimagination.com
+> 
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

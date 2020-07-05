@@ -1,0 +1,112 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: 2.1-dev memory leak?
+DATE: 30 Nov 2006
+
+Hi,
+
+Wow, that was fast - java-user support is just as fast as I heard! ;)
+I'll try your patch shortly. Like I said, the bug may be in my application.  Here is a clue.
+ Memory usage increases with the number of open files (file descriptors) on the system, and
+lsof gives:
+
+COMMAND     PID    USER   FD      TYPE     DEVICE      SIZE       NODE NAME
+...
+java      24476   xxx *562r      REG      253,0    657314    8470761 /xxx/users/1/1-home/link/index/_20k.cfs
+java      24476   xxx *894r      REG      253,0    657314    8470761 /xxx/users/1/1-home/link/index/_20k.cfs
+java      24476   xxx *078r      REG      253,0    657314    8470761 /xxx/users/1/1-home/link/index/_20k.cfs
+java      24476   xxx *648r      REG      253,0    657314    8470761 /xxx/users/1/1-home/link/index/_20k.cfs
+...
+
+If I'm reading this right, this tells me that this same file has been opened a number of different
+times (note the FD column, all file descriptors are different).  This must correspond to multiple
+new IndexSearcher(...) calls, no?  Multiple new IndexSearcher(...) calls on the same index
+are okay in my case - because the system has tens of thousands of separate indices, it can't
+keep all IndexSearchers open at all times, so I use the LRU algo to keep only recently used
+IndexSearchers open.  The other ones I "let go" without an explicit close() call.  The assumption
+is that the old IndexSearchers "expire", that they get garbage collected, as I'm no longer
+holding references to them.
+Iff I understand this correctly, the fact that I see these open file descriptors all pointing
+to the same index file tells me that the old IndexSearchers are just hanging around and are
+not getting cleaned up.
+
+I can also see the number of file descriptors increasing with time:
+
+$ /usr/sbin/lsof | grep -c '/1-home/link/index/_20k.cfs'
+14
+$ /usr/sbin/lsof | grep -c '/1-home/link/index/_20k.cfs'
+23
+
+This may still not point to my app having the bug, but it points to something not releasing
+IndexSearcher/IndexReader, as that is not getting GCed as before.  I did not change my logic
+for creating new IndexSearchers (inlined in my previous email).  On the other hand, this app
+has recently started getting a lot more search action, so perhaps it's just that the GC is
+not cleaning things up fast enough....
+I happen to have an lsof output from the same system from July.  I see the same thing there
+- a number of FDs open and pointing to the same .cfs index file.  Perhaps it's just that the
+JVM GC was able to clean things up then, and now it can't, because the CPU is maxed out....
+really maxed out.
+
+Otis
+
+----- Original Message ----
+From: Michael McCandless <lucene@mikemccandless.com>
+To: java-user@lucene.apache.org
+Sent: Thursday, November 30, 2006 6:51:48 AM
+Subject: Re: 2.1-dev memory leak?
+
+Otis Gospodnetic wrote:
+> Hi,
+> 
+> Is anyone running Lucene trunk/HEAD version in a serious production system?  Anyone noticed
+any memory leaks?
+> 
+> I'm asking because I recently bravely went from 1.9.1 to 2.1-dev (trunk from about a
+week ago) and all of a sudden my application that was previosly consuming about 1.5GB (-Xmx1500m)
+now consumes 2.2GB, and blows up after it exhausts the whole heap and the GC can't make any
+more room there after running for about 3-6 hours and handling several tens of thousands of
+queries.
+
+Whoa, I'm sorry to hear this Otis :(
+
+> I'd love to go back to 2.0.0, or even back to 1.9.1 and run that for a while and just
+double-check that it really is the the Lucene upgrade that is the source of the leak, but
+unfortunately because of LUCENE-701 (lockless commits), I can't go back that easily without
+reindexing...
+> 
+> Moreover, I just looked at CHANGES.txt from 1.9.1 to present, and I think the biggest
+change since then was LUCENE-701.
+
+The file-format changes for lockless commits are small enough that
+making a tool to back-convert a lockless format index into a
+pre-lockless format index (so that Lucene 2.0 can read/write to it) is
+fairly simple.
+
+OK I coded up a first version.  I will open a JIRA issue and attach a
+patch.
+
+We clearly need to also get to the bottom of where the memory leak is,
+but I think first priority is to stabilize your production
+environment.  Hopefully this tool can at least get you back up in
+production and then also enable us to narrow down where the memory
+leak is.
+
+Please tread carefully though: it makes me very nervous that this tool
+I just created would be used in your production environment!
+Obviously first test it in a sandbox, running against your production
+index(es).
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

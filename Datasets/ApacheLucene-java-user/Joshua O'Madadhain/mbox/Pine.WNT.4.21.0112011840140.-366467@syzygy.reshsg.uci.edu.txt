@@ -1,0 +1,254 @@
+FROM: Joshua O'Madadhain <jmad...@ics.uci.edu>
+SUBJECT: number of terms vs. number of fields
+DATE: 2 Dec 2001
+
+I have been experimenting with indexing a document set with different sets
+of fields.  Specifically, I start out with a "contents" field that
+is a concatenation of all the elements of the original document in which
+I'm interested.  This gets me an index with about 7500 unique terms (which
+I determine by opening up an IndexReader, extracting the terms in the
+index, and counting them).  Then I've been adding each of the separate
+elements (title, major subject, minor subject, abstract/extract), one at a
+time, to the index (by recreating the index).  
+
+Because "contents" is the concatenation of the other fields ("title",
+"major", "minor", "abstract"/"extract"), I would expect that the number of
+unique terms in the index would not change if I added the other fields
+into the index; each term should just have twice the frequency
+as if I only used the "contents" field.  However, this is not what's
+happening; in fact, if I add all the other fields in, the total number of
+unique terms is 22000+.
+
+I have verified that "contents" contains everything that the other fields
+do, so I am quite puzzled by this.  Any idea what's going on here, and
+why?
+
+For anyone who might be interested in checking this out, my code is below.
+
+Regards,
+
+Joshua
+
+
+// FileCFDocument.java (a modified version of FileDocument.java in the
+// source examples)
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.Vector;
+
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+
+/** A utility for making Lucene Documents from a File. */
+
+public class FileCFDocument
+{
+    public static Document[] makeDocuments(File f)
+        throws java.io.FileNotFoundException, java.io.IOException
+    {
+        // open file, read it into a byte array and thence a String
+        FileInputStream fis = new FileInputStream(f);
+        int n = fis.available();
+        byte[] data = new byte[n];
+        fis.read(data);
+        fis.close();
+
+        String s = new String(data);
+        int ti, so, mj, mn, ab, ex, rf, abex;
+
+        Vector vdocs = new Vector();
+        String contents;
+
+        // fields being indexed:
+        // TI (title)
+        // MJ (major subject)
+        // MN (minor subject)
+        // AB/EX (abstract/extract)
+
+        ti = s.indexOf("\nTI ");
+        while (ti != -1)
+        {
+            // make a new, empty document
+            Document doc = new Document();
+
+            int k = s.indexOf("\nPN ");
+            doc.add(Field.UnIndexed("number", s.substring(k+4, k+9)));
+
+            // DEBUG
+            System.out.println(s.substring(k, k+9));
+
+            s = s.substring(ti+4);
+
+            // DEBUG
+            System.out.println("s.length(): " + s.length());
+
+            so = s.indexOf("\nSO ");
+            mj = s.indexOf("\nMJ ");
+            mn = s.indexOf("\nMN ");
+            ab = s.indexOf("\nAB ");
+            ex = s.indexOf("\nEX ");
+            rf = s.indexOf("\nRF ");
+
+//            System.out.println("so: " + so + ", mj: " + mj + ", mn: " 
+//		+ mn +
+//                ", ab: " + ab + ", ex: " + ex + ", rf: " + rf);
+
+            String title = s.substring(0, so);
+            doc.add(Field.Text("title", title));
+            contents = title;
+
+            if (mj != -1 && mj < mn) // not all documents have major
+subject
+            {
+                String major = s.substring(mj+4, mn);
+//                doc.add(Field.Text("major", major));
+                contents = contents + " " + major;
+            }
+
+            if (ab != -1 && ab < rf) // if this document has an abstract
+            {
+                abex = ab;
+                String abs = s.substring(ab+4, rf);
+//                doc.add(Field.Text("abstract", abs));
+                contents = contents + " " + abs;
+            }
+            else // it has an extract instead
+            {
+                abex = ex;
+                String extract = s.substring(ex+4, rf);
+//                doc.add(Field.Text("extract", extract));
+                contents = contents + " " + extract;
+            }
+
+            if (mn != -1 && mn < abex)
+            {
+                String minor = s.substring(mn+4, abex);
+//                doc.add(Field.Text("minor", minor));
+                contents = contents + " " + minor;
+            }
+
+            // add a field that's the concatenation of the others so that
+            // we can search on all fields simultaneously
+            doc.add(Field.Text("contents", contents));
+
+            // DEBUG
+//            System.out.println(contents);
+            System.out.println(doc.toString());
+
+            ti = s.indexOf("\nTI ");
+            vdocs.add(doc);
+        }
+
+        Document[] docs = new Document[vdocs.size()];
+        vdocs.toArray(docs);
+
+        return docs;
+  }
+
+  private FileCFDocument() {}
+}
+
+// IndexCFFiles.java (a modification of the IndexFiles.java example)
+import org.apache.lucene.analysis.StopAnalyzer;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.document.Document;
+
+import java.io.File;
+import java.util.Date;
+
+// DEBUG
+import org.apache.lucene.index.IndexReader;
+import java.util.Vector;
+import org.apache.lucene.index.TermEnum;
+
+class IndexCFFiles
+{
+
+    public static void main(String[] args)
+    {
+        try
+        {
+            Date start = new Date();
+
+            String indexID = "index";
+            if (args.length > 1)
+                indexID = args[1];
+            IndexWriter writer = new IndexWriter(indexID, new
+                ThoroughAnalyzer(), true);
+            writer.mergeFactor = 20;
+
+            indexDocs(writer, new File(args[0]));
+
+            writer.optimize();
+            writer.close();
+
+            Date end = new Date();
+
+            System.out.print(end.getTime() - start.getTime());
+            System.out.println(" total milliseconds");
+
+            // DEBUG
+            // open the specified index
+            IndexReader ir = IndexReader.open(indexID);
+
+            // get an enumeration of the terms in the index
+            TermEnum te = ir.terms();
+
+            // extract the terms from this enumeration
+            Vector v = new Vector();
+            while (te.next())
+            {
+                char c = te.term().text().charAt(0);
+                if (((c >= 65 && c <= 91) || (c >= 97 && c <=
+123)))
+                    v.add(te.term());
+            }
+
+            // place the terms in an array
+            int n = v.size();
+
+            // DEBUG
+            System.out.println("Number of unique terms in index '" +
+		indexID +
+                          "': " + n);
+
+        }
+        catch (Exception e)
+        {
+            System.out.println(" caught a " + e.getClass() +
+                "\n with message: " + e.getMessage());
+        }
+    }
+
+    public static void indexDocs(IndexWriter writer, File file)
+       throws Exception
+    {
+        if (file.isDirectory())
+        {
+            String[] files = file.list();
+            for (int i = 0; i < files.length; i++)
+                indexDocs(writer, new File(file, files[i]));
+        }
+        else
+        {
+            System.out.println("adding " + file);
+            Document[] docs = FileCFDocument.makeDocuments(file);
+            for (int i = 0; i < docs.length; i++)
+                writer.addDocument(docs[i]);
+        }
+    }
+}
+
+
+ jmadden@ics.uci.edu...Obscurium Per Obscurius...www.ics.uci.edu/~jmadden
+    Joshua Madden: Information Scientist, Musician, Philosopher-At-Tall
+ It's that moment of dawning comprehension that I live for--Bill Watterson
+My opinions are too rational and insightful to be those of any organization.
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

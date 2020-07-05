@@ -1,0 +1,644 @@
+FROM: legrand thomas <thomaslegran...@yahoo.fr>
+SUBJECT: Help IndexWriter,Multi-threaded index access
+DATE: 11 May 2007
+
+
+Hello,
+
+I work on a web application deployed on a Tomcat server 5. Many jsp front pages (thanks to
+controllers) query a single manager (retrieved by a factory as an instance). This manager
+deals with Lucene index, stored by using a FSDirectory, to create several kind of documents,
+append or remove them from the index and so on ... The problem is that many errors often occur
+when the manager performs the index treatment because I don't know how to use the IndewWriter
+efficiently. The main question is : Can I use an single instance of IndexWriter (only ONE
+for the manager that means only one IndexWriter for all the front access) ? I guess it's not
+possible, I got so many times a "RAMDirectory.createOutput error". In that way, is it reasonable
+to create an IndexWriter each time the manager need to add a document ? Is there another way
+to proceed ?
+
+I join a complete JUnit test which behaves exactly as my manager. The main methods to look
+at are testIndexManagement (the test),getIndexWriter,addDocument,performExactSearchIntoIndex,performApproximativeSearchIntoIndex.
+
+Thank you for your help,
+
+Best regards,
+
+Thomas Legrand
+France
+
+
+/**************************************************************************************/
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+
+import junit.framework.Test;
+import junit.framework.TestCase;
+import junit.framework.TestSuite;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+
+
+public class IndexTest extends TestCase{
+
+    protected static IndexWriter mWriter=null;
+    protected static IndexReader mReader=null;
+    protected static IndexSearcher mSearcher=null;
+    protected static Analyzer mIndexAnalyser=null;
+    
+    private static  boolean IS_INDEX_LOADED=false;
+    private static  String INDEX_LOCATION="indexes//test";
+    private static  String ID="ID";
+    private static  String CONTENT="content";
+    
+    public static void main(String[] args) {
+        junit.textui.TestRunner.run(suite());
+    }
+
+    public IndexTest(String _testName) {
+        super(_testName);
+        System.out.println("--> "+_testName); 
+    }
+    
+    
+    protected void tearDown() throws Exception {
+        super.tearDown();
+    }
+    
+    protected void setUp() throws Exception {        
+        super.setUp();
+        
+        /* load index */
+        if(IS_INDEX_LOADED){
+            System.out.println("\n[setUp] Index already loaded");
+        }else{
+            System.out.println("\n[setUp] Index loading...");
+            loadIndexes();
+            IS_INDEX_LOADED=true;
+        }
+    }
+
+
+    private Analyzer getIndexAnalyser(){
+        System.out.println("\n[getIndexAnalyser][begin]");        
+        try{
+            if(mIndexAnalyser==null){
+                mIndexAnalyser=new SimpleAnalyzer(); 
+                System.out.println("[getIndexAnalyser] SimpleAnalyzer created");
+            }    
+        }catch(Exception analyzex){
+            System.out.println("[getIndexAnalyser] Error when creating the analyzers: "+analyzex);
+            analyzex.printStackTrace();
+            fail();            
+        }
+        System.out.println("[getIndexAnalyser] [end]");
+        return mIndexAnalyser;
+    }
+    
+    
+    private IndexWriter getIndexWriter(){
+        System.out.println("\n[getIndexWriter][begin]");
+        Directory indexDir=null;
+        
+        // Where is the index ?    
+        System.out.println("[getIndexWriter] Indexes located in: "+INDEX_LOCATION);
+        
+        // Get the ad's analyser
+        Analyzer analyser = getIndexAnalyser(); 
+        
+        /* create a new writer each time it's required ! */
+        if(mWriter==null ){
+            try{
+                indexDir=FSDirectory.getDirectory(INDEX_LOCATION);
+                 
+                boolean isTheIndexNew=true;
+                mWriter = new IndexWriter(indexDir, analyser, isTheIndexNew);
+                System.out.println("[getIndexWriter] Doc index writer created");
+            
+            }catch(Exception ex){
+                System.out.println("[getIndexWriter] Cannot instantiate index writer: "+ex);
+                ex.printStackTrace();
+                fail();
+            }
+        }else{
+            try{
+                indexDir=FSDirectory.getDirectory(INDEX_LOCATION);
+                 
+                boolean isTheIndexNew=true;
+                mWriter = new IndexWriter(INDEX_LOCATION, analyser, isTheIndexNew);
+                System.out.println("[getIndexWriter] Doc index writer created");
+            
+            }catch(Exception ex){
+                System.out.println("[getIndexWriter] Cannot instantiate index writer: "+ex);
+                ex.printStackTrace();
+                fail();
+            }
+        }
+        System.out.println("[getIndexWriter] [end]");
+        return mWriter;
+    }
+    
+    
+    private IndexReader getIndexReader(){
+        System.out.println("\n[getIndexReader][begin]");
+        Directory indexDir=null;
+        
+        // Where is the index ?
+        try{
+            indexDir=FSDirectory.getDirectory(INDEX_LOCATION);
+        }catch(Exception direx){
+            System.out.println("[getIndexReader] Error when asserting the directory for the
+index");
+            direx.printStackTrace();
+            fail();
+        }
+        System.out.println("[getIndexReader] Indexes located in: "+INDEX_LOCATION);
+        
+        // create the reader if it doesn't exist yet
+        if(mReader==null){
+            try{
+                mReader= IndexReader.open(indexDir); 
+                System.out.println("[getIndexReader] User index reader has been created");
+            
+            }catch(Exception ex){
+                System.out.println("[getIndexReader] Cannot instantiate index reader: "+ex);
+                ex.printStackTrace();
+                fail();
+            }
+        }else{                    
+            try{
+                /* do we need to re-open it ? */
+                if(mReader.isCurrent()==false){
+                    System.out.println("[getIndexReader] Need to re-open the index reader");
+                    mReader=IndexReader.open(indexDir);
+                }
+            }catch(Exception ioex){
+                System.out.println("[getIndexReader] Error when re-opening the index reader:
+"+ioex);
+                ioex.printStackTrace();
+                fail();
+            }            
+        }
+        System.out.println("[getIndexReader][end]");
+        return mReader;
+    }
+    
+    
+    private IndexSearcher getIndexSearcher(){
+        System.out.println("\n[getIndexSearcher] [begin]");
+
+        // create the searcher if it doesn't exist yet
+        if(mSearcher==null){
+            try{
+                mSearcher= new IndexSearcher(getIndexReader()); 
+                System.out.println("[getIndexSearcher]The index searcher has been created");
+            
+            }catch(Exception ex){
+                System.out.println("[getIndexSearcher] Cannot instantiate index searcher:
+"+ex);
+                ex.printStackTrace();
+                fail();
+            }
+        }else{        
+            try{
+                /* do we need to re-open it ? */
+                if(!mSearcher.getIndexReader().isCurrent()){
+                    System.out.println("[getIndexSearcher] Need to re-open the index searcher
+(reader)");
+                    mSearcher=new IndexSearcher(getIndexReader());
+                }
+            }catch(Exception ioex){
+                System.out.println("[getIndexSearcher] Error when re-opening the index searcher:
+"+ioex);
+                ioex.printStackTrace();
+                fail();
+            }            
+        }
+        System.out.println("[getIndexSearcher] [end]");
+        return mSearcher;
+    }
+    
+
+    private void addDocument(Document _doc){
+        System.out.println("\n[addDocument][begin]");
+
+        try{
+            System.out.println("[addDocument] Want to add the doc: "+_doc.toString());
+
+            IndexWriter    writer=this.getIndexWriter();
+
+            writer.addDocument(_doc); 
+            writer.optimize();
+            writer.close();            
+            
+        }catch(Exception docex){            
+            System.out.println("[addDocument] Error when adding the document: "+ docex);
+            docex.printStackTrace();
+            fail();
+        }
+        System.out.println("[addDocument][end]");
+    }
+    
+    
+    private ArrayList<Document> buildDocuments() {
+        System.out.println("\n[buildDocuments] [begin]");
+
+        // the result to build 
+        ArrayList<Document> documents=null;
+        
+        try{
+            // create the result
+            documents= new ArrayList<Document> ();
+
+            Document doc1=new Document();
+            doc1.add(new Field(ID,"1", Field.Store.YES,Field.Index.UN_TOKENIZED));
+            doc1.add(new Field(CONTENT,"test", Field.Store.YES,Field.Index.TOKENIZED));
+            documents.add(doc1);                        
+        
+            Document doc2=new Document();
+            doc2.add(new Field(ID,"2", Field.Store.YES,Field.Index.UN_TOKENIZED));
+            doc2.add(new Field(CONTENT,"othertest", Field.Store.YES,Field.Index.TOKENIZED));
+            documents.add(doc2);    
+                
+        }catch(Exception ex){            
+            System.out.println("[buildDocuments] An error occured while building the list
+of documents: " + ex);
+            ex.printStackTrace();
+            fail();
+        }
+        System.out.println("[buildDocuments] [end]");
+        return documents;        
+    }
+    
+
+    private void loadIndexes() throws EncheromaxException{
+        
+        System.out.println("\n[loadIndexes] [begin]");        
+        try{ 
+            
+            /* build all the documents we need */
+            ArrayList<Document> docsToIndex=buildDocuments();
+            
+            if(docsToIndex==null){
+                System.out.println("[oadIndexes] No doc found to index");
+            }else{                
+                System.out.println("[loadIndexes] Total number of doc to index="+docsToIndex.size());
+                
+                /* create the index now ! */
+                Iterator<Document> docIter=docsToIndex.iterator();        
+                int total=0;
+                while(docIter.hasNext()){
+                    Document doc=docIter.next();
+                    addDocument(doc);    
+                    total++;
+                }                    
+                System.out.println("[loadIndexes] Total doc indexed="+total);
+
+                System.out.println("[loadIndexes] Indexes successfully created");
+            }    
+            }catch(Exception indexex){
+                indexex.printStackTrace();
+                fail();
+            }    
+            System.out.println("[loadIndexes][end]");
+    }
+
+    
+    protected void appendDocToIndex(String _ID,String _content){        
+        System.out.println("\n[appendDocToIndex][begin]");        
+
+        /* that's it */
+        try{             
+            /* build all the document we need */
+            Document doc=new Document();
+            doc.add(new Field(ID,_ID, Field.Store.YES,Field.Index.UN_TOKENIZED));
+            doc.add(new Field(CONTENT,_content, Field.Store.YES,Field.Index.TOKENIZED));
+
+            /* write it to the index */
+            System.out.println("[appendDocToIndex] Add the document: "+doc.toString());
+            addDocument(doc);                             
+            System.out.println("[appendDocToIndex] Append document successfully");
+    
+            }catch(Exception indexex){                 
+                 System.out.println("[appendDocToIndex] Cannot append the doc to the index:
+"+ indexex);
+                 indexex.printStackTrace();
+                 fail();
+            }    
+            System.out.println("[appendDocToIndex] [end]");
+    }
+    
+    
+    
+    protected void removeDocFromIndex(String _ID) throws EncheromaxException{        
+        System.out.println("\n[removeDocFromIndex][begin]");        
+        
+        /* first checking */
+        if(_ID==null){
+            System.out.println("[removeDocFromIndex] No ID provided");
+            fail();
+        }
+        
+        /* that's it */
+        try{                                 
+            // build the term with the ID
+            Term iDTerm=new Term(ID,_ID);
+            
+            // get all the documents that contain the given  ID
+            TermDocs docs=getIndexReader().termDocs(iDTerm);
+            
+            System.out.println("[removeDocFromIndex] Trying to delete a document with term:
+"+iDTerm);        
+            int docID=0;
+            while(docs.next()){
+                docID=docs.doc();
+                getIndexReader().deleteDocument(docID);        
+                System.out.println("[removeDocFromIndex] Document with ID="+docID + " deleted");
+       
+            }
+            
+            // avoid lock ?
+            getIndexReader().close();            
+            
+            /* check if the document has really been removed */
+            TermDocs finalDocs=getIndexReader().termDocs(iDTerm);            
+            if(finalDocs.next()){
+                System.out.println("[removeDocFromIndex] The document is still in the index
+!");
+                //fail();
+            }else{
+                System.out.println("[removeDocFromIndex] The document has really been removed
+from the index");
+            }
+            
+            
+        }catch(Exception indexex){
+            System.out.println("[removeDocFromIndex] Cannot remove the document from the index:
+"+ indexex);
+            indexex.printStackTrace();
+            fail();
+        }    
+        System.out.println("[removeDocFromIndex][end]");
+    }
+    
+    
+
+    private ArrayList<Document> performExactSearchIntoIndex(String _content,String _fieldName)
+{
+        System.out.println("\n[performExactSearchIntoIndex][begin]");    
+        ArrayList<Document> documentsFound=null;
+        try{            
+            // build the term
+             Term term=new Term(_fieldName,_content);
+                
+            //     search now !
+            TermDocs docs=getIndexReader().termDocs(term);        
+            
+            // build the result
+            documentsFound=new ArrayList<Document>();    
+
+            int docID=0;
+            while(docs.next()){
+                docID=docs.doc();
+                System.out.println("[performExactSearchIntoIndex] Doc found with ID="+docID);
+               
+                Document currentDoc=getIndexReader().document(docID);        
+                documentsFound.add(currentDoc); 
+            }    
+            
+        }catch(Exception querex){
+            System.out.println("[performExactSearchIntoIndex] Error when searching into the
+doc index: "+ querex);
+            querex.printStackTrace();
+            fail();
+        }
+        System.out.println("[performExactSearchIntoIndex][end]");    
+        return documentsFound;
+    }
+    
+    
+    private ArrayList<Document> performApproximativeSearchIntoIndex(String _content,String
+_fieldName){
+        System.out.println("\n[performApproximativeSearchIntoIndex][begin]");    
+        ArrayList<Document> documentsFound=null;
+        
+        //     get the searcher        
+        IndexSearcher searcher = getIndexSearcher();
+        
+        try{            
+            // build the query
+             FuzzyQuery query=new FuzzyQuery(new Term(_fieldName,_content));
+                     
+            //     search now !
+            Hits hits = searcher.search(query);
+            System.out.println("[performApproximativeSearchIntoIndex] Total result found="+
+hits.length());
+            
+            // build the result
+            documentsFound=new ArrayList<Document>();    
+            
+            int maxAproxHitReturned=hits.length();
+            for(int i = 0; i <maxAproxHitReturned; i++){ 
+                System.out.println("[performApproximativeSearchIntoIndex] Add a document with
+score="+hits.score(i));
+                Document currentDoc = hits.doc(i);                             
+                documentsFound.add(currentDoc); 
+            }             
+        }catch(Exception querex){
+            System.out.println("[performApproximativeSearchIntoIndex] Error when searching
+into document in the index: "+ querex);
+            querex.printStackTrace();
+            fail();
+        }
+        System.out.println("[performApproximativeSearchIntoIndex][end]");    
+        return documentsFound;
+    }
+    
+    
+    private ArrayList<Document> searchDocIntoIndex(String[] _search,String[] _onfields){
+        System.out.println("\n[searchDocIntoIndex] [begin]");    
+        ArrayList<Document> docFound=null;
+        ArrayList<Document> docFromExactSearch=null;
+        ArrayList<Document> docFromApproxSearch=null;    
+        HashSet<String> docAlreadyTreatened=null;
+        
+        if(_search == null || _onfields==null || _search.length!=_onfields.length){
+            System.out.println("[searchDocIntoIndex] No search field given or wrong size");
+            fail();
+        }
+        
+        /* ** search a doc by using an exact method (expect only one doc found) ** */
+        for(int i=0;i<_search.length;i++){
+            if(_onfields[i].toString()==CONTENT){
+                System.out.println("[searchDocIntoIndex] Perform an exact search on content:
+"+_search[i]);    
+                docFromExactSearch=performExactSearchIntoIndex(_search[i], _onfields[i]);
+            }
+        }        
+        /* build the documents */
+        if(docFromExactSearch==null || docFromExactSearch.isEmpty()){
+            System.out.println("[searchDocIntoIndex] No doc returned by the exact search");
+   
+        }else{
+            System.out.println("[searchDocIntoIndex] Total doc returned by the exact search
+(expect 1!) ="+docFromExactSearch.size());    
+            // build the result here
+            docFound=new ArrayList<Document>();
+            // keep the doc found by the exact method to avoid having him twice in the final
+result
+            docAlreadyTreatened=new HashSet<String> (docFromExactSearch.size());
+            
+            for(int i=0;i<docFromExactSearch.size();i++){
+                docFound.add(docFromExactSearch.get(i));
+                
+                // flag the doc ID as treatened
+                docAlreadyTreatened.add(docFromExactSearch.get(i).get(ID));
+            }
+        }
+        
+        /* ** search a doc by using an approximative  method ** */
+        for(int i=0;i<_search.length;i++){
+            if(_onfields[i].toString()==CONTENT){
+                System.out.println("[searchDocIntoIndex] Perform an approximative search on
+content: "+_search[i]);    
+                docFromApproxSearch=performApproximativeSearchIntoIndex(_search[i], _onfields[i]);
+            }
+        }        
+        /* build the documents */
+        if(docFromApproxSearch==null || docFromApproxSearch.isEmpty()){
+            System.out.println("[searchDocIntoIndex] No doc returned by the approximative
+search");    
+        }else{
+            System.out.println("[searchDocIntoIndex] Total doc returned by the approximative
+search="+docFromApproxSearch.size());    
+            // build the result here
+            if(docFound==null)
+                docFound=new ArrayList<Document>();
+            for(int i=0;i<docFromApproxSearch.size();i++){
+                
+                if(docAlreadyTreatened!=null && !docAlreadyTreatened.contains(docFromApproxSearch.get(i).get(ID))){
+                    docFound.add(docFromApproxSearch.get(i));
+                }else if(docAlreadyTreatened==null){
+                    docFound.add(docFromApproxSearch.get(i));
+                }else
+                    System.out.println("[searchDocIntoIndex] Doc with ID="+docFromApproxSearch.get(i).get(ID)
++ " already treatened by the exact search");    
+            }
+        }
+        System.out.println("[searchDocIntoIndex] [end]");
+        return docFound;
+    }
+
+
+    public  static Test suite() {        
+        TestSuite testsuite = new TestSuite();
+        testsuite.addTest(new IndexTest("testIndexManagement"));        
+        return testsuite;
+    }    
+    
+    
+    
+    public void testIndexManagement(){
+        System.out.println("[testIndexManagement][begin]");        
+        Date justBefore=new Date();
+        long timeBefore=justBefore.getTime();
+        
+                
+        /* make sure we don't already have a new do in the index  */
+        System.out.println("\n\n---- Not in the index ----------------------------------------");
+        try{            
+            String[] field=new String[1];
+            field[0]=CONTENT;
+            String[] search=new String[1];
+            search[0]="new";
+            assertNull(searchDocIntoIndex(search,field));        
+            
+        } catch (Exception ex){
+            ex.printStackTrace();
+            fail();
+        }        
+        
+        /* append a new doc to the index  */
+        System.out.println("\n\n---- Append doc ----------------------------------------");
+        try{
+            appendDocToIndex("3", "new")    ;        
+        } catch (Exception ex){
+            ex.printStackTrace();
+            fail();
+        }        
+    
+        
+        /* make sure we have the new doc once in the index */
+        System.out.println("\n\n---- Once in the index ----------------------------------------");
+        try{
+            String[] field=new String[1];
+            field[0]=CONTENT;
+            String[] search=new String[1];
+            search[0]="new";
+            assertEquals(searchDocIntoIndex(search,field).size(),1);        
+        } catch (Exception ex){
+            ex.printStackTrace();
+            fail();
+        }    
+        
+        /* delete the doc */
+        System.out.println("\n\n---- Delete the doc ----------------------------------------");
+        try{
+            removeDocFromIndex("3");
+        } catch (Exception ex){
+            ex.printStackTrace();
+            fail();
+        }    
+
+        
+        /* make sure he disappeared from the index */
+        System.out.println("\n\n---- Doc dissapeared ----------------------------------------");
+        try{
+            String[] field=new String[1];
+            field[0]=CONTENT;
+            String[] search=new String[1];
+            search[0]="new";
+            assertNull(searchDocIntoIndex(field,search));        
+            
+        } catch (Exception ex){
+            ex.printStackTrace();
+            fail();
+        }
+        
+        
+        Date justAfter=new Date();
+        long timeAfter=justAfter.getTime();
+        System.out.println("[testIndexManagement] Test  performed in " + (timeAfter-timeBefore)
++ " ms");
+        System.out.println("[testIndexManagement][end]\n");
+    }
+}
+
+
+
+
+
+
+
+
+
+ 
+             
+---------------------------------
+ Ne gardez plus qu'une seule adresse mail ! Copiez vos mails vers Yahoo! Mail 

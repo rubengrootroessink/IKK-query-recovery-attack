@@ -1,0 +1,209 @@
+FROM: "Radhalakshmi  Sreedharan" <Radhalakshm...@infosys.com>
+SUBJECT: RE: Need help : SpanNearQuery
+DATE: 17 Apr 2009
+
+Thanks Paul. Is there any alternative way of implementing this requirement?
+
+As a side note, Will the Shingle Filter help me getting all possible combination of the input
+tokens?
+
+-----Original Message-----
+From: Paul Elschot [mailto:paul.elschot@xs4all.nl] 
+Sent: Friday, April 17, 2009 8:00 PM
+To: java-user@lucene.apache.org
+Subject: Re: Need help : SpanNearQuery
+
+To avoid passing all combinations to a NearSpansQuery
+some non trivial changes would be needed in the spans package.
+
+NearSpansUnOrdered (and maybe also NearSpansOrdered)
+would have to be extended to provide matching Spans when
+(the Spans of) not all terms/subqueries match.
+
+Also, quite likely, it will be necessary add a float getWeight() method
+to the Spans interface. This value could indicate how many
+terms/subqueries actually matched, and then be used in SpanScorer
+to provide a score for the matching document.
+This weight value would also be useful in other cases, for
+example to allow different weights in SpanTermQuery.
+
+Regards,
+Paul Elschot
+
+
+On Friday 17 April 2009 12:18:46 Radhalakshmi Sreedharan wrote:
+> To make the question simple,
+> 
+> What I need is  the following :
+> If my document field is ( ab,bc,cd,ef) and Search tokens are (ab,bc,cd). 
+> 
+> Given the following : 
+>  I should get a hit even if all of the search tokens aren't present
+>  If the tokens are found they should be found within a distance x of each other ( proximity
+search)
+> 
+> I need the percentage match of the search tokens with the document field. 
+> 
+> Currently this is my query :  
+> 1) I form all possible permutation of the search tokens 
+> 2) do a spanNearQuery of each permutation
+> 3)  Do a DisjunctionMaxQuery on the spannearqueries. 
+> 
+> This is how I compute % match  : 
+> % match =  ( Score by running the query on the document field ) /
+> 		( score by running the query on a document field created out of search tokens )
+> 
+> The numerator gives me the actual score with the search tokens run on the field.
+> Denominator gives  me the  best possible or maximum possible score with the current search
+tokens
+> 
+> For this example << If my document field is ( ab,bc,cd,ef) and Search tokens are
+(ab,bc,cd).>> I expect a % match of around 90%.
+> 
+> However I get a match of only around 50% without a boost. Using a boost infact reduces
+my percentage. 
+> 
+> I even overrode the queryNorm method to return a one, still the percentage did not increase.
+> 
+> Any suggestions ?
+> -----Original Message-----
+> From: Radhalakshmi Sreedharan [mailto:Radhalakshmi_S@infosys.com] 
+> Sent: Friday, April 17, 2009 12:37 PM
+> To: java-user@lucene.apache.org
+> Subject: RE: Need help : SpanNearQuery
+> 
+> Hi Steven,
+> Thanks for your reply.
+> 
+> I tried out your approach and the problem got solved to an extent but still it remains.
+> 
+> The problem is the score reduces quite a bit even now as bc is not found in the combinations
+>  ( bc,cd) ( bc,ef) and ( ab,bc,cd,ef) etc. 
+> 
+> The boosting infact has a negative impact and reduces the score further :(
+> 
+> The factor which is affected by boosting is the queryNorm .
+> 
+> With a boost of 6  - 
+> 
+> 0.015559823 = (MATCH) max of:
+>   0.015559823 = (MATCH) weight(spanNear([SearchField:cd, SearchField:ef], 10, false)^6.0
+in 0), product of:
+>     0.07606166 = queryWeight(spanNear([SearchField:cd, SearchField:ef], 10, false)^6.0),
+product of:
+>       6.0 = boost
+>       0.61370564 = idf(SearchField: cd=1 ef=1)
+>       0.02065639 = queryNorm
+>     0.20456855 = (MATCH) fieldWeight(SearchField:spanNear([cd, ef], 10, false)^6.0 in
+0), product of:
+>       0.33333334 = tf(phraseFreq=0.33333334)
+>       0.61370564 = idf(SearchField: cd=1 ef=1)
+>       1.0 = fieldNorm(field=SearchField, doc=0)
+> 
+> Without a boost  - 
+> 
+> 0.07779912 = (MATCH) max of:
+>   0.07779912 = (MATCH) weight(spanNear([SearchField:cd, SearchField:ef], 10, false) in
+0), product of:
+>     0.3803083 = queryWeight(spanNear([SearchField:cd, SearchField:ef], 10, false)), product
+of:
+>       0.61370564 = idf(SearchField: cd=1 ef=1)
+>       0.6196917 = queryNorm
+>     0.20456855 = (MATCH) fieldWeight(SearchField:spanNear([cd, ef], 10, false) in 0),
+product of:
+>       0.33333334 = tf(phraseFreq=0.33333334)
+>       0.61370564 = idf(SearchField: cd=1 ef=1)
+>       1.0 = fieldNorm(field=SearchField, doc=0)
+> 
+> 
+> Regards,
+> Radha
+> -----Original Message-----
+> From: Steven A Rowe [mailto:sarowe@syr.edu] 
+> Sent: Thursday, April 16, 2009 10:35 PM
+> To: java-user@lucene.apache.org
+> Subject: RE: Need help : SpanNearQuery
+> 
+> Hi Radha,
+> 
+> On 4/16/2009 at 8:35 AM, Radhalakshmi Sredharan wrote:
+> > I have a question related to SpanNearQuery.
+> > 
+> > I need a hit even if there are 2/3 terms found with the span being
+> > applied for those 2 terms.
+> > 
+> > Is there any custom implementation in place for this? I checked
+> > SrndQuery but that also doesn't work.
+> > 
+> > This is my workaround currently:
+> > 
+> > 1)      For a list of terms ( ab,bc, cd,ef) , make a set like ( ab,bc)
+> > , ( bc,cd) ( ab,cd) (bc,ef) ( ab,bc,cd) ( ab,bc,cd,ef)..... and so on.
+> > 
+> > 2)      Create a spanNearQuery for  each of these terms
+> > 
+> > 3)      Add it to the booleanQuery with a  SHOULD clause.
+> > 
+> > However this approach gives me puzzling scores
+> >  eg If my document has  only ( ab,bc,cd) the penalty for the missing ef
+> > is very high and my score comes down quite a bit.
+> 
+> Do you know about the scoring documentation on the Lucene site: <http://lucene.apache.org/java/2_4_1/scoring.html>
+?  In particular, see the link from there to the Searcher.explain() javadocs - this functionality
+will help you understand what's happening with your queries.
+> 
+> I suspect that the penalty is due to fewer sub-queries matching; that is, not only does
+(ab,bc,cd,ef) fail to match, but (ab,bc,ef), (ab,cd,ef), (ab,ef) etc. also fail to match,
+and since all of these contribute to the final score, you will see a large drop off if you
+don't get a full match.
+> 
+> Instead of putting all of the alternatives together in a single large disjunction, if
+you package them such that the shorter alternatives don't influence the final score when larger
+ones match, you may get something more like what you want.  I think DisjunctionMaxQuery <http://lucene.apache.org/java/2_4_1/api/org/apache/lucene/search/DisjunctionMaxQuery.html>,
+along with judicious boosting, will do the trick, e.g.:
+> 
+> DMQ((ab,bc,cd,ef)^100,
+>     ((ab,bc,cd)^10 (ab,bc,ef)^10 (ab,cd,ef)^10 ...),
+>     ((ab,bc) (ab,cd) (ab,ef) ...))
+> 
+> Steve
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> **************** CAUTION - Disclaimer *****************
+> This e-mail contains PRIVILEGED AND CONFIDENTIAL INFORMATION intended solely 
+> for the use of the addressee(s). If you are not the intended recipient, please 
+> notify the sender by e-mail and delete the original message. Further, you are not 
+> to copy, disclose, or distribute this e-mail or its contents to any other person and
+
+> any such actions are unlawful. This e-mail may contain viruses. Infosys has taken 
+> every reasonable precaution to minimize this risk, but is not liable for any damage 
+> you may sustain as a result of any virus in this e-mail. You should carry out your 
+> own virus checks before opening the e-mail or attachment. Infosys reserves the 
+> right to monitor and review the content of all messages sent to or from this e-mail 
+> address. Messages sent to or from this e-mail address may be stored on the 
+> Infosys e-mail system.
+> ***INFOSYS******** End of Disclaimer ********INFOSYS***
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

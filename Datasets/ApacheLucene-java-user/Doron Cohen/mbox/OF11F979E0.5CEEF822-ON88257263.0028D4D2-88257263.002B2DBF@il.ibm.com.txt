@@ -1,0 +1,59 @@
+FROM: Doron Cohen <DOR...@il.ibm.com>
+SUBJECT: Re: Making document numbers persistent
+DATE: 14 Jan 2007
+
+>
+> : - To keep the document ids from changing we could prevent segment
+> : merging - I'm not concerned with optimizing indices, this can be done
+> : offline,
+> :    and I'm prepared to build the caches after that. What would be the
+> : ballpark figure for query time degradation, approximately?
+> :    The code changes are obvious, I think, or are there more places
+> : I'd need to touch, other than maybeMergeSegments?
+>
+> As i recall, everytime you open a new IndexWriter (which you would need
+to
+> do frequently since you have to close your old IndexWriter for your
+> multiple updates a second to be visible) a new segment is opened ... if
+> you really manage to competely eliminate segment merges you are talking
+> about potentially having 100,000 segments after 24 hours ... I think the
+> search performance cost there would breaty significantly outway your
+> current Filter building costs ... but that's just speculation since i've
+> never seen an index with that many segments -- at least not on a machine
+> that was acctually *functioning* :)
+>
+
+I think that one effective way to control docids changes, assuming
+delete/update rate significantly lower than add rate, is to modify Lucene
+such that deleted docs are only 'squeezed out' when calling optimize().
+This would involve delicate changes in the merging code, but is possible.
+Then, once there are 'too many' deletions, the application could call
+optimize().
+
+This way, having full control on when deleted docs are 'squeezed', and also
+knowing which docs these are (same docs that same app deleted during last X
+hours) - that application can at that point update the mapping between
+Lucene IDs and the database IDs, again, knowing that Lucene IDs are set -
+deterministically - by the order of adding docs.
+
+This would allow - as Erick mentioned earlier in this thread - to create
+the filter from the database only, no need to query Lucene for that. You
+would probably need to copy that table so existing table can be still used
+by searchers referencing the index before optimize() was called, at least
+until db table is updated and some index warming is done.
+
+I am not sure that I am happy with this direction, just wanted to point out
+the possibility. Would have been convenient for this if Lucene's writer had
+an option like "keepDeletions" or something, though I am not sure yet if
+this can be implemented without too much complication of the code, or if
+this is general enough to be in the API.
+
+Doron
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,153 @@
+FROM: Scott Ganyo <scott.ga...@eTapestry.com>
+SUBJECT: RE: IndexReader Pool
+DATE: 5 Jul 2002
+
+You are correct.  Actually, there have been a few bug fixes since that was
+posted.  Here's a diff to an updated version:
+
+@@ -19,11 +19,21 @@
+  */
+ public class IndexAccessControl
+ {
+-       public static final Analyzer LUCENE_ANALYZER = new LuceneAnalyzer();
++       private static Analyzer s_defaultAnalyzer;
+     private static final Map WRITER_PATHS = new HashMap(); // path ->
+CheckoutI
+nfo
+     private static final Map SEARCHER_PATHS = new HashMap(); // path ->
+Searche
+r
+     private static final Map OLD_SEARCHERS = new HashMap(); // Searcher ->
+Chec
+koutInfo
+
++    public static void setDefaultAnalyzer(Analyzer analyzer)
++    {
++        s_defaultAnalyzer = analyzer;
++    }
++
++    public static Analyzer getDefaultAnalyzer()
++    {
++        return s_defaultAnalyzer;
++    }
++
+     /** get for adding documents.
+      * blocks: readers until released
+      */
+@@ -47,7 +57,7 @@
+                     {
+                         try
+                         {
+-                            info.wait(); // wait for info to be released
++                            synchronized (info) { info.wait(); } // wait
+for in
+fo to be released
+                         }
+                         catch (InterruptedException e)
+                         {
+@@ -61,9 +71,10 @@
+                 {
+                     boolean missing = !path.exists();
+                     if (missing) path.mkdir();
+-                    writer = new IndexWriter(path, LUCENE_ANALYZER,
+/*create*/m
+issing);
++                    writer = new IndexWriter(path, s_defaultAnalyzer,
+/*create*
+/missing);
+                     writer.mergeFactor = 2;
+                     info = new CheckoutInfo(writer);
++                    WRITER_PATHS.put(path, info);
+                 }
+             }
+             while (writer == null);
+@@ -88,7 +99,7 @@
+                 {
+                     WRITER_PATHS.remove(path);
+                     writer = info.writer;
+-                    info.notify(); // notify waiters to try again
++                    synchronized (info) { info.notify(); } // notify
+waiters to
+ try again
+                 }
+             }
+         }
+@@ -137,10 +148,12 @@
+         String sync = path.getAbsolutePath().intern();
+         synchronized (sync) // sync on specific index
+         {
++            boolean old = false;
+             CheckoutInfo info = (CheckoutInfo)SEARCHER_PATHS.get(path);
+             if (info == null || searcher != info.searcher) // this isn't
+the in
+fo we're looking for
+             {
+                 info = (CheckoutInfo)OLD_SEARCHERS.get(searcher);
++                old = true;
+             }
+             if (info != null) // found a searcher
+             {
+@@ -148,7 +161,7 @@
+                 {
+                     info.checkoutCount--;
+                 }
+-                else // last reference to searcher
++                else if (old)// last reference to old searcher
+                 {
+                     info.searcher.close();
+                 }
+@@ -183,7 +196,7 @@
+                     {
+                         try
+                         {
+-                            info.wait(); // wait for info to be released
++                            synchronized (info) { info.wait(); } // wait
+for in
+fo to be released
+                         }
+                         catch (InterruptedException e)
+                         {
+@@ -221,7 +234,7 @@
+                 {
+                     WRITER_PATHS.remove(path);
+                     reader = info.reader;
+-                    info.notify(); // notify waiters to try again
++                    synchronized (info) { info.notify(); } // notify
+waiters to
+ try again
+                 }
+             }
+         }
+
+Hope it helps,
+Scott
+
+> -----Original Message-----
+> From: Ilya Khandamirov [mailto:ikh@startext.de]
+> Sent: Friday, July 05, 2002 12:13 PM
+> To: 'Lucene Users List'
+> Subject: RE: IndexReader Pool
+> 
+> 
+> Hi Péter,
+> 
+> >
+> http://www.mail-archive.com/lucene-dev@jakarta.apache.org/msg0
+> 0938.html
+> 
+> Something wrong with the code or i'm missing something. 
+> WRITER_PATHS is
+> always empty, i.e.  there is no reuse, you always create a new object.
+> 
+> 
+> Regards,
+> Ilya
+> 
+> 
+> --
+> To unsubscribe, e-mail:   
+> <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail: 
+> <mailto:lucene-user-help@jakarta.apache.org>
+> 
+

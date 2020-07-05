@@ -1,0 +1,105 @@
+FROM: Karl Wettin <karl.wet...@gmail.com>
+SUBJECT: Re: Exact match on entire field
+DATE: 6 May 2009
+
+You should probably tell us the reason to why you need this  
+functionallity.
+
+Given you only load the stored comparative field for the first it  
+doesn't really have to be that expensive. If you know that the first  
+hit was not a perfect match then you know that any matching documents  
+with a lower score isn't a perfect match. Stemming et c could however  
+mess things up for you.
+
+There is nothing in Lucene that tells your if the query yielded a  
+perfect match or not, only how much greater precition one hit has  
+compared to another. Depending on your needs and your corpus it's  
+possible to use this information to solve the problem.
+
+You could try to find a delta score threadshold that tells you where  
+perfect matches begin and end in the results. With some luck the  
+length normalization built in to Lucene is enough to find this. If not  
+you can look at more expensive solutions that increase the score of  
+perfect matches by adding BOL and EOL token markers in your index and  
+(0-slop) query:
+
+index:
+"^", "bloemendaal", "$"
+"^", "adele", "bloemendaal", "$"
+
+query:
+("bloemendaal")
+OR ("^", "bloemendaal")
+OR ("bloemendaal", "$")
+OR ("^", "bloemendaal", "$")
+
+You could use either span queries or shingles and you'll probably have  
+to fiddle around with boosts on the clauses.
+
+Be aware, it's rather expensive to search for tokens that exists in  
+all documents, so it's probably a lot speedier to use shingles and  
+skip single BOL/EOL tokens in the index as required by span queries.  
+But shingles will make your index explode in size. And lots of BOL/EOL  
+tokens can mess with the idf(t).
+
+There has been a bit of talk about adding functionallity to retrieve  
+what queryies matched a specific document. If this was in place you  
+could simple check if the ("^", "bloemendaal", "$") clause matched and  
+you'll know it was a perfect match. At current rate such a patch might  
+be available in a few months from now. You are of course more than  
+welcome to implement and contribute such a patch if you have the time.
+
+
+I hope this helped,
+
+      karl
+
+
+6 maj 2009 kl. 10.50 skrev Laura Hollink:
+
+> Hi,
+>
+> I am trying to distinguish between a document that matches the query  
+> because the query *appears* in one of the fields, and a document  
+> that matches the query because the query equals the complete field.  
+> I do want to use an Analyzer for case- and punctuation  
+> normalization. For example:
+>
+> The query "bloemendaal" matches the complete field "Bloemendaal" in  
+> a document in my result list.
+> The query "adele" only partly matches the field "Adele Bloemendaal"  
+> in another document.
+>
+> What is the best way to do this?
+>
+> I currently solve it by first searching in a normal way, and than  
+> using the QueryParser on both the query and the relevant field in  
+> the documents in my result list. Finally, I simply compare the  
+> parsed query and the parsed field.
+>
+> 	QueryParser parser = new QueryParser(field,new StandardAnalyzer());
+> 	Query query = parser.parse(q);
+> 	Hits hits = is.search(query);
+> 	...	
+> 	Document doc = hits.doc(i);
+> 	Query myfield = parser.parse(doc.get("skos:prefLabel"));
+> 	if(myfield.equals(query)) System.out.println("Query exactly matches  
+> the entire field.");
+> 	else System.out.println("The field contains the query.");
+>
+> Is there a better way?
+>
+> Thanks,
+> Laura
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

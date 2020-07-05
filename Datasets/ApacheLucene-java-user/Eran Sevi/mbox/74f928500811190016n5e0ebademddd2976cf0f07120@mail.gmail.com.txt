@@ -1,0 +1,189 @@
+FROM: "Eran Sevi" <erans...@gmail.com>
+SUBJECT: Re: Searching repeating fields
+DATE: 19 Nov 2008
+
+If you don't have a lot of entries for each invoice you can duplicate the
+invoice for each entry - you'll have some field duplications (and bigger
+index size) between the different invoices but it'll be easy to find exactly
+what you want.
+
+If you have too many different values, I built a solution somewhat similiar
+to what Chris suggested.
+I treat all the the extra data you describe as metadata and store it in
+parallel fields. your example becomes:
+
+invoice_id: 1234
+invoice_description:(some text)
+employee_id: 5, 8, 12
+comment_type: request_for_approval, redirection, approval, please approve
+invoice
+ts:200811181012, 200811181015, 200811181340
+Of course you'll have to make sure each field contains exactly the same
+number of tokens.
+In order to search the index I use something which I'm not sure is the best
+alternative but still gives good performance:
+I run a span query on one field (for example employee_id=8) and then fetch
+the other fields and check the same position (for example check the
+comment_type at the 2nd position).
+
+Since I need to know what is the data in all those other fields even if they
+were not present in the query, I can't run the "modified" PhraseQuery even
+if existed, since it will return only the matched doc number but not the
+data in the parallel fields.
+
+ Eran.
+
+
+On Tue, Nov 18, 2008 at 11:49 PM, Mark Ferguson
+<mark.a.ferguson@gmail.com>wrote:
+
+> I'll provide a better example, perhaps it will help in formulating a
+> solution.
+>
+> Suppose I am designing an index that stores invoices. One document
+> corresponds to one invoice, which has a unique id. Any number of employees
+> can make comments on the invoices, and comments have different
+> classifications (request_for_approval, redirection, approval,
+> miscellaneous). Each comment is timestamped. An invoice also contains a
+> long
+> description that is indexed and is stored.
+>
+> So an example document may look like this:
+>
+> invoice_id: 1234
+> invoice_description:(some text)
+> employee_id: 5
+> employee_id: 8
+> employee_id: 12
+> comment_type: request_for_approval
+> comment_type: redirection
+> comment_type: approval
+> comment: please approve invoice
+> comment: sending invoice to sales
+> comment: invoice approved
+> ts:200811181012
+> ts:200811181015
+> ts:200811181340
+>
+> I want to be able to search by any number of these fields. For example, I
+> may want all of employee 5's requests for approvals from today.
+>
+> It may seem like it would be simpler to just have two separate indexes: a
+> comments index and an invoice index. But I also want to be able to search
+> the invoice description along with the comments. I could set the
+> granularity
+> of the index to the comments level, but then I am duplicating a lot of text
+> in the invoice description. Also, I only care about returning the invoice,
+> so I will have to merge results if the granularity is set to the comments
+> level, which will ruin Lucene's scoring (?).
+>
+> This is a made-up example, but I think it describes pretty thoroughly the
+> problem I'm trying to solve. In my real world problem, I'm storing the
+> full-text of web pages, and I really don't want to be duplicating that much
+> text to set the granularity lower.
+>
+> Mark Ferguson
+>
+>
+> On Tue, Nov 18, 2008 at 2:29 PM, Mark Ferguson <mark.a.ferguson@gmail.com
+> >wrote:
+>
+> > Thanks for the suggestion, but I think I will need a more robust
+> solution,
+> > because this will only work with pairs of fields. I should have specified
+> > that the example I gave was somewhat contrived, but in practice there
+> could
+> > be more than two parallel fields. I'm trying to find a general solution
+> that
+> > I can apply to any number of parallel fields holding any kind of data.
+> >
+> > I was thinking of trying something along the lines of a multi-value
+> field.
+> > So for example, I could have:
+> >
+> > page_user_title: ajax|news (where | is a field separator)
+> >
+> > The problem is I don't know how to formulate the query that would be
+> > equivalent to +username:ajax +page_title:news, or if it's even possible.
+> (I
+> > should also mention that I am creating the queries programmatically, not
+> > using the query parser, so anything goes).
+> >
+> > Any other ideas?
+> >
+> > Mark Ferguson
+> >
+> >
+> >
+> > On Tue, Nov 18, 2008 at 1:06 PM, Ian Lea <ian.lea@gmail.com> wrote:
+> >
+> >> How about using variable field names?
+> >>
+> >>  url: http://www.cnn.com/
+> >>  page_description: cnn breaking news
+> >>  page_title_ajax: news
+> >>  page_title_paris: cnn news
+> >>  page_title_daniel: homepage
+> >>  username: ajax
+> >>  username: paris
+> >>  username: daniel
+> >>
+> >> and search for +user:ajax +page_title_ajax:news or maybe just
+> >> page_title_ajax:news.  Might not even need to store user.
+> >>
+> >>
+> >> --
+> >> Ian.
+> >>
+> >>
+> >> On Tue, Nov 18, 2008 at 5:48 PM, Mark Ferguson
+> >> <mark.a.ferguson@gmail.com> wrote:
+> >> > Hello,
+> >> >
+> >> > I am designing an index in which one url corresponds to one document.
+> >> Each
+> >> > document also contains multiple parallel repeating fields. For
+> example:
+> >> >
+> >> > Document 1:
+> >> >  url: http://www.cnn.com/
+> >> >  page_description: cnn breaking news
+> >> >  page_title: news
+> >> >  page_title: cnn news
+> >> >  page_titel: homepage
+> >> >  username: ajax
+> >> >  username: paris
+> >> >  username: daniel
+> >> >
+> >> > In this contrived example, user 'ajax' have saved the URL with the
+> page
+> >> > title 'news', 'paris' has saved it with 'cnn news', and 'daniel' has
+> >> saved
+> >> > it with 'homepage'.
+> >> >
+> >> > What I need to be able to do is perform a search for a particular user
+> >> and a
+> >> > particular title, but they must occur together. For example,
+> +user:ajax
+> >> > +page_title:news would return this document, but +user:ajax
+> >> > +page_title:homepage would not.
+> >> >
+> >> > I am open to changing the design of the document (i.e. using repeating
+> >> > fields isn't required), but I do need to have one document per url. I
+> am
+> >> > looking for suggestions for a strategy on implementing this
+> requirement.
+> >> >
+> >> > Thanks,
+> >> >
+> >> > Mark Ferguson
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+>
+

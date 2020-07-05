@@ -1,0 +1,92 @@
+FROM: Chris Collins <chris_j_coll...@yahoo.com>
+SUBJECT: Re: Optimizing indexes with mulitiple processors?
+DATE: 10 Jun 2005
+
+Hi John, your comments are correct.  But based on the fact we know on our box
+we have almost 80MB sustainable bandwidth and very low latency to disk per
+second, and observing that the io we are doing in lucene is small in comparison
+a 1 second I am reasonably confident that this time spent is not far out (for
+this run).  
+
+As I may have mentioned before, in my case we have reasonably fast hardware
+raid.  At that point the bottlenecks of course change.  We also have the case
+where we write to a filer which has good bandwidth but high latency.  Here we
+see that merge is io bound as you would expect.  Thats why I assume changing
+the buffer sizes of the FS streams could help assuming the merge operations
+read and write to the segments in a linear fashionin this case, the latency is
+not really a function of the disks, but a function of the latency in the rpc
+between the client (indexer) and the filer.  By increasing the buffer sizes we
+would reduce the amount of RPCs. 
+
+>From an IO bound point of view one needs to consider if you have saturated the
+device or you are just stuck waiting for the disk to rotate around.  Long gone
+is escalator algorithm as the preferred disk optimization of seagate :-}, disk
+can take many instructions and re-order them to minimize latency issues. If its
+a latency issue and not necessarily bandwidth then using overlapping io can
+improve throughput (splitting the index and having multiple writer threads
+would give you that). In fact in my silly filer example having multiple writers
+does show good effect.  Of course this depends on if you can finagle your
+application to allow you to split the indices.
+
+Further I have done longer runs to plot throughput over time (16M doc crawls). 
+I only profiled 4k docs since I didnt want to wait forever with JProbe.  Not
+sure what the correct jargon is here so excuse my description.  The in memory
+objects were merged out to disk but we didnt get the second order effect of the
+maybeMerge function finding enough segments on that level to trigger the
+merging of multiple segments for the next tier (segments * mergefactor). 
+Indexer throughput is not of course constant, over time the time to index one
+document does increase when you take into account the cost of the merges.  But
+due to the pyramid effect of how the merger works, the larger order merges of
+course happen less and less.  
+
+Back to my observations.  From the CPU part of indexing, the inversion aspect
+is dwarfed by the standard tokenizer.  My hat off to Doug (what is hogging the
+cpu is auto generated code :-} )Given multiple cores / ht/ smp your certainly
+can capitalize on them if you so wish to write the code.  Not all IO bound
+problems are created equal, if it is merely latency then you still have room to
+improve throughput if you massage your indexing approach.  Using a single
+indexing thread and seeing your io bound should not be a reason to give up :-} 
+
+As you can tell I have two indexing worlds, one where my disk is fast (CPU
+Bound) and one where it is slow (IO Bound).  I have to capitalize on the
+effects of both to get my job done and each of them have distinctive
+challenges.
+
+Regards
+
+Chris
+--- John Haxby <jch@scalix.com> wrote:
+
+> Chris Collins wrote:
+> 
+> >Ok that part isnt surprising.  However only about 1% of 30% of the merge was
+> >spent in the OS.flush call (not very IO bound at all with this controller).
+> >  
+> >
+> On Linux, at least, measuring the time taken in OS.flush is not a good 
+> way to determine if you're I/O bound -- all that does is transfer the 
+> data to the kernel.   Later, possibly much later, the kernel will 
+> actually write the data to the disk.
+> 
+> The upshot of this is that if the size of the index is around the size 
+> of physical memory in the system, optimizing will appear CPU bound.   
+> Once the index exceeds the size of physical memory, you'll see the 
+> effects of I/O.   OS.flush will still probably be ver quick, but you'll 
+> see a lot of I/O wait if you run, say, top.
+> 
+> jch
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

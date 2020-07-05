@@ -1,0 +1,99 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: RE: Date ranges - getting the approach right
+DATE: 20 Jul 2006
+
+Wow. Looking at the implementation of
+http://lucene.apache.org/java/docs/api/org/apache/lucene/index/IndexReader.h
+tml#open(org.apache.lucene.store.Directory) I've now realised that when you
+create an IndexReader (clue it is abstract), you actually instantiate a
+MultiReader, with an IndexReader for each segment. That's elegant, because
+what the user knows as a MultiReader is actually a MultiReader or
+MultiReaders.
+
+So one the thing that would need to be engineered into MultiReader to
+implement Erick's suggestion would be to make IndexReader[] subReaders
+accessible (iteratable) for the sake of getting first document numbers for
+dates in each segment. We'd need something similar for ParallelReader too,
+so perhaps it would need to be an abstract method on IndexReader. In
+addition to this, we'd need to have another file for each segment to
+correlate date first document number with each date in the segment.
+
+i.e.
+--------8<--------
+/**
+ * Chronological filtering
+ */
+
+import java.util.BitSet;
+import java.io.IOException;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.search.*;
+
+public class ChronologicalFilter extends Filter {
+
+	final String fieldName;
+	final String lowerTerm;
+	final String upperTerm;
+	final boolean includeLower;
+	final boolean includeUpper;
+
+	public ChronologicalFilter(String fieldName, String lowerTerm,
+String upperTerm, boolean includeLower, boolean includeUpper) {
+		this.fieldName = fieldName;
+		this.lowerTerm = lowerTerm;
+		this.upperTerm = upperTerm;
+		this.includeLower = includeLower;
+		this.includeUpper = includeUpper;
+	}
+
+	@Override
+	public BitSet bits(IndexReader reader) throws IOException {
+
+		final BitSet bits = new BitSet(reader.maxDoc());
+
+	/*
+		// Lets say that reader.segmentReaders() was
+		// Iterator<IndexReader> and allowed us to walk
+		// through all the segment readers
+		for (IndexReader segmentReader : reader.segmentReaders()) {
+			// Our segment reader should have an associated
+SortedMap of
+			// dates and first document numbers - not sure what
+the
+			// best approach would be here
+			SortedMap<Integer,Integer> dateDocNumMap =
+MyUtils.getDateMapForSegmentReader(segmentReader, fieldName);
+
+			// Set those bits...
+		}
+	*/
+
+		return bits;
+	}
+}
+--------8<--------
+
+-----Original Message-----
+From: Erick Erickson [mailto:erickerickson@gmail.com] 
+Sent: 16 July 2006 15:03
+To: java-user@lucene.apache.org
+Subject: Re: Date ranges - getting the approach right
+
+Thanks for the clarification. Let me re-state this and see if I got it
+right.
+
+1> if you never do any deletions (or recalculate your "special records"
+after deletion/optimization), this could work as-is.
+
+2> the safe way to do this would be to find the miniminum doc ID for the
+start date, the maximum doc ID for the end date and make the filter by
+flipping all the bits in the filter in between. Assuming that you indexed in
+date-sorted order in the first place. There really can't be anything in the
+system to do anything like this for you since it relies on the meta-data
+that the mails were indexed in some specific order.
+
+I actually like the second, it's less prone for getting out of whack.....
+
+Thanks for the
+Erick
+

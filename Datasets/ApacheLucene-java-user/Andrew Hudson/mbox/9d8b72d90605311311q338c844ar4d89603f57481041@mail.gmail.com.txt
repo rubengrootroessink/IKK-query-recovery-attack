@@ -1,0 +1,50 @@
+FROM: "Andrew Hudson" <andrewhud...@gmail.com>
+SUBJECT: Inefficiency in MultiReader / MultiTermDocs.skipTo (non optimized indexes)
+DATE: 31 May 2006
+
+In our application we noticed that anytime there was more than one segment
+(as in not optimized) in the index that there was a big drop in
+performance.  After thinking about this for a long time it didn't add up,
+even if you optimize an index and then add just 1 job the big drop occurs.
+
+I tracked down the inefficiency to MultiTermDocs.skipTo where even in the
+comment it said the function was unoptimized, I implemented the function
+very similar to how its 'next' function is implemented and the performance
+hit vanished:
+
+Here is how the 'next' function is implemented:
+  public boolean next() throws IOException {
+    if (current != null && current.next()) {
+      return true;
+    } else if (pointer < readers.length) {
+      base = starts[pointer];
+      current = termDocs(pointer++);
+      return next();
+    } else
+      return false;
+  }
+
+This is how I implemented skipTo:
+  /** Much more optimized implementation. Could be
+   * optimized to skip entire segments */
+  public boolean skipTo(int target) throws IOException {
+    if (current != null && current.skipTo(target-base)) {
+      return true;
+    } else if (pointer < readers.length) {
+      base = starts[pointer];
+      current = termDocs(pointer++);
+      return skipTo(target);
+    } else
+      return false;
+  }
+
+Here is the old implementation, it just calls next over and over:
+  /** As yet unoptimized implementation. */
+  public boolean skipTo(int target) throws IOException {
+    do {
+      if (!next())
+        return false;
+    } while (target > doc());
+      return true;
+  }
+

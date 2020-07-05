@@ -1,0 +1,90 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: More frustration with Lucene/Java file i/o on Windows
+DATE: 18 Aug 2006
+
+> 	I do appreciate the thoroughness and graciousness of your
+> responses, and I hope there's nothing in my frustration that you would
+> take personally.  Googling around, I've found other references to the
+> sun jvm handling of the Windows file system to be, well, quixotic at
+> best.
+
+No problem!
+
+And I suspect Sun doesn't like Microsoft :)
+
+> 	In our current system, we have two modes of operation, full
+> index recreation and incremental indexing.  Which to use is determined
+> by a quick validate check (check to see if the path exists, see if it is
+> a directory.  If it is, make an IndexSearcher to check the meta data as
+> below.  If the reader passes the test, build incremental; otherwise
+> delete the directory and start fresh
+>   searcher = new IndexSearcher(FSDirectory.getDirectory(indexFile,
+> false));
+>   TermQuery tq = new TermQuery(new Term(METADATA_DOCUMENT_FIELD,
+> METADATA_DOCUMENT_FIELD_VALUE));
+>   Hits h = searcher.search(tq);
+> ).
+> 
+> 	The validation IndexSearcher gets closed in a finally block, so
+> there shouldn't be anything left over from that.
+
+OK, this sounds fine.
+
+> 	If it's a full rebuild, we just have an IndexWriter (no reader).
+> If it's incremental, there's an IndexReader to delete old documents,
+> which is closed, followed by an IndexWriter that is also closed (when
+> things go well).
+
+OK but be real careful on the incremental case: you can only have 
+exactly one of IndexReader or IndexWriter open at a time.  In other 
+words, you have to close one in order to open the other, and vice/versa. 
+  It sounds like you do all deletes with an IndexReader, then close it, 
+then open an IndexWriter, do all your adds, then close it?  In which 
+case that should be fine... the closes are also in finally blocks?
+
+> 	I haven't gone looking in the source to figure out what goes
+> into the middle of the lucene-<xxx>-write.lock naming convention, but as
+> you say they could have been left over from some abnormal termination.
+
+The Lucene classes have finalizers that try to release these locks so 
+"in theory" (cross fingers) it should only be a hard KILL or C-level 
+exception in the JVM that would cause these lock files to be left behind.
+
+> 	Our indexing schema bats back and forth between 2 build dirs;
+> one's supposed to be the last successful build, the other is the one you
+> can work on.  When a successful build is finished, all the files are
+> copied over into the scratch dir and the next build goes in the scratch
+> dir.  If part of the glorp in the lock file name is a hash of the
+> directory path, we could run for a while and not hit the locking issue
+> for a couple of builds.
+
+OK I see.  Yes indeed the glorp is a "digest" from the directory name ...
+
+> 	I still can't figure out how the .cfs file delete would fail,
+> though, unless the IndexSearcher.close() hadn't really let go of the
+> file.  What would happen with an IndexSearcher on a malformed directory?
+> I.e. if there was only a .cfs file there?  Would .close() know to
+> release the one handle it had?
+
+Yeah the fact that the OS wouldn't let Lucene nor you delete the CFS 
+file means it was indeed still open.  That combined with write locks 
+stuck in the filesystem really sorta feels like there was an 
+IndexSearcher that didn't get closed.  Or it could indeed be the lurking 
+[possible] bug in the JVM that fails to really close a file even when 
+you call File.close() from Java.
+
+What JVM & version of Lucene are you using?
+
+> 	Anyway, I'll implement something at the root to delete the lock
+> files before starting to do anything to make sure the slate is clean and
+> cross my fingers.
+
+OK good luck!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,226 @@
+FROM: "Praveen Peddi" <ppe...@contextmedia.com>
+SUBJECT: Re: displaying 'pages' of search results...
+DATE: 22 Sep 2004
+
+Sure I can share parts of the code.
+LuceneSearchResults class extends HitCollector and overrides collect() method and takes care
+of paging stuff. The class roughly looks as follows. I didn't add un necessary methods for
+simplicity. collect method just reads the doc ids and score, but not the actual document.
+Where as the method getResults(startIndex, endIndex) reads the full document whose index is
+between startIndex and endIndex. search() method instantiates LuceneSearchResults and pass
+it to the lucene search(query, hitCOllector) method that collects all the document ids.
+
+public class LuceneSearchResults extends HitCollector implements Serializable,
+    SearchResults {
+    /*
+     * This class collects all non-zero search results
+     * and presents them in descending order. This class
+     * should be cached when possible to avoid having to re-run
+     * the search.
+     *
+     */
+
+    /** Cache of results.  This is serialized rather than the SortedSet to reduce size on
+disk */
+    private SearchResultEntry[] results = null;
+
+    /**
+     *  Sorted set of results. Used to maintain order of results by score, but is not
+     *  persisted since we need to deal with an indexable store to build sub-lists.
+     * This data structure is only used during the initial collection of results.
+     */
+    private transient SortedSet sortedResults = null;
+
+    /** Lucene searcher used to read results out of the index */
+    private transient Searcher searcher = null;
+
+    /** Factory for converting objects to domain objects */
+    private transient SearchRecordFactory factory = null;
+
+
+    /**
+    * Creates a LuceneSearchResults that
+    * reads Lucene Documents from the specified searcher
+    * and converts them into ContentObjects with the specified
+    * factory
+    * @param index
+    * @param factory
+    * @throws IOException if there is an error opening the index.
+    * @throws ClassCastException if the Index is incompatable with the passed in Index.
+     */
+    public LuceneSearchResults(Index index, SearchRecordFactory factory,
+        Map modifiers) throws IOException {
+        this.searcher = ((LuceneIndex) index).getSearcher();
+        this.factory = factory;
+        initializeSortedSet();
+        initializeLogger();
+    }
+
+    /**
+     *
+     * @see org.apache.lucene.search.HitCollector#collect(int, float)
+     */
+    public void collect(int doc, float score) {
+        // The Set is setup to sort in descending order by initializeSortedSet
+        // so that results return with highest scoring first.
+        // this.searcher.doc(doc).getField("division")
+        sortedResults.add(new SearchResultEntry(doc, score));
+    }
+
+    /**
+     * DOCUMENT ME!
+     *
+     * @return DOCUMENT ME!
+     */
+    public int getResultSize() {
+        if (results == null) {
+            results = new SearchResultEntry[sortedResults.size()];
+            sortedResults.toArray(results);
+        }
+
+        return results.length;
+    }
+
+    /* (non-Javadoc)
+         * @see com.contextmedia.ip.domain.search.SearchResults#getResults(int, int)
+         */
+    public List getResults(int startIndex, int size) throws SearchException {
+        if (startIndex < 0) {
+            throw new IllegalArgumentException();
+        }
+
+        if (results == null) {
+            results = new SearchResultEntry[sortedResults.size()];
+            sortedResults.toArray(results);
+        }
+
+        if (startIndex > results.length) {
+            throw new IllegalArgumentException();
+        }
+
+        int end = ((startIndex + size) > results.length) ? results.length
+                                                         : (startIndex + size);
+
+        int totalRead = end - startIndex;
+
+        ArrayList toReturn = new ArrayList(totalRead);
+
+        for (int i = startIndex; i < end; i++) {
+            toReturn.addAll(toDomainObjects(results[i]));
+        }
+
+        SearchResultList results = new SearchResultList(toReturn,
+                this.getResultSize());
+
+        return results;
+    }
+
+   
+}
+
+Th actual search method look something like this:
+public SearchResults search(IQuery query, Map modifiers)
+        throws MalformedQueryException, IOException {
+        Query toRun = null;
+
+        try {
+            toRun = (Query) query.toQuery();
+        } catch (ClassCastException ce) {
+            // We don't know what the query string is, and
+            // we don't know the user at this point.
+            throw new MalformedQueryException(SearchResourceKeys.SRCH_UNKNOWN_QUERY_OBJECT,
+"Invalid type of class for Query", null, null, ce);
+        }
+
+        log.info("Query being executed " + toRun.toString());
+
+        LuceneSearchResults toReturn = new LuceneSearchResults(this,
+                this.factory, modifiers);
+
+        Searcher searcher = getSearcher();
+
+        searcher.search(toRun, toReturn);
+
+        return toReturn;
+    }
+
+Hope this helps.
+
+Praveen
+
+
+----- Original Message ----- 
+From: "Karthik N S" <karthik@controlnet.co.in>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Wednesday, September 22, 2004 2:53 AM
+Subject: displaying 'pages' of search results...
+
+
+> Hi
+> 
+> Can u share the  searcher.search(query, hitCollector);  [light weight paging
+> api ]
+> 
+> Code on the form ,may be somebody like me need's it.........
+> 
+> 
+>  ....  ; )
+> 
+> Karthik
+> 
+> -----Original Message-----
+> From: Praveen Peddi [mailto:ppeddi@contextmedia.com]
+> Sent: Wednesday, September 22, 2004 1:24 AM
+> To: Lucene Users List
+> Subject: Re: displaying 'pages' of search results...
+> 
+> 
+> The way we do it is: Get all the document ids, cache them and then get the
+> first 50, second 50 documents etc. We wrote a light weight paging api on top
+> of lucene. We call searcher.search(query, hitCollector); Our
+> HitCollectorImpl implements collect method and just collects the document id
+> only.
+> 
+> Praveen
+> 
+> 
+> ----- Original Message -----
+> From: "Chris Fraschetti" <fraschetti@gmail.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Tuesday, September 21, 2004 3:33 PM
+> Subject: displaying 'pages' of search results...
+> 
+> 
+>>I was wondering was the best way was to go about returning say
+>> 1,000,000 results, divided up into say 50 element sections and then
+>> accessing them via the first 50, second 50, etc etc.
+>>
+>> Is there a way to keep the query around so that lucene doesn't need to
+>> search again, or would the search be cached and no delay arise?
+>>
+>> Just looking for some ideas and possibly some implementational issues...
+>>
+>>
+>>
+>> --
+>> ___________________________________________________
+>> Chris Fraschetti
+>> e fraschetti@gmail.com
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+>>
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>

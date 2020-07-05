@@ -1,0 +1,254 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: Help with delimited text
+DATE: 7 Apr 2011
+
+Mark - I've uploaded some code to http://pastebin.com/mqSVcWUi that
+indexes and searches file system paths.  It demonstrates what I've
+been trying to suggest and may help you get your search up and
+running.
+
+--
+Ian.
+
+On Thu, Apr 7, 2011 at 8:18 AM, Mark Wiltshire
+<mark@redalertconsultants.co.uk> wrote:
+> Hi Thanks Ian for you help on this, its driving me nuts :-)
+> The StandardAnalyser is only used on the search query term being passed
+> also.
+> But In this case I am just adding a filter to the search.
+> The actual category may be
+> /Top/Books/Accountancy/10_Compliance/International
+> And the filter will allow me so filter search by subject area, i.e.
+> There is a drop down on the search page showing
+> Books
+> Online
+> Software
+> I translate this to a base category to then filter on.  i.e. Books =
+> /Top/Books
+> It performs filter on search, so only those living in /Top/Books/*
+> categories (with *)
+> are returned.
+> I then want to use the actual category in the index to correctly display the
+> item.
+> Hope that makes sense.
+> Many thanks
+> Mark
+> On 6 Apr 2011, at 12:05, Ian Lea wrote:
+>
+> Query  subjectFilterQuery = new TermQuery(new
+> Term("category_path","/Top/Books*"));
+>
+> Try losing the asterisk.  Presumably the indexed term is "/Top/Books".
+>
+> You don't appear to be using the StandardAnalyzer you create in your
+> code sample but if you did searches wouldn't work since "/Top/Books"
+> would certainly be lower cased.  You've got /TOP/CD in there as well -
+> don't know where that came from.  Unless you want case-sensitive
+> searching I'd downcase these paths in advance, and replace / with some
+> character that will be ignored by any analyzers you might be using.
+>
+>
+> --
+> Ian.
+>
+>
+> On Wed, Apr 6, 2011 at 11:33 AM, Mark Wiltshire
+> <mark@redalertconsultants.co.uk> wrote:
+>
+> Thanks Ian,
+>
+> I have managed to do that and through Luke I get My expected results.
+>
+> Here is now my Index Code.
+>
+>                 StringTokenizer st = buildSubjectArea(dbConnection, oid);
+>
+>                 int tokenCount = 0;
+>
+>                 while (st.hasMoreTokens()){
+>
+>                 tokenCount++;
+>
+>                 String categoryPath = st.nextToken();
+>
+>                     if (categoryPath.length() != 0) {
+>
+>                         ////doc.add(Field.Text("category", category));
+>
+>                     doc.add(new
+> Field("category_path",categoryPath,Field.Store.YES,Field.Index.NOT_ANALYZED));
+>
+>
+>
+>                     }
+>
+>                 }
+>
+> Now using Luke with KeyworkAnalyser if I enter
+>
+> category_path:/Top/My Prods*
+>
+> I get my expected results back.
+>
+> But I cannot get this working in my search code.
+>
+> I am using this field to filter the results, i.e.
+>
+> If I want Top Books I want to filter by /Top/Books*, if I want Top CD's I
+> want to filter by /Top/CD*
+>
+> Filter string is generated from mapping file which gives me a category path
+>
+> e.g. /Top/Books
+>
+> Searcher searcher = new IndexSearcher(FSDirectory.open(new File(index)));
+>
+> Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_30);
+>
+> ...
+>
+> Query  subjectFilterQuery = new TermQuery(new
+> Term("category_path","/Top/Books*"));
+>
+> QueryWrapperFilter filter = new QueryWrapperFilter(subjectFilterQuery);
+>
+> TopDocs searchResult =
+> searcher.search(query,filter,MAX_SEARCH_RESULTS_SIZE);
+>
+> If I debug the subjectFilterQuery and write out
+>
+> subjectFilterQuery.toString()
+>
+> I See
+>
+> "subjectFilterQuery.toString()" category_path:/TOP/CD*
+>
+> So it looks like the query is constructed correctly ?
+>
+> But this does not bring back any results ?
+>
+> You say I need to be consistent in Index and Query, am I missing something.
+>
+> Many thanks
+>
+> Mark
+>
+> On 6 Apr 2011, at 10:06, Ian Lea wrote:
+>
+> You can add multiple values for a field to a single document.
+>
+> Document doc = new Document();
+>
+> String[] paths = whatever.split(",");
+>
+> for (String p : paths) {
+>
+>  doc.add(new Field("path", p, whatever ...);
+>
+> }
+>
+>
+> For searching, assuming you only want to be able to wildcard on path
+>
+> delimiters, you could index
+>
+> /Top/My Prods/Book Prods/Text Books
+>
+> /Top/My Prods/Book Prods
+>
+> /Top/My Prods
+>
+> /Top
+>
+> which would let you search on any of them.
+>
+> You'll want to pick or build an analyzer that behaves as you want wrt
+>
+> case matching and not splitting on the /.  Sometime it can be easier
+>
+> to replace a character e.g. / to _.  I think there is a lucene class
+>
+> that can do that, maybe MappingCharFilter, if you don't want to do it
+>
+> yourself.  You will of course need to be consistent and do the same
+>
+> processing at index and search time.
+>
+>
+> --
+>
+> Ian.
+>
+>
+>
+> On Wed, Apr 6, 2011 at 7:55 AM, Mark Wiltshire
+>
+> <mark@redalertconsultants.co.uk> wrote:
+>
+> To add more information
+>
+>        I am then wanting to search this field using part or all of the path
+> using wildcards
+>
+>        i.e.
+>
+>        Search category_path with /Top/My Prods*
+>
+>
+> Hi java-users
+>
+>        I need some help.
+>
+>        I am indexing categories into a single field category_path
+>
+>        Which may contain items such as
+>
+>        /Top/Books,/Top/My Prods/Book Prods/Text Books,
+> /Maths/Books/TextBooks
+>
+>        i.e. category paths delimited by ,
+>
+>        I want to store this field, so the Analyser tokenizes the document
+> only on ',' charaters and not on the '/' characters
+>
+>        I am adding the field to the index using
+>
+>        Where the categoryPath is a String containing list of the items
+> above.
+>
+>        doc.add(new
+> Field("category_path",categoryPath,Field.Store.YES,Field.Index.ANALYZED));
+>
+>        I think I need to split the string my self, but how do I pass this to
+> Lucene, do I have to setup different fields ?
+>
+>        I need to keep the full path in the index, as I want to use this when
+> redirecting users, when clicking on the results.
+>
+>        Any help would be great.
+>
+>        Many thanks
+>
+> Regards
+>
+> Mark
+>
+> ---------------------------------------------------------------------
+>
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

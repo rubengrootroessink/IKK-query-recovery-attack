@@ -1,0 +1,146 @@
+FROM: Fredrik <fred...@start.no>
+SUBJECT: OutOfMemory when calling SegmentTermEnum.growBuffer(..) during search
+DATE: 24 Aug 2005
+
+We have a Lucene powered search with approx 1,2 million documents indexed.
+We get sporadic OutOfMemory errors when users search this index (have tried
+rebuilding the index several times from scratch), as Lucene tries to allocate
+over 500 MB of memory.
+
+Luke reports the following details:
+Number of fields: 17
+Number of documents: 1165726
+Number of terms: 6721726
+The size of the index is approx 5,3 GB.
+Lucene version is 1.4.3.
+
+The index contains Norwegian terms, but lots of inline HTML, etc
+is probably increasing the index term count (should 'wash' these
+unwanted terms away when indexing documents).
+
+----------- analysis -----------
+<aF[338]: Allocation Failure. need 532676624 bytes, 105670 ms since last AF>
+<aF[338]: managing allocation failure, action=2 (64317856/2044721664)>
+<GC(750): GC cycle started Thu Jun 9 10:48:00 2005
+<GC(750): freed 593221816 bytes, 32% free (657539672/2044721664), in 10944 ms>
+<GC(750): mark: 2888 ms, sweep: 239 ms, compact: 7817 ms>
+<GC(750): refs: soft 0 (age >= 32), weak 356, final 1083, phantom 0>
+<GC(750): moved 16099123 objects, 1183312592 bytes, reason=1, used 13328 more bytes>
+<aF[338]: managing allocation failure, action=3 (657539672/2044721664)>
+<aF[338]: managing allocation failure, action=4 (657539672/2044721664)>
+<aF[338]: managing allocation failure, action=6 (657539672/2044721664)>
+JVMDG217: Dump Handler is Processing OutOfMemory - Please Wait.
+---------- end of analysis ------------
+
+An analysis of the heap dump shows that the two largest contiguous
+memory segmets at the time, was 512,230,096 and 137,232,560 bytes large.
+
+'need 532676624 bytes' means that something is allocating a 500Mb slab
+of memory.
+'action=2' means that this much memory was not available at all; and it
+goes through a normal GC cycle. The GC cycle needs to perform a
+compaction to be able to make a 500Mb slab available, which takes around
+8 seconds.
+'action=3', 4 and 6 indicate that the compaction did not help, and that
+even though there is around 650Mb free space in the heap, there is no
+block large enough to hold the requestet array.
+
+This, in turn triggers a normal OutOfMemory, which we have configured to
+trigger a thread dump. (see below)
+
+--------- thread dump -------------
+ at
+org.apache.lucene.index.SegmentTermEnum.growBuffer(SegmentTermEnum.java(Compiled
+Code))
+ at
+org.apache.lucene.index.SegmentTermEnum.readTerm(SegmentTermEnum.java(Compiled
+Code))
+ at
+org.apache.lucene.index.SegmentTermEnum.next(SegmentTermEnum.java(Compiled
+Code))
+ at
+org.apache.lucene.index.TermInfosReader.scanEnum(TermInfosReader.java(Compiled
+Code))
+ at
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java(Compiled
+Code))
+ at
+org.apache.lucene.index.SegmentReader.docFreq(SegmentReader.java(Compiled
+Code))
+ at
+org.apache.lucene.index.MultiReader.docFreq(MultiReader.java(Compiled Code))
+ at org.apache.lucene.search.IndexSearcher.docFreq(IndexSearcher.java:69)
+ at org.apache.lucene.search.Similarity.idf(Similarity.java:255)
+ at
+org.apache.lucene.search.TermQuery$TermWeight.sumOfSquaredWeights(TermQuery.java:47)
+ at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(BooleanQuery.java:110)
+ at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(BooleanQuery.java:110)
+ at org.apache.lucene.search.Query.weight(Query.java(Compiled Code))
+ at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java(Compiled
+Code))
+ at org.apache.lucene.search.Hits.getMoreDocs(Hits.java(Compiled Code))
+ at org.apache.lucene.search.Hits.<init>(Hits.java:43)
+ at org.apache.lucene.search.Searcher.search(Searcher.java(Compiled Code))
+
+
+the growBuffer contains:
+  buffer = new char[length]
+length is the result of two readVInt() on the "tii" file (start +
+length)
+
+
+
+I made a local copy of the largest "tii" file and (using beanshell)
+read the two "variable ints":
+bsh % d = org.apache.lucene.store.FSDirectory.getDirectory("/tmp/",
+false);
+bsh % i = d.openFile("copy.tii");
+bsh % print (i.readVInt());
+266338303
+bsh % print (i.readVInt());
+0
+
+In other words (If I read the code correctly) _start_ is set to
+266338303 while 'length' is set to 0.  growBuffer allocates a char
+array, and (according to our GC logs) allocates 532676624 bytes (which
+is 266338303*2 + 18)  I am guessing the 18 additional bytes is type
+information, which is probably JVM-dependent.
+
+=======================
+So he question becomes:
+=======================
+Why on earth does our biggest segment think that it starts at 266 million
+characters?
+
+I just noticed that the hex value of the 266-million-tingy is ... ...
+drumroll ... ... fdfffff
+
+Now I'm thinking that either the read/write-operations dont work 100% or
+that there's a corrupt index.  However we _have_ tried to rebuild the
+index from scratch, so I don't think it's a corrupt index.
+
+And finally, the start of the 'tii' file is as follows:
+
+$ hexdump /tmp/test.tii | head
+0000000 ffff feff 0000 0000 0000 f3cc 0000 8000
+0000010 0000 1000 0000 0000 0000 0014 3107 3030
+0000020 3130 3831 0104 02fd 897f 0407 3203 3034
+0000030 0104 0380 0180 0788 0304 3633 0430 8001
+
+Can anyone please help?? :)
+
+Thank you,
+Fredrik Omland
+
+-------------------------------------------------------------------------
+Start.no tilbyr nå raskere bredbånd til lavere pris.
+Sjekk http://www.start.no/bredband/ for mer informasjon
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

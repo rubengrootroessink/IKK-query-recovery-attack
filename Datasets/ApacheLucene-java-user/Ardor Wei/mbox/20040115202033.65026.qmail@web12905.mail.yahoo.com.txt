@@ -1,0 +1,182 @@
+FROM: Ardor Wei <ardor...@yahoo.com>
+SUBJECT: Help on IOException and FileNotFoundException (synchronization issue)
+DATE: 15 Jan 2004
+
+Hi, experts, 
+
+I am new to Lucene. I am trying to fix bugs in
+existing code. I read Lucene final 1.3 Doc (some of
+API) and searched the related thread on the mailing
+list archive. But I still couldn't solve problem even
+though I know 
+the problem might be related to synchronization
+issues. Typically I encountered 3 types of problem:
+couldn't delete, file not found, lock obtain timeout.
+Here are some exception stacks: (Sorry for the long
+post.)
+java.io.IOException: couldn't delete _17.fdt
+        at
+org.apache.lucene.store.FSDirectory.create(FSDirectory.java:166)
+        at
+org.apache.lucene.store.FSDirectory.<init>(FSDirectory.java:151)
+        at
+org.apache.lucene.store.FSDirectory.getDirectory(FSDirectory.java:132)
+        at
+org.apache.lucene.store.FSDirectory.getDirectory(FSDirectory.java:113)
+        at
+org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:151)
+        at
+com.panva.lucene.ProfileIndexer.<init>(ProfileIndexer.java:47)
+        at
+com.panva.lucene.ProfileDBIndexer.createIndex(ProfileDBIndexer.java:67)
+        at
+com.panva.lucene.MainIndexScheduler.createMainSearchIndex(MainIndexScheduler.java:99)
+        at
+com.panva.lucene.MainIndexScheduler.run(MainIndexScheduler.java:60)
+
+java.io.FileNotFoundException:
+C:\lucenesource\index\_17.f1 (The system cannot find
+the file specified)
+        at java.io.RandomAccessFile.open(Native
+Method)
+        at
+java.io.RandomAccessFile.<init>(RandomAccessFile.java:200)
+        at
+org.apache.lucene.store.FSInputStream$Descriptor.<init>(FSDirectory.java:389)
+        at
+org.apache.lucene.store.FSInputStream.<init>(FSDirectory.java:418)
+        at
+org.apache.lucene.store.FSDirectory.openFile(FSDirectory.java:291)
+        at
+org.apache.lucene.index.SegmentReader.openNorms(SegmentReader.java:388)
+        at
+org.apache.lucene.index.SegmentReader.<init>(SegmentReader.java:151)
+        at
+org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:423)
+        at
+org.apache.lucene.index.IndexWriter.maybeMergeSegments(IndexWriter.java:401)
+        at
+org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:260)
+        at
+org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:244)
+        at
+com.panva.lucene.ProfileIndexer.addProfile(ProfileIndexer.java:89)
+        at
+com.panva.lucene.ProfileDBIndexer.createIndex(ProfileDBIndexer.java:72)
+        at
+com.panva.lucene.MainIndexScheduler.createMainSearchIndex(MainIndexScheduler.java:99)
+        at
+com.panva.lucene.MainIndexScheduler.run(MainIndexScheduler.java:60)
+
+java.io.IOException: Lock obtain timed out
+        at
+org.apache.lucene.store.Lock.obtain(Lock.java:97)
+        at
+org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:173)
+        at
+org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:151)
+        at
+com.panva.lucene.ProfileIndexer.<init>(ProfileIndexer.java:47)
+        at
+com.panva.lucene.ProfileDBIndexer.createIndex(ProfileDBIndexer.java:67)
+        at
+com.panva.lucene.IndexScheduler.createRealTimeSearchIndex(IndexScheduler.java:103)
+        at
+com.panva.lucene.IndexScheduler.run(IndexScheduler.java:63)
+
+
+In my application, mutilple threads are writing and
+searching. Here is the code snippet (not complete, but
+should be enough):
+
+// ProfileDBIndexer.java
+public class ProfileDBIndexer
+{
+
+  public static void createIndex(String path, String
+sqlStmt) throws Throwable
+  {  // blah, blah
+    try
+    {
+      // DB code
+      rs = stmt.executeQuery(sqlStmt);
+
+      indexer = new ProfileIndexer(path, true);
+
+      while (rs.next())
+      {
+
+        Profile profile = getProfileFromResultSet(rs);
+        indexer.addProfile(profile);  // if I do
+synchronize(indexer) here and use writer.close() in
+tbe following addProfile() method,
+NullPointerException is thrown. Looks like    
+writeLock.release() in close() of IndexWriter throws
+this. 
+        noOfRecordsProcessed++ ;
+      }
+    }
+    catch (Exception e)
+    {
+      e.printStackTrace();
+    }
+    finally
+    {
+     // close DB connection
+    }
+  }
+}
+
+// ProfileIndexer.java
+public class ProfileIndexer {
+  IndexWriter writer;
+
+  public ProfileIndexer(String path, boolean create)
+throws IOException {
+    Analyzer analyzer = new AlphanumStopAnalyzer();
+    writer = new IndexWriter(path, analyzer, create);
+  }
+
+  public void addProfile(Profile profile) throws
+IOException {
+   Document document = new Document();
+
+    document.add(Field.Keyword("Username",
+profile.getUsername()));
+    ...... //many document.add() here
+
+    writer.addDocument(document);
+    // writer.optimize();
+    // writer.close();
+ }
+}
+
+
+In the thread class, the following method is called
+frequently:
+ProfileDBIndexer.createIndex( indexPath, indexQuery )
+;
+
+In my application, index searcher is driven by client
+request, not multi-threaded, it doesn't delete index
+file, and no synchronization is used.
+
+I tried to use synchronization for some methods, but
+it didn't work out. I know I didn't realize the real
+problem. I am lost.
+
+Could you help me or give any suggestion?  Thanks a
+lot in advance!
+
+Ardor Wei
+
+__________________________________
+Do you Yahoo!?
+Yahoo! Hotjobs: Enter the "Signing Bonus" Sweepstakes
+http://hotjobs.sweepstakes.yahoo.com/signingbonus
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

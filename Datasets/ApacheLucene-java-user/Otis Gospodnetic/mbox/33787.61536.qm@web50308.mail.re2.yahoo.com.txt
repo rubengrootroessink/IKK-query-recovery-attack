@@ -1,0 +1,263 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: NumericField indexing performance
+DATE: 15 Apr 2010
+
+Hi,
+
+I actually don't follow your change, because after "but changing it to" line the only different
+thing I see is the doc.add(dateField) call, which you didn't list before "but changing it
+to".
+
+Also, if I understood Uwe correctly, he was suggesting reusing NumericField instances, which
+means "new NumericField("date")" should exist and be called for only *once* in your code.
+ The same for Document instances.  GC threads will thank you and Uwe for this change.
+ Otis
+----
+Sematext :: http://sematext.com/ :: Solr - Lucene - Nutch
+Hadoop ecosystem search :: http://search-hadoop.com/
+
+
+
+----- Original Message ----
+> From: Tomislav Poljak <tpoljak@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Thu, April 15, 2010 7:41:02 AM
+> Subject: RE: NumericField indexing performance
+> 
+> Hi Uwe,
+thank you very much for your answers. I've done Document 
+> and
+NumericField reuse like this:
+
+Document doc = 
+> getDocument();
+NumericField dateField = new NumericField("date");
+
+for 
+> each 
+> doc:
+
+doc.add(dateField.setLongValue(Long.parseLong(DateTools.dateToString(date), 
+> DateTools.Resolution.MINUTE))));
+
+,but changing it to:
+
+Document doc 
+> = getDocument();
+NumericField dateField = new 
+> NumericField("date");
+doc.add(dateField);
+
+for each 
+> doc:
+
+dateField.setLongValue(Long.parseLong(DateTools.dateToString(date),
+DateTools.Resolution.MINUTE)));
+
+did 
+> the trick. Now indexing with NumericField takes minutes, not 
+> hours.
+
+Thanks again,
+
+Tomislav
+
+
+
+
+
+On Wed, 
+> 2010-04-14 at 23:38 +0200, Uwe Schindler wrote:
+> One addition:
+> If 
+> you are indexing millions of numeric fields, you should also try to reuse 
+> NumericField and Document instances (as described in JavaDocs). NumericField 
+> creates internally a NumericTokenStream and lots of small objects (attributes), 
+> so GC cost may be high. This is just another idea.
+> 
+> Uwe
+> 
+> 
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 
+> Bremen
+> 
+> >http://www.thetaphi.de
+> eMail: 
+> href="mailto:uwe@thetaphi.de">uwe@thetaphi.de
+> 
+> 
+> > 
+> -----Original Message-----
+> > From: Uwe Schindler [mailto:
+> ymailto="mailto:uwe@thetaphi.de" 
+> href="mailto:uwe@thetaphi.de">uwe@thetaphi.de]
+> > Sent: Wednesday, 
+> April 14, 2010 11:28 PM
+> > To: 
+> ymailto="mailto:java-user@lucene.apache.org" 
+> href="mailto:java-user@lucene.apache.org">java-user@lucene.apache.org
+> 
+> > Subject: RE: NumericField indexing performance
+> > 
+> > 
+> Hi Tomislav,
+> > 
+> > indexing with NumericField takes longer 
+> (at least for the default
+> > precision step of 4, which means out of 
+> 32 bit integers make 8 subterms
+> > with each 4 bits of the value). So 
+> you produce 8 times more terms
+> > during indexing that must be handled 
+> by the indexer. If you have lots
+> > of documents, with distinct values 
+> the term index gets larger and
+> > larger, but search performance 
+> increases dramatically (for
+> > NumericRangeQueries). So if you index 
+> *only* numeric fields and nothing
+> > else, a 8 times slower indexing 
+> can be true.
+> > 
+> > If you are not using NumericRangeQuery 
+> or you want tune indexing
+> > performance, try larger precision Steps 
+> like 6 or 8. If you don’t use
+> > NumericRangeQuery and only want to 
+> index the numeric terms as *one*
+> > term, use 
+> precStep=Integer.MAX_VALUE. Also check your memory
+> > requirements, as 
+> the indexer may need more memory and GC costs too
+> > much. Also the 
+> index size will increase, so lots of more I/O is done.
+> > Without more 
+> details I cannot say anything about your configuration. So
+> > please 
+> tell us, how many documents, how many fields and how many
+> > numeric 
+> fields in which configuration do you use?
+> > 
+> > Uwe
+> 
+> > 
+> > -----
+> > Uwe Schindler
+> > 
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> > 
+> href="http://www.thetaphi.de" target=_blank >http://www.thetaphi.de
+> 
+> > eMail: 
+> href="mailto:uwe@thetaphi.de">uwe@thetaphi.de
+> > 
+> > 
+> 
+> > > -----Original Message-----
+> > > From: Tomislav 
+> Poljak [mailto:
+> href="mailto:tpoljak@gmail.com">tpoljak@gmail.com]
+> > > Sent: 
+> Wednesday, April 14, 2010 8:13 PM
+> > > To: 
+> ymailto="mailto:java-user@lucene.apache.org" 
+> href="mailto:java-user@lucene.apache.org">java-user@lucene.apache.org
+> 
+> > > Subject: NumericField indexing performance
+> > >
+> 
+> > > Hi,
+> > > is it normal for indexing time to increase up to 
+> 10 times after
+> > > introducing NumericField instead of Field (for 
+> two fields)?
+> > >
+> > > I've changed two date fields 
+> from String representation (Field) to
+> > > NumericField, now it 
+> is:
+> > >
+> > > doc.add(new 
+> NumericField("time").setIntValue(date.getTime()/24/3600))
+> > 
+> >
+> > > and after this change indexing took 10x more time (before 
+> it was few
+> > > minutes and after more than an hour and half). I've 
+> tested with a
+> > > simple
+> > > counter like 
+> this:
+> > >
+> > > doc.add(new 
+> NumericField("endTime").setIntValue(count++))
+> > >
+> > 
+> > but nothing changed, it still takes around 10x longer. If I comment
+> 
+> > > adding one numeric field to index time drops significantly and if 
+> I
+> > > comment both fields indexing takes only few minutes 
+> again.
+> > >
+> > > Tomislav
+> > >
+> 
+> > >
+> > > 
+> ---------------------------------------------------------------------
+> 
+> > > To unsubscribe, e-mail: 
+> ymailto="mailto:java-user-unsubscribe@lucene.apache.org" 
+> href="mailto:java-user-unsubscribe@lucene.apache.org">java-user-unsubscribe@lucene.apache.org
+> 
+> > > For additional commands, e-mail: 
+> ymailto="mailto:java-user-help@lucene.apache.org" 
+> href="mailto:java-user-help@lucene.apache.org">java-user-help@lucene.apache.org
+> 
+> > 
+> > 
+> > 
+> > 
+> ---------------------------------------------------------------------
+> 
+> > To unsubscribe, e-mail: 
+> ymailto="mailto:java-user-unsubscribe@lucene.apache.org" 
+> href="mailto:java-user-unsubscribe@lucene.apache.org">java-user-unsubscribe@lucene.apache.org
+> 
+> > For additional commands, e-mail: 
+> ymailto="mailto:java-user-help@lucene.apache.org" 
+> href="mailto:java-user-help@lucene.apache.org">java-user-help@lucene.apache.org
+> 
+> 
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To 
+> unsubscribe, e-mail: 
+> href="mailto:java-user-unsubscribe@lucene.apache.org">java-user-unsubscribe@lucene.apache.org
+> 
+> For additional commands, e-mail: 
+> ymailto="mailto:java-user-help@lucene.apache.org" 
+> href="mailto:java-user-help@lucene.apache.org">java-user-help@lucene.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To 
+> unsubscribe, e-mail: 
+> href="mailto:java-user-unsubscribe@lucene.apache.org">java-user-unsubscribe@lucene.apache.org
+For 
+> additional commands, e-mail: 
+> ymailto="mailto:java-user-help@lucene.apache.org" 
+> href="mailto:java-user-help@lucene.apache.org">java-user-help@lucene.apache.org
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

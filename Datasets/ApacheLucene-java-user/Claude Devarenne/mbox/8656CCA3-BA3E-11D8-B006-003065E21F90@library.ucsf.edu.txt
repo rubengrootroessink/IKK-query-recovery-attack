@@ -1,0 +1,374 @@
+FROM: Claude Devarenne <cla...@library.ucsf.edu>
+SUBJECT: Re: Another way to handle large numeric range queries
+DATE: 9 Jun 2004
+
+Hi,
+
+Very nice, thank you!  I finally got around writing a filter to handle  
+date ranges in YYYYMMDD format and it seems to work fine. I basically  
+adapted the DateFilter code for my purposes.  I was wondering if  
+someone could quickly review the code and tell me if I am missing  
+something.  Thank you in advance for your time.
+
+Claude
+
+RangeFilter.java
+------------------------
+package org.apache.lucene.search;
+
+/**
+  * Copyright 2004 The Apache Software Foundation
+  *
+  * Licensed under the Apache License, Version 2.0 (the "License");
+  * you may not use this file except in compliance with the License.
+  * You may obtain a copy of the License at
+  *
+  *     http://www.apache.org/licenses/LICENSE-2.0
+  *
+  * Unless required by applicable law or agreed to in writing, software
+  * distributed under the License is distributed on an "AS IS" BASIS,
+  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or  
+implied.
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+
+import java.util.BitSet;
+import java.io.IOException;
+
+//import org.apache.lucene.document.DateField;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.index.TermEnum;
+import org.apache.lucene.index.IndexReader;
+
+/**
+  * A Filter that restricts search results to a range of time.
+  *
+  */
+public class RangeFilter extends Filter {
+   String field;
+   // dates are expected to be in the format YYYYMMDD
+   String start = "00000000";
+   String end = "99999999";
+
+   private RangeFilter(String f) {
+     field = f;
+   }
+
+   /**
+    * Constructs a filter for field <code>f</code> matching dates
+    * between <code>from</code> and <code>to</code> inclusively.
+    */
+   public RangeFilter(String f, String from, String to) {
+     field = f;
+     start = from;
+     end = to;
+   }
+
+   /**
+    * Constructs a filter for field <code>f</code> matching
+    * dates on or before before <code>date</code>.
+    */
+   public static RangeFilter Before(String field, String date) {
+     RangeFilter result = new RangeFilter(field);
+     result.end = date;
+     return result;
+   }
+
+   /**
+    * Constructs a filter for field <code>f</code> matching
+    * dates on or after <code>date</code>.
+    */
+   public static RangeFilter After(String field, String date) {
+     RangeFilter result = new RangeFilter(field);
+     result.start = date;
+     return result;
+   }
+
+
+   /**
+    * Returns a BitSet with true for documents which should be
+    * permitted in search results, and false for those that should
+    * not.
+    */
+   public BitSet bits(IndexReader reader) throws IOException {
+     BitSet bits = new BitSet(reader.maxDoc());
+     TermEnum enumerator = reader.terms(new Term(field, start));
+     TermDocs termDocs = reader.termDocs();
+     if (enumerator.term() == null) {
+       return bits;
+     }
+
+     try {
+       Term stop = new Term(field, end);
+       while (enumerator.term().compareTo(stop) <= 0) {
+         termDocs.seek(enumerator.term());
+         while (termDocs.next()) {
+           bits.set(termDocs.doc());
+         }
+         if (!enumerator.next()) {
+           break;
+         }
+       }
+     } finally {
+       enumerator.close();
+       termDocs.close();
+     }
+     return bits;
+   }
+
+   public String toString() {
+     StringBuffer buffer = new StringBuffer();
+     buffer.append(field);
+     buffer.append(":");
+     buffer.append(start);
+     buffer.append("-");
+     buffer.append(end);
+     return buffer.toString();
+   }
+}
+
+------------------------
+
+poor man's unit test: TestRangefilter.java
+------------------------
+
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.search.*;
+import org.apache.lucene.search.RangeFilter;
+import org.apache.lucene.index.IndexReader;
+import java.io.IOException;
+
+
+  /**
+   * RangeFilter unit tests.
+   *
+   * @author
+   * @version $Revision: 1.5 $
+   */
+public class TestRangeFilter
+{
+
+	String dirRealPath = "/web/gfdocs/index";
+	Searcher searcher = null;
+	IndexReader idxReader = null;
+	Analyzer analyzer = new StandardAnalyzer();
+	
+	public void initSearch()  throws IOException {
+			this.idxReader = IndexReader.open(this.dirRealPath);
+			this.searcher = new IndexSearcher(this.idxReader);
+			System.out.println("Searcher created successfully!");
+	}
+	
+     public void testBefore() throws IOException {
+		// filter that should preserve matches
+		RangeFilter df1 = RangeFilter.Before("normdd", "19900000");
+
+		// filter that should discard matches
+		RangeFilter df2 = RangeFilter.Before("normdd", "00000000");
+
+		// search something that doesn't exist with DateFilter
+		Query query1 = new TermQuery(new Term("ti", "NoMatchForThis"));
+
+		// search for something that does exists
+		Query query2 = new TermQuery(new Term("ti", "excretion"));
+
+		Hits result;
+		
+		System.out.println("testBefore");
+
+		// ensure that queries return expected results without RangeFilter  
+first
+		result = searcher.search(query1);
+		System.out.println("zero is " +result.length());
+
+		result = searcher.search(query2);
+		System.out.println("not zero is " + result.length());
+
+
+		// run queries with TestRangeFilter
+		result = searcher.search(query1, df1);
+		System.out.println("zero is " + result.length());
+
+		result = searcher.search(query1, df2);
+		System.out.println("zero is " + result.length());
+
+		result = searcher.search(query2, df1);
+		System.out.println("not zero is " + result.length());
+
+		result = searcher.search(query2, df2);
+		System.out.println("zero is " + result.length());
+     }
+
+     public void testAfter() throws IOException {
+
+		// filter that should preserve matches
+		RangeFilter df1 = RangeFilter.After("normdd", "19740000");
+
+		// filter that should discard matches
+		RangeFilter df2 = RangeFilter.After("normdd", "99999999");
+
+		// search something that doesn't exist with TestRangeFilter
+		Query query1 = new TermQuery(new Term("ti", "NoMatchForThis"));
+
+		// search for something that does exists
+		Query query2 = new TermQuery(new Term("ti", "excretion"));
+
+		Hits result;
+		
+		System.out.println("\ntestAfter\n");
+
+		// ensure that queries return expected results without RangeFilter  
+first
+		result = searcher.search(query1);
+		System.out.println("zero is " + result.length());
+
+		result = searcher.search(query2);
+		System.out.println("not zero is " + result.length());
+
+		// run queries with TestRangeFilter
+		result = searcher.search(query1, df1);
+		System.out.println("zero is " + result.length());
+
+		result = searcher.search(query1, df2);
+		System.out.println("zero is " + result.length());
+
+		result = searcher.search(query2, df1);
+		System.out.println("not zero is " + result.length());
+
+		result = searcher.search(query2, df2);
+		System.out.println("zero is " + result.length());
+     }
+	
+     public void testBetween() throws IOException {
+		
+		// filter that should preserve matches
+		RangeFilter df1 = new RangeFilter("normdd", "19740000", "19841231");
+		
+		// filter that should discard matches
+		RangeFilter df2 = new RangeFilter("normdd", "19000000", "19200000");
+		
+		// search something that doesn't exist with TestRangeFilter
+		Query query1 = new TermQuery(new Term("ti", "NoMatchForThis"));
+		
+		// search for something that does exists
+		Query query2 = new TermQuery(new Term("ti", "excretion"));
+		
+		Hits result;
+		
+		System.out.println("\ntestBetween\n");
+		
+		// ensure that queries return expected results without RangeFilter  
+first
+		result = searcher.search(query1);
+		System.out.println("zero is " + result.length());
+		
+		result = searcher.search(query2);
+		System.out.println("not zero is " + result.length());
+		
+		// run queries with TestRangeFilter
+		result = searcher.search(query1, df1);
+		System.out.println("zero is " + result.length());
+		
+		result = searcher.search(query1, df2);
+		System.out.println("zero is " + result.length());
+		
+		result = searcher.search(query2, df1);
+		System.out.println("not zero is " + result.length());
+		
+		result = searcher.search(query2, df2);
+		System.out.println("zero is " + result.length());
+     }
+	
+	public static void main(String [] args) {
+		
+		TestRangeFilter app = new TestRangeFilter();
+		try {
+			app.initSearch();
+			app.testBefore();
+			app.testAfter();
+			app.testBetween();
+		} catch (IOException ioe) {
+			System.out.println("Caught error: " + ioe.toString());
+			if (app.searcher != null) {
+				try {
+					app.searcher.close();
+					app.searcher = null;
+				} catch (IOException ie) {
+					System.out.println("Caught error: " + ie.toString());
+				}
+			}
+		}
+	}
+}
+------------------------
+
+
+On Jun 8, 2004, at 7:55 PM, Don Gilbert wrote:
+
+>
+> I ran into this problem using current Lucene implementation
+> of rangeQuery applied to genome data (search a chromosome
+> range from 1..20MB).  We wanted to use lucene queries like
+>
+>   +organism:fruitfly +chromosome:X +location:[1000000 5000000]
+>
+> to find all the genome features (1000s to 100,000s) that are
+> listed in some megabase range of a genome.  This failed
+> quickly with small ranges using the basic Lucene RangeQuery.
+> My solution was to scores each document that falls in the
+> query range into a BitSet:
+>
+> class NumRangeQuery extends Query
+>   public NumRangeQuery(Term first, Term last, boolean inc);
+>
+> -- full numeric (integer) range query, can handle large ranges.
+> -- makes a BitSet of documents within range once, and feeds back to
+> Searcher thru score(HitCollector c, int end) as often as called.
+> -- query semantics are same as for RangeQuery
+> -- implicit assumptions are
+>  -- first, last Term have integer values, as does indexed field
+>  -- indexed field is recoded for alphanumeric sorting;
+>    e.g.  2 -> 0000000002, 10 -> 0000000010, -3 ->  -0000000003
+>
+> Find this as part of the 'LuceGene' package for searching
+> genome and bioinformatics databases at http://www.gmod.org/lucegene/
+> with lucene related source code in cvs here:
+>
+> http://cvs.sourceforge.net/viewcvs.py/gmod/lucegene/src/org/eugenes/ 
+> index/
+> NumRangeQuery.java -- range searches of integer fields.
+> LGQueryParser.java -- extension of QueryParser for NumRangeQuery (&  
+> other)
+> BioDataAnalyzer.java -- NumberField formats field for indexing
+>
+> -- Don Gilbert
+>> Date: Tue, 18 May 2004 13:35:55 -0700
+>> From: Andy Goodell <goodell@gmail.com>
+>> Subject: How to handle range queries over large ranges and avoid Too  
+>> Many Boolean cla
+>>
+>> In our application we had a similar problem with non-date ranges until
+>> we realized that it wasnt so much that we were searching for the
+>> values in the range as restricting the search to that range, and then
+>> we used an extension to the org.apache.lucene.search.Filter class, and
+>> our implementation got much simpler and faster.
+>
+> -- d.gilbert--bioinformatics--indiana-u--bloomington-in-47405
+> -- gilbertd@indiana.edu--http://marmot.bio.indiana.edu/
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+

@@ -1,0 +1,115 @@
+FROM: Ian Lea <ian....@gmail.com>
+SUBJECT: Re: IndexSearch very slow after reopening the index
+DATE: 14 Oct 2010
+
+Do the fast searches that you get while the app is running use the
+searcher you create before you add all the docs to the index?  Surely
+that won't see the added docs.
+
+There are general tips on speeding up searches at
+http://wiki.apache.org/lucene-java/ImproveSearchingSpeed.  There are
+some gotchas with MMapDirectory depending on your OS and whether you
+are 32 or 64 bit - see the javadocs.  What are you running? What
+happens when you use a standard disk based directory rather than MMap?
+ How many docs are you adding?  How big is the index?  What version of
+lucene are you using?
+
+Your NumericRangeQuery doesn't look much like a range but I doubt
+that's the problem.
+
+Finally, you could run a profiler to see where the time is being spent.
+
+
+--
+Ian.
+
+On Thu, Oct 14, 2010 at 10:07 AM, subwayne
+<labrassbandito@googlemail.com> wrote:
+>
+> Hi,
+>
+> I'am facing some problems in using Lucene. The index I am using is
+> constructed like this:
+>
+> try {
+>  Analyzer analyzer = new SnowballAnalyzer(Version.LUCENE_30, "English");
+>  Directory dir = MMapDirectory.open(index);
+>  IndexWriter writer = new IndexWriter(dir, analyzer,
+> MaxFieldLength.LIMITED);
+>  searcher = new IndexSearcher(dir);
+>
+>  Document luceneDocument;
+>  int numClusters = clustering.getClusterCount();
+>  String[] clusterLabels = clustering.getClusterLabels();
+>  for (int cluId = 0; cluId != numClusters; ++cluId) {
+>    int[] docIds = clustering.getItemsOfCluster(cluId);
+>    for (int docId : docIds) {
+>      luceneDocument = new Document();
+>      luceneDocument.add(new NumericField("id", Field.Store.YES,
+> true).setIntValue(docId));
+>      luceneDocument.add(new NumericField("cluster_id", Field.Store.YES,
+> true).setIntValue(cluId));
+>      luceneDocument.add(new Field(
+>        "plaintext", texts.get(docId),
+>        Field.Store.NO,
+>        Field.Index.ANALYZED,
+>        Field.TermVector.YES));
+>      luceneDocument.add(new Field(
+>        "label", clusterLabels[cluId],
+>        Field.Store.YES,
+>        Field.Index.ANALYZED,
+>        Field.TermVector.YES));
+>      writer.addDocument(luceneDocument);
+>    }
+>  }
+>
+>  writer.optimize();
+>  writer.close();
+>
+> } catch (IOException e) {
+>  e.printStackTrace();
+> }
+>
+> Then, while the Java application is running, the speed of Lucene is good. I
+> can sift through about 11,000 categories in a few minutes. However, if I
+> restart the application and read in the previous created Lucene index
+> instead of generating a new one via:
+>
+> try {
+>  Directory dir = MMapDirectory.open(index);
+>  searcher = new IndexSearcher(dir);
+> } catch (CorruptIndexException e) {
+>  e.printStackTrace();
+> } catch (IOException e) {
+>  e.printStackTrace();
+> }
+>
+> Now, only about 10 categories are examined within a few minutes instead of
+> 11,000 categories like before. Subsequently, my question is why the access
+> to Lucene is very slow in the second case. A usually query looks like this:
+>
+> BooleanQuery booleanQuery = new BooleanQuery();
+> Term luceneTerm = new Term(PLAINTEXT, stemmer.process(candidate));
+> TermQuery termQuery = new TermQuery(luceneTerm);
+> booleanQuery.add(termQuery, BooleanClause.Occur.MUST);
+> NumericRangeQuery<Integer> lTerm =
+> NumericRangeQuery.newIntRange(CLUSTER_ID, clusterId, clusterId, true, true);
+> booleanQuery.add(lTerm, BooleanClause.Occur.MUST);
+> TopDocs resultSet = queryIndex(searcher, booleanQuery);
+>
+> Thank you!
+> --
+> View this message in context: http://lucene.472066.n3.nabble.com/IndexSearch-very-slow-after-reopening-the-index-tp1699711p1699711.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

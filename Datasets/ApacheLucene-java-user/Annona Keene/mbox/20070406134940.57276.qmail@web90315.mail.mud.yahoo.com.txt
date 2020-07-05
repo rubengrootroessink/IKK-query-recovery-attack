@@ -1,0 +1,109 @@
+FROM: Annona Keene <annonake...@yahoo.com>
+SUBJECT: Re: Explanation from FunctionQuery
+DATE: 6 Apr 2007
+
+Ok, glossing over some of the details was not the best idea. ms is a MultiSearcher in that
+it's something I wrote that extends MultiSearcher.  And this part I should have mentioned
+before, the explain method being called is the one in org.apache.lucene.search.Searcher. So
+explain is 
+
+  public Explanation explain(Query query, int doc) throws IOException {
+    return explain(createWeight(query), doc);
+  }
+
+I've verified that I am in fact calling the explain method that I think I am. Here's the full
+stack trace:
+
+java.lang.UnsupportedOperationException
+    at org.apache.lucene.search.Query.extractTerms(Query.java:163)
+    at org.apache.lucene.search.BooleanQuery.extractTerms(BooleanQuery.java:425)
+    at org.apache.lucene.search.MultiSearcher.createWeight(MultiSearcher.java:292)
+    at org.apache.lucene.search.Searcher.explain(Searcher.java:143)
+    at com.testing.documentationsearch.DocumentationSearcher.search(DocumentationSearcher.java:197)
+    at com.testing.documentationsearch.DocumentationSearcher.search(DocumentationSearcher.java:42)
+    at com.testing.documentationsearch.Test.main(Test.java:6)
+
+So we reach a problem at extractTerms.  I get an explanation no problem if I do not include
+the FunctionQuery in my BooleanQuery, so I can't see how this isn't related in some way to
+FunctionQuery.  Stepping through my code, I can see that the extractTerms in BooleanQuery
+  
+public void extractTerms(Set terms) {
+      for (Iterator i = clauses.iterator(); i.hasNext();) {
+          BooleanClause clause = (BooleanClause) i.next();
+          clause.getQuery().extractTerms(terms);
+        }
+  }
+
+goes swimmingly until the clause is the FunctionQuery clause.  extractTerms is being called
+on LinearFloatFunction:1.0*float(int(num))+1.0)^1.0, and that is where the UnsupportedOperationException
+occurs.  
+
+So it seems to me like there's something simple here I'm missing. I've used the FunctionQuery
+as part of a BooleanQuery, which is the advice I found searching this list. Am I not using
+it correctly in the BooleanQuery? Here is the code I sent previously: 
+
+           Query query = parser.parse(newCriteria);
+
+            LinearFloatFunction lff = new LinearFloatFunction(new IntFieldSource("num"), 1.0f,
+1.0f);
+            FunctionQuery fQ = new FunctionQuery(lff);
+            
+            BooleanQuery bQ = new BooleanQuery();
+            bQ.add(query, BooleanClause.Occur.MUST);
+            bQ.add(fQ, BooleanClause.Occur.SHOULD); 
+
+I'm using the version of FunctionQuery from the JIRA attachment.
+
+I appreciate your input, and I would be very grateful for any other insight you could offer.
+I am eager to get this working!
+
+Thanks again,
+Ann
+
+
+----- Original Message ----
+From: Chris Hostetter <hossman_lucene@fucit.org>
+To: java-user@lucene.apache.org
+Sent: Thursday, April 5, 2007 4:58:30 PM
+Subject: Re: Explanation from FunctionQuery
+
+
+1) which version of FunctionQuery are you using (from the solr repository
+or from a Jira issue attachment?)
+2) what is hte full stacktrace? (ie: which function/line is throwing the
+Exception)
+
+FunctionQuery supports explain just fine, not sure why you'd have
+problems, oh wait ... i see exactly what hte problem is...
+
+: The ms is a MultiSearcher.  I read that
+
+...this is the implemnetation for MultiSearcher...
+
+    public Explanation explain(Weight weight,int doc) {
+      throw new UnsupportedOperationException();
+    }
+
+...it's got nothing to do with FunctionQuery.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+
+
+
+ 
+____________________________________________________________________________________
+Bored stiff? Loosen up... 
+Download and play hundreds of games for free on Yahoo! Games.
+http://games.yahoo.com/games/front

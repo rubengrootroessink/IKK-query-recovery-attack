@@ -1,0 +1,133 @@
+FROM: Babak Farhang <farh...@gmail.com>
+SUBJECT: Re: incremental document field update
+DATE: 17 Jan 2010
+
+> So the idea is, I can change the field for only a few docs in a
+> massive index, and the amount of "work" done, and bytes written, is in
+> proportion only to how many docs were changed?
+
+Exactly. We append auxiliary data to the parallel segment and
+delay rewriting the segment to when it'll be merged with another segment.
+
+
+> What would the actual data structure look like on disk?
+
+Something like a surrogate docs log file
+
+<rowCount><<int><int>>**rowCount
+
+a fixed-width table, each row mapping a deleted doc-id to its "surrogate"
+doc-id. The mapping entries are not sorted; it's a log file. If 2
+entries reference the
+same deleted doc-id, the last one wins. The <rowCount> header makes the
+structure self-delimiting, and ensures clean writes (perhaps using a byte-size
+keystone).
+
+
+> And what
+> would be loaded into RAM such that eg enumerating a postings lists
+> would work correctly?  You'd have to remap docIDs on the fly, right?
+
+Yes, on the fly. I think it boils down to 3 tasks:
+
+1. Map "view" doc-ids to surrogate doc-ids. Supports input, e.g. referring
+  to a doc by id.
+2. Map surrogate doc-ids to "view" doc-ids. Supports output.
+3. Re-sort postings quickly on output, and provide correct
+TermDocs.skipTo() semantics.
+
+For (1), I think an unordered HashMap<Integer,Integer> is good enough.
+For (2) and (3), something like a TreeMap<Integer,Integer> I imagine should be
+good enough too.  The sorted order of its keys (surrogate doc-ids)
+should also allow
+us to intersect the set of surrogate docs quickly with the already
+sorted outbound
+postings data, for example.
+
+Both maps would be built by replaying the surrogate docs log file.
+
+
+Maybe I should first try to bang out a prototype that works at the
+index level, not the
+segment level?
+
+-Babak
+
+On Sun, Jan 17, 2010 at 3:06 AM, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> On Sun, Jan 17, 2010 at 4:33 AM, Babak Farhang <farhang@gmail.com> wrote:
+>> Thanks Mike!  This is pretty cool..
+>>
+>> So LUCENE-1879 takes care of aligning (syncing) doc-ids across
+>> parallel index / segment merges. Missing is the machinery for
+>> updating a field (or fields) in a parallel slave index: to do this the
+>> appropriate segment in the slave index must somehow be rewritten.
+>> (right?)
+>
+> I think you're right -- though I haven't looked closely in a while.  I
+> think under LUCENE-1879, the entire secondary index must be fully
+> rewritten whenever any changes are made.  But the thinking is that the
+> secondary index has smallish fields so this might be OK (but I agree,
+> does not scale up well).
+>
+>> In order to support this feature, I'm thinking one could implement
+>> an UpdateableSlaveIndexWriter / UpdateableSlaveIndexReader
+>> pair. UpdateableSlaveIndexWriter is an IndexWriter with a special
+>> updateField[s] method that uses a (I think, per-segment, not sure)
+>> write-ahead log to map a to-be-deleted doc-id in to a newly created
+>> doc-id.  It also maintains other statistics such as a virtual maxDocId.
+>> The UpdateableSlaveIndexReader would play back this log file (if
+>> any) and maintain the mappings in-memory.
+>>
+>> I imagine there would also have to be a UpdateableSlaveIndexReader
+>> variant that works on individual slave index segments rather than the
+>> entire collection of segments that comprise the slave index. This, say,
+>> UpdateableSlaveIndexSegReader would be used in lieu of the
+>> SegmentReader instances currently used for merging segments.
+>
+> This sounds very interesting!
+>
+> So the idea is, I can change the field for only a few docs in a
+> massive index, and the amount of "work" done, and bytes written, is in
+> proportion only to how many docs were changed?
+>
+> What would the actual data structure look like on disk?  And what
+> would be loaded into RAM such that eg enumerating a postings lists
+> would work correctly?  You'd have to remap docIDs on the fly, right?
+>
+>> The SegmentMerger class appears to be sufficiently agnostic about the
+>> exact type of the IndexReader instances that represent the inputs to the
+>> merge (though it does favor SegmentReader subclasses). So far so
+>> good.  However, there appear to be a number of other junctures in the
+>> merge code that depend on the static SegmentReader.get methods.
+>> These would have to be indirected through some factory mechanism
+>> so that we could return our UpdateableSlaveIndexSegReader.
+>
+> Yeah this has been a growing problem... or at least others have bumped
+> up against this.  We are wanting to factor out the ReaderPool
+> (currently embedded in IndexWriter) to a public standalone class that
+> would be the "standard" factory for getting new SegmentReaders.  I
+> think SegmentMerger would then use this, and apps could specify their
+> own ReaderPool impl to produce whichever impl they wanted.  This is
+> being tracked (well, only started at this point) in LUCENE-2026.
+>
+>> Is the approach I'm describing sensible? Or did I get it all wrong? (This
+>> was my first look at this code, so it is entirely possible that I'm making
+>> a fool of myself ;)
+>
+> This sounds great so far!  Individually updateable fields would be an
+> awesome addition to Lucene (it's often asked about).
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,90 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Simple date/range question
+DATE: 2 Apr 2004
+
+Let me clarify what Otis meant as well as shed some light on the other 
+questions in this thread.
+
+On Apr 2, 2004, at 10:03 AM, lucene@nitwit.de wrote:
+> if (time != null) doc.add(Field.Keyword("date", new 
+> Date(time.getTime())));
+>
+> query:
+> date:[20030101 TO 20030202]
+> date:20030101
+>
+> The first query does throw a ParserException, the second doesn't 
+> return any
+> hits.
+
+QueryParser uses DateFormat.SHORT to parse dates using the default 
+locale.  20030101 does not parse using that format string.
+
+If you are truly only representing dates (not times) then use, what 
+Otis meant, YYYYMMDD *Strings* to represent the date.  If you need 
+times as well, first be aware of what RangeQuery does (expand all terms 
+in that range!) so that you aren't shocked with performance or a too 
+many clauses exception.
+
+When you use Field.Keyword(String, Date), the date is converted into a 
+lexicographically ordered value (the ugly thing you saw in Luke).  This 
+is why, if you only care about dates, YYYYMMDD is recommended (it must 
+sort properly).
+
+> Hmm...there must be something simple I misunderstood :) BTW what about 
+> custom
+> date format in QueryParser (...and are the last two digits actually 
+> the day
+> or month)?
+
+Custom date format in QueryParser is quite do-able.  Subclass 
+QueryParser and override getRangeQuery and do what you like there.
+
+I do something similar in Lucene in Action.  I'd like users to search 
+on ranges like lastmodified:[1/1/04 TO 12/31/04], but internally I 
+represent dates as YYYYMMDD.  To make the conversion, I had to have a 
+custom QueryParser....
+
+/**
+  * From Lucene in Action (Manning Publications)
+  */
+public class SmartDayQueryParser extends QueryParser {
+
+ public static final DateFormat formatter =
+     new SimpleDateFormat("yyyyMMdd");
+
+ public SmartDayQueryParser(String field, Analyzer analyzer) {
+   super(field, analyzer);
+ }
+
+ protected Query getRangeQuery(String field, Analyzer analyzer,
+                               String part1, String part2,
+                               boolean inclusive)
+     throws ParseException {
+   try {
+     DateFormat df =
+         DateFormat.getDateInstance(DateFormat.SHORT,
+             getLocale());
+     df.setLenient(true);
+     Date d1 = df.parse(part1);
+     Date d2 = df.parse(part2);
+     part1 = formatter.format(d1);
+     part2 = formatter.format(d2);
+   } catch (Exception ignored) {
+   }
+
+   return new RangeQuery(new Term(field, part1),
+       new Term(field, part2),
+       inclusive);
+ }
+}
+
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,169 @@
+FROM: "Colin Young" <Colin.Yo...@tembizi.com>
+SUBJECT: RE: Help with indexing and query strategy
+DATE: 31 Jan 2006
+
+Actually, I arrived at a very similar solution for indexing as you did,
+but I've been away from a connection, so I haven't been able to post it
+here.
+
+Essentially I'm adding the items as you suggest, but I've built a
+synonym injector (actually I'm just using the one from "Lucene in
+Action") to produce the synonyms, but as a result, I'm not tokenizing
+(i.e. when I pass in "New York" it doesn't get broken into 2 tokens) --
+essentially everything is stored in my database tokenized, so there
+isn't any need to do it when indexing, and it allows me to create
+synonyms for two-word items (e.g. "New York" also adds "NY").
+
+I'll have to take a closer look at your suggestion for searching,
+although I do have a working search. The only part that isn't working
+yet is doing partial matches (e.g. "London NH" should be able to match
+"Londonderry NH"). I've been playing with wildcard and prefix searches,
+and neither seem to be working for me. I don't know if it's because I've
+interfered with the tokenizing process, of if there's something else I'm
+missing, but I'm pretty sure it's not the tokenizing since I'm seeing
+the problem with single-word entries.
+
+Thanks for your assistance. It's been very helpful in getting me this
+far.
+
+Colin
+
+-----Original Message-----
+From: Rajesh Munavalli [mailto:findmath@gmail.com] 
+Sent: 30 January, 2006 13:16
+To: java-user@lucene.apache.org
+Subject: Re: Help with indexing and query strategy
+
+For now, the best I could come up with is the following scheme
+
+SAMPLE DOCUMENTS:
+------------------------------------
+Lets say there are four documents:
+
+Doc1: st louis, missouri, usa
+Doc2: st louis du ha ha, quebec, canada
+Doc3: new york, NY, united states of america
+Doc4: ny, usa
+
+INDEX PHASE:
+-----------------------
+Index the documents as follows:
+* Lucene index will have two fields
+    - Primary: To hold the primary information
+    - Secondary: To hold the secondary information
+
+Doc: PRIMARY:<primary_info> SECONDARY:<secondary_info>
+
+Doc1:    PRIMARY:    0 st louis
+    SECONDARY:    0 missouri
+            0 ms
+            1 usa
+            1 united states of america
+
+Doc 2:    PRIMARY:    0 st louis du ha ha
+    SECONDARY    0 quebec
+            0 qb
+            1 canada
+            1 ca
+
+Doc 3:    PRIMARY    0 new york
+            0 nyc
+    SECONDARY    0 ny
+            0 new york
+            1 united states of america
+            1 usa
+
+Doc 4:    PRIMARY    0 ny
+    SECONDARY    0 usa
+            0 united states of america
+
+
+QUERY PHASE:
+-------------------------
+At the query time split the query of "n" words as follows
+
+q1 q2 q3.....qn
+
+(primary:"q1"^1 AND secondary:"q2 q3 ....qn"^SLOPE 1) OR (primary:"q1
+q2"^2 AND secondary:"q3 q4....qn"^SLOPE 1) .........(primary:"q1
+q2...qn-1"^n-1
+secondary:"qn") OR (primary:"q1 q2...qn"^n)
+
+
+SAMPLE QUERY:
+---------------------------
+Query1:
+ "st louis du ha ha qb ca" (NOTE: not separated by any delimiters ",")
+
+Expanded query:
+------------------------
+(primary:"st"^1 AND secondary:"louis du ha ha qb ca"^SLOPE 1) OR
+(primary:"st louis"^2 AND secondary:"du ha ha qb ca"^SLOPE 1) OR
+(primary:"st louis du"^3 AND secondary:"ha ha qb ca"^SLOPE 1) OR
+(primary:"st louis du ha"^4 AND secondary:"ha qb ca"^SLOPE 1) OR
+(primary:"st louis du ha ha"^5 AND secondary:"qb ca"^SLOPE 1) OR
+(primary:"st louis du ha ha qb"^6 AND secondary:"ca") OR (primary:"st
+louis du ha ha qb ca")
+
+Result: This would retrieve Doc 2 only
+NOTE:
+----------
+Eventhough the query matches "st louis" in Doc 1" the secondary
+information does not match. Hence it wont be retrieved.
+
+
+Query 2:
+"ny united states of america"
+
+Expanded query:
+------------------------
+(primary:"ny"^1 AND secondary:"united states of america"^SLOPE 1) OR
+(primary:"ny united"^2 AND secondary:"states of america"^SLOPE 1) OR
+(primary:ny "united states"^3 AND secondary:"of america"^SLOPE 1) OR
+(primary:"ny united states of"^4 AND secondary:"america"^SLOPE 1) OR
+(primary:"ny united states of america"^5)
+
+Result: This would rertrieve Doc 4 only.
+
+I hope this helps....:)
+
+Good luck,
+
+Rajesh Munavalli
+
+On 1/27/06, Colin Young <Colin.Young@tembizi.com> wrote:
+>
+> 1) Yes. One location per document.
+>
+> 2) Using the SimpleAnalyzer (for now). I have city, state and country 
+> as separate fields, so I could tokenize each as a single token if that
+
+> would work better. I think that avoids the need for a delimiter at 
+> index time.
+>
+> 3) I am not making any assumptions now at query time, but the goal is 
+> that we should support commas and spaces (i.e. "London, Ontario,
+Canada"
+> or "London Ontario Canada" are equivalent). My unit tests are 
+> supplying the query assuming it's been tokenized already (i.e. I'm 
+> sending in String[] for the query terms).
+>
+> 4) We don't want to return Albany unless the user has Albany in the 
+> query.
+>
+> Thanks again for looking at this.
+>
+> Colin
+>
+
+Notice: This email message is for the sole use of the intended recipient(s) and may contain
+confidential and privileged information. Any unauthorized review, use, disclosure or distribution
+is prohibited. If you are not the intended recipient, please contact the sender by reply email
+and destroy all copies of the original message.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

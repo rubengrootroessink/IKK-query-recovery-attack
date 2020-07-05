@@ -1,0 +1,69 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: using lucene with a very large index
+DATE: 14 Feb 2002
+
+> From: tal blum [mailto:thetalthe@hotmail.com]
+>
+> 2) Does the Document id changes after merging indexes adding 
+> or deleting documents?
+
+Yes.
+
+> 4) assuming I have a term query that has a large number of 
+> hits say 10 millions, is there a way to get the say the top  
+> 10 results without going through all the hits?
+
+Your best bet is to use the normal search API.
+
+> From: tal blum [mailto:thetalthe@hotmail.com]
+>
+> one solution to that is to change the implementation and 
+> store the docs
+> sorted by their term score.
+
+That would make incremental index updates much slower, since every time a
+document is added, the list of documents containing each term in that
+document would need to be re-sorted.  Currently we only need to append new
+entries, which is much simpler.  You could optimize this in various ways
+(e.g., instead take the hit at search time) but it would still make things
+slower for rapidly changing indexes.
+
+Also, while this would make single term queries faster, multi-term queries
+are more complex to accellerate.  The highest scoring match for a two term
+query may be in a document where one term has a very high weight and the
+other has a very low weight.  There have been papers written (I don't have
+the references handy) exploring this issue, and, in general, there isn't an
+algorithm that is guaranteed to return the highest scoring documents for
+multi-term queries that does not in most cases have to process nearly all of
+the documents containing those terms.  That said, it is possible to use such
+an index to vastly accellerate searches that *usually* return the highest
+scoring documents.
+
+Such a heuristic search technique is among the things required to scale
+Lucene to extremely large collections (e.g., hundreds of millions of
+documents).  There are also lower-tech optimizations.  For example, one can
+simply keep a small index containing the highest-quality documents that is
+always searched first.  If enough hits are found there, you're done.  A real
+internet search engine combines lots of tricks in order to scale: segmenting
+indexes by quality; heuristic search methods; and distributed searching.
+Deploying something like Google is not a small task.
+
+I would someday like to add a heuristic search component to Lucene, that
+uses a special index format (possibly with term document lists sorted by
+normalized frequency, as you suggest).  I have some experience doing this at
+Excite, and it pays off big time.  But it would take me several weeks
+full-time to implement this, and I don't currently have that time.  Perhaps
+(with the support of an interested sponsor) I could make time this summer to
+implement this.
+
+In the meantime, if you encounter performance problems with a very large
+index, you might try segmenting your index by document quality and/or
+distributed search.
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

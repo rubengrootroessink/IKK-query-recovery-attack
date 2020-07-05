@@ -1,0 +1,71 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: Faceted search with OpenBitSet/SortedVIntList
+DATE: 8 Feb 2009
+
+Hi Paul:
+
+     Took a little time to find these classes, they are post-2.4 additions I
+think.
+
+     Our representation:
+
+1) We do not build on top of the FieldCacheImpl class for a few reasons: It
+is keyed off of the IndexReader, and application cannot clear the cache, and
+we assume indexes can update often, using FieldCacheImpl is not ideal. Also,
+to support faceted search, we need to store the value array, and the only
+thing available in FieldCacheImp is StringIndex. While this is nice and all,
+if data is of primitive types, e.g. int, short etc. this is wasteful.
+Another reason, though minor, is that we discovered with high doc count
+indexes, the order array, keyed from 0 to maxdoc, for each field we want to
+support, can cause problems with VM gc. We instead use a segmented index
+array representation. Lastly, our data structure is loaded at index load
+time, not lazily like FieldCacheImpl.
+
+2) So our forward index representation is an order array, a value array (of
+primitive type if specified), and some helper arrays which I will describe
+later in detail.
+
+3) For range queries, the idea is very similar to FieldCacheRangeFilter,
+except for our primitive value store, and make use of our helper array, e.g.
+min/max docid, e.g. for each value, we store corresponding min/max values,
+so we know to skip to starting doc and stop early at maxdoc.
+
+4) The differences between FieldCacheTermFilter are similar. Except that we
+cased out when termList contains 1 element. We felt that was neccessary due
+to the number of times next and skip are called when recall is large, the
+price to pay for bitset.get() is too high.
+
+5) We also consider the cases when indexed values are tokenized, e.g. 1 doc
+can have more than 1 value in a field. And that representation is a more
+involved than can be explained in an email. Comparing to 3), we need to
+consider the case of AND in addition to OR which can be assumed when only 1
+value per doc is allowed.
+
+6) We also support hierarchical data.
+
+I just merged to our trunk, feel free to take a look.
+
+-John
+
+On Sun, Feb 8, 2009 at 2:40 AM, Paul Elschot <paul.elschot@xs4all.nl> wrote:
+
+> John,
+>
+> On Sunday 08 February 2009 00:35:10 John Wang wrote:
+> > Our implementation of facet search can handle this. Using bitsets for
+> > intersection is not scalable performance wise when index is large.
+> >
+> > We are using a compact forwarded index representation in memory for the
+> > counting.
+>
+> Could you describe how this compact forwarded index works?
+>
+> > Similar to FieldCache idea but more compact.
+>
+> Does this also use FieldCacheRangeFilter and/or FieldCacheTermsFilter?
+>
+>
+> Regards,
+> Paul Elschot
+>
+

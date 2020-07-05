@@ -1,0 +1,99 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Refreshing RAMDirectory
+DATE: 13 Dec 2007
+
+Ruslan Sivak wrote:
+
+> Michael McCandless wrote:
+>>
+>> Ruslan Sivak wrote:
+>>
+>>> Michael McCandless wrote:
+>>>>
+>>>> Ruslan Sivak wrote:
+>>>>> Since my app would be multithreaded, there could be multiple  
+>>>>> threads accessing the reader, while i'm reloading it.  This  
+>>>>> means that if I close the reader, and another thread is using  
+>>>>> it, it might get an exception.
+>>>>
+>>>> The normal approach here is open a new reader, start sending new  
+>>>> searches to the new reader, and only once all existing searches  
+>>>> (and, possibly, search sessions, if for example you want  
+>>>> paginating through results to not suddenly change on the user)   
+>>>> are done with the old reader do you close the old one.
+>>>>
+>>> How exactly would I do something like this?   I'm not sure where  
+>>> to start.  From what I understand, the reader will be auto closed  
+>>> when there are no more references to it.  What if I did somehting  
+>>> like this
+>>>
+>>> Private IndexReader reader;
+>>>
+>>> public IndexReader getReader()
+>>> {
+>>>   if (we are reloading)
+>>>   {
+>>>      Directory dir = new RAMDirectory (indexName);
+>>>      reader = IndexReader.open(dir);
+>>>   }
+>>>   return reader;
+>>> }
+>>> public Results search(String searchTerms)
+>>> {
+>>>   IndexReader r=getReader()
+>>>   //Do search and return results
+>>> }
+>>>
+>>> This should work, right?  The local variable will hold a  
+>>> reference to a reader that it's using, and once it goes out of  
+>>> use, it should auto close, correct?  Is closing the reader even  
+>>> necessary?  Won't it just get collected by the GC once there are  
+>>> no more references to it?
+>>
+>> Well you could keep a counter of how many searches are presently  
+>> using the previous reader, and then the final search to finish  
+>> with the previous reader would close it?
+>>
+>> GC doesn't actually "close" the reader, though since you're using  
+>> RAMDirectory, you're not actually consuming any file descriptors  
+>> so I think it might be OK for you to never close and simply  
+>> replace your reader with the newly reopened one?  Normally this is  
+>> not recommended, ie, a reader against an FSDirectory uses up  
+>> precious file descriptors...
+>>
+>> Mike
+>>
+>
+> What about using something like decref?  Does anyone know the  
+> proper way to use it?  From the docs:
+>
+>
+>      decRef
+>
+> protected void *decRef*()
+>
+>               throws IOException <http://java.sun.com/j2se/1.4/docs/ 
+> api/java/io/IOException.html>
+>
+> Decreases the refCount of this IndexReader instance. If the  
+> refCount drops to 0, then pending changes are committed to the  
+> index and this reader is closed.
+
+
+That's a very good question!
+
+Well ... that's a protected method.  I think it would in fact work,
+except, it would only handle closing the reader (not the searcher).
+Though, IndexSearcher.close() currently does nothing besides closing
+the reader; but in theory that may change some day.
+
+You can do the same thing (reference counting) above your searcher and
+that would work.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

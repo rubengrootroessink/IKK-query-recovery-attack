@@ -1,0 +1,116 @@
+FROM: Adrian Tarau <adrian.ta...@gmail.com>
+SUBJECT: Re: Lucene & Transactional semantics
+DATE: 17 Jun 2008
+
+
+I had the same problem, so one year ago I implemented transactions on top of
+Lucene(I had an idea how to do it, but I also peeked a little bit in Compass
+sources). Basically I create a new index every time when a new transaction
+is started and this new index is made visible if commit is successful. Of
+course, you will still need to refresh your IndexReader(s). I planned also
+for a form of two-phase commit but right now it works pretty well doing
+everything manually - controlling when to commit/rollback/restore.
+
+How it works :
+
+1. start 2 transactions, one with MySQL one with Lucene(I have an abstract
+layer on top of both engines so the API calls are the same), commit first
+Lucene. 
+2. if Lucene fails, rollback MySQL.
+3. if Lucene commit(precommit actually - everything is stored, I have a new
+optimized index, ready to be used) is successful, commit MySQL.
+4. if MySQL fails, "cancel" Lucene transaction(remove index). There is a
+slightly chance to not being able to cancel the Lucene transaction(which is
+a new index). This index will hang there on disk/memory until the session is
+closed or the application is restarted.
+5. if MySQL commit is successful, the newly created Lucene index is
+"activated". There is a slightly chance to not being able to "activate"
+Lucene transaction(application crashes, disk full so cannot write state on
+disk) - so in this case the global transaction is "in-doubt". In this case a
+system administrator must act and activate the index(the index is fine, but
+not active) - after he fixes any existing problems - or decided to clear the
+database(you need eventually a unique global transaction id stored in the
+database too, as an additional column). Your data is in the database, the
+application works fine but some entries are "invisible" when searching.
+
+So is kind of a two-phase commit. You can read more about two-phase commit
+here :
+http://www.ibm.com/developerworks/db2/library/techarticle/dm-0611chang/ or
+just google about "two-phase commit". 
+
+ 
+
+
+
+Beto Siless wrote:
+> 
+> 
+> Hi, I'm with the transaction problem too: I have Documents which are 
+> represented by a Business Object (persisted in a DB with an ORM), 
+> indexed with Lucene and finally stored in the file system. So it's very 
+> difficult to maintain the consistency in an error scenario.
+> The main problem is that if you implement some ad-hoc transaction with 
+> Lucene (working in a RAMDirectory or keeping the commands to apply until 
+> the end), you still have to coordinate the lucene transaction with the 
+> others. Cause if lucene transaction rollbacks you can abort the db 
+> transaction, but if lucene transaction commits you can't do anything if 
+> the DB transaction fails with out a 3pc transaction manager.
+> Does Anybody have an idea about how to reduce the error time window? 
+> Could this problem be solved storing the index in a database?
+> Thanks
+> Beto
+> 
+> 
+> Marios Skounakis wrote:
+>> Hi all,
+>> 
+>> I am interested in developing a system which will use Lucene to implement
+>> the search functionality. A key characteristic of this system is that
+>> certain information about the indexed documents will be editable by the
+>> user administrators. For instance, the user administrators can manually
+>> create "document collections" and assign some of the indexed documents to
+>> them. One way to implement document collections would by having documents
+>> have a dedicated field for storing the document collection id, and
+>> storing the document collection information in a database.
+>> 
+>> Ideally, such an operation as the above should have transactional
+>> semantics, i.e. if a user wants to assign documents x, y and z to
+>> collection C, then either all three documents should be assigned to the
+>> collection or, in case of error, none of the documents should be assigned
+>> to the collection. Also, if the operation were to be followed by an SQL
+>> query to update the database with the number of documents assigned to
+>> collection C, that should be included in the "transaction" as well.
+>> 
+>> Is there a straightforward way to do this with Lucene? Or are
+>> "transactions" a no-no for a system like Lucene and I should just go
+>> ahead without having transactional semantics?
+>> 
+>> Thanks in advance,
+>> 
+>> Marios Skounakis
+>> 
+>> 
+>> ------------------------------------------------------------------------
+>> 
+>> No virus found in this incoming message.
+>> Checked by AVG Free Edition.
+>> Version: 7.1.362 / Virus Database: 267.13.1/169 - Release Date:
+>> 11/15/2005
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Lucene---Transactional-semantics-tp1509155p17936135.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

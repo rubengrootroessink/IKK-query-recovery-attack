@@ -1,0 +1,99 @@
+FROM: AHMET ARSLAN <iori...@yahoo.com>
+SUBJECT: RE: Payloads
+DATE: 19 Dec 2009
+
+
+> Let's say I have a document that
+> contains the following text:
+> 
+> "Graph Algorithms is one of the most important topics in
+> computer science"
+> 
+> And a query "!Graph Algorithms" then the term Graph in the
+> query should have
+> a double weight because the offset of Graph is 0 (and it is
+> even) - we apply
+> this doubling of weight only if a '!' operator precedes the
+> term and if its
+> offset from the document is even.
+
+I modified the TokenOffsetPayloadTokenFilter and created TermPositionPayloadTokenFilter.
+
+Index time you can use WhitespaceTokenizer + TermPositionPayloadTokenFilter to assign payload
+values of 2.0f to the tokens that have an even term position.
+
+Modifying the QueryParser to change the meaning of ! operator is very troublesome.
+If you can convert your query "!Graph Algorithms" to "Graph|2.0 Algorithms" you can use DelimitedPayloadTokenFilter
+to set payload of marked term. 
+
+Additionally you need to everride QueryParser to return PayloadTermQuery
+and scorePayload method of DefaultSimilarity.
+By doing so payloads will be included in score calculation.
+
+
+public class PayloadAnalyzer extends Analyzer {
+
+    public TokenStream tokenStream(String fieldName, Reader reader) {
+        TokenStream result = new WhitespaceTokenizer(reader);
+        result = new DelimitedPayloadTokenFilter(result, '|', new FloatEncoder());
+        return result;
+    }
+
+    public static void main(String[] args) throws ParseException {
+        QueryParser qp = new QueryParser(Version.LUCENE_29, "f", new PayloadAnalyzer());
+        System.out.println(qp.parse("Graph|2.0 Algorithms").toString());
+    }
+
+}
+public class TermPositionPayloadTokenFilter extends TokenFilter {
+
+    protected PayloadAttribute payAtt;
+    protected PositionIncrementAttribute posIncrAtt;
+
+    private static final Payload evenPayload = new Payload(PayloadHelper.encodeFloat(2.0f));
+
+    private int termPosition = 0;
+
+    public TermPositionPayloadTokenFilter(TokenStream input) {
+        super(input);
+        payAtt = (PayloadAttribute) addAttribute(PayloadAttribute.class);
+        posIncrAtt = (PositionIncrementAttribute) addAttribute(PositionIncrementAttribute.class);
+    }
+
+    public final boolean incrementToken() throws IOException {
+        if (input.incrementToken()) {
+            if ((termPosition % 2) == 0)
+                payAtt.setPayload(evenPayload);
+            termPosition += posIncrAtt.getPositionIncrement();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    public static void main(String[] args) throws IOException {
+        String test = "Graph Algorithms is one of the most important topics in computer science";
+        TokenStream tokenStream = new TermPositionPayloadTokenFilter(new WhitespaceTokenizer(new
+StringReader(test)));
+        TermAttribute termAtt = (TermAttribute) tokenStream.getAttribute(TermAttribute.class);
+        PayloadAttribute payloadAtt = (PayloadAttribute) tokenStream.getAttribute(PayloadAttribute.class);
+
+        while (tokenStream.incrementToken()) {
+            System.out.print(termAtt.term());
+            Payload payload = payloadAtt.getPayload();
+            if (payload != null)
+                System.out.println(" Payload = " + PayloadHelper.decodeFloat(payload.toByteArray()));
+            else
+                System.out.println(" Payload is null.");
+        }
+    }
+}
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

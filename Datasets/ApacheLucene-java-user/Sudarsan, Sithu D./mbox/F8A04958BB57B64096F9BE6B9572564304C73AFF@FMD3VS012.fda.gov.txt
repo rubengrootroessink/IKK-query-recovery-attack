@@ -1,0 +1,188 @@
+FROM: "Sudarsan, Sithu D." <Sithu.Sudar...@fda.hhs.gov>
+SUBJECT: RE: Multi -threaded indexing of large number of PDF documents
+DATE: 24 Oct 2008
+
+ 
+Hi Glen, Mike, Grant & Mark
+
+Thank you for the quick responses.
+
+1. Yes, I'm looking now at ThreadPoolExecutor. Looking for a sample code
+to improve the multi-threaded code.
+
+2. We'll try using as many Indexwriters as the number of cores, first
+(which is 2cpu x 4 core = 8).
+
+3. Yes, PDFBox exceptions have been independently checked. We've a
+prototype module to check PDF files that contain errors. Generally they
+are few, less than 1% of the total number of files. The PDFs all have
+been OCRed. Also, if any throws exceptions then they are quarantined in
+a separate folder for further analysis to have a look at the document
+itself.
+
+4. We've tried using larger JVM space by defining -Xms1800m and
+-Xmx1800m, but it runs out of memory. Only -Xms1080m and -Xmx1080m seems
+stable. That is strange as we have 32 GB of RAM and 34GB swap space.
+Typically no other application is running. However, the CentOS version
+is 32 bit. The Ungava project seems to be using 64 bit.
+
+5. -QUIT option for Linux does throw stack trace, but after few threads
+it hangs. Don't know why. Need to look at that.
+
+Meantime, we're seriously looking for a ThreadPoolExecutor sample source
+code. It looks like, we need to use unbounded queues.
+
+Really appreciate your inputs and will keep you posted on what we get.
+
+Now working on the code for ThreadPoolExecutor.
+
+Thanks and regards,
+Sithu Sudarsan
+Graduate Research Assistant, UALR
+& Visiting Researcher, CDRH/OSEL
+
+sithu.sudarsan@fda.hhs.gov
+sdsudarsan@ualr.edu
+
+-----Original Message-----
+From: Michael McCandless [mailto:lucene@mikemccandless.com] 
+Sent: Thursday, October 23, 2008 5:01 PM
+To: java-user@lucene.apache.org; Glen Newton
+Subject: Re: Multi -threaded indexing of large number of PDF documents
+
+
+Glen Newton wrote:
+
+> 2008/10/23 Michael McCandless <lucene@mikemccandless.com>:
+>>
+>> Mark Miller wrote:
+>>
+>>> Glen Newton wrote:
+>>>>
+>>>> 2008/10/23 Mark Miller <markrmiller@gmail.com>:
+>>>>
+>>>>> It sounds like you might have some thread synchronization issues  
+>>>>> outside
+>>>>> of
+>>>>> Lucene. To simplify things a bit, you might try just using one
+>>>>> IndexWriter.
+>>>>> If I remember right, the IndexWriter is now pretty efficient,  
+>>>>> and there
+>>>>> isn't much need to index to smaller indexes and then merge.  
+>>>>> There is a
+>>>>> lot
+>>>>> of juggling to get wrong with that approach.
+>>>>>
+>>>>
+>>>> While I agree it is easier to have a single IndexWriter, if you  
+>>>> have
+>>>> multiple cores you will get significant speed-ups with multiple
+>>>> IndexWriters, even with the impact of merging at the end.
+>>>> #IndexWriters = # physical cores is an reasonable rule of thumb.
+>>>>
+>>>> General speed-up estimate: # cores * 0.6 - 0.8  over single  
+>>>> IndexWriter
+>>>> YMMV
+>>>>
+>>>> When I get around to it, I'll re-run my tests varying the # of
+>>>> IndexWriters & post.
+>>>>
+>>>> -Glen
+>>>>
+>>> Hey Mr McCandless, whats up with that? Can IndexWriter be made to  
+>>> be as
+>>> efficient as using Multiple Writers? Where do you suppose the hold  
+>>> up is?
+>>> Number of threads doing merges? Sync contention? I hate the idea  
+>>> of multiple
+>>> IndexWriter/Readers being more efficient than a single instance.  
+>>> In an ideal
+>>> Lucene world, a single instance would hide the complexity and use  
+>>> the number
+>>> of threads needed to match multiple instance performance.
+>>
+>> Honestly this surprises me: I would expect a single IndexWriter with
+>> multiple threads to be as fast (or faster, considering the extra  
+>> merge time
+>> at the end) than multiple IndexWriters.
+>>
+>> IndexWriter's concurrency has improved alot lately, with
+>> ConcurrentMergeScheduler.  The only serious operation that is not  
+>> concurrent
+>> is flushing the RAM buffer as a new segment; but in a well tuned  
+>> indexing
+>> process (large RAM buffer) the time spent there should be quite  
+>> small,
+>> especially with a fast IO system.
+>>
+>> Actually, addIndexes is also not concurrent in that if multiple  
+>> threads call
+>> it, only one can run at once.  But normally you would call it with  
+>> all the
+>> indices you want to add, and then the merging is concurrent.
+>>
+>> Glen, in your single IndexWriter test, is it possible there was  
+>> accidental
+>> thread contention during document preparation or analysis?
+>
+> I don't think there is. I've been refining this for quite a while, and
+> have done a lot of analysis and hand-checking of the threading stuff.
+
+OK.
+
+For your multiple-index-writer test, how much time is spent building  
+the N indices vs merging them in the end?
+
+> I do use multiple threads for document creation: this is where much of
+> the speed-up happens (at least in my case where I have a large indexed
+> field for the full-text of an article: the parsing becomes a
+> significant part of the process).
+
+So in the single-index-writer vs multiple-index-writer tests, this  
+part (64 threads that construct document objects) is unchanged, right?
+
+How do you rate limit the 64 threads?  (Ie, slow them down when they  
+get too far ahead of indexing).
+
+If you only process documents with the 64 threads (but not index  
+them), what percentage of the total time is that?  I'd like to tease  
+out "building documents" vs "indexing" times.
+
+>> I do agree that we should strive to have enough concurrency in  
+>> IndexWriter
+>> and IndexReader so that you don't get any real benefit by using  
+>> separate
+>> instances. Eg in 2.4.0 you can now open read-only IndexReaders, and  
+>> on Unix
+>> you can use NIOFSDirectory, both of which should go a long ways  
+>> towards
+>> fixing IndexReader's concurrency issue.
+>
+> My original tests were in the Spring with 2.3.1. I am planning on
+> doing the new tests with 2.4 for indexing, as well as re-doing my
+> concurrent query tests[1] and concurrent multiple reader tests[2]
+> using the features you describe. I am sure the results will be quite
+> different...
+
+Also, for the indexing tests, make sure you run with autoCommit=false.
+
+> BTW the files I am indexing were originally PDFs, but were batch
+> converted to text and stored compressed on the filesystem, so except
+> for GUnzipping them there is no other overhead.
+
+But I'm confused: why do you need 64 threads to build up the  
+documents?  Gunzipping should be very low CPU cost.  Are you pre- 
+analyzing the fields on your documents?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

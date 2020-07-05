@@ -1,0 +1,98 @@
+FROM: David Spencer <dave-lucene-u...@tropo.com>
+SUBJECT: Re: Alert function (aka "profiled alerting")
+DATE: 17 Mar 2005
+
+Robert Watkins wrote:
+
+> The reason your suggestion is not practical is scalability. In a production
+> environment you might have, for example, 10,000 stored queries and 10 new
+> documents a minute. That's a fair bit of load on the system for only one
+> aspect of a much larger search application.
+
+Fun, interesting question - maybe you could elaborate on the 
+requirements a bit.
+
+I believe the basic kind of use case here is something like "Google 
+alerts", only more time sensitive - a large number of queries sitting 
+around waiting to execute against incoming news feeds...
+
+So:
+
+Number of stored queries: could be 10,000 (thus a "large" number)
+Incoming docs: 10/min (thus not a huge load)
+
+Questions:
+
+- How complicated are the queries? Are they essentially a list of words 
+ANDed together, or are they generalized queries against multiple fields 
+with things like fuzzy term expansion and phrase matches allowed?
+
+- How big are the incoming documents?
+
+=====
+
+I believe the general goal is to avoid looping thru all 10k queries 
+every time a doc comes in.
+
+These approaches come to mind:
+
+[a] Store queries in memory, and batch incoming documents into a 
+RAMDirectory, and do the dumb loop thru all 10k queries every minute, 
+and then destrory the RAMDirectory. Good news pure Lucene and easy to 
+code, bad news it has the dreaded loop thru all 10k queries.
+
+[b] For each query generate a sparse term boolean array (maybe "bitmask" 
+is a better term), where any bit in the array that's set means the query 
+requires that word (er..term).
+
+For every incoming document form a term vector and then you AND the 
+document term array against each queries. If the AND returns all bits 
+set that the query needs, then you can execute the query, else, 
+hopefully, you've avoided an "expensive" query execution by this logic.
+Bad news is you still have a loop. If the queries are trivial then you 
+don't have to separately execute it, as you've already shown that it 
+will match. If the queries are non-trival, well, then any query that 
+passes the AND might succeed, whereas any that fails the AND will not 
+succeed, so this prevents some query executions.
+
+[c]
+A variation on [b] is to form some kind of a "parse tree". The source 
+document terms guide you through the tree, and the nodes in the tree 
+indicate which queries should be executed based on the matching terms. 
+Good news is you avoid a loop, bad news is this could be the most memory 
+intensive and it's a bit trickier to build the data structure.
+
+For both [b] and [c], you can also stem the terms to reduce the number 
+of different ones, and thus the memory required, at the expense of 
+having more "false positives".
+
+
+-- Dave
+
+
+
+
+
+
+> 
+> 
+> On Wed, 16 Mar 2005, Dan Funk wrote:
+> 
+>>I don't understand - this is all happening in the background right?
+>>Why not just add the document to the index, then execute all the queries
+>>(with an extra clause to restrict results to that document) and see what
+>>hits?
+>>
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

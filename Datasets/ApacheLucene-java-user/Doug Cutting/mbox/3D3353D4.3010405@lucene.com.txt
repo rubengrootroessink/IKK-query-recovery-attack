@@ -1,0 +1,65 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: CachedSearcher
+DATE: 15 Jul 2002
+
+Halácsy Péter wrote:
+> A lot of people requested a code to cache opened Searcher objects until the index is
+not modified. The first version of this was writed by Scott Ganyo and submitted as IndexAccessControl
+to the list.
+> 
+> Now I've decoupled the logic that is needed to manage searher.
+> 
+> Unfortunatly to compile and use this code one has to modify the lucene source: 
+
+Why is this more complicated than the code in demo/Search.jhtml 
+(included below)?  FSDirectory closes files as they're GC'd, so you 
+don't have to explicitly close the IndexReaders or Searchers.
+
+Doug
+
+   /** Keep a cache of open IndexReader's, so that an index does not
+    * have to opened for each query.  The cache re-opens an index when
+    * it has changed so that additions and deletions are visible ASAP.
+   */
+
+   static Hashtable indexCache = new Hashtable();  // name->CachedIndex
+
+   class CachedIndex {				  // a cache entry
+     IndexReader reader;				  // an open reader
+     long modified;				  // reader's mod. date
+
+     CachedIndex(String name) throws IOException {
+       modified = IndexReader.lastModified(name);  // get mod. date
+       reader = IndexReader.open(name);		  // open reader
+     }
+   }
+
+   IndexReader getReader(String name) throws ServletException {
+     CachedIndex index =				  // look in cache
+       (CachedIndex)indexCache.get(name);
+
+     try {
+       if (index != null &&			  // check up-to-date
+	  (index.modified == IndexReader.lastModified(name)))
+	return index.reader;			  // cache hit
+       else {
+	index = new CachedIndex(name);		  // cache miss
+       }
+     } catch (IOException e) {
+       StringWriter writer = new StringWriter();
+       PrintWriter pw = new PrintWriter(writer);
+       throw new ServletException("Could not open index " + name + ": " +
+				 e.getClass().getName() + "--" +
+				 e.getMessage());
+     }
+
+     indexCache.put(name, index);		  // add to cache
+     return index.reader;
+   }
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

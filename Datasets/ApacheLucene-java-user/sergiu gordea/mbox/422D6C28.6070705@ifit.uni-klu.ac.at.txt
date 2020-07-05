@@ -1,0 +1,97 @@
+FROM: sergiu gordea <gser...@ifit.uni-klu.ac.at>
+SUBJECT: Re: QueryParser refactoring
+DATE: 8 Mar 2005
+
+
+>>>> 2) Single term queries using +/- flags are parse to a query without
+>>>> flag
+>>>> +a -> a
+>>>
+>>>
+>>> Hmmm.... this is a debatable one.  It's returning a TermQuery in this
+>>> case for "a".  Is that appropriate?  Or should it return a BooleanQuery
+>>> with a single TermQuery as required?
+>>>
+>> I'd prefer, if query parser parses queries created by query.toString()
+>> to the same query. But that's just a nice to have.
+>
+>
+> It's also an impossibility to have.  Here's a simple example, take a 
+> Query that is equivalent to A OR B, .toString equals "A B", then parse 
+> that with the default operator set to AND and you'll get "+A + B".  I 
+> created a modified Query->String converter for my current day time 
+> project (as I use a String representation for the most recently used 
+> drop-down that is stored as a client-side cookie) that explicitly puts 
+> in "OR" between SHOULD BooleanClauses.
+>
+> I still believe that we need to have some query-parser-specific way to 
+> build strings from Query objects, though I haven't thought through 
+> exactly how that should be designed.  For example, I'm building a very 
+> custom query parser for a client that looks nothing like QueryParser 
+> syntax.  It would be very nice to be able to turn a Query back around 
+> into their expression syntax.
+>
+In our project I save search strings, generated with query.toString in 
+the database and I reconstruct the Query at runtime.
+I would appreciate if the  new QueryParser will pass the following assert:
+
+Query query = QueryParser.parse(queryString, analyzer);
+Query query2 =  QueryParser.parse(query.toString(), analyzer);
+assertEquals(query.toString(), query2.toString());
+
+I think this might be a usefull test case ....
+
+>>> I think having it optimized to a TermQuery makes the most sense.
+>>> Though, putting it in a BooleanQuery does make this next one simpler...
+>>>
+>>>> -a -> a
+>>>> While this doesn't make a difference for +a it's a bit strange for -a,
+>>>> OTOH -a isn't a usable query anyway.
+>>>
+>>>
+>>> Oops... yeah, you're right.  If its a single clause right now it
+>>> doesn't wrap in a BooleanQuery and thus does not take into account the
+>>> modifier +/-/NOT.   But as you say, this is a bogus query anyway.  I
+>>> guess the right thing to do is wrap both the +a query as above and the
+>>> -a query into a BooleanQuery with the modifier set appropriately.
+>>>
+>> Ok.
+>> The question how to handle BooleanQueries, that contain prohibited terms
+>> only, is a question on it's own.
+>> In my fix I choose to silently drop these queries. Basically because 
+>> it's
+>> effectivly dropped during querying anyway.
+>
+>
+> Silently drop as in you removed them entirely from the resultant Query?
+>
+> That'd be easy enough to add - but is that what we want to happen?  
+> Community, thoughts?
+
+In my oppinion is better to throw a RuntimeException, something like ...
+throw new ParseException("The query must contain at least one allowed 
+term. Full prohibited term queries are not allowed");
+
+I experienced many cases when after long debug sessions I discovered 
+silent exception drop ...
+One of them was just yesterday ...
+
+>
+>> In an application, I handled this by dropping the query and notifying 
+>> the
+>> user, that some part of the query could not be handled and was ignored.
+>
+>
+> How did your application notice that part of the query was dropped?
+>
+
+
+All the best,
+
+ Sergiu Gordea
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

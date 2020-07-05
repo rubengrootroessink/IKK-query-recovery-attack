@@ -1,0 +1,83 @@
+FROM: "W. Eliot Kimber" <el...@isogen.com>
+SUBJECT: Re: Index Optimization: Which is Better?
+DATE: 12 Oct 2001
+
+"Steven J. Owens" wrote:
+
+>      I think that's exactly what Elliot is intending.
+
+Steven is correct. For each element in the XML document we create a
+separate Lucene document with the following fields:
+
+- docid (unique identifier of the input XML document, e.g., file system
+path, object ID from a repository, URL, etc.)
+- list of ancestor element types
+- DOM tree location
+- text of direct PCDATA content
+- DOM node type (Element_node, processing_instruction_node,
+comment_node) [This list is probably imcomplete but it was enough for us
+to test the idea.]
+- For each attribute of the element, a field whose name is the attribute
+name and whose value is the attribute value.
+
+We also capture all the text content of the input XML document as a
+single Lucene document with the same docid and the node type
+"all_content". 
+
+Given these Lucene documents, I can do queries like this:
+
+   big brown dog AND ancestor:tag2 AND NOT ancestor:tag3 and
+language:english
+
+This will result in one doc for each element instance that contains the
+text "big brown dog", is within a tag2 element, not within a tag3
+element and has the value "english" for its language attribute.
+
+To make sure you match the phrase if it crosses element boundaries, just
+include the all-content doc as well:
+
+   big brown dog ((AND ancestor:tag2 AND NOT ancestor:tag3 and
+language:english) OR
+   (nodetype:ALL_CONTENT))
+
+Given this set of Lucene docs, we can then collect them by docid to
+determine which XML documents are represented. The ancestor list and
+tree location enable correlating each hit back to its original location
+in the input document. It also enables post-processing to do more
+involved contextual filtering, such as "find 'foo' in all paras that are
+first children of chapters".
+
+We have implemented a first pass at code that does this indexing but we
+have no idea how it will perform (we only got this fully working
+yesterday and haven't had time to stress it yet).
+
+I agree that this is somewhat "twisted". In fact my collegue John
+Heintz, who suggested the approach of one Lucene doc per element,
+characterized the idea as an "abuse" of Lucene's design. But we haven't
+been able to think of a better or easier way to do it.
+
+It was really easy to write the DOM processing code to generate this
+index and the interaction with Lucene's API couldn't have been
+easier--this is my first experience programming against Lucene and I'm
+really impressed with the simplicity of the API and the power of the
+architecture. 
+
+The functionality described above for XML retrieval already surpasses
+anything I know how to do with Verity, Fulcrum, Excallibur, etc. and it
+was freaky easy to do once we got the idea for the approach. I just hope
+it performs adequately.
+
+Cheers,
+
+E.
+
+-- 
+. . . . . . . . . . . . . . . . . . . . . . . .
+
+W. Eliot Kimber | Lead Brain
+
+1016 La Posada Dr. | Suite 240 | Austin TX  78752
+    T 512.656.4139 |  F 512.419.1860 | eliot@isogen.com
+
+w w w . d a t a c h a n n e l . c o m
+

@@ -1,0 +1,60 @@
+Message-ID: <22421253.1075841523902.JavaMail.evans@thyme>
+Date: Thu, 19 Jul 2001 14:52:11 -0700 (PDT)
+From: edismail@incident.com
+To: edis-by-email@incident.com
+Subject: [EDIS]  EQ MAG 4 3 UTAH [News: Statewide]
+Mime-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+X-From: EDIS Email Service <edismail@incident.com>
+X-To: EDIS-by-Email@incident.com
+X-cc: 
+X-bcc: 
+X-Folder: \ExMerge - Salisbury, Holden\Inbox
+X-Origin: SALISBURY-H
+X-FileName: holden salisbury 6-26-02.PST
+
+U.S. GEOLOGICAL SURVEY  NATIONAL EARTHQUAKE INFORMATION CENTER
+World Data Center for Seismology, Denver
+
+Reply to: sedas@neis.cr.usgs.gov or neic@usgs.gov
+
+The following is from the  United  States  Geological  Survey,  National
+Earthquake Information Center:  Preliminary hypocenter for earthquake of
+2001 Jul 19, UTAH, about 25 miles (40 km) NNE of  Loa,  Utah:   latitude
+38.7 degrees north, longitude 111.5 degrees west, origin time 20 15 34.0
+utc, depth 3 km, magnitude 4.3.   The  magnitude  and  location  may  be
+revised when additional data and further analysis results are available.
+There have been no reports of damage.  The location  and  magnitude  for
+this  earthquake  were  furnished  by  the University of Utah, Salt Lake
+City.
+Stations used:  MSU eP 201544.3 MVU eP 201545.2
+SRU eP 201550.5 PV10 P 201552.5 MPU eP 201557.9
+DUG eP 201605.0 DAU eP 201605.2 ARUT eP 201606.5
+NOQ eP 201608.3 CTU P 201609.0 PV01 P 201616.1
+ELK P 201629.7 TPNV P 201639.8 BW06 P 201641.5
+BMN P 201648.6 ISCO P 201648.9 HAYW P 201650.8
+HLID eP 201654.8 ANMO eP 201658.3 LAZ P 201659.8
+LENM P 201703.8 LPM P 201705.7 BNM P 201706.9
+MCMT P 201709.3 JLDW P 201709.4 TUC qPn 201710.6
+WVOR ePn 201713.7 BOZ eP 201718.7 CHMT P 201738.9
+WALA eP 201808.8 WMOK eP 201814.0 MIAR eP 201908.8
+ULM P 201920.8 SIUC P 201943.4 PWLA P 202001.5
+LRAL P 202016.8 GOGA P 202043.8
+
+
+
+EDIS-07-19-01 1443 PDT
+
+
+---------------------------------------------------------
+To update or terminate your subscription to this email service
+visit our webpage at http://www.incident.com/edismail.html.
+
+EDIS is operated by the Governor's Office of Emergency Services, 
+State of California. This email relay is offered by incident.com 
+as a public service. Because of the complexity of this system and
+its dependence on other systems, we cannot be responsible for 
+delays or failures in transmission. 
+---------------------------------------------------------
+

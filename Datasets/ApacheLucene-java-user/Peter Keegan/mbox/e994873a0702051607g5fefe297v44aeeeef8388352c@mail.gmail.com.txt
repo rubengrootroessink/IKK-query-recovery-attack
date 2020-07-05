@@ -1,0 +1,113 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: relevancy "buckets" and secondary searching
+DATE: 6 Feb 2007
+
+Hi Erick,
+
+The timing of your posting is ironic because I'm currently working on the
+same issue. Here's a solution that I'm going to try:
+
+Use a HitCollector with a PriorityQueue to sort all hits by raw Lucene
+score, ignoring the secondary sort field.
+
+After the search, re-sort just the hits from the queue above (500 in your
+case) with a FieldSortedHitQueue that sorts on score, then the secondary
+field (title in your case), but 'normalize' the score to your 'user visible'
+scores before re-sorting. If your 'normalized' score is computed properly,
+this should force the secondary sort to occur and produce the 'proper'
+sorting that the user expects.
+
+I think the trick here is in computing the proper normalized score from
+Lucene's raw scores, which will vary depending on boosts, etc.
+
+I agree with you that this "special relevancy sort" is a real hack to
+implement!
+
+
+Peter
+
+On 2/5/07, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> Am I missing anything obvious here and/or what would folks suggest...
+>
+> Conceptually, I want to normalize the scores of my documents during a
+> search
+> BUT BEFORE SORTING into 5 discrete values, say 0.1, 0.3, 0.5, 0.7, 0.9 and
+> apply a secondary sort when two documents have the same score. Applying
+> the
+> secondary sort is easy, it's massaging the scores that has me stumped.
+>
+> We have a bunch of documents (30K). Books actually. We only display to the
+> user 5 different "relevance" scores, with 5 being the most relevant. So
+> far,
+> so good.
+>
+> Within each quintile, we want to sort by title. So, suppose the following
+> three books score a hit:
+>
+> relevance      title
+> 0.98              zzzzz
+> 0.94              ccccc
+> 0.79              aaaaa
+>
+> The proper display would be
+>
+> 5           ccccc
+> 5           zzzzz
+> 4           aaaaa
+>
+>
+> It's easy enough to do a secondary sort, but that would not give me what I
+> want. In this case, I'd get...
+>
+> 5       zzzzz
+> 5       ccccc
+> 4       aaaaa
+>
+> because the secondary sort only matters if the primary sort is equal. The
+> user is left scratching her head asking "why did two books with the same
+> relevancy have the titles out of order?".
+>
+> If I could massage my scores *before* sorts are done, things would be
+> hunky-dory, but I'm not seeing how to do that. One problem is that until
+> the
+> top N documents have been collected, I don't know what the maximum
+> relevance
+> is, therefore I don't know how to normalize raw scores. I followed Hoss's
+> thread where he talks about FakeNorms, but don't see how that applies to
+> my
+> problem.
+>
+> My result sets are strictly limited to < 500, so it's not unreasonable to
+> just get the TopDocs back and aggregate my buckets at that point and sort
+> them. But of course I only care about this when I am using relevancy as my
+> primary sort. For sorting on any other fields, I would just let Lucene
+> take
+> care of it all. So post-sorting myself leads to really ugly stuff like
+>
+> if (it's my special relevancy sort) do one thing
+> else don't do that thing.
+>
+> repeated wherever I have to sort. Yuck.....
+>
+>
+> And since I'm talking about 500 docs, I don't want to wait until after I
+> have a Hits object because I'll have to re-query several times. On an 8G
+> index (and growing).
+>
+>
+> This almost looks like a HitCollector, but not quite.
+> This almost looks like a custom Similarity, but not quite since I want to
+> just let Lucene compute relevance and put that into a bucket.
+> This almost looks like FakeNorms, but not quite.
+> This almost looks like about 8 things I tried to make work, but not quite
+> <G>....
+>
+> So, somebody out there needs to tell me what part of the manual I
+> overlooked
+> <G>...
+>
+> Thanks
+> Erick
+>
+

@@ -1,0 +1,141 @@
+FROM: Patrick Kimber <mailing.patrick.kim...@gmail.com>
+SUBJECT: Deprecated API in BooleanQuery broken in Lucene from CVS?
+DATE: 15 Nov 2005
+
+Hi
+I have checked out the latest version of Lucene from CVS and have
+found a change in the results compared to version 1.4.3.
+The issue is with the deprecated API in the BooleanQuery class.  The
+deprecated function:
+"public void add(Query query, boolean required, boolean prohibited)"
+is returning different results to version 1.4.3.
+Please find attached a sample program which should illustrate the
+issue.  (I also have a Maven 1 project.xml if you would like it).
+Thanks
+Pat
+
+package com.test;
+
+import java.io.IOException;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.analysis.snowball.SnowballAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.ParseException;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+
+import junit.framework.TestCase;
+
+public class testCollectionType extends TestCase {
+
+    private String body = "body";
+    private String type = "type";
+    private String [] keyTypes = {
+        "Media",
+        "UserDefined"
+        };
+    private String [] bodyText = {
+        "The Queen has conducted a massive international fleet review "
+        + "to mark the bicentenary of the Battle of Trafalgar.",
+        "1953: Queen Elizabeth takes coronation oath "
+        + "Queen Elizabeth II has been crowned at a coronation
+ceremony in Westminster Abbey in London. "
+        + "In front of over 8,000 guests, including prime ministers
+and heads of state from throughout "
+        + "the Commonwealth, she took the Coronation Oath and is now
+bound to serve her people and to "
+        + "maintain the laws of God."
+        };
+
+    public void testType() throws IOException, ParseException {
+
+        Directory directory = new RAMDirectory();
+        IndexWriter writer = new IndexWriter(directory, getAnalyzer(), true);
+        for (int i = 0; i < keyTypes.length; i++) {
+            Document doc = new Document();
+            doc.add(Field.Keyword(type, keyTypes[i]));
+            doc.add(Field.UnStored(body, bodyText[i]));
+            writer.addDocument(doc);
+        }
+        writer.close();
+
+        IndexSearcher searcher = new IndexSearcher(directory);
+        Query query = getQuery();
+        Hits hits = searcher.search(query);
+        System.out.println("The query is: " + query.toString());
+        System.out.println("Found " + hits.length() + " records.");
+        for (int i = 0; i < hits.length(); i++) {
+            Document doc = hits.doc(i);
+            System.out.println("Type: " + doc.get(type) + ", Score: "
++ hits.score(i));
+        }
+        int count = hits.length();
+        searcher.close();
+
+        assertTrue("Should return 1 hit.  Returned " + count, count == 1);
+    }
+
+    private Analyzer getAnalyzer() {
+        PerFieldAnalyzerWrapper analyzer = new
+PerFieldAnalyzerWrapper(new SnowballAnalyzer("English"));
+        analyzer.addAnalyzer(type, new WhitespaceAnalyzer());
+        return analyzer;
+    }
+
+    private Query getQuery() throws ParseException {
+
+        BooleanQuery typeQuery = new BooleanQuery();
+        typeQuery.add(new TermQuery(new Term(type, "Media")),
+BooleanClause.Occur.SHOULD);
+
+        BooleanQuery bodyQuery = new BooleanQuery();
+        bodyQuery.add(new TermQuery(new Term(body, "queen")),
+BooleanClause.Occur.SHOULD);
+
+        BooleanQuery query = new BooleanQuery();
+        // ********************************************************************
+        // The new version of Lucene (from CVS) has deprecated the
+        // "BooleanQuery, add(Query, boolean, boolean)" function.
+        //
+        // The JavaDoc suggestion is to replace:
+        // add(typeQuery, true, false)
+        // with:
+        // add(typeQuery, BooleanClause.Occur.MUST)
+        //
+        // I think the deprecated function is now broken:
+        // 1) It returns a different result to Lucene 1.4.3
+        // 2) It returns a different result to the new version of the function.
+        //
+        // This section illustrates the issue:
+        // If you comment out the deprecated functions and un-comment the new
+        // functions you will get a different result.  You should get the same
+        // result.
+        //
+//        query.add(typeQuery, BooleanClause.Occur.MUST);
+//        query.add(bodyQuery, BooleanClause.Occur.MUST);
+        query.add(typeQuery, true, false);
+        query.add(bodyQuery, true, false);
+        // ********************************************************************
+
+        return query;
+
+    }
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

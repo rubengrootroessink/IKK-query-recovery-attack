@@ -1,0 +1,152 @@
+FROM: Seneviratne_Yas...@emc.com
+SUBJECT: RE: Indexing XML documents (Urdu)
+DATE: 6 Dec 2007
+
+Hi Liaqat, I'd rather keep the email-thread on the lucene user list.
+
+The code I used is below, the thing to do is be careful when reading
+UTF-8 text so you don't garble it.
+ 
+import org.xml.sax.*;
+import org.xml.sax.helpers.DefaultHandler;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.search.*;
+
+import javax.xml.parsers.*;
+import java.io.*;
+
+public class testNonEnglishXML
+{
+    public static void main(String[] args){
+        if(args.length < 3) {
+            System.out.println("Usage: <file-name> <index-name>
+<query-file-name>" );
+            System.exit(-1);
+        }
+
+        testNonEnglishXML idx = new testNonEnglishXML();
+        try {
+            idx.index(args[0], args[1]);
+            idx.search(args[1], args[2]);
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void index(String filePath, String indexPath) throws
+IOException, UnsupportedEncodingException, ParserConfigurationException,
+SAXException {
+        Document luceneDoc = new Document();
+        luceneDoc.add(new Field("name", filePath, Field.Store.YES,
+Field.Index.UN_TOKENIZED));
+
+        StringBuffer sb = new StringBuffer(1024); String line;
+        BufferedReader reader = new BufferedReader( new
+InputStreamReader(new FileInputStream(new File(filePath)),  "UTF-8") );
+        while( (line = reader.readLine()) != null) {
+            sb.append(line);
+        }
+        luceneDoc.add(new Field("contents", sb.toString(),
+Field.Store.NO, Field.Index.TOKENIZED));
+
+        TestParser parser = new TestParser(luceneDoc);
+        SAXParser saxParser =
+SAXParserFactory.newInstance().newSAXParser();
+        saxParser.parse(new FileInputStream(new File(filePath)),
+parser);
+
+        IndexWriter writer = new IndexWriter(indexPath, new
+SimpleAnalyzer(), true);
+        writer.addDocument(luceneDoc);
+        writer.optimize();
+        writer.close();
+    }
+
+    public void search(String indexPath, String queryFilePath) throws
+IOException {
+        BufferedReader reader = new BufferedReader( new
+InputStreamReader(new FileInputStream(new File(queryFilePath)),
+"UTF-8") );
+        String queryString =  new String( reader.readLine() );
+        reader.close();
+
+        IndexSearcher searcher = new
+IndexSearcher(FSDirectory.getDirectory(indexPath));
+        PhraseQuery query = new PhraseQuery();
+        query.add(new Term("contents", queryString));
+
+        Hits hits = searcher.search(query);
+        if(hits.length()> 0)
+            System.out.println("found " + hits.doc(0).getField("name"));
+    }
+
+    public class TestParser extends DefaultHandler
+    {
+      public TestParser(Document doc)
+      {
+          luceneDoc = doc;
+      }
+
+      public void startElement(String namespaceURI, String localName,
+String qName, Attributes atts) throws SAXException
+      {
+          if(qName.equalsIgnoreCase("title"))
+            buffer = new String();
+      }
+
+      public void characters(char[] ch, int start, int length) throws
+SAXException
+      {
+          buffer +=  new String(ch, start, length);
+      }
+
+      public void endElement(String namespaceURI, String localName,
+String qName) throws SAXException
+      {
+          if(qName.equalsIgnoreCase("title"))
+            luceneDoc.add(new Field(qName, buffer, Field.Store.YES,
+Field.Index.UN_TOKENIZED));
+      }
+
+      public void endDocument() {}
+      public void startDocument() {}
+      public void error(SAXParseException e) {}
+      public void fatalError(SAXParseException e) {}
+      public void ignorableWhitespace(char[] ch, int start, int length)
+{}
+
+      private Document luceneDoc = null;
+      private String buffer = null;
+    }
+}
+
+-----Original Message-----
+From: Liaqat Ali [mailto:liaqatalimian@gmail.com] 
+Sent: Thursday, December 06, 2007 1:42 AM
+To: Seneviratne, Yasoja
+Subject: Indexing XML documents (Urdu)
+
+Hello,
+
+I read your reply. I need some more help in this regard. As you saw the 
+text (Urdu language). The whole XML file is a collection of 200 
+documents. I am at initial level as SAX is concerned. Can you kindly 
+provide me the code how to extract textual information of each document 
+plus its Doc number and title  or some guidence, because my whole 
+project has stuck  because of this...
+
+Looking for your response....  Thanks..
+
+Liaqat
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

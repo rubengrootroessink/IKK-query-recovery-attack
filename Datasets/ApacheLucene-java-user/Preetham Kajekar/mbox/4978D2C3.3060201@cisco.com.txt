@@ -1,0 +1,584 @@
+FROM: Preetham Kajekar <preet...@cisco.com>
+SUBJECT: Re: Combining results of multiple indexes
+DATE: 22 Jan 2009
+
+Hi,
+ Just thought of sharing some more progress I made on this.
+
+ This time I created multiple (2) indexWriter writing different 
+documents (based on if it is odd or even based on an id - not doc-id) to 
+different indexes and the performance seems to scale up based on the 
+number of threads (and the number of CPU's.
+So while querying, I will use all these indexes to get matches.
+What do you think about this ? Will querying etc be considerable slower ?
+
+Thanks,
+ ~preetham
+
+Preetham Kajekar wrote:
+> Hi,
+> I noticed that the doc id is the same. So, if I have HitCollector, 
+> just collect the doc-ids of both Searchers (for the two indexes) and 
+> find the intersection between them, it would work. Also, get the doc 
+> is even where there are large number of hits is fast.
+>
+> Of course, I am using something undocumented of Lucene.
+>
+> Thanks,
+> ~preetham
+>
+> Preetham Kajekar wrote:
+>> Thanks. Yep the code is very easy. However, it take about 3 mins to 
+>> complete merging.
+>>
+>> Looks like I will need to have an out of band merging of indexes once 
+>> they are closed (planning to store about 50mil entries in each index 
+>> partition)
+>>
+>>
+>> However, as the data is being indexed, is there any other way to 
+>> combine results ?
+>>
+>> I could get the results of one index, get all the hits and then apply 
+>> this as a filter for the next index. But if there are large number of 
+>> hits (which is likely to be the case), this would not perform too well.
+>>
+>> Do you think the document id can be used in anyway. How is the 
+>> document id generated ? After all, i have the two indexes operating 
+>> on a common List of objects. Would the doc is in index1 and index2 
+>> for object N in the list be the same ?
+>>
+>>
+>> Thanks,
+>> ~preetham
+>>
+>> Erick Erickson wrote:
+>>> You will be stunned at how easy it is. The merging code should be
+>>> a dozen lines (and that only if you are merging 6 or so indexes)....
+>>>
+>>> See IndexWriter.addIndexes or
+>>> IndexWriter.addIndexesNoOptimize
+>>>
+>>> Best
+>>> Erick
+>>>
+>>> On Thu, Dec 18, 2008 at 5:03 AM, Preetham Kajekar 
+>>> <preetham@cisco.com>wrote:
+>>>
+>>>  
+>>>> Hi,
+>>>> I tried out a single IndexWriter used by two threads to index 
+>>>> different
+>>>> fields. It is slower than using two separate IndexWriters. These 
+>>>> are my
+>>>> findings
+>>>>
+>>>> All Fields (9) using 1 IndexWriter 1 Thread - 38,000 object per sec
+>>>> 5 Fields       using 1 IndexWriter 1 Thread - 62,000 object per sec
+>>>> All Fields (9) using 1 IndexWriter 2 Thread - 29,000 object per sec
+>>>> All Fields (9) using 2 IndexWriter 2 Thread - 55,000 object per sec
+>>>>
+>>>> So, it looks like I will have figure how to combine results of 
+>>>> multiple
+>>>> indexes.
+>>>>
+>>>> Thanks,
+>>>> ~preetham
+>>>>
+>>>>
+>>>> Preetham Kajekar wrote:
+>>>>
+>>>>   
+>>>>> Thanks Erick and Michael.
+>>>>> I will try out these suggestions and post my findings.
+>>>>>
+>>>>> ~preetham
+>>>>>
+>>>>> Erick Erickson wrote:
+>>>>>
+>>>>>     
+>>>>>> Well, maybe if I'd read the original post more carefully I'd have
+
+>>>>>> figured
+>>>>>> that out,
+>>>>>> sorry 'bout that.
+>>>>>>
+>>>>>> I *think* I remember reading somewhere on the email lists that your
+>>>>>> indexing
+>>>>>> speed goes up pretty linearly as the number of indexing tasks 
+>>>>>> approaches
+>>>>>> the number of CPUs. Are you, perhaps, on a dual-core machine? But
+do
+>>>>>> search
+>>>>>> the mail archives because my memory may not be accurate.
+>>>>>>
+>>>>>> You can easily combine indexes by IndexWriter.addIndexes BTW. 
+>>>>>> Personally
+>>>>>> I prefer fewer indexes if you can get away with it. But I'd only
+
+>>>>>> try this
+>>>>>> after
+>>>>>> Michael's suggestion of using multiple threads on a single 
+>>>>>> underlying
+>>>>>> writer.
+>>>>>>
+>>>>>> You could even think about using N machines to create M fragments
+
+>>>>>> then
+>>>>>> combining them all afterwards if your logs are static enough to 
+>>>>>> make that
+>>>>>> reasonable. Combining indexes may take a while though.....
+>>>>>>
+>>>>>> Best
+>>>>>> Erick
+>>>>>>
+>>>>>> On Wed, Dec 17, 2008 at 10:46 AM, Preetham Kajekar 
+>>>>>> <preetham@cisco.com
+>>>>>>       
+>>>>>>> wrote:
+>>>>>>>           
+>>>>>>
+>>>>>>       
+>>>>>>> Hi Erick,
+>>>>>>> Thanks for the response. Replies inline.
+>>>>>>>
+>>>>>>> Erick Erickson wrote:
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> The very first question is always "are you opening a new
+searcher
+>>>>>>>> each time you query"? But you've looked at the Wiki so I
+assume 
+>>>>>>>> not.
+>>>>>>>> This question is closely tied to what kind of latency you
+can 
+>>>>>>>> tolerate.
+>>>>>>>>
+>>>>>>>> A few more details, please. What's slow? Queries? Indexing?
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> Indexing. Again, it is not slow. It is just faster with two 
+>>>>>>> separate
+>>>>>>> indexers in two threads.
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> How slow? 100ms? 100s? What are your target times and
+>>>>>>>> what are you seeing?
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> With a single indexer in a single thread, I can index about 
+>>>>>>> 20,000 event
+>>>>>>> objects per second. With 2 thread and 2 indexers, it is close
+to 
+>>>>>>> 50,000.
+>>>>>>> :-)
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> How big is your index? 100M? 100G? What kind of VM
+>>>>>>>> parameters are you specifying?
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> The index will have about 20mil entries. The size of the index
+
+>>>>>>> lands up
+>>>>>>> being about 500M.
+>>>>>>> I start the VM with 1G of heap. No other options for GC etc is
+
+>>>>>>> used.
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> As an aside, do note that there's no requirement in Lucene
+that
+>>>>>>>> each document have the same fields, so it's unclear why you
+>>>>>>>> need two indexes, but perhaps some of the answers to the
+above
+>>>>>>>> will help us understand.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> Like I mentioned, Lucene does the job much faster with two indexes.
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> Also, be very very careful what you measure when you measure
+>>>>>>>> queries. You absolutely *have* to put some instrumentation
+in
+>>>>>>>> the code since "slow queries" can result from things other
+than
+>>>>>>>> searching. For instance, iterating over a Hits object for
+100s of
+>>>>>>>> documents....
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> The Query speeds are much faster than what I need :-) So no 
+>>>>>>> complains
+>>>>>>> here.
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> Show the code, man <G>!
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> Code below. EvIndexer is the base class. There are two 
+>>>>>>> subclasses which
+>>>>>>> implement addEvFieldsToIndexDoc() (template pattern) to add 
+>>>>>>> different
+>>>>>>> fields
+>>>>>>> to the index. that code is also pasted below
+>>>>>>>
+>>>>>>> --Code ---
+>>>>>>>
+>>>>>>> BaseClass
+>>>>>>>
+>>>>>>>  public EvIndexer(String indexName) throws Exception {
+>>>>>>>      this.name = indexName;
+>>>>>>>      a = new KeywordAnalyzer();
+>>>>>>>      INDEX_PATH = System.getProperty(StoreManager.PROP_DB_DB_LOC,
+>>>>>>> "./index/");
+>>>>>>>      FSDirectory directory = FSDirectory.getDirectory(INDEX_PATH
++
+>>>>>>> File.separatorChar + indexName, NoLockFactory.getNoLockFactory());
+>>>>>>>      indexWriter = new IndexWriter(directory, a,
+>>>>>>> IndexWriter.MaxFieldLength.LIMITED);
+>>>>>>> //indexWriter.setUseCompoundFile(false);
+>>>>>>>      //indexWriter.setRAMBufferSizeMB(256);
+>>>>>>>        }
+>>>>>>>      /** Method implemented by extending classes to add data
+
+>>>>>>> into the
+>>>>>>> index document for the
+>>>>>>>   *  given event
+>>>>>>>   *
+>>>>>>>   * @param d
+>>>>>>>   */
+>>>>>>>  protected abstract void addEvFieldsToIndexDoc(Document d, Ev
+
+>>>>>>> event);
+>>>>>>>    public void addToIndex(Ev ev) throws Exception {
+>>>>>>>      noOfEventsIndexed++;
+>>>>>>>      Document d = new Document();             
+>>>>>>> addEvFieldsToIndexDoc(d,
+>>>>>>> ev);
+>>>>>>>      indexWriter.addDocument(d);
+>>>>>>>            if ((noOfEventsIndexed % COMMIT_INTERVAL) == 0) {
+>>>>>>>          System.out.println(name + " indexed " +
+>>>>>>> NumberFormat.getInstance().format(noOfEventsIndexed) + " Commiting
+>>>>>>> them");
+>>>>>>>          commit();
+>>>>>>>      }                   }
+>>>>>>>
+>>>>>>> DerievdClass1
+>>>>>>>  protected void addEvFieldsToIndexDoc(Document d, Ev ev) {
+>>>>>>>      //noOfEventsIndexed++;
+>>>>>>>            Field id = new Field(EV_ID, Long.toString(ev.getId()),
+>>>>>>> Field.Store.YES, Field.Index.NO);
+>>>>>>>      Field src = new Field(EV_SRC, Long.toString(ev.getSrcId()),
+>>>>>>> Field.Store.NO, Field.Index.NOT_ANALYZED);
+>>>>>>>      Field type = new Field(EV_TYPE,
+>>>>>>> Integer.toString(ev.getEventTypeId()), Field.Store.NO,
+>>>>>>> Field.Index.NOT_ANALYZED);
+>>>>>>>      Field pri = new Field(EV_PRI, 
+>>>>>>> Short.toString(ev.getPriority()) ,
+>>>>>>> Field.Store.NO, Field.Index.NOT_ANALYZED);
+>>>>>>>      Field time = new Field(EV_TIME, 
+>>>>>>> getHexString(ev.getRecvTime()) ,
+>>>>>>> Field.Store.NO, Field.Index.NOT_ANALYZED);
+>>>>>>>      d.add(id);
+>>>>>>>      d.add(src);
+>>>>>>>      d.add(type);
+>>>>>>>      d.add(pri);
+>>>>>>>      d.add(time);
+>>>>>>>      //noOfFieldsIndexed +=  4;
+>>>>>>>                  }
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>> Thanks for the support.
+>>>>>>> ~preetham
+>>>>>>>
+>>>>>>>
+>>>>>>>  Best
+>>>>>>>
+>>>>>>>
+>>>>>>>         
+>>>>>>>> Erick
+>>>>>>>>
+>>>>>>>>
+>>>>>>>> On Wed, Dec 17, 2008 at 9:40 AM, Preetham Kajekar 
+>>>>>>>> <preetham@cisco.com
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>           
+>>>>>>>>> wrote:
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>               
+>>>>>>>>
+>>>>>>>>           
+>>>>>>>>> Hi Grant,
+>>>>>>>>> Thanks four response. Replies inline.
+>>>>>>>>>
+>>>>>>>>> Grant Ingersoll wrote:
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>             
+>>>>>>>>>> On Dec 17, 2008, at 12:57 AM, Preetham Kajekar wrote:
+>>>>>>>>>>
+>>>>>>>>>>  Hi,
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>               
+>>>>>>>>>>> I am new to Lucene. I am not using it as a pure
+text indexer.
+>>>>>>>>>>>
+>>>>>>>>>>> I am trying to index a Java object which has
+about 10 fields 
+>>>>>>>>>>> (like
+>>>>>>>>>>> id,
+>>>>>>>>>>> time, srcIp, dstIp) - most of them being numerical
+values.
+>>>>>>>>>>> In order to speed up indexing, I figured that
+having two 
+>>>>>>>>>>> separate
+>>>>>>>>>>> indexers, each of them indexing different set
+of fields 
+>>>>>>>>>>> works great.
+>>>>>>>>>>> So
+>>>>>>>>>>> I
+>>>>>>>>>>> have the first 5 fields in index1 and the remaining
+in index2.
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>                   
+>>>>>>>>>> Can you explain this a bit more?  Are those two fields
+really 
+>>>>>>>>>> large
+>>>>>>>>>> org
+>>>>>>>>>> something?  How are you obtaining them?  How are
+you 
+>>>>>>>>>> correlating the
+>>>>>>>>>> documents between the two indexes?  Did you actually
+try a 
+>>>>>>>>>> single
+>>>>>>>>>> index
+>>>>>>>>>> and
+>>>>>>>>>> it was too slow?
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>                 
+>>>>>>>>> I have a java object which has about 10 fields. However,
+the 
+>>>>>>>>> fields
+>>>>>>>>> are
+>>>>>>>>> not
+>>>>>>>>> fixed. The java object is essentially a representation
+of 
+>>>>>>>>> Syslogs from
+>>>>>>>>> network devices. So different syslogs have different
+fields. Each
+>>>>>>>>> field
+>>>>>>>>> has
+>>>>>>>>> a unique id and a value (mostly numeric types, so i convert
+it to
+>>>>>>>>> string).
+>>>>>>>>> There are some fixed fields. So the object is a list
+of fields 
+>>>>>>>>> which
+>>>>>>>>> is
+>>>>>>>>> produced by a parser.
+>>>>>>>>> I am trying to index using two indexers in two separate
+
+>>>>>>>>> threads- one
+>>>>>>>>> for
+>>>>>>>>> fixed and another for the non-fixed fields. Except for
+a 
+>>>>>>>>> unique id, I
+>>>>>>>>> do
+>>>>>>>>> not
+>>>>>>>>> store the fields in Lucene - i just index them. From
+the 
+>>>>>>>>> index, i get
+>>>>>>>>> the
+>>>>>>>>> unique id which is all I care about. (the objects are
+stored 
+>>>>>>>>> elsewhere
+>>>>>>>>> and
+>>>>>>>>> can be looked up based on this unique id).
+>>>>>>>>> I did try using a single indexer, but things were quite
+slow. 
+>>>>>>>>> Getting
+>>>>>>>>> high
+>>>>>>>>> throughput is crucial and having two indexers seemed
+to do 
+>>>>>>>>> very well.
+>>>>>>>>> (more
+>>>>>>>>> than twice as fast)
+>>>>>>>>>
+>>>>>>>>> Further, the index will never be modified and I can have
+just one
+>>>>>>>>> thread
+>>>>>>>>> writing to the index. If there are any other performance
+tips 
+>>>>>>>>> would be
+>>>>>>>>> very
+>>>>>>>>> helpful. I have already looked at the wiki link regarding
+
+>>>>>>>>> performance
+>>>>>>>>> and
+>>>>>>>>> using some of them.
+>>>>>>>>>
+>>>>>>>>> Thanks,
+>>>>>>>>> ~preetham
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>             
+>>>>>>>>>> Now, I want to have boolean AND query's looking for
+values in 
+>>>>>>>>>> both
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>               
+>>>>>>>>>>> indexes. Like f1=1234 AND f7=ABCD.f1 and f7 and
+present in two
+>>>>>>>>>>> separate
+>>>>>>>>>>> indexes. Would using the MultiIndexReader help
+? Since I am 
+>>>>>>>>>>> doing an
+>>>>>>>>>>> AND, I
+>>>>>>>>>>> dont expect that it would work.
+>>>>>>>>>>>
+>>>>>>>>>>> Thanks,
+>>>>>>>>>>> ~preetham
+>>>>>>>>>>>
+>>>>>>>>>>> ---------------------------------------------------------------------
+
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>>> For additional commands, e-mail: 
+>>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>
+>>>>>>>>>>>                   
+>>>>>>>>>> --------------------------
+>>>>>>>>>> Grant Ingersoll
+>>>>>>>>>>
+>>>>>>>>>> Lucene Helpful Hints:
+>>>>>>>>>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+>>>>>>>>>> http://wiki.apache.org/lucene-java/LuceneFAQ
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> ---------------------------------------------------------------------
+
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>>> For additional commands, e-mail: 
+>>>>>>>>>> java-user-help@lucene.apache.org
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>
+>>>>>>>>>>                 
+>>>>>>>>> ---------------------------------------------------------------------
+
+>>>>>>>>>
+>>>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>
+>>>>>>>>>               
+>>>>>>>>
+>>>>>>>>             
+>>>>>>> ---------------------------------------------------------------------
+
+>>>>>>>
+>>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>           
+>>>>>>
+>>>>>>         
+>>>>>       
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>     
+>>>
+>>>   
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

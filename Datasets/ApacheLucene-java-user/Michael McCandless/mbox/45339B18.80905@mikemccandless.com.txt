@@ -1,0 +1,90 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Parallel Index Search
+DATE: 16 Oct 2006
+
+Supriya Kumar Shyamal wrote:
+
+>>> If I am not mistaken the process of locking the Index by different 
+>>> objects like IndexReader or Indexwriter, theoratically only one 
+>>> Thread can access the index at a time.
+>>
+>> Actually, only one writer can write to the index at once.  Multiple
+>> readers can read from the index.
+>>
+>> On top of that, multiple threads may share one writer and one reader.
+>> Ie, these classes are thread safe.
+>>
+>>> When we do search on the index it creates a commit lock so the other 
+>>> thread does not modify the index, so other thread waits until the 
+>>> previosu therads release the lock, is it right?
+>>>
+>>> So in this case I should say index accessed one by one not parallel?
+>>
+>> The commit lock is only held while a reader is loading the index and
+>> while a writer is "committing" its changes to the index.  These times
+>> should be brief.  Whereas, the write lock is held for the entire time
+>> that a writer is open.
+> But IndexSearcher open index using INdexReader right?
+
+Yes, IndexSearcher will open an IndexReader.  So every time you open
+it, the commit lock is acquired, the IndexReader reads all segments
+details from the index, and then the commit lock is released.  But,
+this lock needs to be shared across all your machines, so that the
+writer is prevented from committing while a reader is reading the
+index.
+
+Aside: note that you should not be re-opening an IndexSearcher with
+every search.  It's much more efficient to open it (and reopen it
+every so often) and then share that one instance across many searches.
+
+>>
+>>> Its just my speculation, please don't get me wrong.
+>>>
+>>> Because I try to share the same index by 6 instances and since the 
+>>> lock for 5 instances are disabled and only once instance can modify 
+>>> the index, at this case I achive the parallel read of the index. Only 
+>>> disadvantage is that when the index modified then I get 
+>>> FileNotFoundException, ao I do some kind of  respawn the search again.
+>>
+>> You should not have to disable locking to do this sharing; in fact,
+>> disabling locking will lead to the "FileNotFoundException" on
+>> instantiating a reader when a writer is committing.
+>>
+>>> If I implement the lock mechanism in the DB using the custom locking 
+>>> then I am afraid the index performance will be reduced but the only 
+>>> advantage is that I can avoid FNFE.
+>>
+>> There are also open issues at least over NFS eg:
+>>
+>>     http://issues.apache.org/jira/browse/LUCENE-673
+>>
+>> Whereby even with proper (native) locking it's still possible to
+>> hit exceptions due to caching in the NFS client.  Are you using NFS?
+>>
+> Yes I am using NFS and for sharing I use the READ-ONLY FS mount so that 
+> the search instance cannot do any modification by mistake , otherwise it 
+> can corrupt the index.
+
+OK, Lucene currently hits intermittant FileNotFoundException over NFS
+(see that issue I listed for the gory details).  Furthermore (worse),
+correct locking (native locking) does not in fact fix the issue.
+
+We are working on small changes to how Lucene stores the index in the
+filesystem ("lockless commits") that do away with the commit lock
+entirely.  This not only enables readers to actually be entirely
+read-only, but it also allows Lucene to work properly over NFS.
+
+Unfortunately it's going to be a while before this is actually
+available (it's still being developed).  In the mean time, one
+workaround is to do something similar to the Solr project (built on
+top of Lucene) which takes snapshots of the index at "known safe"
+times and then readers read from these snapshots instead of the live
+index.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

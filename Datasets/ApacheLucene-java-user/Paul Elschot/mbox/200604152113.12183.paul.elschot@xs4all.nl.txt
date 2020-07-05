@@ -1,0 +1,61 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Catching BooleanQuery.TooManyClauses
+DATE: 15 Apr 2006
+
+On Saturday 15 April 2006 13:44, Erick Erickson wrote:
+> With the warning that I'm not the most experienced Lucene user in the
+> world...
+> 
+> I *think*, that rather than search for each term, it's more efficient to
+> just use IndexReader.termDocs..... i.e.
+> 
+> Indexreader ir = <whatever>;
+> TermDocs termDocs = ir.TermDocs();
+> WildcardTermEnum wildEnum = <whatever>;
+> 
+> for (Term term = null; (term = wildEnum.term()) != null; wildEnum.next()) {
+>       termDocs.seek(term);
+
+This avoids the buffer space needed for each TermDocs by using each term
+separately. A BooleanQuery over all the terms will use the termDocs.next() and
+termDocs.doc() for all terms at the same time. It has to, because more terms
+might match each document and it has to compute the query score for each
+document.
+
+>       while (termDocs.next()) {
+>             Document doc = reader.document(termDocs.doc())
+
+The methods termDocs.next() and reader.document()
+go to different places in the Lucene index (see the index format),
+so this will send the disk head up and down.
+It's better to collect the termDocs.doc() values first,  for example in a
+BitSet, and then retrieve the Document's in numerical order.
+Btw., this is what the ConstantScoreRangeQuery does to avoid using all terms
+at the same time.
+
+>       }
+> }
+> 
+> I know that for loop looks odd, but I just peeked at the source code for the
+> TermEnum classes and see why it works.
+> 
+> One warning, as the folks on the board have pointed out to me is that the
+> Hits object is not entirely efficient when you fetch lots of docs (more than
+> 100 has been mentioned) and you should think about TopDocs or some such.
+> 
+> Also, if you can avoid fetching the document (i.e. get everything you want
+> from the index) you'll add efficiency. I have no clue how much you're
+> returning to the user, so I don't know whether that would work for you.....
+
+In other words, one can use the above BitSet in a Filter lateron
+during an IndexSearcher.search() (or in a ConstantScoreQuery),
+and use Hits or TopDocs for document retrieval.
+
+Regards,
+Paul Elschot.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

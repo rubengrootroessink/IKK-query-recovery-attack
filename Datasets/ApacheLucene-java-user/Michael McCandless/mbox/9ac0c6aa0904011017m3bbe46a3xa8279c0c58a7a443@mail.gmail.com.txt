@@ -1,0 +1,74 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: IndexWriter.deleteDocuments(Query query)
+DATE: 1 Apr 2009
+
+> For me at lease, IndexWriter.deleteDocument(int) would be useful.
+
+I completely agree: delete-by-docID in IndexWriter would be a great
+feature.  Long ago I became convinced of that.
+
+Where this feature always gets stuck (search the lists -- it's gotten
+stuck alot) is how to implement it?  At any time, a merge can commit,
+which invalidates all docIDs stored anywhere.  We need to solve that
+before we can delete by docID.
+
+I don't see a clean solution.  Do you?
+
+> I have a customized index reader that stores a mapping of docid -> uid in
+> the payload (something Michael Bush and Ning Li suggested a while back) And
+> that mapping is loaded a IndexReader load time and is shared by searchers.
+
+OK
+
+> I do realtime update, so I get a batch of updates with a uid associated with
+> each batch. So I do deleted on the uid and add the document. And I
+> implemented using IndexWriter.deleteDocuments(Term[])
+
+OK
+
+> I realized I have an IndexReader around already with a docId->uid mapping, I
+> can just find out the docid from that list and simply call
+> IndexReader.deleteDocument(int). So out of curiosity, I compare the times
+> doing deletes with these two mechanisms with 1 batch of 10000 deletes. And
+> on my macbook pro, I see a difference/overhead of 3-4 seconds (with various
+> runs and how much term table is cached etc.) And that is something I would
+> expect because we essentially doing a "query" per element in the batch,
+> albeit posting list length is only 1, but still...
+
+But, your mapping is stale (you can't trust the docIDs) as soon as you
+open an IndexWriter on the same index, so this isn't really a valid
+test.
+
+3-4 seconds out of how much total time?
+
+Can you give more details on this test?  Are you including time to
+open IndexReader, time to load your docID/uid mapping, and time to
+commit the changes (to be apples/apples)?
+
+> Now to me that is significant enough to move away from
+> IndexWriter.deleteDocuments().
+>
+
+> However, to actually implement the delete with IndexWriter on
+> docids, I have to create a customized Query object that iterates my
+> int[] of docids.
+
+That won't work (the docIDs might be invalid by the time your Query is
+visited).  The point of delete-by-Query is IW hands you a reader,
+which you must use right then use to find the docIDs; only the docIDs
+from that reader are valid.
+
+> Having IndexWriter.deleteDocuments take a Filter than DocIdSet makes
+> sense.
+
+Well... when IW deletes-by-Query, it's already using the Query as a
+Filter (ie, not doing any scoring).  Changing the API to
+delete-by-Filter won't change the performance.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

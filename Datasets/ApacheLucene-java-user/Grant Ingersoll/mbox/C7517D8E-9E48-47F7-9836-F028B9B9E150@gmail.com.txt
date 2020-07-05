@@ -1,0 +1,188 @@
+FROM: Grant Ingersoll <grant.ingers...@gmail.com>
+SUBJECT: Re: contrib/benchmark questions
+DATE: 23 Mar 2007
+
+OK, Doron (and other benchmarkers!), on to search:
+
+Here's my alg file:
+
+#Indexing declaration up here
+
+OpenReader
+     { "SrchSameRdr" Search > : 5000
+
+     { "SrchTrvSameRdr" SearchTrav > : 5000
+     { "SrchTrvSameRdrTopTen" SearchTrav(10) > : 5000
+     { "SrchTrvRetLoadAllSameRdr" SearchTravRet > : 5000
+
+#Skip bytes and body
+     { "SrchTrvRetLoadSomeSameRdr" SearchTravRetLoadFieldSelector 
+(docid,docname,docdate,doctitle) > : 5000
+     CloseReader
+
+
+Never mind the last task, I will be submitting a patch shortly that  
+will make sense out of it.  Essentially, it specifies what fields to  
+load for the document
+
+Here are the 	results:
+                 Operation                      round merge  
+max.buffered   runCnt   recsPerRun        rec/s  elapsedSec     
+avgUsedMem    avgTotalMem
+      [java] OpenReader -  -  -  -  -  -  -  -  0 -  10 -  -  -   10  
+-  -   1 -  -  -  - 1 -  -   125.0 -  -   0.01 -   5,385,600 -  -  
+9,965,568
+      [java] SrchSameRdr_5000                   0    10            
+10        1         5000      1,184.3        4.22     5,805,120       
+9,965,568
+      [java] SrchTrvSameRdr_5000 -  -  -  -  -  0 -  10 -  -  -   10  
+-  -   1 -  -  427500 -   71,776.4 -  -   5.96 -   5,806,144 -  -  
+9,965,568
+      [java] SrchTrvSameRdrTopTen_5000          0    10            
+10        1       427500     62,001.4        6.89     5,766,584       
+9,965,568
+      [java] SrchTrvRetLoadAllSameRdr_5000 -  - 0 -  10 -  -  -   10  
+-  -   1 -  -  850000 -  - 7,226.4 -  - 117.62 -   6,161,728 -  -  
+9,965,568
+      [java] SrchTrvRetLoadSomeSameRdr_5000     0    10            
+10        1       850000     10,334.0       82.25     6,162,752       
+9,965,568
+      [java] CloseReader -  -  -  -  -  -  -  - 0 -  10 -  -  -   10  
+-  -   1 -  -  -  - 1 -  - 1,000.0 -  -   0.00 -   5,921,856 -  -  
+9,965,568
+
+The line I'm a bit confused by is the recsPerRun
+For the tasks that are doing the traversal and the retrieval, why so  
+many recsPerRun?  Is it counting the hits, the traversals and the  
+retrievals each as one record?
+
+What I am trying to do is compare:
+Search
+Search plus traversal of all hits
+Search plus traversal of top ten
+Search plus traversal and retrieval of all documents and all fields  
+on the document
+Search plus traversal and retrieval of all documents and some fields  
+on the document
+
+I think I see in the ReadTask that it is the res var that is being  
+incremented and would have to be altered.  I guess I can go by  
+elapsed time, but even that seems slightly askew.  I think this is  
+due to the withRetrieve() function overhead inside the for loop.  I  
+have moved it out and will submit that change, too.
+
+Am I interpreting this correctly?
+
+-Grant
+
+On Mar 19, 2007, at 5:11 PM, Doron Cohen wrote:
+
+> Grant Ingersoll <gsingers@apache.org> wrote on 19/03/2007 13:10:16:
+>
+>> So, if I am understanding correctly:
+>>
+>>>> "SearchSameRdr" Search > : 5000
+>>
+>> means don't collect indiv. stats fur SearchSameRdr, but do whatever
+>> that task does 5000 times, right?
+>
+> Almost...
+>
+> It should be btw
+>    { "SearchSameRdr" Search > : 5000
+> and it means: run Search 5000 times, sequentially, 5000 times,  
+> assign the
+> name "SearchSameRdr" to that sequence of 5000, and do not collect
+> individual stats for the individual tasks making that sequence.
+>
+> If it was just
+>   { Search > : 5000
+> it would still mean the same, just that a name was assigned to this  
+> for
+> you, something like: "Seq_Search_5000".
+>
+> If it was:
+>    { "SearchSameRdr" Search } : 5000
+> it would be the same as your example, just that stas would be  
+> collected not
+> only for the entire elapsed sequence, but also breaking it down for  
+> each of
+> the 5000 calls to "Search".
+>
+> Similar logic with
+>   [ .. ]
+> and
+>   [ .. >
+> just that the tasks making the (parallel) sequence are executed in
+> parallel, each in a separate thread.
+>
+>>
+>>>
+>>>> 3. Is there anyway to dump out the stats as a CSV file or  
+>>>> something?
+>>>> Would I implement a Task for this?  Ultimately, I want to be  
+>>>> able to
+>>>> create a graph in Excel that shows tradeoffs between speed and
+>>>> memory.
+>>>
+>>> Yes, implementing a report task would be the way.
+>>> ... but when I look at how I implemented these reports, all the
+>>> work is
+>>> done in the class Points. Seems it should be modified a little with
+>>> more
+>>> thought of making it easiert to extend reports.
+>>
+>> I may take a crack at it, but deadline for the talk is looming
+>
+> I'll take a look too, let you know if I have anything.
+>
+>>> - Being intetested in memory stats - the thing that all the rounds
+>>> run in a
+>>> single program, same JVM run, usually means what you see is very  
+>>> much
+>>> dependent in the GC behavior of the specific VM you are using. If
+>>> it does
+>>> not release memory (most likely) to the OS you would not be able to
+>>> notice
+>>> that round i+1 used less memory than round i. It would probably
+>>> better for
+>>> something like this to put the "round" logic in an ant script,
+>>> invoking
+>>> each round in a separate new exec. But then things get more
+>>> complicated for
+>>> having a final stats report containing all rounds. What do you
+>>> think about
+>>> this?
+>>
+>> Good to know.  Perhaps a GarbageCollectionTask is needed?
+>
+> ResetSystemSoft and ResetSystemErase both call GC;
+> Is this sufficient, task wise?
+> The concern is that this is not enough gc/mem wise, because the JVM  
+> already
+> has some memory, that the OS is not going to reclaim.
+>
+>> So, I should wrap those task in an OpenReader/CloseReader?
+>
+> Yes, if you want the same reader object to be used by all these.
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+------------------------------------------------------
+Grant Ingersoll
+http://www.grantingersoll.com/
+http://lucene.grantingersoll.com
+http://www.paperoftheweek.com/
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

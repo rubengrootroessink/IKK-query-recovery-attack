@@ -1,0 +1,49 @@
+FROM: "Armbrust, Daniel C." <Armbrust.Dan...@mayo.edu>
+SUBJECT: RE: Indexing very large sets (10 million docs)
+DATE: 28 Jul 2003
+
+I would say that something definitely went wrong to make your index that big that early - now
+that I saw you are only storing one field.
+
+Even if you make your indexes partitioned at 2.5 instead of 10 million (which you probably
+don't need to do) I would still recommend that you lower your mergeFactor - when I was testing,
+I had the best performance on my machine at 90.  It will probably vary a little bit based
+on how fast your disk is, etc. 
+
+When you have it set that high, what you end up doing is using a lot of memory - and a lot
+of file handles (which you noticed).... And then pausing for a good while while you do all
+of your disk writes at once.  At a lower number, you will be able to take advantage of hardware
+level write buffering, etc. by doing more smaller writes and get better performance.  At least
+that was my experience.  I have also used the RAM index - and found its performance to be
+_worse_ than a properly configured file index - because the ram index ends up writing the
+whole thing out to disk at once.  And its even worse if you are merging it with a master index
+every X documents, rather than just writing it out to a blank spot on disk, because you really
+end up repeatedly reading and writing the older parts of the index.
+
+Also - Optimizing kills your indexing speed performance... What you are doing is stopping
+indexing, and then reading the entire index in, and writing it out to a new set of files.
+ So, this gets slower and slower as your index gets larger.
+
+If you set your mergeFactor back down to something closer to the default (10) - you probably
+wouldn't have any problems with file handles.  The higher you make it, the more open files
+you will have.  When I set it at 90 for performance reasons, I would run out of file handles
+(on XP) somewhere after 100,000 documents.  So, I simply create a new index every 100,000
+documents.  This way, I get the best of both worlds.  Performance while indexing from a relatively
+high mergefactor, and non-excessive file handle usage (without calling optimize), from closing
+the index before it gets huge.  I am never recopying the index over itself until the last
+step, when I merge all of the indexes into one master index.  
+
+Plus, with multiple (relatively) small indexes, you can keep them on different disk drives
+- and when you do your final merge, read them from one drive, and write them to another to
+help get around the issue of needing double the disk space free to do the merging/optimizing.
+ And if you make a mistake along the way (which I am prone to) or a sysadmin kills one of
+your processes or something like that - you only end up with one small corrupt index, which
+can be quickly rebuilt, instead of your master index.  
+
+Dan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

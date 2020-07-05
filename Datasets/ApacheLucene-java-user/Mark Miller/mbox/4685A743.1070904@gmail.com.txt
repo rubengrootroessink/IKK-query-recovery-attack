@@ -1,0 +1,54 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Lucene 2.2, NFS, Lock obtain timed out
+DATE: 30 Jun 2007
+
+>Never used the IndexAccessor patch, so I may be
+>wrong in the following.
+
+>No, let's fix it...  /;->
+
+Don't mean to wade in over my head here, but just to help out those that 
+have not used LuceneIndexAccessor.
+
+I am fairly certain that using the LuceneIndexAccessor could easily 
+create the FileNotFoundException on the segments file. I am a lot less 
+clear on whether that would then cause a problem with the WriteLock.
+
+LuceneIndexAccessor manages Readers and Writers (And Searchers, and 
+Directories, etc). It keeps track of how many Readers are out and 
+ensures a single Writer. You must request and release Readers and 
+Writers. All Readers are cached until you release a Writer. Upon 
+releasing a Writer, LuceneIndexAccessor waits for all Readers to be 
+returned and clears the cache, causing new Readers to be opened on the 
+next request.
+
+This is certain to be a problem due to the unavailability of "delete on 
+last close" semantics over NFS. If a certain node in the cluster has not 
+released a writer (due to not being used to write to the index) in a 
+long time, another node could trigger the deletion of the files that a 
+Reader from the first Node was using. LuceneIndexAccessor runs 
+independently on each node, and so is not providing coherent access 
+across all nodes. The WriteLock is being to sync the Writer from each 
+node and the Readers are not being coordinated at all...each Node counts 
+on getting a Writer released to cause its cached Readers to be released 
+and reopened (on first access).
+
+Without this problem solved, it would seem difficult to know the 
+FileNotFoundException was caused by something else. What I don't know is 
+if or how this would cause a WriteLock timeout. Perhaps there is more 
+than one issue at hand.
+
+A simple way to test the LuceneIndexAccessor problem would be to 
+implement a synchronized method that calls 
+waitForReadersAndCloseCached() (this method would prob need more logic 
+than just the simple call), and then call that method more often than 
+every 10 minutes.
+
+
+- Mark
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

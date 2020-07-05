@@ -1,0 +1,168 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Oracle and Lucene Integration
+DATE: 23 Nov 2006
+
+I don't think you can have much, if any, influence on the docid that Lucene
+assigns. When you add a document, it's guaranteed to have an ID greater than
+any already in the index. I just think (but don't depend) on it being N + 1
+where N is the largest docid already in the index.
+
+But here's the really critical part. A document ID can change. If you delete
+a document and re-optimize the index (I'm pretty sure the optimization is
+necessary), all the documents with docids greater than the one you deleted
+will be re-assigned.
+
+People have recommended instead, that you store things like ROWID in a new
+field in the Lucene document and leave the docid alone......
+
+Or something like that <G>...
+
+BTW, I commend your efforts and contributions to the Lucene corpus with
+this, keep up the good work!
+
+Best
+Erick
+
+On 11/23/06, Marcelo Ochoa <marcelo.ochoa@gmail.com> wrote:
+>
+> Otis:
+>   I am new to Lucene API and searching technologies :)
+>
+>                   doc.add(new Field("rowid", rowid, Field.Store.YES,
+>                           Field.Index.UN_TOKENIZED));
+>                   Done!!.
+>
+>   Also the Oracle ROWID format has a portion which can be used as the
+> document id into the Lucene document, this will simplify the delete
+> operation, for example, because with the rowid we can use
+> reader.deleteDocument(idFromRowIDValue).
+>
+> http://download-east.oracle.com/docs/cd/B19306_01/server.102/b14220/datatype.htm#sthref3899
+>   But I don't know how to add documents with an specific id.
+>   Somebody can help me showing a code snipped with an adding operation
+> using a predefined ID?
+>   Rowid number start with 0 and are sequentially assigned.
+>   Best regards, Marcelo.
+>
+> On 11/23/06, Otis Gospodnetic <otis_gospodnetic@yahoo.com> wrote:
+> > Wow, very cool, even though I don't use Oracle anywhere at the moment.
+> > You probably don't want that rowid field tokenized, by the way.
+> >
+> > Otis
+> >
+> > ----- Original Message ----
+> > From: Marcelo Ochoa <marcelo.ochoa@gmail.com>
+> > To: java-user@lucene.apache.org
+> > Sent: Wednesday, November 22, 2006 8:44:58 AM
+> > Subject: Re: Oracle and Lucene Integration
+> >
+> > Hi Mark:
+> > > Very interesting.
+> > >
+> > > So how does this solution manage mapping Oracle primary keys to and
+> from Lucene doc ids?
+> >   I am storing the rowid value as a Document field, here a code sniped
+> >                 Document doc = new Document();
+> >                 doc.add(new Field("rowid", rowid, Field.Store.YES,
+> >                           Field.Index.TOKENIZED));
+> >                 Object value = rs.getObject(2);
+> >                 String valueStr = null;
+> >                 if (value!=null) { // Sanity checks
+> >                   if (value instanceof CLOB)
+> >                     valueStr =
+> > ((CLOB)value).getSubString(1,(int)((CLOB)value).length());
+> >                   else if (value instanceof XMLType)
+> >                     valueStr =
+> > ((XMLType)value).extract("//text()","").getStringVal();
+> >                   else
+> >                     valueStr = value.toString();
+> >                   doc.add(new
+> > Field(col,valueStr,Field.Store.NO,Field.Index.TOKENIZED));
+> >                   writer.addDocument(doc);
+> >
+> >   So when I am querying I can get the rowid back using:
+> >                 if (iterator.hasNext()) {
+> >                     // append rowid to collection
+> >                     Hit hit = (Hit) iterator.next();
+> >                     try {
+> >                         rid =  hit.get("rowid");
+> >                         score = hit.getScore();
+> >                     } catch (IOException e) {
+> >                         e.printStackTrace();
+> >                         throw new SQLException(e.getMessage());
+> >                     }
+> >                     rlist[i] = new String(rid);
+> >                     slist.put(rid,new Float(score));
+> >                     idx++;
+> >                 } else {.............
+> >   and passing the rowid to the Oracle execution plan which is
+> > collecting in bacth of 2000 rowids.
+> > >
+> > > >> Another benefits of using the Data Cartridge API is that if the
+> > > >>table T1 has insert, update or delete rows operations a
+> corresponding
+> > > >>Java method will be called to automatically update the Lucene Index.
+> > >
+> > > I suspect the tricky bit is optimizing the opening/closing of Lucene
+> IndexReaders/Writers especially in the event of large batches of database
+> updates.
+> > > Does this API pass the transactional info which would help organize
+> the batching of the Lucene reader.delete and writer.add calls?
+> >   Well, I think that Oracle Text uses a Queue to store large batches,
+> > because it use a ctx_sys.sync procedure to update the index ;)
+> >   We can make the same solution using Oracle AQ.
+> > >
+> > > Cheers
+> > > Mark
+> >  Best regards, Marcelo.
+> > --
+> > Marcelo F. Ochoa
+> > http://marcelo.ochoa.googlepages.com/home
+> > ______________
+> > Do you Know DBPrism? Look @ DB Prism's Web Site
+> > http://www.dbprism.com.ar/index.html
+> > More info?
+> > Chapter 17 of the book "Programming the Oracle Database using Java &
+> > Web Services"
+> > http://www.amazon.com/gp/product/1555583296/
+> > Chapter 21 of the book "Professional XML Databases" - Wrox Press
+> > http://www.amazon.com/gp/product/1861003587/
+> > Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+> > http://www.oreilly.com/catalog/oracleopen/
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+> --
+> Marcelo F. Ochoa
+> http://marcelo.ochoa.googlepages.com/home
+> ______________
+> Do you Know DBPrism? Look @ DB Prism's Web Site
+> http://www.dbprism.com.ar/index.html
+> More info?
+> Chapter 17 of the book "Programming the Oracle Database using Java &
+> Web Services"
+> http://www.amazon.com/gp/product/1555583296/
+> Chapter 21 of the book "Professional XML Databases" - Wrox Press
+> http://www.amazon.com/gp/product/1861003587/
+> Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+> http://www.oreilly.com/catalog/oracleopen/
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

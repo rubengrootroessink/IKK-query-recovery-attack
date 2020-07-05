@@ -1,0 +1,123 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: NFS and Lucene 2.0 status - still troublesome ?
+DATE: 13 Nov 2006
+
+
+The quick answer is: NFS is still problematic in Lucene 2.0.
+
+The longer answer is: we'd like to fix this, but it's not fully fixed
+yet.  You can see here:
+
+     http://issues.apache.org/jira/browse/LUCENE-673
+
+for gory details.
+
+There are at least two different problems with NFS (spelled out in the
+above issue):
+
+   * Intermittant IOException on instantiating a reader.
+
+     This is in fact [surprisingly] not due to locking, at least in my
+     testing.  The unreleased version of Lucene now supports native
+     locks (through java.nio.*), but even when using native locks I can
+     still reproduce this error in my testing.
+
+     The good news is: the lockless commits patch (which is not yet
+     committed but I think close):
+
+         http://issues.apache.org/jira/browse/LUCENE-701
+
+     resolves this issue.  Lockless commits also makes readers entirely
+     read only, so your read-only NFS mount for readers becomes
+     possible.
+
+   * "Stale NFS handle" IOException when searching.
+
+     Lucene's readers provide "point in time" searching: once open,
+     a reader searches the snapshot of the index as of the point it was
+     open.
+
+     Unfortunately, the implementation of this feature currently relies
+     on the filesystem to provide access to files even after they are
+     deleted.  NFS makes no such guarantee.
+
+     This means on searching you have to catch this exception and then
+     close & open a new searcher.
+
+     I think it would make sense to change how Lucene implements point
+     in time searching so we don't rely on filesystem semantics.  But
+     this is a ways off.
+
+I'm hopeful that with lockless commits, and then with the caveat of
+closing/opening your searchers on hitting "Stale NFS handle" during
+searching (until we can change how "point in time" searching is
+implemented), that Lucene will work fine over NFS.
+
+Anyway, in the meantime, one good workaround is to either use Solr:
+
+     http://incubator.apache.org/solr/
+
+directly, or, borrow its approach.  With Solr, a writer writes to the
+index and periodically (at a known safe time) takes a snapshot, and
+then readers only read from the current snapshot.
+
+Mike
+
+Peter A. Friend wrote:
+> 
+> On Nov 13, 2006, at 8:10 AM, Øyvind Stegard wrote:
+> 
+>> I've searched the list and have found many references to problems when
+>> using Lucene over NFS. Mostly because of file-based locking, which
+>> doesn't work all that well for many NFS installations. I'm under the
+>> impression that the core locking logic between writers and/or readers
+>> hasn't changed in a significant way between Lucene 1.4 and 2.0 (?). I
+>> guess this means NFS is still problematic ?
+> 
+> Unfortunately it all depends on the reliability of the NFS drivers in 
+> the OS, and the kind of filers you are using. If the environment isn't 
+> too busy, NFS lockd *may* work on some systems, but it usually ends up 
+> collapsing under load.
+> 
+>  From there you have to hand craft some C code to create lock files, and 
+> what works again depends on your system. On some systems doing an 
+> exclusive create will work (can only be expected to work on version 3 
+> mounts), but then local caches will bite you, so you end up having to 
+> disable the directory cache, assuming your system supports such an 
+> option. That failing, creating locks as symlinks to unique temporary 
+> files that don't exist will usually blow through the cache and work ok. 
+> This of course doesn't rule out problems in the NFS implementation that 
+> show up under heavy load, and allow more than one machine to think it 
+> has the lock. You also have to include some code to sensibly expire 
+> locks left from crashes.
+> 
+>> We are considering a model where a single node updates the search index
+>> according to changes in the repository (only one physical index for the
+>> entire cluster) while multiple other nodes can search the very same
+>> index over NFS (read-only). But I guess there is a need for a single
+>> lock-directory shared and writable between all nodes, and that this
+>> makes NFS-usage difficult ?
+> 
+> The fact that only a single node will be doing writes greatly improves 
+> the chances of this working. I don't recall whether readers ever check 
+> for locks, it's best if that can be avoided. I know that it's safe to 
+> write the new indexes since they aren't being referred to by the 
+> segments file, but I'm not sure what sequence of operations are used 
+> when re-writing the segments file. I think unlinking the old segments 
+> file and using a rename to put the new one in place is probably the 
+> safest bet.
+> 
+> Peter
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

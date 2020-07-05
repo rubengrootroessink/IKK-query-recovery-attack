@@ -1,0 +1,140 @@
+FROM: "MOYSE Gilles (Cetelem)" <gilles.mo...@cetelem.fr>
+SUBJECT: RE: derive tokens from single token
+DATE: 29 Sep 2003
+
+Hi.
+
+In your the method "next", I think there is a "null pointer exception"
+threat.
+
+
+	       //New token ?
+       if (receivedText.length() == 0) {//<-- null pointer exception may
+occur here
+         receivedToken = input.next();			
+         if (receivedToken == null) return null; 	// if the pointer
+was null, null exception occured while checking the "length" property above
+									//
+if you know the pointer cant be null, this test is not useful. Or maybe I
+messed something ?
+         receivedText.append(receivedToken.termText());		
+         positionIncrement = 1;		
+       }
+
+isn't this one more secure ?
+
+	       //New token ?
+	if (receivedToken == null) return null;
+	if (receivedText.length() == 0) {
+         receivedToken = input.next();			
+         receivedText.append(receivedToken.termText());		
+         positionIncrement = 1;		
+       }
+
+
+Hope I did not miss anything, and my remark will be useful.
+
+Gilles.
+
+-----Message d'origine-----
+De : Pierrick Brihaye [mailto:pierrick.brihaye@culture.gouv.fr]
+Envoyé : lundi 29 septembre 2003 15:46
+À : Lucene Users List
+Objet : Re: derive tokens from single token
+
+
+Hi,
+
+Hackl, Rene a écrit:
+
+> I tried to extend TokenFilter, but 
+> all I get is either "oobar" or "obar", depends on when 'return' is called.
+
+> 
+> How could I add such extra tokens to the tokenStream? Any thoughts on this
+> appreciated.
+
+Adapted from my... arabic Analyzer :
+
+public class ChemicalOrSomethingFilter extends TokenFilter {
+	
+   private Token receivedToken = null;
+   private StringBuffer receivedText = new StringBuffer();	
+	
+   public ChemicalOrSomethingFilter(TokenStream input){
+     super(input);
+   }
+	
+   private String getNextTruncation() {		
+     StringBuffer emittedText = new StringBuffer();
+     //left trim the token
+     while(true) {
+       if (receivedText.length() == 0) break;
+       char c = receivedText.charAt(0);
+       if (!Character.isWhitespace(c)) break;
+       receivedText.deleteCharAt(0);		
+     }				
+     //keep the good stuff
+     while(true) {
+       if (receivedText.length() == 0) break;
+       char c = receivedText.charAt(0);
+       if (Character.isWhitespace(c)) break;
+       emittedText.append(receivedText.charAt(0));
+       receivedText.deleteCharAt(0);			
+     }		
+     //right trim the token
+     while(true) {
+      if (receivedText.length() == 0) break;
+      char c = receivedText.charAt(0);
+      if (!Character.isWhitespace(c)) break;
+      receivedText.deleteCharAt(0);		
+     }				
+     return emittedText.toString();
+   }
+
+   public final Token next() throws IOException {
+     while (true) {
+       String emittedText;	
+       int positionIncrement = 0;	
+       //New token ?
+       if (receivedText.length() == 0) {
+         receivedToken = input.next();			
+         if (receivedToken == null) return null;
+         receivedText.append(receivedToken.termText());		
+         positionIncrement = 1;		
+       }
+       emittedText = getNextPart();			
+       //Warning : all tokens are emitted with the *same* offset
+       if (emittedText.length() > 0) {
+         Token emittedToken = new Token(emittedText, 
+receivedToken.startOffset(), receivedToken.endOffset());
+
+emittedToken.setPositionIncrement(positionIncrement);
+         return emittedToken;
+       }				
+     }
+   }
+}
+
+Not tested at all : it is a quick copy of my "WhiteSpaceFilter" (that's 
+why triming is so important up there ;-) which is not the best designed 
+class.
+
+This should work for indexing. For querying, it's another matter 
+especially if you want to use the queryParser.
+
+Keep us informed.
+
+Cheers,
+
+-- 
+Pierrick Brihaye, informaticien
+Service régional de l'Inventaire
+DRAC Bretagne
+mailto:pierrick.brihaye@culture.fr
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+

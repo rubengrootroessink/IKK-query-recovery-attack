@@ -1,0 +1,261 @@
+FROM: "Nathan Brackett" <nbrack...@net-temps.com>
+SUBJECT: RE: Search deadlocking under load
+DATE: 11 Jul 2005
+
+Thanks for the advice. That ought to reduce contention a bit in that
+particular method.
+
+I've been reviewing a large amount of thread dumps today and I was wondering
+if it's common to see many threads that look like this:
+
+"tcpConnection-8080-20" daemon prio=5 tid=0x081ba000 nid=0x810ac00 waiting
+for monitor entry [bf24b000..bf24bd20]
+        at
+org.apache.lucene.index.CompoundFileReader$CSInputStream.readInternal(Compou
+ndFileReader.java:216)
+        - waiting to lock <0x2ee24c48> (a
+org.apache.lucene.store.FSInputStream)
+
+When I get the deadlock situation, I often see a few of these lying around,
+but no matching thread that actually has the lock on 0x2ee24c48 in the dump.
+Is this normal? Not really a thread dump pro.
+
+
+
+-----Original Message-----
+From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+Sent: Monday, July 11, 2005 1:57 PM
+To: java-user@lucene.apache.org
+Subject: RE: Search deadlocking under load
+
+
+Hi Nick,
+
+Without looking at the source of that method, I'd suggest first trying
+the multifile index format (you can easily convert to it by setting the
+new format on IndexWriter and optimizing it).  I'd be interested to
+know if this eliminates the problem, or at least makes it harder to
+hit.
+
+Otis
+
+
+--- Nathan Brackett <nbrackett@net-temps.com> wrote:
+
+> Hey Otis,
+>
+> Thanks for the hasty response and apologies for my delayed response.
+> It was
+> Friday and time to go :)
+>
+> The queries we're running are very varied (wildcard, phrase, normal).
+> The
+> index is only about a 1/2 gig in size (maybe 250,000 documents). The
+> machine
+> is running FreeBSD 5.3 with ~2 gig RAM.
+>
+> I got a thread dump from right around the time that the process would
+> deadlock and not come back and I noticed that almost all of the
+> threads were
+> waiting on the same method. Here's what the trace looks like: (small
+> sample
+> for the sake of brevity...the real dump is huge)
+>
+> tcpConnection-8080-32:
+>   [1]
+> org.apache.lucene.index.CompoundFileReader$CSInputStream.readInternal
+> (CompoundFileReader.java:217)
+>   [2] org.apache.lucene.store.InputStream.refill
+> (InputStream.java:158)
+>   [3] org.apache.lucene.store.InputStream.readByte
+> (InputStream.java:43)
+>   [4] org.apache.lucene.store.InputStream.readVInt
+> (InputStream.java:83)
+>   [5] org.apache.lucene.index.SegmentTermDocs.read
+> (SegmentTermDocs.java:126)
+>   [6] org.apache.lucene.search.TermScorer.next (TermScorer.java:55)
+>   [7] org.apache.lucene.search.BooleanScorer.next
+> (BooleanScorer.java:112)
+>   [8] org.apache.lucene.search.Scorer.score (Scorer.java:37)
+>   [9] org.apache.lucene.search.IndexSearcher.search
+> (IndexSearcher.java:92)
+>   [10] org.apache.lucene.search.Hits.getMoreDocs (Hits.java:64)
+>   [11] org.apache.lucene.search.Hits.<init> (Hits.java:43)
+>   [12] org.apache.lucene.search.Searcher.search (Searcher.java:33)
+>   [13] org.apache.lucene.search.Searcher.search (Searcher.java:27)
+>   [14] com.nettemps.search.backend.SingleIndexManager.search
+> (SingleIndexManager.java:335)
+>   [15] com.nettemps.search.backend.IndexAccessControl.doSearch
+> (IndexAccessControl.java:100)
+>   [16] com.nettemps.search.server.SearchServerImpl.searchResumes
+> (SearchServerImpl.java:402)
+>   [17]
+>
+com.nettemps.search.server.SearchServerReadOnly_Tie.invoke_searchResumes
+> (SearchServerReadOnly_Tie.java:93)
+>   [18]
+> com.nettemps.search.server.SearchServerReadOnly_Tie.processingHook
+> (SearchServerReadOnly_Tie.java:298)
+>   [19] com.sun.xml.rpc.server.StreamingHandler.handle
+> (StreamingHandler.java:321)
+>   [20] com.sun.xml.rpc.server.http.JAXRPCServletDelegate.doPost
+> (JAXRPCServletDelegate.java:443)
+>   [21] com.sun.xml.rpc.server.http.JAXRPCServlet.doPost
+> (JAXRPCServlet.java:102)
+>   [22] javax.servlet.http.HttpServlet.service (HttpServlet.java:165)
+>   [23] javax.servlet.http.HttpServlet.service (HttpServlet.java:103)
+>   [24] com.caucho.server.http.FilterChainServlet.doFilter
+> (FilterChainServlet.java:96)
+>   [25] com.caucho.server.http.Invocation.service
+> (Invocation.java:315)
+>   [26] com.caucho.server.http.CacheInvocation.service
+> (CacheInvocation.java:135)
+>   [27] com.caucho.server.http.HttpRequest.handleRequest
+> (HttpRequest.java:253)
+>   [28] com.caucho.server.http.HttpRequest.handleConnection
+> (HttpRequest.java:170)
+>   [29] com.caucho.server.TcpConnection.run (TcpConnection.java:139)
+>   [30] java.lang.Thread.run (Thread.java:534)
+>
+> I took a look at that readInternal method and saw that the contention
+> is
+> around an InputStream that I assume reads from the actual index file
+> and
+> returns it for use by the method. We are running many threads that
+> are
+> attempting to do searches at the same time (roughly 30 - 35), so that
+> explains why the search times would go up.
+>
+> In an attempt to reduce the amount of contention, we synchronized our
+> search
+> method (the one that makes the actual call to Lucene's search: [14]
+> com.nettemps.search.backend.SingleIndexManager.search
+> (SingleIndexManager.java:335)). This also caused the same results
+> when hit
+> with too many threads.
+>
+> We're really stuck at this point as to what to try. Any advice?
+>
+>
+>
+> -----Original Message-----
+> From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> Sent: Friday, July 08, 2005 3:40 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Search deadlocking under load
+>
+>
+> Nathan,
+>
+> 3) is the recommended usage.
+> Your index is on an NFS share, which means you are searching it over
+> the network.  Make it local, and you should see performance
+> improvements.  Local or remove, it makes sense that searches take
+> longer to execute, and the load goes up.  Yes, it shouldn't deadlock.
+> You shouldn't need to synchronize access to IndexSearcher.
+> When your JVM locks up next time, kill it, get the thread dump, and
+> send it to the list, so we can try to remove the bottleneck, if
+> that's
+> possible.
+>
+> How many queries/second do you run, and what kinds of queries are
+> they,
+> how big is your index and what kind of hardware (disks, RAM, CPU) are
+> you using?
+>
+> Otis
+>
+> --- Nathan Brackett <nbrackett@net-temps.com> wrote:
+>
+> > Hey all,
+> >
+> > We're looking to use Lucene as the back end to our website and
+> we're
+> > running
+> > into an unusual deadlocking problem.
+> >
+> > For testing purposes, we're just running one web server (threaded
+> > environment) against an index mounted on an NFS share. This machine
+> > performs
+> > searches only against this index so it's not being touched. We have
+> > tried a
+> > few different models so far:
+> >
+> > 1) Pooling IndexSearcher objects: Occasionally we would run into
+> > OutOfMemory
+> > problems as we would not block if a request came through and all
+> > IndexSearchers were already checked out, we would just create a
+> > temporary
+> > one and then dispose of it once it was returned to the pool.
+> >
+> > 2) Create a new IndexSearcher each time: Every request to search
+> > would
+> > create an IndexSearcher object. This quickly gave OutOfMemory
+> errors,
+> > even
+> > when we would close them out directly after.
+> >
+> > 3) Use a global IndexSearcher: This is the model we're working with
+> > now. The
+> > model holds up fine under low-moderate load and is, in fact, much
+> > faster at
+> > searching (probably due to some caching mechanism). Under heavy
+> load
+> > though,
+> > the CPU will spike up to 99% and never come back down until we kill
+> > -9 the
+> > process. Also, as you ramp the load, we've discovered that search
+> > times go
+> > up as well. Searches will generally come back after 40ms, but as
+> the
+> > load
+> > goes up the searches don't come back for up to 20 seconds.
+> >
+> > We've been attempting to find where the problem is for the last
+> week
+> > with no
+> > luck. Our index is optimized, so there is only one file. Do we need
+> > to
+> > synchronize access to the global IndexSearcher so that only one
+> > search can
+> > run at a time? That poses a bit of a problem as if a particular
+> > search takes
+> > a long time, all others will wait. This problem does not look like
+> an
+> > OutOrMemory error because the memory usage when the spike occurs is
+> > usually
+> > in the range of 150meg used with a ceiling of 650meg. Anyone else
+> > experiencing any problems like this or have any idea where we
+> should
+> > be
+> > looking? Thanks.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

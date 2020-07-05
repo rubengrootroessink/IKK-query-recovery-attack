@@ -1,0 +1,226 @@
+FROM: KK <dioxide.softw...@gmail.com>
+SUBJECT: Re: How to support stemming and case folding for english content	mixed with non-english content?
+DATE: 11 Jun 2009
+
+Note: I request Solr users to go through this mail and let me thier ideas.
+
+Thanks Yonik, you rightly pointed it out. That clearly says that the way I'm
+trying to mimic the default behaviour of Solr indexing/searching in Lucene
+is wrong, right?.
+ I downloaded the latest version of solr nightly on may20[at that time I was
+using Solr, now switched to Lucene]. I hope the issue must have been fixed
+with that version.Anyway I'm going to download the latest nightly build
+today and try it out. I hope using the nightly build instead of getting the
+src from latest trunk is more or less same[provided I donwload the latest
+nightly build, right?]as I don't know much about getting/compiling the src
+from solr trunk. Do let me know if I've to use the trunk anyway, in that
+case I'm ready to spend time to get that done.
+BTW, Yonik, as per the basic Solr schema.xml file, the analyzers/filters
+used by default are these ones, correct me if I'm wrong,
+this is the code snip  that mentions the filters used for indexing in Solr
+------------------------------------
+
+<fieldType name="text" class="solr.TextField" positionIncrementGap="100">
+      <analyzer type="index">
+        <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+        <!-- in this example, we will only use synonyms at query time
+        <filter class="solr.SynonymFilterFactory"
+synonyms="index_synonyms.txt" ignoreCase="true" expand="false"/>
+        -->
+        <!-- Case insensitive stop word removal.
+             enablePositionIncrements=true ensures that a 'gap' is left to
+             allow for accurate phrase queries.
+        -->
+        <filter class="solr.StopFilterFactory"
+                ignoreCase="true"
+                words="stopwords.txt"
+                enablePositionIncrements="true"
+                />
+        <filter class="solr.WordDelimiterFilterFactory"
+generateWordParts="1" generateNumberParts="1" catenateWords="1"
+catenateNumbers="1" catenateAll="0" splitOnCaseChange="1"/>
+        <filter class="solr.LowerCaseFilterFactory"/>
+        <filter class="solr.EnglishPorterFilterFactory"
+protected="protwords.txt"/>
+        <filter class="solr.RemoveDuplicatesTokenFilterFactory"/>
+      </analyzer>
+----------------------------------------
+and this is the part used for Solr querying,
+
+<analyzer type="query">
+        <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+        <filter class="solr.SynonymFilterFactory" synonyms="synonyms.txt"
+ignoreCase="true" expand="true"/>
+        <filter class="solr.StopFilterFactory" ignoreCase="true"
+words="stopwords.txt"/>
+        <filter class="solr.WordDelimiterFilterFactory"
+generateWordParts="1" generateNumberParts="1" catenateWords="0"
+catenateNumbers="0" catenateAll="0" splitOnCaseChange="1"/>
+        <filter class="solr.LowerCaseFilterFactory"/>
+        <filter class="solr.EnglishPorterFilterFactory"
+protected="protwords.txt"/>
+        <filter class="solr.RemoveDuplicatesTokenFilterFactory"/>
+      </analyzer>
+    </fieldType>
+
+To summarize the names are like this,
+Indexing:
+1. solr.WhitespaceTokenizerFactory  -- tokenizer and the followings filters
+as is clear from the name itself
+2. solr.SynonymFilterFactory
+3. solr.StopFilterFactory
+4. solr.WordDelimiterFilterFactory  (with the options as,
+generateWordParts="1" generateNumberParts="1" catenateWords="1"
+catenateNumbers="1" catenateAll="0" splitOnCaseChange="1")
+
+5. solr.LowerCaseFilterFactory
+6. solr.EnglishPorterFilterFactory
+7. solr.RemoveDuplicatesTokenFilterFactory
+
+Querying:
+1. solr.WhitespaceTokenizerFactory
+2. solr.SynonymFilterFactory
+3. solr.StopFilterFactory
+4. solr.WordDelimiterFilterFactory( options are: generateWordParts="1"
+generateNumberParts="1" catenateWords="0" catenateNumbers="0"
+catenateAll="0" splitOnCaseChange="1")
+
+5. solr.LowerCaseFilterFactory
+6. solr.EnglishPorterFilterFactory
+7. solr.RemoveDuplicatesTokenFilterFactory
+
+Now the filters/analyzers I used that tried to mimic the above behavior of
+Solr [in Lucene] is as show below.
+I pulled out the whitespacedelimiterfilter from Solr and my custom analyzer
+for indexing is like this,
+/**
+ * Analyzer for Indian language.
+ */
+public class IndicAnalyzerIndex extends Analyzer {
+  public TokenStream tokenStream(String fieldName, Reader reader) {
+    TokenStream ts = new WhitespaceTokenizer(reader);
+     ts = new WordDelimiterFilter(ts, 1, 1, 1, 1, 0);  // I tried using
+...(ts, 1, 1, 1, 1, 0, 1) 7 params, but no constructor found for that, I
+didn't try to modify the code to add this feature though, then used this
+with 6 params, that uses the constructor for which the last option for
+splitOnCaseChange is set to 1 so we're doing the same thing even in this
+way...
+    ts = new StopFilter(ts, StopAnalyzer.ENGLISH_STOP_WORDS);
+    ts = new LowerCaseFilter(ts);
+    ts = new PorterStemFilter(ts);
+    return ts;
+  }
+}
+
+and for querying this is teh code
+/**
+ * Analyzer for Indian language.
+ */
+public class IndicAnalyzerQuery extends Analyzer {
+  public TokenStream tokenStream(String fieldName, Reader reader) {
+    TokenStream ts = new WhitespaceTokenizer(reader);
+    ts = new WordDelimiterFilter(ts, 1, 1, 0, 0, 0);
+    ts = new StopFilter(ts, StopAnalyzer.ENGLISH_STOP_WORDS);
+    ts = new LowerCaseFilter(ts);
+    ts = new PorterStemFilter(ts);
+    return ts;
+  }
+}
+
+The only difference for both is just the worddelimiterfilter with different
+options... Comparing the analyzers/filters used by Solr and the above custom
+analyzer we can see that I'm not using synonymfilter and
+removeduplicatefilter. I hope these make sense for english content only and
+using/skipping them will not make any differece to my non-english content.
+Can someone with knowledge of Solr/Lulcene source code point me what exactly
+is going wrong in my case whn I'm trying to do the same thing in Lucene. It
+seems I'm missing some minor yet important thing...hence my custom
+IndicAnalyzer is not behaving the way Solr's default anlyzer works and this
+is clearly shown  by Yonik that Solr is smart enough to detect unicoded word
+endings and behaving as expected.
+Any idea on this issue is welcome. Help me fix the issue. BTW, lucene ppl
+when is that basic worddelimiterfilter going to be added to Lucene as well?
+Any idea?
+
+Thanks,
+KK.
+
+On Tue, Jun 9, 2009 at 7:01 PM, Yonik Seeley <yonik@lucidimagination.com>wrote:
+
+> I just cut'n'pasted your word into Solr... it worked fine (it didn't
+> split the word).
+> Make sure you're using the latest from the trunk version of Solr...
+> this was fixed since 1.3
+>
+> http://localhost:8983/solr/select?q=साल&debugQuery=true
+> [...]
+> <lst name="debug">
+>  <str name="rawquerystring">साल</str>
+>  <str name="querystring">साल</str>
+>  <str name="parsedquery">text:साल</str>
+>  <str name="parsedquery_toString">text:साल</str>
+>
+> -Yonik
+>
+>
+> On Tue, Jun 9, 2009 at 7:48 AM, KK <dioxide.software@gmail.com> wrote:
+> > Hi Robert, I tried a sample code to check whats the reason. The
+> > worddelimiterfilter uses isLetter() method to tokenize, and for hindi
+> words
+> > some parts of word are not actually letters but just part of the word[but
+> > that doesnot mean they can be used as word delimiters], since they are
+> not
+> > letters isLetter() returns false and the word is getting breaked around
+> > that. This is some sample code with a hindi word pronounced saal[meaning
+> > year in english],
+> >
+> > import java.lang.String;
+> >
+> > public class HindiUnicodeTest {
+> >    public static void main(String args[]) {
+> >        String hindiStr = "साल";
+> >        int length = hindiStr.length();
+> >        System.out.println("str length " + length);
+> >        for (int i=0; i<length; i++) {
+> >            System.out.println(hindiStr.charAt(i) + " is " +
+> > Character.isLetter(hindiStr.charAt(i)));
+> >        }
+> >
+> >    }
+> > }
+> >
+> > Running this gives this output,
+> > str length 3
+> > स is true
+> > ा is false
+> > ल is true
+> >
+> > As you can see the second one is false, which says that it is not a
+> letter
+> > but this makes worddelimiterfilter break/tokenize around the word. I even
+> > tried to use my custom parser[which I mentioned earlier] and tried to
+> print
+> > the string that is the output after the query getting parsed, and what I
+> > found is that if I send the above hindi word then the query string after
+> > being parsed is something like this,
+> > Parsed Query string: स ल
+> > it essentialy removes the non-letter character[the second one], and it
+> seems
+> > it treats them as separate and whenever thse two characters appear
+> adjacent,
+> > they are in th top of result set, also whereever these two letters appers
+> in
+> > the doc, it says they are part of the result set [and hence highlights
+> > them].
+> >
+> > I hope I made it clear. Do let me if some more information is required.
+> >
+> > Thanks,
+> > KK.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

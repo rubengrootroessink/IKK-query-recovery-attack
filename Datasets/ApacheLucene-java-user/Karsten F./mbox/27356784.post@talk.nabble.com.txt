@@ -1,0 +1,130 @@
+FROM: "Karsten F." <karsten-luc...@fiz-technik.de>
+SUBJECT: Search a PhraseQuery one multiple terms with the same position
+DATE: 28 Jan 2010
+
+
+Hi,
+
+I have a problem with the checkedRepeats in SloppyPhraseScorer.
+This feature is for phrases like "1st word 2st word".
+Without this feature the result would be the same as "1st word 2st". 
+OK
+
+But I have an Index with more then one token on the same position.
+The german sentence  "Die käuflichen Reihenhäuser standen am Waldrand" is
+tokenized in the index as
+"die käuflichen|kaufen reihenhäuser|reihe|haus standen|stehen am
+waldrand|wald|rand"
+where e.g. all three terms "reihenhäuser|reihe|haus" have the same position.
+
+My problem:
+I need a hit for the phrase "reihe haus", but I don't get it, because of the
+checkedRepeats feature in SloppyPhraseScorer.
+Any ideas how to deal with this problem?
+
+Best regards
+  Karsten
+
+P.S. a source code example to show the problem:
+/////////////////////////////////////////////////////////////
+package org.apache.lucene.search;
+
+import java.io.IOException;
+
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import
+org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
+import org.apache.lucene.analysis.tokenattributes.TermAttribute;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+
+/**
+ * @see SloppyPhraseScorer
+ */
+public class TestPhraseWithoutPosIncrementQuery
+{
+    public static class MyTokenStream extends TokenStream
+    {
+        TermAttribute              termAtt;
+        PositionIncrementAttribute posIncrAtt;
+
+        int[]                      posInc = new int[] { 1, 0, 0, 1, 0, 0 };
+        String[]                   terms  = new String[] { "t00", "t01",
+"t02", "t10", "t11", "t12" };
+        int                        pos    = 0;
+
+        public MyTokenStream()
+        {
+            termAtt = (TermAttribute) addAttribute(TermAttribute.class);
+            posIncrAtt = (PositionIncrementAttribute)
+addAttribute(PositionIncrementAttribute.class);
+        }
+
+        public boolean incrementToken() throws IOException
+        {
+            if (pos < terms.length)
+            {
+                termAtt.setTermBuffer(terms[pos]);
+                posIncrAtt.setPositionIncrement(posInc[pos]);
+                pos++;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public static void main(String[] args) throws Exception
+    {
+        Directory ramDirectory = new RAMDirectory();
+        IndexWriter indexWriter = new IndexWriter(ramDirectory, new
+StandardAnalyzer());
+        Document testDocument = new org.apache.lucene.document.Document();
+        Field f = new Field("field", new MyTokenStream());
+        testDocument.add(f);
+        indexWriter.addDocument(testDocument);
+        indexWriter.commit();
+        indexWriter.close();
+
+        IndexReader iR = IndexReader.open(ramDirectory);
+        IndexSearcher indexSearcher = new IndexSearcher(iR);
+        PhraseQuery query = new PhraseQuery();
+        query.add(new Term("field", "t00"), 0);
+        query.add(new Term("field", "t10"), 1);
+        Hits hits = indexSearcher.search(query);
+        System.out.println(query.toString() + ": " + hits.length());
+        // field:"t00 t10": 1
+
+        query = new PhraseQuery();
+        query.add(new Term("field", "t01"), 0);
+        query.add(new Term("field", "t11"), 1);
+        hits = indexSearcher.search(query);
+        System.out.println(query.toString() + ": " + hits.length());
+        // field:"t01 t11": 1
+
+        query = new PhraseQuery();
+        query.add(new Term("field", "t00"), 0);
+        query.add(new Term("field", "t01"), 1);
+        hits = indexSearcher.search(query);
+        System.out.println(query.toString() + ": " + hits.length());
+        // field:"t00 t01": 0
+
+    }
+
+}
+ 
+-- 
+View this message in context: http://old.nabble.com/Search-a-PhraseQuery-one-multiple-terms-with-the-same-position-tp27356784p27356784.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

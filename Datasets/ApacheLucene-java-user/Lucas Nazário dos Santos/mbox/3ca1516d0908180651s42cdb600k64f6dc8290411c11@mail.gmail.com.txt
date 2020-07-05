@@ -1,0 +1,297 @@
+FROM: Lucas Nazário dos Santos <nazario.lu...@gmail.com>
+SUBJECT: Re: Problem doing backup using the SnapshotDeletionPolicy class
+DATE: 18 Aug 2009
+
+Thanks, Shai.
+
+After thinking a bit I don't believe that the SnapshotDeletionPolicy is the
+best approach to my problem.
+
+Because I do batch indexing, the final solution I came up with is to index
+documents each time in a temporary folder, copy this temporary folder to a
+backup directory after indexing, and merge it with a complete index to
+maintain a unique structure. This way I can backup only the difference since
+last indexing took place.
+
+Lucas
+
+
+
+On Mon, Aug 17, 2009 at 3:48 PM, Shai Erera <serera@gmail.com> wrote:
+
+> The way I'd do the backups is by having a background thread that is
+> scheduled to run every X hours/days (depends on how frequent you want to do
+> the backups) and when it wakes it:
+> 1) Creates a SnapshotDeletionPolicy and retrieve the file names.
+> 2) Lists the files in the backup folder.
+> 3) Copies the files from (1) that do not appear in (2).
+> 4) Delete the files in (2) that do not appear in (1) --> that deletes
+> segments that do not exist anymore.
+>
+> But that is because I want to do the backups while the system is up and
+> running, and indexing and search operations occur.
+>
+> From what you describe below, you index in batches and then indexing stops.
+> So you can just do a directory listing (after everything stops - indexing,
+> optimize ...) and basically repeat steps (2) - (4) from above, I think.
+>
+> Hope this helps,
+> Shai
+>
+> On Mon, Aug 17, 2009 at 3:59 PM, Lucas Nazário dos Santos <
+> nazario.lucas@gmail.com> wrote:
+>
+> > Thanks Mike.
+> >
+> > I'm using Windows XP with Java 1.6.0 and Lucene 2.4.1.
+> >
+> > I don't know if I'm using the right backup strategy. I have an indexing
+> > process that happens from time to time and the index is getting every day
+> > bigger. Hence, copying all the index every time as a backup strategy is
+> > becoming a painful, endless activity. Giving this scenario, I wouldn't
+> like
+> > to copy the entire index each time I do backup, but only the difference
+> > from
+> > the previous backup. Here is the plan:
+> >
+> > 1. Create an index writer;
+> > 2. Take a snapshot to prevent existing files from changing;
+> > 3. Start indexing until no more documents to be indexed exist;
+> > 4. Retrieve a list of index files that didn't change with
+> > this.snapshotDeletionPolicy.snapshot().getFileNames();
+> > 5. Copy all other files inside the index folder that not those retrieved
+> in
+> > step 4 to the backup directory;
+> > 6. Optimize and close the index.
+> >
+> > I really don't know if what I'm doing is the best approach to my problem.
+> I
+> > believe that people use the SnapshotDeletionPolicy to copy all the index
+> up
+> > to the last commit. I want to copy only the difference since last backup.
+> >
+> > What I'm thinking about doing now is to index in a new directory at every
+> > indexing iteration, copy this index to the backup folder and merge it
+> with
+> > the main index afterwards.
+> >
+> > What do you guys think I should do?
+> >
+> > Lucas
+> >
+> >
+> >
+> > On Fri, Aug 14, 2009 at 8:05 PM, Michael McCandless <
+> > lucene@mikemccandless.com> wrote:
+> >
+> > > Alas I don't see it failing, with the optimize left in.  Which exact
+> > > rev of 2.9 are you testing with?  Which OS/filesystem/JRE?
+> > >
+> > > I realize this is just a test so what follows may not apply to your
+> > > "real" usage of SnapshotDeletionPolicy...:
+> > >
+> > > Since you're closing the writer before taking the backup, there's no
+> > > need to even use SnapshotDeletionPolicy (you can just copy all files
+> > > you find in the index).
+> > >
+> > > SnapshotDeletionPolicy's purpose is to enable taking backups while an
+> > > IndexWriter is still open & making ongoing changes to the index, ie a
+> > > "hot backup".
+> > >
+> > > Finally, you're taking the snapshot before doing any indexing... which
+> > > means your backup will only reflect the index as of the last commit
+> > > before you did indexing.
+> > >
+> > > Mike
+> > >
+> > > On Fri, Aug 14, 2009 at 4:55 PM, Lucas Nazário dos
+> > > Santos<nazario.lucas@gmail.com> wrote:
+> > > > Not as small as I would like, but shows the problem.
+> > > >
+> > > > If you remove the statement
+> > > >
+> > > > // Remove this and the backup works fine
+> > > > optimize(policy);
+> > > >
+> > > > the backup works wonderfully.
+> > > >
+> > > > (More code in the next e-mail)
+> > > >
+> > > > Lucas
+> > > >
+> > > >
+> > > >        public static void main(final String[] args) throws
+> > > > CorruptIndexException, IOException, InterruptedException {
+> > > >                final SnapshotDeletionPolicy policy = new
+> > > > SnapshotDeletionPolicy(new KeepOnlyLastCommitDeletionPolicy());
+> > > >                final IndexBackup backup = new IndexBackup(policy, new
+> > > > File("backup"));
+> > > >                for (int i = 0; i < 3; i++) {
+> > > >                        index(policy, backup);
+> > > >                }
+> > > >        }
+> > > >
+> > > >        private static void index(final SnapshotDeletionPolicy policy,
+> > > final
+> > > > IndexBackup backup) throws CorruptIndexException,
+> > > >                        LockObtainFailedException, IOException {
+> > > >                IndexWriter writer = null;
+> > > >                try {
+> > > >                        FSDirectory.setDisableLocks(true);
+> > > >                        writer = new
+> > > > IndexWriter(FSDirectory.getDirectory("index"), new
+> StandardAnalyzer(),
+> > > > policy,
+> > > >                                        MaxFieldLength.UNLIMITED);
+> > > >
+> > > >                        System.out.println("Star: " +
+> > > > backup.willBackupFromNowOn());
+> > > >
+> > > >                        for (int i = 0; i < 10000; i++) {
+> > > >                                final Document document = new
+> > Document();
+> > > >                                document.add(new Field("content",
+> > "content
+> > > > content content content", Store.YES, Index.ANALYZED));
+> > > >                                writer.addDocument(document);
+> > > >                        }
+> > > >                } finally {
+> > > >                        if (writer != null) {
+> > > >                                writer.close();
+> > > >                        }
+> > > >
+> > > >                        System.out.println("Backup: " +
+> > backup.backup());
+> > > >
+> > > >                        // Remove this and the backup works fine
+> > > >                        optimize(policy);
+> > > >                }
+> > > >        }
+> > > >
+> > > >        private static void optimize(final SnapshotDeletionPolicy
+> > policy)
+> > > > throws CorruptIndexException, LockObtainFailedException,
+> > > >                        IOException {
+> > > >
+> > > >                IndexWriter writer = null;
+> > > >                try {
+> > > >                        writer = new
+> > > > IndexWriter(FSDirectory.getDirectory("index"), new
+> StandardAnalyzer(),
+> > > > policy,
+> > > >                                        MaxFieldLength.UNLIMITED);
+> > > >                        writer.optimize();
+> > > >                } finally {
+> > > >                        writer.close();
+> > > >                }
+> > > >        }
+> > > >
+> > > >
+> > > > On Fri, Aug 14, 2009 at 4:37 PM, Shai Erera <serera@gmail.com>
+> wrote:
+> > > >
+> > > >> I think you should also delete files that don't exist anymore in the
+> > > index,
+> > > >> from the backup?
+> > > >>
+> > > >> Shai
+> > > >>
+> > > >> On Fri, Aug 14, 2009 at 10:02 PM, Michael McCandless <
+> > > >> lucene@mikemccandless.com> wrote:
+> > > >>
+> > > >> > Could you boil this down to a small standalone program showing
+the
+> > > >> problem?
+> > > >> >
+> > > >> > Optimizing in between backups should be completely fine.
+> > > >> >
+> > > >> > Mike
+> > > >> >
+> > > >> > On Fri, Aug 14, 2009 at 2:47 PM, Lucas Nazário dos
+> > > >> > Santos<nazario.lucas@gmail.com> wrote:
+> > > >> > > Hi,
+> > > >> > >
+> > > >> > > I'm using the SnapshotDeletionPolicy class to backup my
+index. I
+> > > >> > basically
+> > > >> > > call the snapshot() method from the class SnapshotDeletionPolicy
+> > at
+> > > >> some
+> > > >> > > point, get a list of files that changed, copy then to the
+backup
+> > > >> folder,
+> > > >> > and
+> > > >> > > finish by calling the release() method.
+> > > >> > >
+> > > >> > > The problem arises when, in between backups, I optimize
+the
+> index
+> > by
+> > > >> > opening
+> > > >> > > it with the IndexWriter class and calling the optimize()
+method.
+> > > When I
+> > > >> > > don't optimize in between backups, here is what happens:
+> > > >> > >
+> > > >> > > The first backup copies the segment composed by the files
+_0.cfs
+> > and
+> > > >> > > segments_2. The second backup copies the files _1.cfs and
+> > > segments_3,
+> > > >> and
+> > > >> > > the third backup copies the files _2.cfs e segments_4. I
+can
+> open
+> > > the
+> > > >> > backup
+> > > >> > > folder with Luke without problems.
+> > > >> > >
+> > > >> > > When I do optimize in between backups, the copies are as
+follow:
+> > > >> > >
+> > > >> > > The first backup copies the segment composed by the files
+_0.cfs
+> > and
+> > > >> > > segments_2. The second backup copies the files _1.cfs and
+> > > segments_3,
+> > > >> and
+> > > >> > > the third backup copies the files _3.cfs e segments_5. In
+this
+> > case,
+> > > >> when
+> > > >> > I
+> > > >> > > try to open the backup folder, Luke gives a message saying
+that
+> it
+> > > >> can't
+> > > >> > > find the file _2.cfs.
+> > > >> > >
+> > > >> > > My question is: how can I backup my index using the
+> > > >> > SnapshotDeletionPolicy
+> > > >> > > and having to optimize the index in between backups? Am
+I using
+> > the
+> > > >> right
+> > > >> > > backup strategy?
+> > > >> > >
+> > > >> > > Thanks,
+> > > >> > > Lucas
+> > > >> > >
+> > > >> >
+> > > >> >
+> > ---------------------------------------------------------------------
+> > > >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >> >
+> > > >> >
+> > > >>
+> > > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+>
+

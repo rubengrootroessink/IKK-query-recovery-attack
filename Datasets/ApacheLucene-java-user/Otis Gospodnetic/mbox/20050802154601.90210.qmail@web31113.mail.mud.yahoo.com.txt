@@ -1,0 +1,165 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: how to free memory after index ist build.
+DATE: 2 Aug 2005
+
+Hi Jan,
+
+I don't know where your memory goes - it could be any number of things.
+ For instance, somebody mentioned recently that some MySQL JDBC drivers
+have known memory leaks.  To figure out where the memory leaks is, and
+what's consuming your RAM, run your application under a profiler
+(OptimizeIt, JProfiler...).
+
+However, i see a few problems in your code.
+1) you should take the JDBC code for getting the connection and
+creation of an SQL statement out of that method, so it is not called
+repeteadly - you can reuse the same connection!
+
+2) I don't see the code to close your statement, connection, and
+ResultSet.  Those typically go to a finally block.
+
+3) mergeFactor looks suspiciously high.
+
+4) You opening IndexWriter, optimizing the index and closing it a lot. 
+Do you really need to optimize it that often?
+
+The gc() call you are making is just a suggestion for the JVM - "now
+may be a good time to consider running GC".  The JVM may ignore this
+suggestion.
+
+Here is a handy method:
+
+    private static long gc()
+    {
+        long freeMemBefore = Runtime.getRuntime().freeMemory();
+        System.out.println("Free Memory Before: " + freeMemBefore);
+        System.gc();
+        try {
+            Thread.sleep(1000);
+            System.runFinalization();
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.gc();
+        long freeMemAfter = Runtime.getRuntime().freeMemory();
+        System.out.println("Total Memory      : " +
+Runtime.getRuntime().totalMemory());
+        System.out.println("Max Memory        : " +
+Runtime.getRuntime().maxMemory());
+        System.out.println("Free Memory After : " + freeMemAfter);
+        return freeMemBefore-freeMemAfter;
+    }
+
+
+Otis
+
+
+--- Jan Philipp Seng <jp.seng@gmx.de> wrote:
+
+> I am using the Lucene 1.4.3 API. After building the index over 150000
+> documents (~250 MB data), Lucene does not free the memory that is
+> used
+> during indexing. The searcher runs as a servlet under Tomcat. Every
+> time the
+> index is build new, the indexing process takes free memory, so after
+> ten
+> runs the memory is completly full. I tried to call the garbage
+> collector
+> explicitly, but that does not help.
+> I build the index to harddisc and load it into a RAMDirectory after
+> building. There is no reference to my indexer left after indexing and
+> I
+> cannot find a reason why the garbage collector does not free the
+> memory.
+> Here are some important points of my code reduced to the central
+> functionality. Do you have any ideas, what kind of problem this could
+> be ?
+> An answer would help me a lot.
+> 
+> 
+> IndexTablesDaemon start the indexing process:
+> IndexTablesDaemon.run():
+> -----------------------------
+> while (true) {
+>   IndexTables indexer = new IndexTables();
+>   indexer.indexTables(); // indexing if necessary, writing the new
+> index to
+> harddisc
+>   indexer = null;        // for freeing the memory, does not help
+>   FTS.initNewIndex();    // switching the old with the new index
+>   Runtime.getRuntime().gc();   // calling the garbage collector. Does
+> not
+> help.
+>   Thread.sleep(lWait);         // waiting a fix space of time
+> } 
+> 
+> 		
+> 		
+> Building the index: sending queries to a mySQLDatabase, 
+> 										buidling a Lucene-document with the mySQL-data und indexing
+> it:
+> IndexTables.indexTables():
+> --------------------------
+>   IndexWriter writer = new IndexWriter(PATHNAME_INDEX_NEW), 
+>     new TTAnalyser(), true);		
+> 
+>   writer.mergeFactor = 250;
+>   writer.minMergeDocs = 250;
+>  
+>   Document doc = null;
+> 
+>   String sQuery = "SELECT columns FROM table";
+> 
+>   Connection conn = DriverManager.getConnection("jdbc:mysql: ...");
+>   Statement stmt = conn.createStatement()
+>   ResultSet	rs = stmt.executeQuery(sQuery);
+> 
+>   while (m_rs.next()) {
+>     doc = getTTDocument();
+>     // fill doc with fields from the database query
+>     writer.addDocument(doc);
+>   }
+> 
+>   writer.optimize();
+>   writer.close();
+>   writer = null;              // for freeing memory. Does not help
+> 
+>   Runtime.getRuntime().gc();  // explicitely running the garbage
+> collector.
+> Does not help
+> }
+> 	
+> 	
+> 		
+> Exchanging the old an the new index for queries to the Lucene-index.
+> FTS.initNewIndex():
+> -------------------
+>   File oldIndex = new File(sPathIndex);
+>   File newIndex = new File(sPathIndexNew);
+>  
+>   // deleting all files in the old index from harddisc
+>   // let the new index become the operating index
+>   oldIndex.delete();
+>   newIndex.renameTo(oldIndex);
+>  
+>   // load the new index to RAMDirectory from harddisc
+>   SearchTables.reloadIndex();		
+> 				
+> 			
+> Thanks for your help,
+> 
+> Jan Philipp Seng, Germany, Aachen
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,224 @@
+FROM: "Koji Sekiguchi" <koji.sekigu...@m4.dion.ne.jp>
+SUBJECT: RE: search by field, not field value
+DATE: 12 Dec 2006
+
+Erick,
+
+Sorry for replying to a bit old topic.
+
+> TermDocs.seek(new Term("specific_field", ""));
+>
+>  Note that the "" as the value of the term gets all the terms. Then use
+> TermDocs.next until it returns false. At each point, TermDocs.doc() will
+> give you the Lucene ID of a document containing that term.
+
+I couldn't seek the term when I use "" as the term value.
+I'd appreciate it if you run the following program and give some comment?
+I'm hoping to get the way of enumerating all the terms.
+Thanks in advance,
+
+Koji
+---------------------
+package termDocs;
+
+import java.io.IOException;
+
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+
+public final class SearchByField {
+
+	static final String F_NAME = "name";
+	static final String F_ADDR = "addr";
+	static final String F_AGE = "age";
+	static final String F_TYPE = "type";
+	static final String F_NUMBER = "num";
+	static final String F_LEVEL = "lvl";
+
+	public static void main(String[] args) throws IOException {
+
+		Source[] docSources = {
+			new Employee( "Dale Rickey", "West Virginia, US", "25" ),
+			new Company( "D&R Co.", "Tennessee, US", "maker" ),
+			new Partner( "0123", "PARTNER-A", "A" ),
+			new Employee( "Candy Buckley", "New York, US", "30" ),
+			new Company( "Suzu Inc.", "Utah, US", "logistics" ),
+			new Partner( "0234", "PARTNER-B", "B" ),
+			new Employee( "Justin Steveman", "Botswana", "35" ),
+			new Company( "Sato Bro.", "Austria", "services" ),
+			new Partner( "5566", "PARTNER-C", "C" )
+		};
+
+		Directory dir = new RAMDirectory();
+		IndexWriter writer = new IndexWriter( dir, new WhitespaceAnalyzer(),
+true );
+		for( Source docSource : docSources ){
+			Document doc = docSource.getDocument();
+			writer.addDocument( doc );
+		}
+		writer.close();
+
+		IndexReader reader = IndexReader.open( dir );
+		TermDocs termDocs = reader.termDocs();
+		termDocs.seek( new Term( F_ADDR, "" ) );
+		//termDocs.seek( new Term( F_ADDR, "US" ) );
+		while( termDocs.next() ){
+			Document doc = reader.document( termDocs.doc() );
+			int freq = termDocs.freq();
+			System.out.println( "doc: \"" + doc.toString() + "\"\tfreq: " + freq );
+		}
+		reader.close();
+		dir.close();
+	}
+
+	static interface Source {
+		public Document getDocument();
+	}
+
+	static class Employee implements Source {
+		String name;
+		String addr;
+		String age;
+		Employee( String name, String addr, String age ){
+			this.name = name;
+			this.addr = addr;
+			this.age = age;
+		}
+		public Document getDocument(){
+			Document doc = new Document();
+			doc.add( new Field( F_NAME, name, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			doc.add( new Field( F_ADDR, addr, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			doc.add( new Field( F_AGE, age, Field.Store.YES,
+Field.Index.UN_TOKENIZED ) );
+			return doc;
+		}
+	}
+
+	static class Company implements Source {
+		String name;
+		String addr;
+		String type;
+		Company( String name, String addr, String type ){
+			this.name = name;
+			this.addr = addr;
+			this.type = type;
+		}
+		public Document getDocument(){
+			Document doc = new Document();
+			doc.add( new Field( F_NAME, name, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			doc.add( new Field( F_ADDR, addr, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			doc.add( new Field( F_TYPE, type, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			return doc;
+		}
+	}
+
+	static class Partner implements Source {
+		String number;
+		String name;
+		String level;
+		Partner( String number, String name, String level ){
+			this.number = number;
+			this.name = name;
+			this.level = level;
+		}
+		public Document getDocument(){
+			Document doc = new Document();
+			doc.add( new Field( F_NUMBER, number, Field.Store.YES,
+Field.Index.UN_TOKENIZED ) );
+			doc.add( new Field( F_NAME, name, Field.Store.YES,
+Field.Index.TOKENIZED ) );
+			doc.add( new Field( F_LEVEL, level, Field.Store.YES,
+Field.Index.UN_TOKENIZED ) );
+			return doc;
+		}
+	}
+}
+
+
+> -----Original Message-----
+> From: Erick Erickson [mailto:erickerickson@gmail.com]
+> Sent: Monday, November 13, 2006 3:04 AM
+> To: java-user@lucene.apache.org; simon.willnauer@gmail.com
+> Subject: Re: search by field, not field value
+>
+>
+> I'm going mostly from memory here, so the details may not be entirely
+> accurate, but.....
+>
+> See TermDocs (FilterTermDocs?). Use the seek method to get to the
+> term e.g.
+>
+> TermDocs.seek(new Term("specific_field", ""));
+>
+>  Note that the "" as the value of the term gets all the terms. Then use
+> TermDocs.next until it returns false. At each point, TermDocs.doc() will
+> give you the Lucene ID of a document containing that term.
+>
+> Really, this enumerates all the documents that have any values in
+> specific_field.
+>
+> One issue here is that you'll get multiple hits per document. For
+> instance,
+> say you've indexed A, B, and C as values in specific_field for document 5.
+> Just blindly doing the next() call will get you document 5 three
+> times. You
+> can use TermDocs.skipTo(current document + 1). to insure that you only
+> process a document once. This is either a minor efficiency or a major time
+> savings, depending on the characteristics of your index..... Be a bit
+> careful and only call next() if you *don't* use skipto, or you may skip a
+> doc that only has one value for specific_field.
+>
+> Hope this helps
+> Erick
+>
+>
+>
+>
+> On 11/12/06, Simon Willnauer <simon.willnauer@googlemail.com> wrote:
+> >
+> > Hey tony,
+> > I guess the easiest way for you to do that is to create a extra field
+> > containig the field names and just fire a boolean query on this extra
+> > field.
+> >
+> > best regards simon
+> >
+> > On 11/12/06, tony yin <gaoligong@gmail.com> wrote:
+> > > I want search document by specific field, not by field value, How to?
+> > >
+> > > I have some document store in fields{content, key, path} and some in
+> > > {content, key, path, specific_field}
+> > >
+> > > and I want to find all the document that have specific_field,
+> Could you
+> > help
+> > > me?
+> > >
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

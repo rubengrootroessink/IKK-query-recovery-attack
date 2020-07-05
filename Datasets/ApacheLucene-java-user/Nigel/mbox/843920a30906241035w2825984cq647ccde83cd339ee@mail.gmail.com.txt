@@ -1,0 +1,66 @@
+FROM: Nigel <nigelspl...@gmail.com>
+SUBJECT: Re: Analyzing performance and memory consumption for boolean queries
+DATE: 24 Jun 2009
+
+Hi Ken,
+
+Thanks for your reply.  I agree that your overall diagnosis (GC problems
+and/or swapping) sounds likely.  To follow up on some the specific things
+you mentioned:
+
+2. 250M/4 = 60M docs/index. The old rule of thumb was 10M docs/index as a
+> reasonable size. You might just need more hardware.
+
+
+I'm curious if there's any practical difference in terms of memory overhead
+between several smaller indexes vs. fewer bigger indexes.  For example, if
+we had 25 indexes of 10M docs each on the same server, would it be more or
+less efficient than 4 indexes of 60M docs each?  (Assuming that they're
+partitioned so that a given search doesn't have to aggregate results from
+many indexes.)
+
+
+> 3. We had better luck running more JVMs per system, versus one JVM with
+> lots of memory. E.g. run 3 32-bit JVMs with 1.5GB/JVM. Though this assumes
+> you've got one drive/JVM, to avoid disk contention.
+
+
+Good point; I've run into this approach before when dealing with very large
+heap sizes and lots of GC.  My impression is that GC improvements in the JVM
+over the years has made this less beneficial than it used to be.  I wonder
+in this case whether the benefit was really the separate disks rather than
+the separate JVMs.
+
+4. I'm assuming, since you don't care about scoring, that you've turned of
+> field norms. There are other optimizations you can do to speed up
+> query-style searches (find all docs that match X) when you don't care about
+> scores, but others on the list are much better qualified to provide input in
+> this area.
+
+
+That's correct; we don't store norms.  I've read up on some of the other
+techniques, such as cached filters, but that seems most appropriate when
+you're doing the same or similar queries frequently, and in our case the
+queries are fairly different.  Also, more caching could just lead to more GC
+and swapping issues.
+
+
+> 5. It seems like storing content outside the index helps with performance,
+> though I can't say for certain what the impact might be. E.g. only store a
+> single unique ID field in the index, and use that to access the content
+> (say, from a MapFile) when you're processing the matched entries.
+
+
+I've thought about this as well, and I know people sometimes store the docs
+themselves in things like Berkeley DB.  But, since in Lucene the stored
+fields are not cached in memory (apart from OS caching), it doesn't seem
+like storing things in Lucene should make searching itself slower.  In other
+words, if you're going to load the doc from disk somehow (Lucene or BDB or
+flat file or whatever), it might as well be in Lucene to keep things
+architecturally simpler.  Of course, it could be more efficient to move the
+document store to a different server, but a similar benefit could be
+achieved by moving some of the Lucene indexes to a different server.
+
+Thanks,
+Chris
+

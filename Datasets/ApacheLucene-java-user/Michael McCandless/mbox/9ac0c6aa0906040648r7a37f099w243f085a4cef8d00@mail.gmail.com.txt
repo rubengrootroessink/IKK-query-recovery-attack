@@ -1,0 +1,86 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Extending StandardAnalyzer considered harmful
+DATE: 4 Jun 2009
+
+Hmm, sorry about that, and thank you for raising it.
+
+This is indeed not good and should be considered a break in
+back-compat since silently things change and it's not easy for you to
+discover that.
+
+I think we should at least deprecate Analyzer.tokenStream, and fix
+QueryParser (and any others) to use reusableTokenStream. But that's
+not perfect since on upgrading you'd only see deprecation warnings,
+which you certainly would not expect to lead to changes in
+functionality.
+
+I think the only safe (back compatible) way for us to make such
+changes in the future is to make a whole new class for each of the
+core analyzers that switch to the new API (and deprecate the old
+ones).  Either that, or going forward we make Lucene's core analyzers
+final (and, more generally, any other core classes we intend/expect to
+make API improvements to).  Or, as you suggested, make tokenStream
+final with the change so that you hit catastrophic compilation errors
+on upgrading, but that's currently against our back compat policy.
+
+Mike
+
+On Thu, Jun 4, 2009 at 12:58 AM, Daniel Noll <daniel@nuix.com> wrote:
+> Hi all.
+> I just want to tell some people an interesting story. :-)
+>
+> We had a custom analyser which was implemented like this:
+>
+>    public class NoStopWordsAnalyser extends StandardAnalyzer {
+>        public TokenStream tokenStream(String fieldName, Reader reader) {
+>            TokenStream result = new StandardTokenizer(reader);
+>            result = new StandardFilter(result);
+>            result = new LowerCaseFilter(result);
+>            return result;
+>        }
+>    }
+>
+> Now, this seemed all well and good, and we unit tested the analyser and it
+> worked.
+>
+> Some time later, a newer version of Lucene added reusableTokenStream() for a
+> performance optimisation.  The indexing side was updated to call the new
+> reusableTokenStream() method.  Since we had extended StandardAnalyzer, it
+> ended up going to StandardAnalyzer's implementation, which puts on a
+> StopFilter, so our NoStopWordsAnalyser ended up including a StopFilter.
+>  This in itself would have been a minor issue as well, but the QueryParser
+> side still called the older tokenStream() method, which resulted in
+> different token streams being used for indexing and querying -- even though
+> it was the same analyser!
+>
+> The end result is that we could never get a hit if the query included any
+> stop words.
+>
+> The solution in this case was to extend Analyzer instead.  I just thought it
+> was interesting that we got affected so much by a new method to the API
+> which didn't cause a compilation error or raise any other flags which would
+> indicate we had done something wrong.  Our own unit tests still passed
+> because they were testing the older method.  Had StandardAnalyzer or its
+> tokenStream() method been made final during this change, we would have had
+> our compilation fail.  Had it been final from the very first time the class
+> was introduced, it would have prevented the problem in its entirety as we
+> would have realised much sooner that it wasn't safe to override in the
+> beginning.
+>
+> Daniel
+>
+>
+>
+> --
+> Daniel Noll                            Forensic and eDiscovery Software
+> Senior Developer                              The world's most advanced
+> Nuix                                                email data
+analysis
+> http://nuix.com/                                and eDiscovery software
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

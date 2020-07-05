@@ -1,0 +1,128 @@
+FROM: "Steven Parkes" <steven_par...@esseff.org>
+SUBJECT: RE: BooleanQuery.TooManyClauses exception
+DATE: 17 Oct 2006
+
+All has to do with the total focus on strings in an inverted index, as
+opposed to the more general model in an RDBMS.
+
+Lucene doesn't need to track the max length. It sees each date as a
+string and understands all string intervals lexicographically. That
+means 20060401 is less than 20060401HHMMSS for any HHMMSS (equal, if
+there is none). This is basically the same ordering as saying "base"
+sorts less than "baseball": if one term is a prefix for another, it is
+"less than".
+
+Given this ordering, when you ask for DATE TO DATE, Lucene first finds
+all tokens in your index within that range and uses that list to compose
+a boolean query, which it then executes. With resolution down to
+seconds, that can be an awful lot of tokens. If you do resolution down
+to days, you know you'll have no more than 365 tokens a year.
+
+Does raise a subtle issue I glossed over, which is that your range query
+might not actually getting what you think (depending, of course, on what
+you think). You say "TO 20060901", but since 20060901HHMMSS is larger
+than 20060901 for any HHMMSS, you're only getting dates up to
+20060831HHMMSS (unless you have dates that don't have a time part, which
+might then be included.)
+
+The wiki page Doron mentioned,
+http://wiki.apache.org/jakarta-lucene/LargeScaleDateRangeProcessing,
+does talk about this a bit more. You can add multiple fields so you can
+query arbitrary date ranges without things blowing up. For example, if
+you wanted to do July 15, 2004 through July 15, 2006, using the coding
+in the wiki, instead of doing one query, you could look for all dates by
+year in 05, by month in the whole months in 04 and 06, and then by day
+in the partial months.
+
+As others have mentioned, there are filters, too.
+
+-----Original Message-----
+From: Bushey, John [mailto:John.Bushey@pega.com] 
+Sent: Tuesday, October 17, 2006 10:57 AM
+To: java-user@lucene.apache.org
+Subject: RE: BooleanQuery.TooManyClauses exception
+
+Thanks.  That's the explanation that I was looking for.  The WIKI does
+not cover this in much detail. The architectural reason for this sounds
+strange to me since my background is in relational databases where this
+is not an issue so I still have a question. How does reducing the
+precision really help?  Does Lucene track the max length of the indexed
+value and use that to enumerate all the unique date/time values for the
+query?  In my case I have done nothing special to index my dates.  I
+just treat them as a string of numbers.
+
+
+-----Original Message-----
+From: Steven Parkes [mailto:steven_parkes@esseff.org] 
+Sent: Tuesday, October 17, 2006 12:13 PM
+To: java-user@lucene.apache.org
+Subject: RE: BooleanQuery.TooManyClauses exception
+
+Lucene takes your date range, enumerates all the unique date/time values
+in your corpus within that range, and then executes that query. So the
+number of terms in your query is going to be equal to the number of
+unique date/time values in the range.
+
+The most common way of handling this is to not index the dates to a
+higher precision than you need to support your query. If you're only
+going to query down to days (and not the time of day within a date),
+don't include the extra hours/minutes/seconds in the indexed field. You
+can always put the higher precision value in a stored but unindexed
+field if you want to retrieve it via the query results.
+
+-----Original Message-----
+From: Bushey, John [mailto:John.Bushey@pega.com] 
+Sent: Monday, October 16, 2006 10:44 AM
+To: java-user@lucene.apache.org
+Subject: BooleanQuery.TooManyClauses exception
+
+Hi - Can someone explain the reason why I'm getting the TooManyClauses
+exception?  I have a general understanding of the issue based on my
+reading, but I don't understand the mechanics of the it.  Specifically
+how is my query being expanded to cause this problem?  How am I
+exceeding the default 1024 clauses?  My query looks like the following.
+
+ 
+
+pyLabel:(test) OR pyDescription:(test) AND ( pxCreateDateTime:[20060401
+TO 20060901] )
+
+ 
+
+The problem only happens when my date range exceeds ~2 months.  The date
+is indexed with more precision, but for my query purposes I only care
+about the date and not the time stamp portion.  What can I do to solve
+or mitigate this problem and be able to search a date range that spans
+at least a year? Is setMaxClauseCount() a predictable solution?  How
+would reducing the precision of my date during indexing help?
+
+ 
+
+ 
+
+Thanks
+
+John
+
+ 
+
+ 
+
+ 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

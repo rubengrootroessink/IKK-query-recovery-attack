@@ -1,0 +1,46 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: index architectures
+DATE: 18 Oct 2006
+
+
+: I *think* that if you reduce your result set by, say, a filter, you might
+: drastically reduce what gets sorted. I'm thinking of something like this
+: BooleanQuery bq = new BooleanQuery();
+: bq.add(Filter for the last N days wrapped in a ConstantScoreQuery, MUST)
+: bq.add(all the rest of your stuff).
+	...
+: Again, I'm note entirely sure when the filter gets applied, before or after
+: the sort. Nor am I sure how to tell. I'd sure like you to do the work and
+
+The memory required for sorting on a field is independent of the size of
+the result -- so a Filter wouldn't help you here.  The reason is becuase
+Sorting builds/uses the FieldCache which cotnains all the values for all
+docs, so that it can be reused for Sorting future queries as well.
+
+That said: if you are seeing OOM errors when you sort by a field (but
+not when you use the docId ordering, or sort by score) then it sounds like
+you are keeping refrences to IndexReaders arround after you've stoped
+using them -- the FieldCache is kept in a WeakHashMap keyed off of hte
+IndexReader, so it should get garbage collected as soon sa you let go of
+it.  Another possibility is that you are sorting on too many fields for it
+to be able to build the FieldCache for all of them in the RAM you have
+available.
+
+There was some discussion recently on java-dev about an approach to
+scoring that took advantage of Lazy Field loading insitead of the
+FieldCache to sort on the *stored* value of a field, the goal being to
+make sorting small result sets possible with small amount of RAM ... but i
+don't remember if the person working on it ever submitted a patch.
+
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

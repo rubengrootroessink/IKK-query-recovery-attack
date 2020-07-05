@@ -1,0 +1,253 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: TermDoc to TermDocsEnum
+DATE: 24 Mar 2011
+
+Simplest solution is to wrap your findFeatures.reader in a
+SlowMultiReaderWrapper (as the exception suggests).
+
+More performant solution is to change your code to visit the
+sequential sub-readers of findFeatures.reader, directly.  But if
+performance isn't important here, just do the simple solution.
+
+Mike
+
+http://blog.mikemccandless.com
+
+On Wed, Mar 23, 2011 at 4:49 PM, nitinhardeniya
+<nitinhardeniya@gmail.com> wrote:
+> I have changed the code according to MIGRATE.txt
+>
+> but now i am getting an error at
+>
+> public long getCorpCount(Vector <SpanTermQuery> clauses)
+>    {
+>        long count=0;
+>        try {
+>            SpanQuery [] clause= new SpanQuery[clauses.size()];
+>            clause= clauses.toArray(clause);
+>        //    SpanNearQuery sq = new SpanNearQuery(clause,1,true);
+>            SpanOrQuery sq=new
+> SpanOrQuery(clause);                              error here
+>            Spans spans=sq.getSpans(findFeatures.reader);
+>
+>            while(spans.next()) //here was the error
+>            {
+>                count++;
+>            }
+>        }
+>        catch (Exception e) {
+>            // TODO: handle exception
+>            e.printStackTrace();
+>        }
+>
+>        return count ;
+>    }
+>
+>
+> the error log is :
+>
+> please use MultiFields.getDeletedDocs, or wrap your IndexReader with
+> SlowMultiReaderWrapper, if you really need a top level Bits deletedDocs
+>    at
+> org.apache.lucene.index.DirectoryReader.getDeletedDocs(DirectoryReader.java:371)
+>    at
+> org.apache.lucene.search.spans.SpanTermQuery.getSpans(SpanTermQuery.java:84)
+>    at
+> org.apache.lucene.search.spans.SpanOrQuery$1.initSpanQueue(SpanOrQuery.java:172)
+>    at
+> org.apache.lucene.search.spans.SpanOrQuery$1.next(SpanOrQuery.java:184)
+>    at rankPhrase.calFeatures.Document.getCorpCount(Document.java:489)
+>    at rankPhrase.calFeatures.Document.calculateTfCorpus(Document.java:468)
+>    at
+> rankPhrase.calFeatures.findFeatures.computeAllFeatures(findFeatures.java:309)
+>    at
+> rankPhrase.calFeatures.findFeatures.LoadPhrases(findFeatures.java:235)
+>    at rankPhrase.calFeatures.findFeatures.main(findFeatures.java:380)
+>
+> On Wed, Mar 23, 2011 at 11:56 PM, Burton-West, Tom [via Lucene] <
+> ml-node+2721619-1942655904-77327@n3.nabble.com> wrote:
+>
+>> Hi,
+>>
+>> If I understand correctly what you are trying to do as far as getting
+>> corpusTF, you might want to look at the implementation of the "-t" flag in
+>>  org.apache.lucene.misc/HighFreqTerms.java in contib.
+>>
+>> Take a look at the getTotalTermFreq method in trunk.
+>>
+>>
+>>
+>> http://svn.apache.org/viewvc/lucene/dev/trunk/lucene/contrib/misc/src/java/org/apache/lucene/misc/HighFreqTerms.java?view=markup
+>>
+>> 3.x version here:
+>>
+>>
+>> http://svn.apache.org/viewvc/lucene/dev/branches/branch_3x/lucene/contrib/misc/src/java/org/apache/lucene/misc/HighFreqTerms.java?view=markup
+>>
+>> Tom
+>> http://www.hathitrust.org/blogs/large-scale-search
+>>
+>>
+>>
+>> -----Original Message-----
+>> From: nitinhardeniya [mailto:[hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=0&by-user=t>]
+>>
+>> Sent: Tuesday, March 22, 2011 1:57 PM
+>> To: [hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=1&by-user=t>
+>> Subject: TermDoc to TermDocsEnum
+>>
+>> hi
+>>
+>> I have a code that work fine with lucene 3.2 where i used TermDocs to find
+>> the corpusTF here is the code
+>>
+>>
+>> public void calculateCorpusTF(IndexReader reader) throws IOException {
+>>                 // TODO Auto-generated method stub
+>>                 Iterator it = word.iterator();
+>>
+>>                 Iterator  iwp  = word_prop.iterator();
+>>                 wordProp wp;
+>>                 Term ta = null;
+>>
+>>                         TermDocs tds;
+>>         // DocsEnum tds;
+>>                 String text;
+>>                 tfDoc tfcoll;
+>>                 long freq=0;
+>>                 OpenBitSet skipDocs = null;
+>>                 skipDocs = new OpenBitSet(0);
+>>                 //System.out.println("Length: "+skipDocs.length());
+>>                 try {
+>>
+>>                         while(it.hasNext())
+>>                         {
+>>                                 text=it.next();
+>>                                 wp=iwp.next();
+>>
+>>                                 System.out.println("Word is "+text);
+>>                                 ta= new Term("content",text);
+>>                                 //BytesRef term = new
+>> BytesRef(text.toCharArray(),0,text.length());
+>>
+>>                                 tfcoll = new tfDoc();
+>>                                 freq=0;
+>>
+>>
+>> tds=reader.termDocs(ta);
+>>                                                      
+  //
+>> tds=reader.terms("content");
+>>
+>> if(tds!=null)
+>>                                                      
+          {
+>>
+>> while(tds.next())
+>>                                                      
+                  {
+>>
+>>
+>>     freq+=tds.freq();
+>>                                                      
+                  //
+>> System.out.print( text +"  "+ freq);
+>>                                                      
+                  }
+>>                                                      
+          }
+>>
+>>                                 // New Code -->
+>>
+>> // tds = reader.termDocsEnum(skipDocs, "content", term);
+>> // if(tds!=null)
+>> // {
+>> // while(true) {
+>> // freq += tds.freq();
+>> // final int docID = tds.nextDoc();
+>> // if (docID == DocsEnum.NO_MORE_DOCS) {
+>> // break;
+>> // }
+>> // }
+>> // }
+>> //
+>>                                 // New code Ends <--
+>>
+>>                                 tfcoll.tfA=freq;
+>>                                 System.out.print( text +"  "+ freq);
+>>                                 if(tfcoll.totalTF()==0)
+>>                                 {
+>>                                         //System.out.println("
+>> "+tfcoll.tfA+" "+tfcoll.tfD+" "+tfcoll.tfC);
+>>                                         System.out.println("Text
+"+text+ "
+>> Freq "+freq);
+>>                                 }
+>>
+>>                                 wp.tfColl=tfcoll;
+>>                         }
+>>                 }
+>>                 catch (Exception e) {
+>>                         // TODO: handle exception
+>>                         e.printStackTrace();
+>>                 }
+>>
+>>         }
+>>
+>> but now i have to use TermDocEnum because i am using lucene dev4.0 which
+>> does not have TermDocs method i was trying to change my code .please refer
+>> to new code [commented ] and tell me how to use this method in a proper way
+>>
+>> . if you can provide an example that would be great.
+>> tds = reader.termDocsEnum(skipDocs, "content", term);
+>> I have tried using null at skipdoc because i don't want to skip anything
+>> but
+>> it through error
+>>
+>> please help
+>>
+>> --
+>> View this message in context:
+>> http://lucene.472066.n3.nabble.com/TermDoc-to-TermDocsEnum-tp2716046p2716046.html<http://lucene.472066.n3.nabble.com/TermDoc-to-TermDocsEnum-tp2716046p2716046.html?by-user=t>
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: [hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=2&by-user=t>
+>> For additional commands, e-mail: [hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=3&by-user=t>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: [hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=4&by-user=t>
+>> For additional commands, e-mail: [hidden email]<http://user/SendEmail.jtp?type=node&node=2721619&i=5&by-user=t>
+>>
+>>
+>>
+>> ------------------------------
+>>  If you reply to this email, your message will be added to the discussion
+>> below:
+>>
+>> http://lucene.472066.n3.nabble.com/TermDoc-to-TermDocsEnum-tp2716046p2721619.html
+>>  To unsubscribe from TermDoc to TermDocsEnum, click here<http://lucene.472066.n3.nabble.com/template/NamlServlet.jtp?macro=unsubscribe_by_code&node=2716046&code=bml0aW5oYXJkZW5peWFAZ21haWwuY29tfDI3MTYwNDZ8LTkwNzg0MTk0MA==>.
+>>
+>>
+>
+>
+>
+> --
+> Nitin Kumar Hardeniya
+>
+> M.Tech Computational Linguistics
+> IIIT Hyderabad
+>
+> SAVE PAPER - THINK BEFORE YOU PRINT
+>
+>
+> --
+> View this message in context: http://lucene.472066.n3.nabble.com/TermDoc-to-TermDocsEnum-tp2716046p2722185.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

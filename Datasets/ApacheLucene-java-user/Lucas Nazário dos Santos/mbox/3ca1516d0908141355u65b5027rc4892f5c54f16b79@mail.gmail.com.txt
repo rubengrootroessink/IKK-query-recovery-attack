@@ -1,0 +1,149 @@
+FROM: Lucas Nazário dos Santos <nazario.lu...@gmail.com>
+SUBJECT: Re: Problem doing backup using the SnapshotDeletionPolicy class
+DATE: 14 Aug 2009
+
+Not as small as I would like, but shows the problem.
+
+If you remove the statement
+
+// Remove this and the backup works fine
+optimize(policy);
+
+the backup works wonderfully.
+
+(More code in the next e-mail)
+
+Lucas
+
+
+        public static void main(final String[] args) throws
+CorruptIndexException, IOException, InterruptedException {
+                final SnapshotDeletionPolicy policy = new
+SnapshotDeletionPolicy(new KeepOnlyLastCommitDeletionPolicy());
+                final IndexBackup backup = new IndexBackup(policy, new
+File("backup"));
+                for (int i = 0; i < 3; i++) {
+                        index(policy, backup);
+                }
+        }
+
+        private static void index(final SnapshotDeletionPolicy policy, final
+IndexBackup backup) throws CorruptIndexException,
+                        LockObtainFailedException, IOException {
+                IndexWriter writer = null;
+                try {
+                        FSDirectory.setDisableLocks(true);
+                        writer = new
+IndexWriter(FSDirectory.getDirectory("index"), new StandardAnalyzer(),
+policy,
+                                        MaxFieldLength.UNLIMITED);
+
+                        System.out.println("Star: " +
+backup.willBackupFromNowOn());
+
+                        for (int i = 0; i < 10000; i++) {
+                                final Document document = new Document();
+                                document.add(new Field("content", "content
+content content content", Store.YES, Index.ANALYZED));
+                                writer.addDocument(document);
+                        }
+                } finally {
+                        if (writer != null) {
+                                writer.close();
+                        }
+
+                        System.out.println("Backup: " + backup.backup());
+
+                        // Remove this and the backup works fine
+                        optimize(policy);
+                }
+        }
+
+        private static void optimize(final SnapshotDeletionPolicy policy)
+throws CorruptIndexException, LockObtainFailedException,
+                        IOException {
+
+                IndexWriter writer = null;
+                try {
+                        writer = new
+IndexWriter(FSDirectory.getDirectory("index"), new StandardAnalyzer(),
+policy,
+                                        MaxFieldLength.UNLIMITED);
+                        writer.optimize();
+                } finally {
+                        writer.close();
+                }
+        }
+
+
+On Fri, Aug 14, 2009 at 4:37 PM, Shai Erera <serera@gmail.com> wrote:
+
+> I think you should also delete files that don't exist anymore in the index,
+> from the backup?
+>
+> Shai
+>
+> On Fri, Aug 14, 2009 at 10:02 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+> > Could you boil this down to a small standalone program showing the
+> problem?
+> >
+> > Optimizing in between backups should be completely fine.
+> >
+> > Mike
+> >
+> > On Fri, Aug 14, 2009 at 2:47 PM, Lucas Nazário dos
+> > Santos<nazario.lucas@gmail.com> wrote:
+> > > Hi,
+> > >
+> > > I'm using the SnapshotDeletionPolicy class to backup my index. I
+> > basically
+> > > call the snapshot() method from the class SnapshotDeletionPolicy at
+> some
+> > > point, get a list of files that changed, copy then to the backup
+> folder,
+> > and
+> > > finish by calling the release() method.
+> > >
+> > > The problem arises when, in between backups, I optimize the index by
+> > opening
+> > > it with the IndexWriter class and calling the optimize() method. When I
+> > > don't optimize in between backups, here is what happens:
+> > >
+> > > The first backup copies the segment composed by the files _0.cfs and
+> > > segments_2. The second backup copies the files _1.cfs and segments_3,
+> and
+> > > the third backup copies the files _2.cfs e segments_4. I can open the
+> > backup
+> > > folder with Luke without problems.
+> > >
+> > > When I do optimize in between backups, the copies are as follow:
+> > >
+> > > The first backup copies the segment composed by the files _0.cfs and
+> > > segments_2. The second backup copies the files _1.cfs and segments_3,
+> and
+> > > the third backup copies the files _3.cfs e segments_5. In this case,
+> when
+> > I
+> > > try to open the backup folder, Luke gives a message saying that it
+> can't
+> > > find the file _2.cfs.
+> > >
+> > > My question is: how can I backup my index using the
+> > SnapshotDeletionPolicy
+> > > and having to optimize the index in between backups? Am I using the
+> right
+> > > backup strategy?
+> > >
+> > > Thanks,
+> > > Lucas
+> > >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+

@@ -1,0 +1,115 @@
+FROM: "John L Cwikla" <cwi...@biz360.com>
+SUBJECT: Abusing lucene and way too many files open
+DATE: 14 Sep 2002
+
+We are trying to use lucene to give us an index into our document base
+(~3 million documents and growing) so we can ascertain relavance for some
+current
+60 accounts, rising quickly toward 100.  Basically a document is retrieved
+and then stored into lucene with 12 fields. Imagine each account pulls into
+it currently about few hundred thousand documents, with new documents
+coming in basically on the hour. Oh, and we are currently supporting
+officially
+5 languages, and expect to have 7-10 by the end.
+
+Our initial strategy was to have an index per account, per language. Our
+feelings
+are that we may need to flush the data per account, we want limited downtime
+for things like flushing and optimization for all the other accounts, and in
+case
+something goes wrong, indexii get hosed, we'd like to limit the damage.  We
+had some problems previously, latest case was Autonomy,  where over time
+our constant adding/removing of documents would basically destroy the index.
+As for down time it seems this is preferable so when/if I want to optimize
+the
+index, I can do it incrementally.
+
+All of these are served up through an RMI server factory passing out
+writer/reader
+connections per account. We cache these during each of our batch.
+
+So after roughly crunching some numbers, with a mergeFactor set to the
+default of 10:
+
+(7 files per segment + 12 for fields) * (up to 10 segments) * 100 accounts *
+10 langauges
+
+= 200,000 open files at once. Ouch.
+
+First note, is that I can get my linux machine to allow me to do 100k files
+open at a time
+if necessary, per process. (2G 1.6Mhz dual or quad with ReiserFS) .
+Obviously it would be
+ideal if I could figure out something that didn't increase by magnitudes
+over time.
+
+Caching readers/writers and aging is pretty much out, as we run over about
+2000 documents
+per batch, looping over each of the accounts 1 at a time.  (This machine is
+also a server, so we
+don't want to bring the files over the network 60-100 times( for each
+account)). So we'd end up
+blowing the cache and I'm sure thrashing the machine.
+
+Caching might work if we split the range of accounts into smaller chunks,
+but we might
+get into diminishing returns with moving the files over the network as the
+number of
+accounts continues to increase , and I'd need to go by a factor of 10 to get
+in the ballpark.
+
+Oh, we could have different jvm's on the same machine, or even multiple
+servers but that
+just seems like a maintenance nightmare as we grow.
+
+We can get the number of fields down to about 8, but we use these as
+limiters on what
+we retrieve, so we are confined to going any less.
+
+Possible solutions:
+
+ I've pondered merging all the field data into one big field and doing
+pre/post processing on the
+single field. This will reduce # of files by a magnitude and get me 20,000
+open files which is doable.
+
+There is still the option of adding a field for the account instead of
+partitioning by account
+which should give me a 100 factor and get me down to 2000 files. There is
+still the problem
+that the index is really and truly live, with data being
+added/removed/rebuilt constantly.
+I need to ensure that if something goes wrong I can limit the damange. (Oh I
+know nothing
+would ever go wrong :) )
+
+I've pondered modifying it so that mergeFactor could be two distinct values,
+so I can
+make the docs per segment alot higher, but the number of segments lower. Any
+thoughts
+on if I made this 50 and 2 for instance?
+
+I've also pondered if it would be worth the effort to see if it would be
+possible to keep all
+the fields in the same file(s) in lucene itself. Even if it was a tad
+slower, that's a good 10 factor
+right there. I'm assuming the field files are separate for speed reasons?
+
+I can just live with the number of files and split things across
+processes -- this doesn't thrill me at all.
+
+Anyone else doing anything similar, or any suggestions would be much
+appreciated.
+
+
+
+
+
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

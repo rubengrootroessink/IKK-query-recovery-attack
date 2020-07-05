@@ -1,0 +1,120 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Question about termDocs.read(docs, freqs)
+DATE: 19 Sep 2006
+
+I'll side-step the explanations part of your mail since I don't know how to
+answer.. But a few observations, see below.
+
+On 9/19/06, Kroehling, Thomas <thomas.kroehling@coremedia.com> wrote:
+>
+> Hi,
+> I am trying to write a WildcardFilter in order to prevent
+> TooManyBooleanClauses and high memory usage. I wrap a Filter in a
+> ConstantScoreQuery. I enumerate over the WildcardTerms for a query. This
+> way I can set a maximum number of terms which i will evaluate. If too
+> many terms match, I throw an exception. I also have a maximum number of
+> documents which are allowed to match using BitsSets cardinality. I am
+> not sure, if that is necessary, but I thought, if only a few terms, but
+> a few million documents might match, that could also considerably slow
+> down a search.
+
+
+This seems like a prime candidate for generating "unexpected" results, so
+I'd start by taking it out and seeing if your search and wildcard
+enumerations agree better.
+
+
+I thought, I could get the TermDocs for each WildcardTerm and use:
+>
+> int count = termDocs.read(docs, freqs);
+>
+> In order to have an optimized way to read not more than a maximum number
+> of documents which match this term.
+
+
+You shouldn't be reading documents at all, just enumerating the terms that
+are indexed and setting bits. It's expensive to read the docs, and the
+javadocs warn against this (of course I could just not understand what
+you're doing...).
+
+
+I would then step through docs and
+> set the bits for these documents. Sometimes this works, but sometimes
+> this returns a different number search results.
+> When I search for "content:test" in my index, I find 66 documents, but
+> when I search for "t*st" with my WildcardFilter, I only find 23. There
+> is only one term "test" matching this query and searching for this term
+> in Luke also returns 66 documents. I found out that the SegmentTermDocs
+> sets a variable df to "23", which leads to stop searching any further.
+> Unfortunately I do not quite understand, where this variable really
+> comes from and what it is for.
+>
+> I probably could just step through the TermDocs for each WildcardTerm.
+
+
+Start here. Unless and until you have some idea that the simple way of doing
+things isn't too slow for your problem, don't try anything fancy. Filters
+were *built* for this type of thing, and I've been pleasantly surprised at
+how fast they can be built. Admittedly, mine are on about 1M documents.....
+
+Here's some sample code that works for me, field and value are fields set in
+the constructor......
+
+    public BitSet bits(IndexReader reader)
+            throws IOException {
+
+        bits = new BitSet(reader.maxDoc());
+
+        TermDocs         termDocs = reader.termDocs();
+        WildcardTermEnum wildEnum = new WildcardTermEnum(reader, new
+Term(field, value));
+
+        for (Term term = null; (term = wildEnum.term()) != null;
+wildEnum.next()) {
+            termDocs.seek(new Term(
+                    field,
+                    term.text()));
+
+            while (termDocs.next()) {
+                bits.set(termDocs.doc());
+            }
+        }
+
+        return bits;
+    }
+
+
+Note a few things...
+CachingWrapperFilter will cache these filters for future use.
+
+If you have an idea of the kinds of wildcards you will need ahead of time,
+you could always generate filters and store them away if it turns out that
+performance is a problem (although I've rarely seen this be practical since
+the silly users type things unpredictably<G>).
+
+I'd really recommend that you try the simple thing first and try a couple of
+timings on really ugly filter creation, something like a* before trying
+anything more complex....
+
+Best
+Erick
+
+
+Is that should a correct (and not dramatically slow) way to find all
+> documents? But I would like to understand, the difference in search
+> results and what the method TermDocs.read(docs, freqs) method does and
+> if my kind of filter does really make sense. I periodically rebuild my
+> index and I wonder why my WildcardFilter sometimes returns the correct
+> search results and sometimes not. What is the difference between steping
+> through the term docs with termDocs.next() and using the read-method.
+> Can anybodey explain that?
+>
+> Thanks in advance,
+> Thomas
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

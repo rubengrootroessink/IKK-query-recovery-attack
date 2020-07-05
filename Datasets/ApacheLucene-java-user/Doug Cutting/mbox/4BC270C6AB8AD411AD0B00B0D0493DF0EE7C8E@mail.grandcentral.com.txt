@@ -1,0 +1,51 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: database-based store
+DATE: 19 Oct 2001
+
+> From: Christophe [mailto:cgd@free.fr]
+> 
+> I'm very interrested to store lucene index in a database.
+> Currently, I use it in EJBs and I'd like to replace io access by jdbc
+> access.
+> It would be great that the jdbc solution don't required a 
+> specific database
+> (ie : Oracle or MSsql).
+> So, is there a way to have a generic JDBC solution ?
+
+I don't think that this would be too hard.
+
+I think a good way would be with a single table, as follows:
+  CREATE TABLE LUCENE_TABLE (
+    FILE_NAME   VARCHAR(100)
+    START_BYTE  BIGINT
+    END_BYTE    BIGINT
+    DATA        VARBINARY(1024)
+  )
+  CREATE INDEX ON LUCENE_TABLE (FILE_NAME, START_BYTE, END_BYTE)
+
+Using VARBINARY should make small files reasonably efficient.
+
+Then, to find the length, use a query like:
+  SELECT MAX(END_BYTE) FROM LUCENE_TABLE WHERE FILE_NAME EQUALS name
+
+To refill a buffer with bytes from 'lo' to 'hi':
+  SELECT START_BYTE,END_BYTE,DATA FROM luceneTable 
+     WHERE FILE_NAME EQUALS name
+     AND START_BYTE > (lo-1024)
+     AND END_BYTE < (hi+1024)
+Then copy the bytes from DATA into the buffer.  The logic for buffer copying
+should look a lot like the logic in RAMInputStream.  Similarly, the logic
+for writing buffers should look a lot like the logic in RAMOutputStream.
+
+The Directory should be constructed with a database connection and a table
+name:
+  public SQLDirectory(java.sql.Connection, boolean create);
+
+I would leave transactions out of it.  If someone wishes to have all
+indexing take place within a single transaction, then they should start and
+finish the transaction in application code.
+
+Does that sound workable?
+
+Doug
+

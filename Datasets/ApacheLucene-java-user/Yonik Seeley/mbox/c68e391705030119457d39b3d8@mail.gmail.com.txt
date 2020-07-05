@@ -1,0 +1,61 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 2 Mar 2005
+
+> 6. Index locally and synchronize changes periodically. This is an
+> interesting idea and bears looking into. Lucene can combine multiple
+> indexes into a single one, which can be written out somewhere else, and
+> then distributed back to the search nodes to replace their existing
+> index.
+
+This is a promising idea for handling a high update volume because it
+avoids all of the search nodes having to do the analysis phase.
+
+Unfortunately, the way addIndexes() is implemented looks like it's
+going to present some new problems:
+
+  public synchronized void addIndexes(Directory[] dirs)
+      throws IOException {
+    optimize();					  // start with zero or 1 seg
+    for (int i = 0; i < dirs.length; i++) {
+      SegmentInfos sis = new SegmentInfos();	  // read infos from dir
+      sis.read(dirs[i]);
+      for (int j = 0; j < sis.size(); j++) {
+        segmentInfos.addElement(sis.info(j));	  // add each info
+      }
+    }
+    optimize();					  // final cleanup
+  }
+
+We need to deal with some very large indexes (40G+), and an optimize
+rewrites the entire index, no matter how few documents were added. 
+Since our strategy calls for deleting some docs on the primary index
+before calling addIndexes() this means *both* calls to optimize() will
+end up rewriting the entire index!
+
+The ideal behavior would be that of addDocument() - segments are only
+merged occasionally.   That said, I'll throw out a replacement
+implementation that probably doesn't work, but hopefully will spur
+someone with more knowledge of Lucene internals to take a look at
+this.
+
+  public synchronized void addIndexes(Directory[] dirs)
+      throws IOException {
+    // REMOVED: optimize();
+    for (int i = 0; i < dirs.length; i++) {
+      SegmentInfos sis = new SegmentInfos();	  // read infos from dir
+      sis.read(dirs[i]);
+      for (int j = 0; j < sis.size(); j++) {
+        segmentInfos.addElement(sis.info(j));	  // add each info
+      }
+    }
+    maybeMergeSegments();   // replaces optimize
+  }
+
+-Yonik
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

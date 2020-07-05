@@ -1,0 +1,132 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Reducing number of poor results from large BooleanQueries
+DATE: 9 Sep 2005
+
+
+One of the things I'm currently looking into is different ways to approach
+the more general problem of "filtering by score" in the specific case of
+BoolenQueries that have a large number of optional terms.
+
+Below is a description of the problem I'm considering (with two
+examples of how it can arrise), a description of the ideal solution
+(filtering by score), and two possible alternatives.  I'm curious if folks
+on this list:
+
+  a) Have any ideas about completley different ways to approach the Problem.
+  b) Concur with the Ideal solution
+  c) Have any suggestions on how to appraoch Alternate Solution #1
+  d) Have any opinions on the usefulness/correctness of Alternate Solution #2
+
+                             ----------
+
+
+Problem:
+
+When a user gives us a simple sequence of characters to search on, we have
+no way of knowing exactly what those characters are -- we have to try lots
+of different things.  If a user searches for "FOO BAR", that might be an
+authors name, it might be two words that appeared in sequence in the body
+of a product review, it might be two words that the user remembers seeing
+on the page they want, but they don't appear near each other, it might be
+the name of a product, FOO-BAR might be the product SKU, FOO might be the
+product name, BAR might be the manufacturer name....  etc.
+
+Having a "catch all" field that is searched for any terms is helpful, but
+we still want to also search more specific fields and give them higher
+boost so that a product named "FOO BAR" or a review written by "FOO BAR"
+is at the top of the list ... you can very easily generate a BooleanQuery
+with dozens of optional clauses from a simple two word search, which means
+it's very easy to wind up in a situation where queries produce a huge
+number of results that only peripherally match.  When sorting by score
+this is not a big problem -- just list them all and don't worry about the
+user skipping to the end (ala google).   But if the user sorts by
+something other then score (popularity perhaps) you don't want a very
+popular article that just happens to match 1 small part of the query to
+appear at the top.
+
+Consider the extreme case of tokenizing text using both whitespace as a
+token separator as well as generating 1, 2 and 3 character ngrams.  (So a
+string such as "FOO BAR" would product a token stream something like "FOO
+F FO FOO  O OO OOB  O OB OBA BAR B BA BAR A AR R R").  As helpful as the
+ngrams may be for finding partial word matches and correcting for spelling
+mistakes, you don't want your results to include matches on a single ngram
+token only a few times -- even if those matches score very low, they might
+be at the top of the list when sorting by a specific field.  Even worse:
+because scores are normalized against the highest scoring result, if there
+are no "good" matches you might get lots of equally bad matches (ie:
+contain the character "F" one time) with equally high scores of "1.0".
+
+
+Ideal Situation:
+
+In a perfect world, Lucene scores would be normalized in such a way that a
+score of "1.0" would mean "no document from the past present or future
+could ever match this query as well as this one".  In that case,
+applications could be configured with a score threshold of N, such that
+any document that matched a query with a score less then N would be
+ignored.  The value of N could be varied depending on whether or not you
+wanted very strict matching or very loose matching -- but generally
+speaking it could remain fixed in the application, regardless of what the
+query is or what documents are added/removed from the index.
+
+Unfortunately the world is not perfect.
+
+
+Alternate Solutions:
+
+1) What if we created a new variant of BooleanQuery that had a
+minThreshold argument and let BooleanQuery make the decision when
+aggregating the *raw* scores.  It's been suggested by a coworker that it
+may actually be possible to to determine a "max possible" *raw* score from
+the various query types.  For example...
+
+  > Among other things, the score for a TermQuery is based on
+  > 1) the number of documents containing that term   (Similarity.idf())
+  > 2) the number of terms in that specific document  (Similarity.tf())
+  >
+  > The max for (1) is Similarity.idf(1,IndexReader.maxDoc())
+  > (2) is more open-ended, but it too has a max...
+  > Similarity.tf(maxFieldLength)
+
+...but other query types are more complex, and who knows what new Query
+types might be added in the future (either added to Lucene core, or
+application specific query types)
+
+
+2) Even if there is no feasible way to know what the max possible score is
+from a BooleanQuery, it is easy to determine the number of "optional"
+clauses -- which would make it very easy to write a sub-class of
+BooleanQuery that could be configured with a integer "minClauseThreshold"
+that would ignore any results that did not satisfy at least that many of
+the optional clauses.
+
+Even better then that, the boost value for each clause could be taken into
+consideration: A float "minThresholdPercentage" could be used to indicate
+that documents are only "valid" if the sum of the boosts for the clauses
+they match divided by the sum of all the boosts for all Clauses is greater
+then minThresholdPercentage.  For example, if the we have a query like...
+
+         f:a^3 g:b^1 g:c^1 g:d^1
+
+...and we specify a threshold of 30%, then at a minimum either the
+sub-query on "f" must match, or at least two of the three sub-queries on
+"g" must match.
+
+The most obvious way in which this differs from the "Ideal Situation"
+described above, is in cases where some documents match a sub-query with a
+high boost but just barely (so they get a low raw score) while other
+documents match low boost fields very well and get a high raw score -- but
+they are thrown away because of the low boost to the clauses they did
+match.  This seems like it would be most noticeable when there is a
+relatively small number of clauses and a relatively high discrepancy in
+boosts -- but in cases where the boosts are all in the same order of
+magnitude, and the number of clauses is very high it seems like this would
+be a very good solution.
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

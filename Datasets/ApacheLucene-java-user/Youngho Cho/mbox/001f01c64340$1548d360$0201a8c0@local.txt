@@ -1,0 +1,162 @@
+FROM: "Youngho Cho" <youn...@nannet.co.kr>
+SUBJECT: RangeQuery, FilterdQuery and HitCollector
+DATE: 9 Mar 2006
+
+Hello,
+
+I would like to use a Filter for rangeQuery ( to avoid potential TooManyClauses exception
+)
+and found out 
+
+http://wiki.apache.org/jakarta-lucene/FilteringOptions
+
+wiki said that FilteredQuery is best one.
+But Interesting is that 
+when I used the option with HitCollector , FilteredQuery test is fail.
+
+Am I something missing or FilteredQuery with HitCollector is forbid or a bug ?
+
+
+Please refer to the my test code.
+
+----------------------------------------------------------
+import junit.framework.TestCase;
+
+import org.apache.lucene.analysis.cjk.CJKAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.NumberTools;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.Filter;
+import org.apache.lucene.search.FilteredQuery;
+import org.apache.lucene.search.HitCollector;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RangeFilter;
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+
+import java.io.IOException;
+import java.io.Serializable;
+
+import java.util.Collection;
+import java.util.HashSet;
+
+public class FilteredRangeQueryTest extends TestCase
+{
+    private Directory ramDir;
+
+    protected void setUp() throws Exception
+    {
+        ramDir = new RAMDirectory();
+        addDocuments();
+    }
+
+    public void testRangeQuery()
+        throws Exception
+    {
+        IndexSearcher searcher = new IndexSearcher(ramDir);
+
+        Filter filter = RangeFilter.Less("num", NumberTools.longToString(1L));
+
+        Term term = new Term("attid", NumberTools.longToString(113L));
+        Query query = new TermQuery(term);
+
+        Hits hits = searcher.search(query, filter);
+
+        assertEquals(0, hits.length());
+
+        HitCollector hitCollector = new TestHitCollector();
+
+        ((TestHitCollector) hitCollector).setSearcher(searcher);
+
+        //////// This test is Pass !!!!  ////////////////
+        searcher.search(query, filter, hitCollector);
+        assertEquals(0, ((TestHitCollector) hitCollector).getIds().size());
+    }
+
+    public void testFilteredQuery()
+        throws Exception
+    {
+        IndexSearcher searcher = new IndexSearcher(ramDir);
+
+        Filter filter = RangeFilter.Less("num", NumberTools.longToString(1L));
+
+        Term term = new Term("attid", NumberTools.longToString(113L));
+        Query query = new TermQuery(term);
+
+        FilteredQuery fq = new FilteredQuery(query, filter);
+
+        Hits hits = searcher.search(fq);
+
+        assertEquals(0, hits.length());
+
+        HitCollector hitCollector = new TestHitCollector();
+
+        ((TestHitCollector) hitCollector).setSearcher(searcher);
+
+        ////////// This test is FAIL !!!! //////////////
+        searcher.search(fq, hitCollector);
+        assertEquals(0, ((TestHitCollector) hitCollector).getIds().size());
+    }
+
+    private void addDocuments()
+        throws IOException
+    {
+        IndexWriter writer = new IndexWriter(ramDir, new CJKAnalyzer(), true);
+
+        Document doc = new Document();
+
+        doc.add(Field.Keyword("num", NumberTools.longToString(1000L)));
+        doc.add(Field.Keyword("attid", NumberTools.longToString(113L)));
+        doc.add(Field.Keyword("itid", "111"));
+        writer.addDocument(doc);
+
+        writer.optimize();
+        writer.close();
+    }
+
+    public class TestHitCollector extends HitCollector implements Serializable
+    {
+        private transient Searcher searcher;
+        private transient Collection res;
+
+        public TestHitCollector()
+        {
+        }
+
+        public void setSearcher(Searcher searcher)
+        {
+            res = new HashSet();
+            this.searcher = searcher;
+        }
+
+        public void collect(int i, float v)
+        {
+            try
+            {
+                final Document doc = searcher.doc(i);
+
+                res.add(doc.get("itid"));
+            }
+            catch (IOException e)
+            {
+                // ignored
+            }
+        }
+
+        public Collection getIds()
+        {
+            return res;
+        }
+    }
+}
+
+
+Thanks,
+
+Youngho

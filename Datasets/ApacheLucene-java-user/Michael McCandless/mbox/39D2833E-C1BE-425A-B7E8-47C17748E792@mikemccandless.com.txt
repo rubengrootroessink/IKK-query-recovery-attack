@@ -1,0 +1,244 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: MergePolicy$MergeException during IndexWriter.addIndexesNoOptimize
+DATE: 4 Feb 2009
+
+
+Hmm... this is not in fact considered a fatal error to
+addIndexesNoOptimize. If you were to optimize(), you would then see an
+exception thrown.
+
+Here's why: when addIndexesNoOptimize runs, it simply appends the
+imported segment description to the internal SegmentInfos and then
+asks the MergePolicy to do merging in based on its normal criteria (eg
+file size).
+
+Then, addIndexesNoOptimize will simply copy over any segments from the
+imported index that hadn't been merged according to normal criteria.
+
+If there is an exception hit when merging in the imported segments,
+that is fatal and will be thrown back to you.
+
+If instead there is an exception when doing an internal-only merge,
+which is non-essential to addIndexesNoOptimize job, this is not fatal
+because the index is perfectly usable (with the unmerged segments),
+and addIndexesNoOptimize has still done its job (merging in or copying
+over all segments from the imported index).
+
+That merge exceptions will be also hit during "normal" merging too
+(not just addIndexesNoOptimize).
+
+It's probably best to subclass ConcurrentMergeScheduler, and override
+its handleMergeException method, so that you can do something when a
+non-essential BG merge hits an exception.
+
+Mike
+
+David Fertig wrote:
+
+> Hello. Hopefully this is the correct forum.  I am currently using
+> release 2.3.2 as my stable release, but have tried this 2.4 as well.
+>
+>
+>
+> I have 4 threads indexing documents into separate indexes and then
+> merging them into a larger master index.
+>
+>
+>
+> If the master index is previously corrupted (such as a file is
+> 'accidentally' removed), and an exception occurs during merge with
+> IndexWriter.addIndexesNoOptimize(Directory[]), I have been unable to
+> catch it and report the index.  It would appear that lucene does not
+> catch or log it either.
+>
+>
+>
+> Thank you in advance,
+>
+> Dave
+>
+>
+>
+>
+>
+> Exception in thread "Thread-5"
+> org.apache.lucene.index.MergePolicy$MergeException:
+> java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:271)
+>
+> Caused by: java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at java.io.RandomAccessFile.open(Native Method)
+>
+>        at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+>
+>        at
+> org.apache.lucene.store.FSDirectory$FSIndexInput 
+> $Descriptor.<init>(FSDir
+> ectory.java:506)
+>
+>        at
+> org.apache.lucene.store.FSDirectory 
+> $FSIndexInput.<init>(FSDirectory.java
+> :536)
+>
+>        at
+> org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:445)
+>
+>        at
+> org 
+> .apache.lucene.index.CompoundFileReader.<init>(CompoundFileReader.jav
+> a:70)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java: 
+> 277)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:262)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:221)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:3263)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:2968)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:240)
+>
+> Exception in thread "Thread-6"
+> org.apache.lucene.index.MergePolicy$MergeException:
+> java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:271)
+>
+> Caused by: java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at java.io.RandomAccessFile.open(Native Method)
+>
+>        at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+>
+>        at
+> org.apache.lucene.store.FSDirectory$FSIndexInput 
+> $Descriptor.<init>(FSDir
+> ectory.java:506)
+>
+>        at
+> org.apache.lucene.store.FSDirectory 
+> $FSIndexInput.<init>(FSDirectory.java
+> :536)
+>
+>        at
+> org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:445)
+>
+>        at
+> org 
+> .apache.lucene.index.CompoundFileReader.<init>(CompoundFileReader.jav
+> a:70)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java: 
+> 277)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:262)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:221)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:3263)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:2968)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:240)
+>
+> Exception in thread "Thread-7"
+> org.apache.lucene.index.MergePolicy$MergeException:
+> java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:271)
+>
+> Caused by: java.io.FileNotFoundException:
+> /entixd/dfertig/indexes/moreover/20090115/0/_0.cfs (No such file or
+> directory)
+>
+>        at java.io.RandomAccessFile.open(Native Method)
+>
+>        at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+>
+>        at
+> org.apache.lucene.store.FSDirectory$FSIndexInput 
+> $Descriptor.<init>(FSDir
+> ectory.java:506)
+>
+>        at
+> org.apache.lucene.store.FSDirectory 
+> $FSIndexInput.<init>(FSDirectory.java
+> :536)
+>
+>        at
+> org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:445)
+>
+>        at
+> org 
+> .apache.lucene.index.CompoundFileReader.<init>(CompoundFileReader.jav
+> a:70)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java: 
+> 277)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:262)
+>
+>        at
+> org.apache.lucene.index.SegmentReader.get(SegmentReader.java:221)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:3263)
+>
+>        at
+> org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:2968)
+>
+>        at
+> org.apache.lucene.index.ConcurrentMergeScheduler 
+> $MergeThread.run(Concurr
+> entMergeScheduler.java:240)
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

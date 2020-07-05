@@ -1,0 +1,99 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: Payloads and PhraseQuery
+DATE: 29 Jun 2007
+
+I tried to subclass PhraseScorer, but discovered that it's an abstract class
+and its subclasses (ExactPhraseScorer and SloppyPhraseScorer) are final
+classes. So instead, I extended Scorer with my custom scorer and extended
+PhraseWeight (after making it public). My scorer's constructor is passed the
+instance of PhraseScorer created by PhraseQuery.scorer(). My scorer's 'next'
+and 'skipTo' methods call the PhraseScorer's methods first and if the result
+is 'true', the payload is loaded and used to determine whether or not the
+PhraseScorer's doc is a hit. If not, PhraseScorer.next() or skipTo() is
+called again. In order to get the payload, I modified PhraseQuery to save
+the TermPositions array it creates for its scorers and added a 'get' method.
+The diff is included, below.
+
+This is probably not the best solution, but at least a starting point for
+further discussion.
+
+Here's the diff:
+
+Index: PhraseQuery.java
+===================================================================
+--- PhraseQuery.java    (revision 551992)
++++ PhraseQuery.java    (working copy)
+@@ -36,7 +36,8 @@
+   private Vector terms = new Vector();
+   private Vector positions = new Vector();
+   private int slop = 0;
+-
++  private TermPositions[] tps;
++
+   /** Constructs an empty phrase query. */
+   public PhraseQuery() {}
+
+@@ -104,7 +105,7 @@
+       return result;
+   }
+
+-  private class PhraseWeight implements Weight {
++  public class PhraseWeight implements Weight {
+     private Similarity similarity;
+     private float value;
+     private float idf;
+@@ -138,7 +139,7 @@
+       if (terms.size() == 0)              // optimize zero-term case
+         return null;
+
+-      TermPositions[] tps = new TermPositions[terms.size()];
++      tps = new TermPositions[terms.size()];
+       for (int i = 0; i < terms.size(); i++) {
+         TermPositions p = reader.termPositions((Term)terms.elementAt(i));
+         if (p == null)
+@@ -155,7 +156,9 @@
+                                  reader.norms(field));
+
+     }
+-
++    public TermPositions[] getTermPositions() {
++        return tps;
++    }
+     public Explanation explain(IndexReader reader, int doc)
+       throws IOException {
+
+
+
+On 6/27/07, Mark Miller <markrmiller@gmail.com> wrote:
+>
+> You cannot do it because TermPositions is read in the
+> PhraseWeight.scorer(IndexReader) method (or MultiPhraseWeight) and
+> loaded into an array which is passed to PhraseScorer. Extend the Weight
+> as well and pass the payload to the Scorer as well is a possibility.
+>
+> - Mark
+>
+> Peter Keegan wrote:
+> > I'm looking at the new Payload api and would like to use it in the
+> > following
+> > manner. Meta-data is indexed as a special phrase (all terms at same
+> > position) and a payload is stored with the first term of each phrase. I
+> > would like to create a custom query class that extends PhraseQuery and
+> > uses
+> > its PhraseScorer to find matching documents. The custom query class then
+> > reads the payload from the first term of the matching query and uses
+> > it to
+> > produce a new score. However, I don't see how to get the payload from
+> the
+> > PhraseScorer's TermPositions. Is this possible?
+> >
+> >
+> > Peter
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

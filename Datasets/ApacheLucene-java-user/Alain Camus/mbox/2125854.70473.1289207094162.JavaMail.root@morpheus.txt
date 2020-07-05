@@ -1,0 +1,143 @@
+FROM: Alain Camus <...@ngi.be>
+SUBJECT: Re: RangeQuery with multiple ranges ?
+DATE: 8 Nov 2010
+
+Hello,
+
+Thanks for your replies. I'm sorry but I couldn't get one of David's or Uwe's solution to
+work.
+
+
+For the QueryParser, I tried :
+
+QueryParser parser = new QueryParser("denominator", new StandardAnalyzer());
+Query bq = new BooleanQuery(); 
+try {
+	bq = parser.parse("+denominator:([10000 TO 10000] OR [20000 TO 20000])");
+} catch (ParseException pe) {
+	Log.error(Geonet.SEARCH_ENGINE, "\n\nQueryParser.parse exception\n" + pe + "\n\n");
+}
+BooleanClause.Occur scaleOccur = LuceneUtils.convertRequiredAndProhibitedToOccur(true, false);
+BooleanClause scaleRangeClause = new BooleanClause(bq, scaleOccur);
+query.add(scaleRangeClause);
+
+
+With TermRangeQuery :
+
+BooleanClause.Occur scaleOccur = LuceneUtils.convertRequiredAndProhibitedToOccur(true, false);
+String term1 = "10000", term2 = "50000";
+BooleanQuery bq = new BooleanQuery();
+bq.add(new TermRangeQuery(LuceneIndexField.SCALE, term1, term1, true, true), BooleanClause.Occur.SHOULD);
+bq.add(new TermRangeQuery(LuceneIndexField.SCALE, term2, term2, true, true), BooleanClause.Occur.SHOULD);
+BooleanClause scaleRangeClause = new BooleanClause(bq, scaleOccur);
+query.add(scaleRangeClause);
+
+I also tried with Uwe's code for the deprecated RangeQuery.
+
+
+The result I get is always the same : 
++((+denominator:[10000 TO 10000] +denominator:[50000 TO 50000])~1)
+which doesn't work, neither deployed on the server or in Luke. The queries that works in Luke
+are 
++denominator:([10000 TO 10000] OR [50000 TO 50000]) or
++denominator:([10000 TO 10000] [50000 TO 50000])
+
+
+A little more background information :
+ * The field denominator is indexed alphabetically. If it was indexed numerically, I'd be
+fine with a simple NumericRangeQuery [10000 TO 50000] but I don't have the time to change
+the way it is indexed (it will be for the next release). 
+ * If you have a solution where denominator takes a single value and not a range (like +denominator:(10000
+OR 50000)), that is probably what I'm looking for.
+ * I have to insert this query in a global query, hence the last line query.add(scaleRangeClause);
+ * The deprecated RangeQuery is used everywhere in the code I'm modifying, so I didn't try
+to replace it with TermRangeQuery and NumericRangeQuery.
+
+Would you have another hint ?
+
+Alain
+
+----- Mail original -----
+De: "David Fertig" <dfertig@cymfony.com>
+À: java-user@lucene.apache.org
+Envoyé: Vendredi 5 Novembre 2010 16:43:42
+Objet: RE: RangeQuery with multiple ranges ?
+
+You can use a query parser to parse your text query into the appropriate query objects.
+
+----- Mail original -----
+De: "Uwe Schindler" <uwe@thetaphi.de>
+À: java-user@lucene.apache.org
+Envoyé: Vendredi 5 Novembre 2010 16:52:58
+Objet: RE: RangeQuery with multiple ranges ?
+
+Why do you use such complicated stuff to build the BQ?
+
+Term term1 = new Term(LuceneIndexField.SCALE, "10000");
+Term term2 = new Term(LuceneIndexField.SCALE, "50000");
+BooleanQuery bq = new BooleanQuery();
+bq.add(new RangeQuery(term1, term1, true), BooleanClause.Occur.SHOULD); 
+bq.add(new RangeQuery(term2, term2, true), BooleanClause.Occur.SHOULD);
+
+By the way, your code is outdated, you should better use NumericRangeQuery for numerics! Else
+RangeQuery is deprecated and replaced by TermRangeQuery:
+
+String term1 = "10000", term2 = "50000";
+BooleanQuery bq = new BooleanQuery();
+bq.add(new TermRangeQuery(LuceneIndexField.SCALE, term1, term1, true, true), BooleanClause.Occur.SHOULD);
+
+bq.add(new TermRangeQuery(LuceneIndexField.SCALE, term2, term2, true, true), BooleanClause.Occur.SHOULD);
+
+Uwe
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Alain Camus [mailto:aca@ngi.be]
+> Sent: Friday, November 05, 2010 4:26 PM
+> To: java-user@lucene.apache.org
+> Subject: RangeQuery with multiple ranges ?
+> 
+> Hello list,
+> 
+> I'm new to lucene, trying to find out if this is possible :
+> 
+> In Luke, I can write a query that gets me the results I want, that is :
+> +denominator:([10000 TO 10000] OR [20000 TO 20000])
+> 
+> I'd like to write the same in java. I tried the next code but it doesn't work :
+> BooleanClause.Occur scaleOccur =
+> LuceneUtils.convertRequiredAndProhibitedToOccur(true, false);
+> Term term1 = new Term(LuceneIndexField.SCALE, "10000");
+> Term term2 = new Term(LuceneIndexField.SCALE, "50000");
+> RangeQuery rangeQuery1 = new RangeQuery(term1, term1, true);
+> RangeQuery rangeQuery2 = new RangeQuery(term2, term2, true);
+> BooleanQuery booleanQuery = new BooleanQuery();
+> booleanQuery .setMinimumNumberShouldMatch(1);
+> booleanQuery .add(rangeQuery1, scaleOccur);
+> booleanQuery .add(rangeQuery2, scaleOccur);
+> BooleanClause scaleRangeClause = new BooleanClause(bq, scaleOccur);
+> query.add(scaleRangeClause);
+> The resulting query doesn't give me the expected results :
+> +((+denominator:[10000 TO 10000] +denominator:[50000 TO 50000])~1)
+> 
+> Is it possible to do what I want ? Any documentation I could read about this ?
+> 
+> Alain
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

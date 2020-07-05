@@ -1,0 +1,71 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: MergePolicy public but SegmentInfos package protected?
+DATE: 27 Mar 2009
+
+On Fri, Mar 27, 2009 at 11:09:09AM -0400, Michael McCandless wrote:
+
+> Whereas in Lucene neither MultiSegmentReader nor SegmentReader is public.
+
+I had thought making SegmentReader public was at least under consideration as
+part of the implementation for segment-centric sorted search, but I guess it
+turned out not to be necessary.  Still, you have
+IndexReader.getSequentialSubReaders().  That might be enough -- at least for
+this part of the problem.  :)
+
+> > As for the actual implementation of MergePolicy, I haven't prototyped that out
+> > yet.  Right now in KS, the infrastructure is reasonably primitive:
+> > IndexManager has a method called SegReaders_To_Merge() which accepts a
+> > PolyReader as an argument and returns an array of SegReaders representing
+> > content that should be merged.
+> 
+> KS does the fibonacci merge policy right?
+
+Yes.  
+
+SegReaders_To_Merge is overridden in certain parts of the test suite, but it's
+not yet public.  However, control over merging policy will soon *have* to be
+made public somehow in order to support real-time indexing, so working out an
+API is on my near-term agenda.
+
+> >> Even though Lucy's SegmentReader is lighter weight, it still seems
+> >> like you shouldn't be opening them in the writer (except for realtime
+> >> search)?
+> >
+> > I don't see why not.
+> 
+> But it still ties up resources?  
+
+Not enough to worry about, I believe.
+
+> EG mmap uses up chunks of your address space (possibly important on 32 bit
+> machines, 
+
+This is an important concern, but I believe that design-wise, we have a
+solution[1] -- on 32-bit systems, we only mmap sliding windows rather than
+whole files.
+
+Furthermore, mmap is called with the MAP_SHARED flag, so IndexReaders across
+multiple processes hitting the same exact memory segment get to share it.
+(This is more important under 64-bit systems, where we do map the whole file
+straightaway.)
+
+> opening files takes time & descriptors, etc.
+
+Launching an IndexReader is still plenty fast.
+
+Actually, if you're not warming sort caches, launching a Lucene IndexReader
+isn't obscenely expensive any more -- just expensive.  Right?
+
+Marvin Humphrey
+
+[1] At least on Unixen.  I believe we can support all of this using Windows
+    MapViewOfFile and friends, and I had a crude prototype working before, but
+    right now Windows is still using the old-school load-into-process-memory
+    style.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

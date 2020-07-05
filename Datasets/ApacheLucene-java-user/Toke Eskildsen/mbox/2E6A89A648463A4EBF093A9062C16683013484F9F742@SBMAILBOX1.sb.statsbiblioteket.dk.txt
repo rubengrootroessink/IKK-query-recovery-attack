@@ -1,0 +1,300 @@
+FROM: Toke Eskildsen ...@statsbiblioteket.dk>
+SUBJECT: RE: heap memory issues when sorting by a string field
+DATE: 9 Dec 2009
+
+Thanks for the heads-up, TCK. The Dietz & Sleator article I found at 
+http://www.cs.cmu.edu/~sleator/papers/maintaining-order.pdf
+looks very interesting.
+
+String sorting in Lucene is indeed fairly expensive and we've experimented with
+two solutions to this, none of which are golden bullets.
+
+1) Store the order, not the content.
+
+Like the Lucene default sorter, we fetch all the terms for the sort field on first
+sort. The docIDs are mapped to the terms and an complete sort is performed 
+(by using a custom Collator: We want to avoid using CollationKeys as they
+take too much memory. But that's another story). When the sort is finished,
+we have an integer-array where each entry is the relative position for a given
+document (referenced by docID). We then de-reference the loaded terms
+so that the memory is freed.
+
+Determining the order of two documents after the initial build is extremely
+simple: order[docIDa] - order[docIDb] (or maybe it was the other way 
+around, I forget).
+
+Cons: Large temporarily memory overhead upon initial sort, though not as 
+much as using CollationKeys. Slower initial sort than Lucene build-in.
+Pros: Very fast subsequent sorts, very low memory-overhead when running.
+Joker: This approach could be used to perform a post-processing on a 
+generated index and storing the orders as a file along with the index, then 
+pushing the complete package to searchers. This would lower the memory
+requirements for the searchers significantly.
+
+
+2) As above, but use a multipass order builder.
+
+For the first sort, the order must be calculated: A sliding window sorter is created 
+with a buffer of a fixed size. The window slides through all terms for the sort field 
+and extracts the top X. The order-array is updated for the documents that has 
+one of these terms. The sliding is repeated multiple times, where terms ordered 
+before the last term of the previous iteration are ignored.
+
+Cons: _Very_ slow (too slow in the current implementation) order build.
+Pros: Same as above.
+Joker: The buffer size determines memory use vs. order build time.
+
+
+The multipass approach looks promising, but requires more work to get to a
+usable state. Right now it takes minutes to build the order-array for half a 
+million documents, with a buffer size requiring 5 iterations. If I ever get it to
+work, I'll be sure to share it.
+
+Regards,
+Toke Eskildsen
+
+________________________________________
+From: TCK [moonwatcher32329@gmail.com]
+Sent: 09 December 2009 22:58
+To: java-user@lucene.apache.org
+Subject: Re: heap memory issues when sorting by a string field
+
+Thanks Mike for opening this jira ticket and for your patch. Explicitly
+removing the entry from the WHM definitely does reduce the number of GC
+cycles taken to free the huge StringIndex objects that get created when
+doing a sort by a string field.
+
+But I'm still trying to figure out why it is necessary for lucene to load
+into memory the sorted-by field of every single document in the index (which
+is what makes the StringIndex objects so big) on the first query. Why isn't
+it sufficient to load the field values for only the documents that match the
+given search criteria? Perhaps by using an order-maintenance data structure
+(Dietz&Sleator, or Bender et al) coupled with a balanced search tree,
+instead of the simple lookup and order arrays currently used in StringIndex,
+we can dynamically grow it as needed by successive queries rather than
+loading everything on the first query.
+
+Apologies if this is a naive question... I'm a newbie to the lucene code and
+can't wait for the new lucene book to come out:-)
+
+-TCK
+
+
+
+
+On Tue, Dec 8, 2009 at 5:43 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> I've opened LUCENE-2135.
+>
+> Mike
+>
+> On Tue, Dec 8, 2009 at 5:36 AM, Michael McCandless
+> <lucene@mikemccandless.com> wrote:
+> > This is a rather disturbing implementation detail of WeakHashMap, that
+> > it needs the one extra step (invoking one of its methods) for its weak
+> > keys to be reclaimable.
+> >
+> > Maybe on IndexReader.close(), Lucene should go and evict all entries
+> > in the FieldCache associated with that reader.  Ie, step through the
+> > sub-readers, and if they are truly closed as well (not shared w/ other
+> > readers), evict.  I'll open an issue.
+> >
+> > Even in TCK's code fragment, it's not until the final line is done
+> > executing, that the cache key even loses all hard references, because
+> > it's that line that assigns to sSearcher, replacing the strong
+> > reference to the old searcher.  Inserting sSearcher = null prior to
+> > that would drop the hard reference sooner, but because of this impl
+> > detail of WeakHashMap, something would still have to touch it (eg, a
+> > warmup query that hits the field cache) before it's reclaimable.
+> >
+> > Mike
+> >
+> > On Mon, Dec 7, 2009 at 7:38 PM, Tom Hill <solr-list@worldware.com>
+> wrote:
+> >> Hi -
+> >>
+> >> If I understand correctly, WeakHashMap does not free the memory for the
+> >> value (cached data) when the key is nulled, or even when the key is
+> garbage
+> >> collected.
+> >>
+> >> It requires one more step: a method on WeakHashMap must be called to
+> allow
+> >> it to release its hard reference to the cached data. It appears that
+> most
+> >> methods in WeakHashMap end up calling expungeStaleEntries, which will
+> clear
+> >> the hard reference. But you have to call some method on the map, before
+> the
+> >> memory is eligible for garbage collection.
+> >>
+> >> So it requires four stages to free the cached data. Null the key; A GC
+> to
+> >> release the weak reference to the key; A call to some method on the map;
+> >> Then the next GC cycle should free the value.
+> >>
+> >> So it seems possible that you could end up with double memory usage for
+> a
+> >> time. If you don't have a GC between the time that you close the old
+> reader,
+> >> and you start to load the field cache entry for the next reader, then
+> the
+> >> key may still be hanging around uncollected.
+> >>
+> >> At that point, it may run a GC when you allocate the new cache, but
+> that's
+> >> only the first GC. It can't free the cached data until after the next
+> call
+> >> to expungeStaleEntries, so for a while you have both caches around.
+> >>
+> >> This extra usage could cause things to move into tenured space. Could
+> this
+> >> be causing your problem?
+> >>
+> >> Workaround would be to cause some method to be called on the
+> WeakHashMap.
+> >> You don't want to call get(), since that will try to populate the cache.
+> >> Maybe if you tried putting a small value to the cache, and doing a GC,
+> and
+> >> see if your memory drops then.
+> >>
+> >>
+> >> Tom
+> >>
+> >>
+> >>
+> >> On Mon, Dec 7, 2009 at 1:48 PM, TCK <moonwatcher32329@gmail.com> wrote:
+> >>
+> >>> Thanks for the response. But I'm definitely calling close() on the old
+> >>> reader and opening a new one (not using reopen). Also, to simplify the
+> >>> analysis, I did my test with a single-threaded requester to eliminate
+> any
+> >>> concurrency issues.
+> >>>
+> >>> I'm doing:
+> >>> sSearcher.getIndexReader().close();
+> >>> sSearcher.close(); // this actually seems to be a no-op
+> >>> IndexReader newIndexReader = IndexReader.open(newDirectory);
+> >>> sSearcher = new IndexSearcher(newIndexReader);
+> >>>
+> >>> Btw, isn't it bad practice anyway to have an unbounded cache? Are there
+> any
+> >>> plans to replace the HashMaps used for the innerCaches with an actual
+> >>> size-bounded cache with some eviction policy (perhaps EhCache or
+> something)
+> >>> ?
+> >>>
+> >>> Thanks again,
+> >>> TCK
+> >>>
+> >>>
+> >>>
+> >>>
+> >>> On Mon, Dec 7, 2009 at 4:37 PM, Erick Erickson <
+> erickerickson@gmail.com
+> >>> >wrote:
+> >>>
+> >>> > What this sounds like is that you're not really closing your
+> >>> > readers even though you think you are. Sorting indeed uses up
+> >>> > significant memory when it populates internal caches and keeps
+> >>> > it around for later use (which is one of the reasons that warming
+> >>> > queries matter). But if you really do close the reader, I'm pretty
+> >>> > sure the memory should be GC-able.
+> >>> >
+> >>> > One thing that trips people up is IndexReader.reopen(). If it
+> >>> > returns a reader different than the original, you *must* close the
+> >>> > old one. If you don't, the old reader is still hanging around and
+> >>> > memory won't be returne.... An example from the Javadocs...
+> >>> >
+> >>> >  IndexReader reader = ...
+> >>> >  ...
+> >>> >  IndexReader new = r.reopen();
+> >>> >  if (new != reader) {
+> >>> >   ...     // reader was reopened
+> >>> >   reader.close();
+> >>> >  }
+> >>> >  reader = new;
+> >>> >  ...
+> >>> >
+> >>> >
+> >>> > If this is irrelevant, could you post your close/open
+> >>> >
+> >>> > code?
+> >>> >
+> >>> > HTH
+> >>> >
+> >>> > Erick
+> >>> >
+> >>> >
+> >>> > On Mon, Dec 7, 2009 at 4:27 PM, TCK <moonwatcher32329@gmail.com>
+> wrote:
+> >>> >
+> >>> > > Hi,
+> >>> > > I'm having heap memory issues when I do lucene queries involving
+> >>> sorting
+> >>> > by
+> >>> > > a string field. Such queries seem to load a lot of data in to
+the
+> heap.
+> >>> > > Moreover lucene seems to hold on to references to this data even
+> after
+> >>> > the
+> >>> > > index reader has been closed and a full GC has been run. Some
+of
+> the
+> >>> > > consequences of this are that in my generational heap configuration
+> a
+> >>> lot
+> >>> > > of
+> >>> > > memory gets promoted to tenured space each time I close the old
+> index
+> >>> > > reader
+> >>> > > and after opening and querying using a new one, and the tenured
+> space
+> >>> > > eventually gets fragmented causing a lot of promotion failures
+> >>> resulting
+> >>> > in
+> >>> > > jvm hangs while the jvm does stop-the-world GCs.
+> >>> > >
+> >>> > > Does anyone know any workarounds to avoid these memory issues
+when
+> >>> doing
+> >>> > > such lucene queries?
+> >>> > >
+> >>> > > My profiling showed that even after a full GC lucene is holding
+on
+> to a
+> >>> > lot
+> >>> > > of references to field value data notably via the
+> >>> > > FieldCacheImpl/ExtendedFieldCacheImpl. I noticed that the
+> WeakHashMap
+> >>> > > readerCaches are using unbounded HashMaps as the innerCaches and
+I
+> used
+> >>> > > reflection to replace these innerCaches with dummy empty HashMaps,
+> but
+> >>> > > still
+> >>> > > I'm seeing the same behavior. I wondered if anyone has gone through
+> >>> these
+> >>> > > same issues before and would offer any advice.
+> >>> > >
+> >>> > > Thanks a lot,
+> >>> > > TCK
+> >>> > >
+> >>> >
+> >>>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

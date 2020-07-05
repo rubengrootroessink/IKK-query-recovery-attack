@@ -1,0 +1,166 @@
+FROM: "Halsey, Stephen" <shal...@verisign.com>
+SUBJECT: RE: Changing the scoring (newest doc date first)
+DATE: 30 May 2006
+
+Hi,
+
+I'm interested in getting a date ordered search on a very large index too, as we are having
+some scaling issues with the Sort object and its regeneration, and so was interested in your
+question and the answers above.   Aviran mentioned using a boost in the query to get a rough
+sort on dates, and I was wondering if you could take this idea further by giving each document
+a boost value when its put in the index of the seconds since the epoch for the date you want
+that document to have, and then set your Searcher so that it ONLY uses that boost factor when
+scoring documents, ignoring all other factors such as term frequency etc etc?
+
+Maybe you could achieve this by making your own copy of the DefaultSimilarity class which
+currently looks like this:-
+
+package org.apache.lucene.search;
+
+/**
+ * Copyright 2004 The Apache Software Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/** Expert: Default scoring implementation. */
+public class DefaultSimilarity extends Similarity {
+  /** Implemented as <code>1/sqrt(numTerms)</code>. */
+  public float lengthNorm(String fieldName, int numTerms) {
+    return (float)(1.0 / Math.sqrt(numTerms));
+  }
+  
+  /** Implemented as <code>1/sqrt(sumOfSquaredWeights)</code>. */
+  public float queryNorm(float sumOfSquaredWeights) {
+    return (float)(1.0 / Math.sqrt(sumOfSquaredWeights));
+  }
+
+  /** Implemented as <code>sqrt(freq)</code>. */
+  public float tf(float freq) {
+    return (float)Math.sqrt(freq);
+  }
+    
+  /** Implemented as <code>1 / (distance + 1)</code>. */
+  public float sloppyFreq(int distance) {
+    return 1.0f / (distance + 1);
+  }
+    
+  /** Implemented as <code>log(numDocs/(docFreq+1)) + 1</code>. */
+  public float idf(int docFreq, int numDocs) {
+    return (float)(Math.log(numDocs/(double)(docFreq+1)) + 1.0);
+  }
+    
+  /** Implemented as <code>overlap / maxOverlap</code>. */
+  public float coord(int overlap, int maxOverlap) {
+    return overlap / (float)maxOverlap;
+  }
+}
+
+and calling it something like SimilarityUsingBoostOnly and then make each of the above return
+1 always, and then the formula:-
+
+The score of query q for document d is defined in terms of these methods as follows:
+score(q,d) =
+	Σ 	( tf(t in d) * idf(t)^2 * getBoost(t in q) * getBoost(t.field in d) * lengthNorm(t.field
+in d) ) 	 * coord(q,d) * queryNorm(sumOfSqaredWeights)
+t in q
+
+at:-
+
+http://lucene.apache.org/java/docs/api/org/apache/lucene/search/Similarity.html
+
+will always just return the boost set for that document as the score.
+
+Then use setSimilarity(Similarity similarity) at:-
+
+http://lucene.apache.org/java/docs/api/org/apache/lucene/search/Searcher.html#setSimilarity(org.apache.lucene.search.Similarity)
+
+to set the Similarity to SimilarityUsingBoostOnly for your Searcher, and then every doc you
+add to the index use:-
+
+http://lucene.apache.org/java/docs/api/org/apache/lucene/document/Document.html#setBoost(float)
+
+to set the boost of the document to the number of seconds since the epoch that equates to
+the date you want to set it to.  Float is limited to 3.4028235E38 and so 38 zeros seems enough
+to store this.
+
+The downside that I can see is that you can't then use this index for normal relevance based
+sorting as all the boosts will change the relevance, unless you can change the code to ignore
+the boosts when you do a relevance search?  Is ignoring this document-wide boost factor something
+people think could be easily do-able?  If so then does this seem like a way of getting date
+ordered searching working on a very large index?
+
+thanks
+
+
+
+Steve. 
+
+-----Original Message-----
+From: Marcus Falck [mailto:marcus.falck@observer.se] 
+Sent: 23 May 2006 09:21
+To: java-user@lucene.apache.org
+Subject: RE: Changing the scoring (newest doc date first)
+
+Hmm.
+Not sure that I understand exactly what you mean.
+Doesn't your solution require me to add all documents in correct date range?
+Since I will index articles from different systems I can't guarantee that all articles will
+be added to the index in correct date order.
+ 
+/
+Marcus
+
+________________________________
+
+From: Doug Cutting [mailto:cutting@apache.org]
+Sent: Tue 5/23/2006 12:54 AM
+To: java-user@lucene.apache.org
+Subject: Re: Changing the scoring (newest doc date first)
+
+
+
+Marcus Falck wrote: 
+> There is however one LARGE problem that we have run into. All search result should be
+displayed sorted with the newest document at top. We tried to accomplish this using Lucene's
+sort capabilites but quickly ran into large performance bottlenecks. So i figured since the
+default sort is by relevance i would like to change the relevance so that we don't even need
+to sort the documents. I guess alot of people at this mail list can give me valuable hints
+about how to accomplish this! 
+
+> (Since i now about the ability to sort by index id (which i haven't tried) I can also
+add that i can't guarantee that all documents will be added in correct date order (remember
+the several systems,  the future plans is to buy content from different actors on the market
+and index it up).
+
+A HitCollector should help.  Matching documents are passed to a HitCollector in the order
+they were added to the index.  So if newer documents were added to your index later, then
+the newest N documents are simply the last N documents passed to the HitCollector. 
+
+Could that work? 
+
+Cheers, 
+
+Doug 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org 
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

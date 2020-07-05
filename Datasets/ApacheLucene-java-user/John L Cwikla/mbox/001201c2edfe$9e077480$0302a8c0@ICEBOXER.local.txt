@@ -1,0 +1,148 @@
+FROM: "John L Cwikla" <cwi...@biz360.com>
+SUBJECT: Re: multiple collections indexing
+DATE: 19 Mar 2003
+
+
+I'd actually be interested in hearing answers about this too, but from our
+experience:
+
+We do something similar. We have data that we have indexed per account id
+(100 or
+so).  We have them separate in the case one of them blows up, down time is
+not acceptable
+so we have the data partitioned. Unlike you however we don't have the
+requirement of
+getting from arbitratry groups of accounts (we may someday create a grand
+index over
+all accounts).
+
+That being said we have found:
+
+Using a field for your collection name will be a problem since lucene has a
+limit of
+32 (or 64?) or/and's per query I believe.  With 80+ or's possible with your
+collections,
+plus the real query itself, you will run into trouble. I would assume that
+this is for
+performance reasons and is arbitrary, and could be made dynamic, or at least
+set to some much larger limit.
+
+Having each in it's own index is another option. I don't know the specifics
+of
+MultiSearcher performance but keep in mind that given a machine that Lucene
+keeps all files open and thus has open per index:
+
+    so the maximum files that can be open is  f* log_f(N) * S * C
+
+    where f is IndexWriter.mergeFactor (default 10)
+    where N is the number of documents (you said max 200000)
+    where S is 7 + number of fields
+    where  C is the number of your collections
+
+    So that would be for 1 field:
+
+    10 * 5 * 1 * 80 = 4000 file handles open
+
+    For 5 fields:
+
+    10 * 5 * 5 * 80 = 20000 file handles open
+
+    For 10 fields:
+
+    10 * 5 * 10 * 80  = 40000 file handles open
+
+    Get the picture :)  Assuming you have these all on one process or
+machine you have
+    to be a bit careful to make sure things don't blow up (we have a linux
+machine
+    that we've modified to allow 150000 file handles open to handle this).
+Granted
+    you can optimize, but that takes time so it's not something we get to do
+all
+    the time (some of our indexes have millions of files) so that may give
+you
+    some relief. Or, obviously, you can split these amongst servers or
+    processes.  (Someone had posted awhile ago about making lucene
+    transactional with a log such that the number of files open was always
+fixed
+    but I don't know what happened to that.)
+
+    The last option you have I'll have to ponder more tomorrow, so I can
+sleep now.
+
+    This is actually one of things I'd like to see addressed -- how lucene
+can handle
+    partitioned data in a more scalable manner.
+
+
+----- Original Message -----
+From: "Morus Walter" <morus.walter@tanto-xipolis.de>
+To: <lucene-user@jakarta.apache.org>
+Sent: Wednesday, March 19, 2003 12:44 AM
+Subject: multiple collections indexing
+
+
+> Hi,
+>
+> we are currently evaluating lucene.
+>
+> The data we'd like to index consists of ~ 80 collections of documents
+> (a few hundred up to 200000 documents per collection, ~ 1.5 million
+documents
+> total; medium document size is in the order of 1 kB).
+>
+> Searches must be able on any combination of collections.
+> A typical search includes ~ 40 collections.
+>
+> Now the question is, how to implement this in lucene best.
+>
+> Currently I see basically three possibilities:
+> - create a data field containing the collection name for each document
+>   and extend the query by a or-combined list of queries on this name
+filed.
+> - create an index per collection and use a MultiSearcher to search all
+>   interesting indexes.
+> - (a third on I just discovered): create a data field containing a
+>   marker for each collection
+>   x100000000000000000... for the first collection
+>   x010000000000000000... for the second
+>   x001000000000000000... for the third
+>   and so on.
+>   The query might use a wildcard search on this field using x?0?00000...
+>   specifying '?' for each collection that should be searched on, and '0'
+>   for the others.
+>   The marker would be very long though (the number of collections is
+>   growing, so we have to keep space for new one also).
+>
+> So far we set up the first aproach (one index; size ~ 750 M) and this
+> seems to work in principle and with reasonable performance.
+> I'm not too optimistic about the second aproach. If I understand the docs
+> correctly this would be a sequential search on each involved index and
+> combining the results.
+>
+> So questions:
+> - has anyone experience with such a setup?
+> - are there other aproaches to deal with it?
+> - is my expectation, that multiple indexes are worse reasonable or should
+>   we give it a try?
+> - how is wildcard search done? Could this be an improvement?
+>
+> I understand that in the end, we have to check this ourselfs, but I'd
+> appreciate any hints and advices since I couln'd find much on this
+> issue in the docs.
+>
+> greetings
+> Morus
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,152 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Waiting for lock file problem
+DATE: 16 May 2009
+
+OK, you're right (to expect/hope that Lucene's locking would work like
+this).
+
+Unfortunately all of Lucene's current LockFactory impls are overly
+simplistic: they try once per second (by default), up until your
+timeout, to acquire the lock.  If they fail to do so in the allotted
+time, they throw the LockObtainFailedException.
+
+Ie, they are not "fair": there is no FIFO queue ensuring that app2
+gets its turn as soon as app1 releases the lock.  So lock starvation
+(where one app waits forever to get the lock because another app is
+hogging it, which is what you are seeing) can easily happen.
+
+The goal of Lucene's locking has been to simply protect the index, not
+to enable fair/efficient access from multiple IndexWriters to a single
+index.
+
+One simple workaround is to sleep for long enough after closing the
+last writer and before opening the next to ensure that the other app,
+if it's polling, will obtain the lock?  You can also decrease
+o.a.l.store.Lock.LOCK_POLL_INTERVAL (= how often the lock obtain
+retries; default is 1000 (msec)) so that the necessary sleep time is
+minimized.
+
+Or... you could create a LockFactory that implements some sort of
+fairness.  If you do that please consider donating it back!
+
+Mike
+
+On Sat, May 16, 2009 at 10:44 AM, Newman, Billy <Billy.Newman@itt.com> wrote:
+> At this point it would not be feasible to share the writer across the application and
+the build index process.  And I shouldn't have to that is what locking if for.
+>
+> And yes I know that I shouldn't open a new index writer for each document added but I
+was just trying this so that lucene wold release the lock file so that the application would
+be able to obtain the lock.  I.E. I am trying to get the simplest case to work.
+>
+> Also this is a simple lock file problem, and yes I understand what the lock file is used
+for (i.e. to enforce that two apps cannot access the index at the same time).  Lucene should
+be able to handle the following situation:
+>
+> 1. App. 1 acquires lock file and starts writing to index.
+> 2. App. 2 asks for lock, lock is acquired by someone else so App 2 waits.  In my case
+it will wait for 10 seconds (IndexWriter.WRITE_LOCK_TIMEOUT = 10000)
+> 3. App. 1 finishes writing to index and closes writer releasing lock file.
+> 4. App. 2  now sees that the lock is no longer taken and acquires the lock and starts
+writing to the index
+> 5. So on and so forth........
+>
+> My problem is that App 1 (build indices app.) grabs the locks, App 2. then tries to get
+the lock, but can't and it waits,  App1 releases the lock, App 2 doesn't see the relased
+lock and App 1 grabs the lock again.  App 2 should see the lock file get released but doesn't.
+ Especially in my test case where I wait 10 seconds.  If I am not doing something wrong
+there is a design flaw in the way lucene handles lock files.
+>
+> Any ideas?  From my very simple test case it seems that if an app asks for the lock
+and it is already taken it will wait the correct amount of time BUT it was not placed in a
+queue to receive the lock next.  Is it just polling for the lock, or is it only checking
+once and then waiting 10 seconds to throw and exception?
+>
+> Thanks again,
+> Billy
+>
+> ________________________________________
+> From: Michael McCandless [lucene@mikemccandless.com]
+> Sent: Friday, May 15, 2009 2:52 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Waiting for lock file problem
+>
+> You should try to share a single IndexWriter instance across "Build
+> Indices" and "Application".  Also, you shouldn't open a new
+> IndexWriter for each document added (nor, call optimize), if possible.
+>
+> Lucene doesn't allow more than one IndexWriter to be open at once on
+> the same index (the write lock enforces this).
+>
+> Mike
+>
+> On Fri, May 15, 2009 at 4:18 PM, Newman, Billy <Billy.Newman@itt.com> wrote:
+>> I am trying to build my indices file while still allowing my application to add new
+information and I my application cannot obtain the lock.
+>>
+>> Here is a little pseudo code on what I am trying to do:
+>>
+>> Build Indicies:
+>>
+>> 1.       For each element (i.e. I have n elements I want to add to the index)
+>>
+>> 2.       Create IndexWriter (this gets the lock)
+>>
+>> 3.       Add document
+>>
+>> 4.       Optimize IndexWriter
+>>
+>> 5.       Close IndexWriter
+>>
+>> Application
+>>
+>> 1.       Application submits one new element
+>>
+>> 2.       Create IndexWriter (this gets the lock)
+>>
+>> 3.       Add document
+>>
+>> 4.       Optimize IndexWriter
+>>
+>> 5.       Close IndexWriter
+>>
+>> So again my problem is that the application cannot get the lock file while I am building
+the index file.  I am sure that the writer in the build indices loop is closed after each
+element is added therefore releasing the lock.  I have set the WRITE_LOCK_TIMEOUT to 10 seconds.
+ I can see the build indices process close the writer many times over those 10 seconds, but
+I see the application wait 10 seconds and timeout with a lock timeout exception.  The loop
+in the build indices process is running very fast but I would guess that when the application
+asks for the lock it should be able to see the lock free (even for just a short amount of
+time) because it should be next in line.   Am I doing something fundamentally wrong here,
+or is this a problem with the way lucene locks.
+>>
+>> Thanks,
+>> Billy
+>>
+>>
+>> ________________________________
+>> This e-mail and any files transmitted with it may be proprietary and are intended
+solely for the use of the individual or entity to whom they are addressed. If you have received
+this e-mail in error please notify the sender.
+>> Please note that any views or opinions presented in this e-mail are solely those
+of the author and do not necessarily represent those of ITT Corporation. The recipient should
+check this e-mail and any attachments for the presence of viruses. ITT accepts no liability
+for any damage caused by any virus transmitted by this e-mail.
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

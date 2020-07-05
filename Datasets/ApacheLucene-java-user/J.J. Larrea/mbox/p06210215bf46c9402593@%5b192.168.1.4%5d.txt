@@ -1,0 +1,90 @@
+FROM: "J.J. Larrea" <...@panix.com>
+SUBJECT: Re: Weird time results doing wildcard queries
+DATE: 9 Sep 2005
+
+At 8:01 PM -0700 9/8/05, Chris Hostetter wrote:
+>: Which makes me wonder whether the caching logic of Hits, optimized for
+>: random- rather than linear-access, and not tuneable or controllable in
+>: 1.4.3, should be reviewed for a subsequent release, at least the
+>: API-breaking 2.0.  I'll wager that a majority of applications do nothing
+>: other than a one-time linear retrieval of Documents from Hits, with the
+>: potential for a lot of wasted cycles for those that retrieve more than a
+>: small number.
+>
+>I agree it should be more tunable, but I disagree with your wager.  I
+>suspect that there are a lot of stateless applications out there that
+>support "paginated results".  For those that only every access one or two
+>pages and have small page size, the current Hits works well (and i suspect
+>that is what it was optimized for)
+
+Well, perhaps you're right... after looking at the source more closely, I take back my critique
+of Hits, which arose within a context in which my problem is not perfectly matched to the
+problems Hits tries to solve, which is probably the more common.
+
+That is, I've integrated Lucene searching into an existing app with its own pagination caching
+mechanism.  So to essentially defeat Hits' caching, I pull a large chunk of hits into the
+external cache.  On reviewing the source I see that this has a negative impact on efficiency:
+ Either the caching mechanism of Hits should be utilized for small chunks of Documents as
+it was intended, or else Hits should be bypassed entirely in favor of the external caching
+mechanism, which could then use TopDocs in much the same way Hits does.  Calling Hits.id(
+maxresult ) as I suggested in my prior email is a bandaid which, while improving performance,
+certainly doesn't optimize it.
+
+I suspect this also applies to the situation of Richard Krenek (who started this illuminating
+thread) as well.
+
+Of course that doesn't mean Hits is perfect as now implemented:
+
+>What doesn't make sense to me is that the constructor allways fetches the
+>first 100 -- which is a waste if the application is currently intersted in
+>results 101 and up.
+
+Very much agreed.
+
+>Off the top of my head, I would imagine that a usefull set of API changes
+>would be...
+>
+> * add Hits.setRetrievalFactor(float); // replace "2" in getMoreDocs
+> * add Hits.setDocCacheSize(int); // modify Hits.maxDocs
+
+These two certainly make a lot of sense.  And perhaps setDocCache(0) can defeat Document caching
+for applications that don't need (or want) Hits to hold hard references to large Documents,
+or to waste time maintaining LRU state.
+
+> * make Hits.getMoreDocs(int) package protected
+> * add Searcher.makeHits(Query,Filter,Sort); // use in search, override in subclasses
+
+Interesting thought.  Hits is now final, which I assume is for efficiency.  And getMoreDocs
+has a lot of fundamental logic in it, not a target for a simple subclass override.  On the
+other hand, while the tuning parameters would probably be sufficient to address many concerns
+with Hits, this would probably address those for which they don't.
+
+> * move the call to getMoreDocs(int) from Hits to Searcher.search
+
+Hmm... Hits is passed to the caller and works as a standalone cache.  While it maintains a
+reference to the Searcher, it only uses that to resolve Documents upon misses.  Perhaps the
+current separation of concerns is actually more appropriate?
+
+However, top-score normalization is left to the caller (Hits or external client of IndexSearcher),
+rather than a concern of TopDocs, where it would IMO be more appropriate, and greatly simplify
+the use of the TopDocs-returning IndexSearcher methods.  A TopDocs consumer shouldn't have
+to copy normalization code from Hits.
+
+>...that way the behavior stays the same, there are no major API changes,
+>and applications that want to customize the amount of caching/prefecthing
+>can do so my subclassing (Index)Searcher with some very simple method
+>overrides.
+>
+>-Hoss
+
+Yes, makes sense not to throw the baby out with the bathwater.
+
+Thanks for your insights (and also to Yonick Seeley).
+
+- J.J.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

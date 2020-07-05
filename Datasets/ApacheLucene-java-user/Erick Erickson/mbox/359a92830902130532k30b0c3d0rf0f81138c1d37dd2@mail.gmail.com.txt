@@ -1,0 +1,100 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Partial / starts with searching
+DATE: 13 Feb 2009
+
+Surprisingly, I found that constructing Filters was surprisingly fast
+for partial queries, you might want to give that a spin. See the Filter
+class, which is unrelated to any of the TokenFilter-derived classes <G>.
+
+
+The basic idea here is to use, say, WildCardTermEnum
+or RegexTermEnum (in my experience, WildcartTermEnum is faster)
+to construct a bit mask for all the docs that contain your
+wildcarded term, and pass that along to your query. It'll restrict
+the documents returned to only docs whose corresponding bit is
+on in your filter. You can get a feel for whether this is fast enough
+just by constructing your filter with a bit of test code. This
+technique has the downside that your wildcard terms will NOT
+contribute to scoring the document though. This is not much of
+a problem in my experience.
+
+About timing: Do note that you need to measure response *after*
+a few warmup queries, the first few queries incur overhead.
+
+Another possibility, depending upon how big you can stand for
+your index to be, and assuming that you're OK with restricting
+wildcards to "begins with". You could index, in the same position
+(see Lucene In Action, Synonym Analyzer for a discussion) several
+tokens for each word. Say you are indexing the word automobile.
+Index a$, au$, aut$ and automobile. Now your wildcards (remember
+this is only "begins with") search for a* would translate into
+a$, no wildcard involved. There are obvious space tradeoffs here,
+but since I don't know how big your index is I can't speculate
+on how suitable this is. And once you get out beyond, say, 4
+leading characters, the number of OR clauses becomes much
+smaller so auto* can probably just be submitted as a "regular"
+wildcard query.
+
+And finally, consider whether it's worth the time and effort to
+match on less than three leading characters. One lesson from
+the "too many clauses" exception is that the use *to the user*
+of a query term like a* is pretty small. You'll have at least
+one term in virtually every document. Ask your product
+manager if requiring at least three leading characters is
+acceptable, in which case you may not need to do anything.
+
+"The guys" generously spent time with me a couple of years ago
+on this topic, see the following for that discussion:
+
+http://www.lucidimagination.com/search/document/65a13a1dbd7035ae/i_just_don_t_get_wildcards_at_all#65a13a1dbd7035ae
+
+Best
+Erick
+
+On Fri, Feb 13, 2009 at 3:05 AM, d-fader <dfader@gmail.com> wrote:
+
+> Hi,
+>
+> I've actually posted this message in de dev mailing list earlier,
+> because I though my 'issue' is a limitation of the functionality of
+> Lucene, but they redirected me to this mailinglist, so I hope one of you
+> guys can help me out :)
+>
+> Maybe the 'issue' I'm addressing now is discussed thouroughly already,
+> in that case I think I need some redirection to the sources of those
+> discussions :) Anyway, here's the thing.
+> For all I know it's impossible to search partial words with Lucene
+> (except the asterix method with e.g. the StandardAnalyzer -> ambul* to
+> find ambulance). My problem with that method is that my index consists
+> of quite a few terms. This means that if a user would search for 'ambu
+> amster' (ambulance amsterdam), there will be so many terms to search,
+> the waiting time is just inacceptable. Now I started thinking why it's
+> impossible to search only a 'part' of a term or even only the 'start' of
+> a term and the only reason I could think of was that the Index terms are
+> stored tokenized (in that way you (of course) can't find partial terms,
+> since the index doesn't actually contain the literal terms, but tokens
+> instead). But Lucene can also store all terms untokenized, so in that
+> case, in my humble opinion, a partial search would be possible, since
+> all terms would be stored 'literally'.
+>
+> Maybe my thinking is wrong, I only have a black box view of Lucene, so I
+> don't know much about indexing algorithm and all, but I just want to
+> know if this could be done or else why not :) You see, the users of my
+> index want to know why they can't search parts of the words they enter
+> and I still can't give them a really good answer, except the 'it would
+> result in too many OR operators in the query' statement :) . I've tried
+> using a Dutch stemmer (most of the data I'm indexing is Dutch) but that
+> didn't work out quite good. Furthermore users sometimes search for a
+> certain 'filename' and mostly they just enter a part of the name and
+> thus don't find anything.
+>
+> I hope someone can enlighten me :) Thanks in advance!
+>
+> Jori
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

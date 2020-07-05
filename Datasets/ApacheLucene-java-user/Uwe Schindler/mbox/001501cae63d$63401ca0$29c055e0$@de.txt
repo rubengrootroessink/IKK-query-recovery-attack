@@ -1,0 +1,199 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: HTMLStripReader, HTMLStripCharFilter
+DATE: 27 Apr 2010
+
+A Reader can only be read one time, that’s the problem. Resetting a TokenStream is not able
+to reset the Reader (see java.io.Reader API). To reply the same tokens again, you must wrap
+with a Caching filter. This is also done in Highlighters code.
+
+The general contract of reset() is not to reset the TokenStream to the beginning, it is just
+for reuse in reuseableTokenStream. CachingTokenFilter implements reset() in an incorrect way
+here, this is just left like so for backwards compatibility. The method in CachingTokenFilter
+should be named "rewind()".
+
+You should *not* add the CachingTokenFilter to your Analyzer, as this is only needed for highlighting
+and similar use cases where a TokenStream needs to be read *multiple* times. So leave the
+Analyzer unchanged and wrap the return value of Analyzer.tokenStream() with the filter. Look
+into Highlighters source, how this is done there.
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Justin [mailto:crynax@yahoo.com]
+> Sent: Tuesday, April 27, 2010 8:48 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: HTMLStripReader, HTMLStripCharFilter
+> 
+> Thanks for the help.  No more exception.  Seems odd that I need to add
+> a filter to make reset apply to the stream's underlying reader.
+> 
+> 
+> 
+> 
+> ----- Original Message ----
+> From: Uwe Schindler <uwe@thetaphi.de>
+> To: java-user@lucene.apache.org
+> Sent: Tue, April 27, 2010 12:00:31 AM
+> Subject: RE: HTMLStripReader, HTMLStripCharFilter
+> 
+> To reset this token stream you have to wrap it with a
+> CachingTokenFilter.
+> 
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+> 
+> 
+> > -----Original Message-----
+> > From: Justin [mailto:crynax@yahoo.com]
+> > Sent: Tuesday, April 27, 2010 1:16 AM
+> > To: java-user@lucene.apache.org
+> > Subject: Re: HTMLStripReader, HTMLStripCharFilter
+> >
+> > Thanks for the update!  I appreciate the hard work.
+> >
+> > Perhaps someone can help me with the use of HTMLStripCharFilter...
+> >
+> >
+> > I get an exception (3.1-dev) similar to the one reported here (2.9):
+> >
+> > https://issues.apache.org/jira/browse/LUCENE-1695
+> >
+> >
+> > With the following code:
+> >
+> >     Analyzer htmlStripAnalyzer = new ReusableAnalyzerBase() {
+> >         @Override
+> >         protected TokenStreamComponents createComponents(
+> >                 final String fieldName, final Reader reader) {
+> >             return new TokenStreamComponents(new
+> > StandardTokenizer(Version.LUCENE_30,
+> >                     new
+> HTMLStripCharFilter(CharReader.get(reader))));
+> >         }
+> >     };
+> >     String content = reader.document(id, fieldSelector).get(field);
+> >     TokenStream ts = htmlStripAnalyzer.tokenStream(field, new
+> > StringReader(content));
+> >     String best = highlighter.getBestFragments(ts, content,
+> >       DEFAULT_EXCERPT_FRAGS, DEFAULT_EXCERPT_SEPARATOR);
+> >     OffsetAttribute off = ts.addAttribute(OffsetAttribute.class);
+> >     ts.reset();
+> >     ts.incrementToken();
+> >
+> >
+> > java.io.IOException: Stream closed
+> >         at java.io.StringReader.ensureOpen(StringReader.java:39)
+> >         at java.io.StringReader.read(StringReader.java:73)
+> >         at
+> > org.apache.lucene.analysis.CharReader.read(CharReader.java:54)
+> >         at java.io.Reader.read(Reader.java:104)
+> >         at
+> >
+> org.apache.solr.analysis.HTMLStripCharFilter.next(HTMLStripCharFilter.j
+> > ava:92)
+> >         at
+> >
+> org.apache.solr.analysis.HTMLStripCharFilter.read(HTMLStripCharFilter.j
+> > ava:690)
+> >         at
+> >
+> org.apache.solr.analysis.HTMLStripCharFilter.read(HTMLStripCharFilter.j
+> > ava:748)
+> >         at
+> >
+> org.apache.lucene.analysis.standard.StandardTokenizerImpl.zzRefill(Stan
+> > dardTokenizerImpl.java:453)
+> >         at
+> >
+> org.apache.lucene.analysis.standard.StandardTokenizerImpl.getNextToken(
+> > StandardTokenizerImpl.java:639)
+> >         at
+> >
+> org.apache.lucene.analysis.standard.StandardTokenizer.incrementToken(St
+> > andardTokenizer.java:167)
+> >
+> >
+> > Looking at the source, I wonder if Tokenizer should override reset():
+> >
+> >   public void reset() throws IOException {
+> >     if (input != null) input.reset(); // would reset CharReader,
+> > StringReader
+> >   }
+> >
+> >
+> >
+> >
+> >
+> > ----- Original Message ----
+> > From: Robert Muir <rcmuir@gmail.com>
+> > To: java-user@lucene.apache.org
+> > Sent: Sat, April 24, 2010 9:03:02 AM
+> > Subject: Re: HTMLStripReader, HTMLStripCharFilter
+> >
+> > On Fri, Apr 23, 2010 at 4:48 PM, Justin <crynax@yahoo.com> wrote:
+> >
+> > > Just out of curiousity, why does LUCENE-1377 have a minor priorty?
+> > >
+> > > https://issues.apache.org/jira/browse/LUCENE-1377
+> > >
+> > > Don't people index, filter, search HTML, perhaps more than any
+> other
+> > > format?
+> > >
+> > >
+> > Rest assured we are working on this... but it unfortunately won't
+> > happen
+> > overnight. First of all, the development of Lucene and Solr was
+> merged
+> > such
+> > that there is now one team working on this stuff. This way, both Solr
+> > and
+> > Lucene developers can maintain this stuff.
+> >
+> > There is now the practical issue to combine all Lucene and Solr
+> > analyzers
+> > (not just the two components listed on that issue) into one package
+> > that can
+> > then be used by both Lucene and Solr users:
+> > https://issues.apache.org/jira/browse/LUCENE-2413
+> >
+> > --
+> > Robert Muir
+> > rcmuir@gmail.com
+> >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

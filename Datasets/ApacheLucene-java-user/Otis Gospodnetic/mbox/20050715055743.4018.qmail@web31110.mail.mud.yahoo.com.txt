@@ -1,0 +1,469 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 15 Jul 2005
+
+The problem that I saw (from your email only) with the "ship the full
+little index to the Queen" approach is that, from what I understand,
+you eventually do addIndexes(Directory[]) in there, and as this
+optimizes things in the end, this means your whole index gets
+re-written to disk after each such call.
+
+As for MapReduce, from what I understand, it's quite a bit more
+complicated under the hood, but very simple on the surface - given a
+single big task, chop it up into a number of smaller ones, put them in
+the massive, parallel system, and re-assemble them when they are done.
+
+I'm not sure how generic or Nutch-specific Doug and Mike's MapReduce
+code is in Nutch, I haven't been paying close enough attention.
+
+Otis
+
+
+--- Paul Smith <psmith@aconex.com> wrote:
+
+> Cooool, I should go have a look at that.. That begs another question 
+> 
+> though, where does Nutch stand in terms of the ASF?  Did I read (or  
+> dream) that Nutch may be coming in under ASF?  I guess I should get  
+> myself subscribed to the Nutch mailing lists.
+> 
+> thanks Erik.
+> 
+> Paul
+> 
+> On 15/07/2005, at 11:36 AM, Erik Hatcher wrote:
+> 
+> > Paul - it sounds an awful like my (perhaps incorrect) understanding
+>  
+> > of the MapReduce capability of Nutch that is under development.   
+> > Perhaps the work that Doug and others have done there are  
+> > applicable to your situation.
+> >
+> >     Erik
+> >
+> >
+> > On Jul 14, 2005, at 7:38 PM, Paul Smith wrote:
+> >
+> >
+> >> My punt was that having workers create sub-indexs (creating the  
+> >> documents and making a partial index) and shipping the partial  
+> >> index back to the queen to merge may be more efficient.  It's  
+> >> probably not, I was just using the day as a chance to see if it  
+> >> looked promising, and get my hands dirty with SEDA (and ActiveMQ, 
+> 
+> >> great JMS provider).  The bit I forgot about until too late was  
+> >> the merge is going to have to be 'serialized' by the queen,  
+> >> there's no real way to get around that I could think of. Worse,  
+> >> because the .merge(Directory[]) method does an automatic optimize 
+> 
+> >> I had to get the Queen to temporarily store the partial indexes  
+> >> locally until it had all results before doing a merge, otherwise  
+> >> the queen would be spending _forever_ doing merges.
+> >>
+> >> If you had the workers just creating Documents, I'm not sure that 
+> 
+> >> would get over the overhead of the SEDA network/jms transport.   
+> >> The document doesn't really get inverted until it's sent to the  
+> >> Writer?  In this example the Queen would be doing 99% of the work 
+> 
+> >> wouldn't it? (defeating the purpose of SEDA).
+> >>
+> >> What I was aiming at was an easily growable, self-healing Indexing
+>  
+> >> network.  Need more capacity? Throw in a Mac-Mini or something,  
+> >> and let it join as a worker via Zeroconf.  Worker dies?  work just
+>  
+> >> gets done somewhere else.  True Google-like model.
+> >>
+> >> But I don't think I quite got there.
+> >>
+> >> Re: document in multiple indexes.  The queen was the co-ordinator,
+>  
+> >> so it's first task was to work out what entities to index  
+> >> (everything in our app can be referenced via a URI, mail://2358 or
+>  
+> >> doc://9375).  The queen works out all the URI's to index, batches 
+> 
+> >> them up into a work-unit and broadcasts that as a work message on 
+> 
+> >> the work queue.  The worker takes that package, creates a  
+> >> relatively small index (5000-10000 documents, whatever the chunk  
+> >> size is), and ships the directory as a zipped up binary message  
+> >> back onto the Result queue.  Therefore there were never any  
+> >> duplicates.  A worker either processed the work unit, or it
+> didn't.
+> >>
+> >> Paul
+> >>
+> >> On 15/07/2005, at 9:28 AM, Otis Gospodnetic wrote:
+> >>
+> >>
+> >>
+> >>> Interesting.  I'm planning on doing something similar for some
+> new
+> >>> Simpy features.  Why are your worker bees sending whole indices  
+> >>> to the
+> >>> Queen bee?  Wouldn't it be easier to send in Documents and have
+> the
+> >>> Queen index them in the same index?  Maybe you need those  
+> >>> individual,
+> >>> smaller indices to be separate....
+> >>>
+> >>> How do you deal with the possibility of the same Document being  
+> >>> present
+> >>> in multiple indices?
+> >>>
+> >>> Otis
+> >>>
+> >>>
+> >>> --- Paul Smith <psmith@aconex.com> wrote:
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>> I had a crack at whipping up something along this lines during a
+> 1
+> >>>> day hackathon we held here at work, using ActiveMQ as the bus  
+> >>>> between
+> >>>>
+> >>>> the 'co-ordinator' (Queen bee) and the 'worker" bees.  The index
+>  
+> >>>> work
+> >>>>
+> >>>> was segmented as jobs on a work queue, and the workers feed the
+> >>>> relatively smal index chunks back along a result queue, which  
+> >>>> the co-
+> >>>>
+> >>>> ordinator then merged in.
+> >>>>
+> >>>> The tough part from observing the outcome is knowing what the
+> chunk
+> >>>> size should be, because in the end the co-ordinator needs to
+> merge
+> >>>> all the sub-indexes together into 1 and for a large index that's
+>  
+> >>>> not
+> >>>>
+> >>>> an insignificant time.  You also have to use bookkeeping to work
+>  
+> >>>> out
+> >>>>
+> >>>> if a 'job' has not been completed in time (maybe failure by the
+> >>>> worker) and decide whether the job should be resubmitted (in
+> theory
+> >>>> JMS with transactions would help there, but then you have a
+> >>>> throughput problem on that too).
+> >>>>
+> >>>> Would love to see something like this work really well, and
+> perhaps
+> >>>> generalize it a bit more.  I do like the simplicity of the SEDA
+> >>>> principles.
+> >>>>
+> >>>> cheers,
+> >>>>
+> >>>> Paul Smith
+> >>>>
+> >>>>
+> >>>> On 14/07/2005, at 11:50 PM, Peter Gelderbloem wrote:
+> >>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>>> I am currently looking into building a similar system and came
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> across
+> >>>>
+> >>>>
+> >>>>
+> >>>>> this architecture:
+> >>>>> http://www.eecs.harvard.edu/~mdw/proj/seda/
+> >>>>>
+> >>>>> I am just reading up on it now. Does anyone have experience
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> building a
+> >>>>
+> >>>>
+> >>>>
+> >>>>> lucene system based on this architecture? Any advice would be
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> greatly
+> >>>>
+> >>>>
+> >>>>
+> >>>>> appreciated.
+> >>>>>
+> >>>>> Peter Gelderbloem
+> >>>>>
+> >>>>>    Registered in England 3186704
+> >>>>> -----Original Message-----
+> >>>>> From: Luke Francl [mailto:luke.francl@stellent.com]
+> >>>>> Sent: 13 May 2005 22:04
+> >>>>> To: java-user@lucene.apache.org
+> >>>>> Subject: Re: Best Practices for Distributing Lucene Indexing
+> and
+> >>>>> Searching
+> >>>>>
+> >>>>> On Tue, 2005-03-01 at 19:23, Chris Hostetter wrote:
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> I don't really consider reading/writing to an NFS mounted
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> FSDirectory
+> >>>>
+> >>>>
+> >>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> to
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> be viable for the very reasons you listed; but I haven't
+> really
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> found
+> >>>>
+> >>>>
+> >>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> any
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> evidence of problems if you take they approach that a single
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> "writer"
+> >>>>
+> >>>>
+> >>>>
+> >>>>>> node indexes to local disk, which is NFS mounted by all of
+> your
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> other
+> >>>>
+> >>>>
+> >>>>
+> >>>>>> nodes for doing queries.  concurent updates/queries may still
+> not
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> be
+> >>>>
+> >>>>
+> >>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> safe
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> (i'm not sure) but you could have the writer node "clone" the
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>> entire
+> >>>>
+> >>>>
+> >>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> index
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> into a new directory, apply the updates and then signal the
+> other
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>> nodes to
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>> stop using the old FSDirectory and start using the new one.
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>>
+> >>>>>
+> >>>>> Thanks to everyone who contributed advice to my question about
+> how
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> to
+> >>>>
+> >>>>
+> >>>>
+> >>>>> distribute a Lucene index across a cluster.
+> >>>>>
+> >>>>> I'm about to start on the implementation and I wanted to
+> clarify
+> >>>>> something about using NFS that Chris wrote about above.
+> >>>>>
+> >>>>> There are many warnings about indexing on an NFS file system,
+> but
+> >>>>> is it
+> >>>>> safe to have a single node index, while the other nodes use the
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> file
+> >>>>
+> >>>>
+> >>>>
+> >>>>> system in read-only mode?
+> >>>>>
+> >>>>> On a related note, our software is cross-platform and needs to 
+> 
+> >>>>> work
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>> on
+> >>>>
+> >>>>
+> >>>>
+> >>>>> Windows as well. Are there any problems known problems having a
+> >>>>> read-only index shared over SMB?
+> >>>>>
+> >>>>> Using a shared file system is preferable to me because it's  
+> >>>>> easier,
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>>> but
+> >>>>> if it's necessary I will write the code to copy the index to
+> each
+> >>>>> node.
+> >>>>>
+> >>>>> Thanks,
+> >>>>> Luke Francl
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>
+> ------------------------------------------------------------------- 
+> >>>> --
+> >>>>
+> >>>>
+> >>>>
+> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>> For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>
+> ------------------------------------------------------------------- 
+> >>>> --
+> >>>>
+> >>>>
+> >>>>
+> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>> For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>>
+> >>>>
+> >>>>
+> >>>>
+> ------------------------------------------------------------------- 
+> >>>> --
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> >>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>
+> >>>
+> >>>
+> -------------------------------------------------------------------- 
+> >>> -
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>>
+> >>>
+> >>>
+> >>
+> >>
+> >>
+> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> >
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

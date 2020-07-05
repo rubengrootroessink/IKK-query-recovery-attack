@@ -1,0 +1,94 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Searchable Solutions Please
+DATE: 3 Nov 2004
+
+
+On Nov 2, 2004, at 11:15 PM, Karthik N S wrote:
+>         If the Search Word  'kid'  is suppose to return me   kid ,  
+> kid's ,
+> kidoos, children
+>
+>        1) Do I need to use Combination of more then one Analysers ??? 
+> , If
+> so How.
+>        2) Any Alternate modification to be done for the simple Searcher
+> methods. ??
+
+<marketing>We cover this very scenario in Lucene in Action</marketing> 
+:)
+
+You may need a combination of Analyzers, depending on what type of 
+analysis makes sense for each field.
+
+However, let's not concern ourselves with multiple analyzers for the 
+sake of this issue.  Suppose you have the following documents (all in a 
+single "contents" field):
+
+Doc 1: "My kid beat me in chess" [yes, it's true]
+Doc 2: "The kid's brilliant"
+Doc 3: "Hey kidoos, it's time to get ready for bed"
+Doc 4: "Children are our most precious resource"
+
+There are two approaches - expansion of synonyms at indexing time, or 
+query expansion.
+
+Expansion at indexing time will increase the size of the index, of 
+course, but with the benefit of simpler and faster queries.  An 
+analyzer would inject the synonyms into the same virtual position as 
+the original word (using position offset of 0 for the injected words).  
+Here's what the heart of the Lucene in Action SynonymAnalyzer looks 
+like:
+
+   public TokenStream tokenStream(String fieldName, Reader reader) {
+     TokenStream result = new SynonymFilter(
+                           new StopFilter(
+                             new LowerCaseFilter(
+                               new StandardFilter(
+                                 new StandardTokenizer(reader))),
+                             StandardAnalyzer.STOP_WORDS),
+                           engine
+                          );
+     return result;
+   }
+
+This is the StandardAnalyzer wrapped with a custom SynonymFilter.  The 
+SynonymFilter is driven by a SynonymEngine:
+
+     public interface SynonymEngine {
+       String[] getSynonyms(String s) throws IOException;
+     }
+
+The implementations of the SynonymEngine are up to your imagination.  I 
+created a mock one for unit testing, and a real one using the WordNet 
+database.
+
+In my examples, I show the SynonymAnalyzer used during indexing, but 
+during searching I use the StandardAnalyzer.  Since the synonyms have 
+already been injected during indexing, it is unnecessary to be 
+concerned with them during querying.  (it gets tricky using analyzers 
+that stack tokens into the same position when using QueryParser and 
+PhraseQuery)
+
+Taking Doc 1 as an example, with a hypothetical SynonymEngine, the 
+tokens emitted from a SynonymAnalyzer could be:
+
+1: my
+2: kid kids children kidoos
+3: beat
+4: me
+5: in
+6: chess
+
+In the 2nd position, all the synonyms appear for "kid".  Now phrase 
+queries such as "my kidoos" work just fine.
+
+Hopefully this gives you some ideas on where to go from here.
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

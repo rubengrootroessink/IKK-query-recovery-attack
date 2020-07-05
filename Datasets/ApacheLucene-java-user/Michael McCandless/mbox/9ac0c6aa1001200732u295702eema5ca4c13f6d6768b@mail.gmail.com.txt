@@ -1,0 +1,220 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: NFS, Stale File Handle Problem and my thoughts....
+DATE: 20 Jan 2010
+
+Sounds great!
+
+Mike
+
+On Wed, Jan 20, 2010 at 10:25 AM, Shai Erera <serera@gmail.com> wrote:
+> Ok, I haven't reached that part in LIA2 yet :-).
+>
+> This module is useful for a single node as well, when one IndexSearcher is
+> shared between several threads. The communication part is just an extension
+> of that case.
+>
+> I'll review the SearcherManager in LIA2, and compare to our code. If it'll
+> make sense, I'll patch it up !
+>
+> Shai
+>
+> On Wed, Jan 20, 2010 at 5:17 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>> I think this would be useful!
+>>
+>> The 2nd edition Lucene in Action sources also have something similar,
+>> a SearcherManager class that handles multiple threads doing searching
+>> while a reopen (normal or NRT) and warming is taking place.  (NOTE:
+>> I'm one of the authors on Lucene in Action 2nd edition!).  But it
+>> doesn't do the communication part, to know when it's time to reopen.
+>>
+>> Mike
+>>
+>> On Wed, Jan 20, 2010 at 9:32 AM, Shai Erera <serera@gmail.com> wrote:
+>> > We've worked around that problem by doing two things:
+>> > 1) We notify all nodes in the cluster when the index has committed (we
+>> use
+>> > JMS for that).
+>> > 2) On each node there is a daemon which waits on this JMS queue, and once
+>> > the index has committed it reopens an IR, w/o checking isCurrent(). I
+>> think
+>> > that the isCurrent call is the problematic one, since that's the one that
+>> > checks the segments file (but I admit I forgot the details).
+>> > 2.1) After the reopen is finished (we do some warm up queries as well),
+>> we
+>> > 'release' this reader to search threads.
+>> >
+>> > So no search thread suffers any overhead from opening a reader, because
+>> to
+>> > them the readers are always open. Calling reopen means calling isCurrent,
+>> so
+>> > you can protect that code and call it until it succeeds, or if it fails
+>> call
+>> > IndexReader.open instead. Anyway, that's done on the daemon side, and
+>> > therefore does not incur any overhead for searchers. In the worse case,
+>> > they'll use a slightly older index than your application intended for.
+>> >
+>> > I don't know if something like that interests the community, to get a
+>> module
+>> > that provides IndexSearcher instances, and taking care of their refresh
+>> w/o
+>> > the application needing to worry about it, or write custom code (which
+>> I'm
+>> > sure a lot of us write .. and probably the same code). If it does, I
+>> don't
+>> > mind to patch something.
+>> >
+>> > Shai
+>> >
+>> > On Wed, Jan 20, 2010 at 4:05 PM, Sertic Mirko, Bedag
+>> > <Mirko.Sertic@bedag.ch>wrote:
+>> >
+>> >> Hi Mike
+>> >>
+>> >> Thank you for your feedback!
+>> >>
+>> >> So I would need the following setup:
+>> >>
+>> >> a) Machine A with custom IndexDeletionPolicy and single IndexReader
+>> >> instance
+>> >> b) Machine B with custom IndexDeletionPolicy and single IndexReader
+>> >> instance
+>> >> c) Machine A and B periodically check if the index needs to be reopened,
+>> at
+>> >> least at 12 o'clock
+>> >> d) Machine A runs an Index update and optimization at 8 o'clock, using
+>> the
+>> >> IndexDeletionPolicy. The IndexDeletionPolicy keeps track of the files to
+>> be
+>> >> deleted.
+>> >> e) On Machine A, the no longer needed files are taken from the
+>> >> IndexDeletionPolicy, and deleted at 12:30. At this point the files to be
+>> >> deleted should no longer be required by any IndexReader and can be
+>> safely
+>> >> deleted.
+>> >>
+>> >> So the IndexDeletionPolicy should be a kind of Singleton, and in fact
+>> would
+>> >> only be needed on Machine A, as only here index modifications are made.
+>> >> Machine B has read only access.
+>> >>
+>> >> Would this be a valid setup? The only limitation is there is only ONE
+>> >> IndexWriter box, and multiple IndexReader boxes. Based on our
+>> requirements,
+>> >> this should fix very well. I really want to avoid some kind of index
+>> >> replication between the boxes...
+>> >>
+>> >> Regards
+>> >> Mirko
+>> >>
+>> >>
+>> >>
+>> >> -----Ursprüngliche Nachricht-----
+>> >> Von: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> >> Gesendet: Mittwoch, 20. Januar 2010 14:45
+>> >> An: java-user@lucene.apache.org
+>> >> Betreff: Re: NFS, Stale File Handle Problem and my thoughts....
+>> >>
+>> >> Right, you just need to make a custom IndexDeletionPolicy.  NFS makes
+>> >> no effort to protect deletion of still-open files.
+>> >>
+>> >> A simple approach is one that only deletes a commit if it's more than
+>> >> XXX minutes/hours old, such that XXX is set higher than the frequency
+>> >> that IndexReaders are guaranteed to have reopened.
+>> >>
+>> >> The TestDeletionPolicy unit test in Lucene's sources has the
+>> >> ExperiationTimeDeletionPolicy that you can use (but scrutinize!).
+>> >>
+>> >> Another alternative is to simply reopen the reader whenever you hit
+>> >> Stale file handle (think of it as NFS's means of notifying you that
+>> >> your reader is no longer current ;) ).  But, if reopen time is
+>> >> potentially long for your app, it's no good to make queries pay that
+>> >> cost and the deletion policy is better.
+>> >>
+>> >> Mike
+>> >>
+>> >> On Wed, Jan 20, 2010 at 8:29 AM, Sertic Mirko, Bedag
+>> >> <Mirko.Sertic@bedag.ch> wrote:
+>> >> > Hi@all
+>> >> >
+>> >> >
+>> >> >
+>> >> > We are using Lucene 2.4.1 on Debian Linux with 2 boxes. The index is
+>> >> > stored on a common NFS share. Every box has a single IndexReader
+>> >> > instance, and one Box has an IndexWriter instance, adding new
+>> documents
+>> >> > or deleting existing documents at a given point in time. After adding
+>> or
+>> >> > deleting the documents, a IndexWriter.optimize() is called. Every box
+>> >> > checks periodically with IndexReader.isCurrent if the index needs to
+>> be
+>> >> > reopened.
+>> >> >
+>> >> >
+>> >> >
+>> >> > Now, we are encountering a "Stale file handle" error on box b after
+>> the
+>> >> > index was modified and optimized by box a.
+>> >> >
+>> >> >
+>> >> >
+>> >> > As far as i understand the problem with NFS is that box b tries to
+>> >> > open/access a file that was deleted by box a on the NFS share.
+>> >> >
+>> >> >
+>> >> >
+>> >> > The question is now, when are files deleted? Does only the index
+>> >> > optimization delete files, or can files be deleted just by adding or
+>> >> > removing documents from an existing index?
+>> >> >
+>> >> >
+>> >> >
+>> >> > I now that there might be a better setup with Lucene and index
+>> >> > replication, but this is an existing application and we cannot change
+>> >> > the architecture now. So what would be the best solution?
+>> >> >
+>> >> >
+>> >> >
+>> >> > Can I just "change" the way Lucene deletes files? I think that just
+>> >> > renaming no longer needed files would be good on NFS. After every
+>> >> > IndexReader has reopened the index, the renamed files can be safely
+>> >> > deleted, as they are definitely no longer needed. Where would be the
+>> >> > hook point? I heard something about IndexDeletionPolicy....
+>> >> >
+>> >> >
+>> >> >
+>> >> > Thanks in advance!
+>> >> >
+>> >> >
+>> >> >
+>> >> > Mirko
+>> >> >
+>> >> >
+>> >> >
+>> >> >
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,86 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: java gc with a frequently changing index?
+DATE: 28 Jul 2007
+
+Why do you believe that it's the gc? I admit i just scanned your
+e-mail, but I *do* know that the first search (especially sorts) on
+a newly-opened IndexReader incure a bunch of overhead. Could
+that be what you're seeing?
+
+I'm not sure there is a "best practice", but I have seen two
+solutions mentioned, both more complex than opening/closing
+the reader.
+
+1> open the reader in the background, fire a few "warmup" queries
+at it, then switch it with the one you actually use to answer queries.
+
+2> Use a RAMDirectory to hold your new entries for some period
+of time. You'd have to do some fancy dancing to keep this straight
+since you're updating documents, but it might be viable. The scheme
+is something like
+Open your FSDIR
+Open a RAMdir.
+
+Add all new documents to BOTH of them. When servicing a query,
+look in both indexes, but you only open/close the RAMdir for
+every query. Note that since, when you open a reader, it
+takes a snapshot of the index, these two views will be disjoint. When you
+get your results back, you'll have to do something about the documents
+from the FSdir that have been replaced in the RAMdir, which is where
+the fancy dancing part comes in. But I leave that as an exercise for
+the reader.
+
+Periodically, shut everything down and repeat. The point here is that
+you can (probably) close/open your RAMdir with very small costs and
+have the whole thing be up to date.
+
+There'll be some coordination issues, and you'll have to cope with data
+integrity if your process barfs before you've closed your FSDir....
+
+Or, you could ask whether 5 seconds is really necessary.I've seen a lot
+of times when "real time" could be 5 minutes and nobody would really
+complain, and other times when it really is critical. But that's between you
+and our Product Manager....
+
+Hope this helps
+Erick
+
+On 7/25/07, Tim Sturge <tsturge@metaweb.com> wrote:
+>
+> Hi,
+>
+> I am indexing a set of constantly changing documents. The change rate is
+> moderate (about 10 docs/sec over a 10M document collection with a 6G
+> total size) but I want to be  right up to date (ideally within a second
+> but within 5 seconds is acceptable) with the index.
+>
+> Right now I have code that adds new documents to the index and deletes
+> old ones using updateDocument() in the 2.1 IndexWriter. In order to see
+> the changes, I need to recreate the IndexReader/IndexSearcher every
+> second or so. I am not calling optimize() on the index in the writer,
+> and the mergeFactor is 10.
+>
+> The problem I am facing is that java gc is terrible at collecting the
+> IndexSearchers I am discarding. I usually have a 3msec query time, but I
+> get gc pauses of 300msec to 3 sec (I assume is is collecting the
+> "tenured" generation in these pauses, which is my old IndexSearcher)
+>
+> I've tried "-Xincgc", "-XX:+UseConcMarkSweepGC -XX:+UseParNewGC" and
+> calling System.gc() right after I close the old index without much luck
+> (I get the pauses down to 1sec, but get 3x as many. I want < 25 msec
+> pauses). So my question is, should I be avoiding reloading my index in
+> this way? Should I keep a separate IndexReader (which only deletes old
+> documents) and one for new documents? Is there a standard technique for
+> a quickly changing index?
+>
+> Thanks,
+>
+> Tim
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

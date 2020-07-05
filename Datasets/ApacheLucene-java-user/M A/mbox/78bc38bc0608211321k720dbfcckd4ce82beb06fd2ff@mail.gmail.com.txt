@@ -1,0 +1,240 @@
+FROM: "M A" <geneticfl...@googlemail.com>
+SUBJECT: Re: Search Performance Problem 16 sec for 250K docs
+DATE: 21 Aug 2006
+
+Ok this is what i have done so far ->
+
+static class MyIndexSearcher extends IndexSearcher {
+         IndexReader reader = null;
+         public MyIndexSearcher(IndexReader r) {
+             super(r);
+             reader = r;
+         }
+         public void search(Weight weight,
+org.apache.lucene.search.Filterfilter, final HitCollector results)
+throws IOException {
+             HitCollector collector = new HitCollector() {
+                 public final void collect(int doc, float score) {
+                     try {
+                         // System.err.println(" doc " + doc + " score " +
+score );
+                         String str = reader.document(doc).get("sid");
+                         results.collect(doc, Float.parseFloat(str));
+                     } catch(Exception e) {
+
+                     }
+                 }
+             };
+
+             Scorer scorer = weight.scorer(reader);
+             if (scorer == null)
+                 return;
+             scorer.score(collector);
+         }
+
+    };
+
+
+Which is essentially an overriden method, although not fully optimized im
+sure there is a way to make it quicker .. my timing has gone down to sub, 5
+secs a query, not ideal but definately better than what i was getting before
+..
+
+In fact some searches now complete in under an sec .. which is a definate
+result ..
+
+The reason for doing it this way is simple .. the field sid stores a long
+value that is the epoch, therefore the larger this value the more recent the
+story and hence .. the higher it should be in the ranking ..
+
+I guess the only bottleneck now is reading the value from the field .. since
+for the multifield queries that value gets called (collect(int doc, float
+score) ) a hell of a lot of times ..
+
+now just have to find a way to eliminate low scoring ones .. and i am set ..
+
+
+Thanx
+
+
+
+
+On 8/20/06, M A <geneticflyer@googlemail.com> wrote:
+>
+>  The index is already built in date order i.e. the older documents appear
+> first in the index, what i am trying to achieve is however the latest
+> documents appearing first in the search results ..  without the sort .. i
+> think they appear by relevance .. well thats what it looked like ..
+>
+> I am looking at the scoring as we speak,
+>
+>
+>
+> On 8/20/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> >
+> > About luke... I don't know about command-line interfaces, but if you
+> > copy
+> > your index to a different machine and use Luke there. I do this between
+> > Linux and Windows boxes all the time. Or, if you can mount the remote
+> > drive
+> > so you can see it, you can just use Luke to browse to it and open it up.
+> > You
+> > may have some latency though.....
+> >
+> > See below...
+> >
+> > On 8/20/06, M A <geneticflyer@googlemail.com> wrote:
+> > >
+> > > Ok I get your point, this still however means the first search on the
+> > new
+> > > searcher will take a huge amount of time .. given that this is
+> > happening
+> > > now
+> > > ..
+> >
+> >
+> > You can fire one or several canned queries at the searcher whenever you
+> > open
+> > a new one. That way the first time a *user* hits the box, the warm-up
+> > will
+> > already have happened. Note that the same searcher can be used by
+> > multiple
+> > threads...
+> >
+> >
+> > i.e. new search -> new query -> get hits ->20+ secs ..  this happens
+> > every 5
+> > > mins or so ..
+> > >
+> > > although subsequent searches may be quicker ..
+> > >
+> > > Am i to assume for a first search the amount of  time is ok -> ..
+> > seems
+> > > like
+> > > a long time to me ..?
+> > >
+> > > The other thing is the sorting is fixed .. it never changes .. it is
+> > > always
+> > > sorted by the same field ..
+> >
+> >
+> > Assuming that you still have performance issues, you could think about
+> > building your index in pre-sorted order an just avoiding the sorting all
+> > together. The internal Lucene document IDs are then your sort order (a
+> > newly
+> > added doc hast an ID that is always greater than any existing doc ID). I
+> >
+> > don't know details of your problem space, but this might be relatively
+> > easy.... You won't want to return things in relevance order in that
+> > case. In
+> > fact, you probably don't want relevance in place at all since your
+> > sorting
+> > doesn't change.... I think a ConstantScoreQuery  might work for you
+> > here.
+> >
+> > But I wouldn't go there unless you have evidence that your sort is
+> > slowing
+> > you down, which is easy enough to verify by just taking it out. Don't
+> > bother
+> > with any of this until you re-use your reader though....
+> >
+> > i just built the entire index and it still takes ages .,..
+> >
+> >
+> > The search took ages? Or building the index? If the former, then
+> > rebuilding
+> > the index is irrelevant, it's the first time you use a searcher that
+> > counts.
+> >
+> > On 8/20/06, Chris Hostetter <hossman_lucene@fucit.org> wrote:
+> > > >
+> > > >
+> > > > : This is because the index is updated every 5 mins or so, due to
+> > the
+> > > > incoming
+> > > > : feed of stories ..
+> > > > :
+> > > > : When you say iteration, i take it you mean, search request, well
+> > for
+> > > > each
+> > > > : search that is conducted I create a new one .. search reader that
+> > is
+> > > ..
+> > > >
+> > > > yeah ... i ment iteration of your test.  don't do that.
+> > > >
+> > > > if the index is updated every 5 minutes, then open a new searcher
+> > every
+> > > 5
+> > > > minutes -- and reuse it for theentire 5 minutes.  if it's updated
+> > > > "sparadically throughout the day" then open a search, and keep using
+> > it
+> > > > untill the index is udated, then open a new one.
+> > > >
+> > > > reusing an indexsearcher as long as possible is one of biggest
+> > factors
+> > > of
+> > > > Lucene applications.
+> > > >
+> > > > :
+> > > > :
+> > > > :
+> > > > : On 8/19/06, Chris Hostetter <hossman_lucene@fucit.org > wrote:
+> > > > : >
+> > > > : >
+> > > > : > :     hits = searcher.search(query, new Sort("sid", true));
+> > > > : >
+> > > > : > you don't show where searcher is initialized, and you don't
+> > clarify
+> > > > how
+> > > > : > you are timing your multiple iterations -- i'm going to guess
+> > that
+> > > you
+> > > > are
+> > > > : > opening a new searcher every iteration right?
+> > > > : >
+> > > > : > sorting on a field requires pre-computing an array of
+> > information
+> > > for
+> > > > that
+> > > > : > field -- this is both time and space expensive, and is cached
+> > per
+> > > > : > IndexReader/IndexSearcher -- so if you reuse the same searcher
+> > and
+> > > > time
+> > > > : > multiple iterations you'll find that hte first iteration might
+> > be
+> > > > somewhat
+> > > > : > slow, but the rest should be very fast.
+> > > > : >
+> > > > : >
+> > > > : >
+> > > > : > -Hoss
+> > > > : >
+> > > > : >
+> > > > : >
+> > > ---------------------------------------------------------------------
+> > > > : > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > : > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> > > > : >
+> > > > : >
+> > > > :
+> > > >
+> > > >
+> > > >
+> > > > -Hoss
+> > > >
+> > > >
+> > > >
+> > ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> > > >
+> > >
+> > >
+> >
+> >
+>
+

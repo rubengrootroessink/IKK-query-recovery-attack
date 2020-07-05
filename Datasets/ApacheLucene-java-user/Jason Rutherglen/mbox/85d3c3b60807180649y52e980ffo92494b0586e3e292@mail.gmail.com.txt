@@ -1,0 +1,81 @@
+FROM: "Jason Rutherglen" <jason.rutherg...@gmail.com>
+SUBJECT: Re: Scaling
+DATE: 18 Jul 2008
+
+RMI search in Lucene uses Searchable.int[] docFreqs(Term[] terms) to obtain
+the docfreqs for all terms in a the query from each server.  Which it then
+turns into a globalized Weight that is submitted to all the Searchables
+(servers).  Look at MultiSearcher.  This is fine for most systems even with
+the network traffic.
+
+There are ways to mitigate network traffic at the greater than 100 server
+mark by locating a proxy server at each rack.  This way the main search
+client does not have for example 5000 sockets open to 5000 servers, it only
+has 500 sockets open to the 500 proxy servers with 100 server per proxy.
+The intensive local network traffic is performed by the search proxy which
+then returns the results to the main search client.
+
+In web search a global term frequency database is used.  This does not work
+for many Lucene instances where the the index is updated frequently.  It
+still could be done with indexes that are updates often however it would
+seem to require a lot of work with possibly little to gain, unless you want
+to offer the user 0.05 second response times.
+
+On Fri, Jul 18, 2008 at 3:49 AM, Eric Bowman <ebowman@boboco.ie> wrote:
+
+> Jason Rutherglen wrote:
+>
+>> The scaling per machine should be linear.  The overhead from the network
+>> is
+>> minimal because the Lucene object sizes are not impacting.  Google
+>> mentions
+>> in one of their early white papers on scaling
+>> http://labs.google.com/papers/googlecluster-ieee.pdf that they have sub
+>> indexes which are now popularly called shards over which an individual
+>> thread performs a search over.  Executed in parallel
+>> (ParallelMultiSearcher
+>> which does not use thread pooling) the response time will be faster than
+>> using a single thread assuming part of the indexes are in the system
+>> cache.
+>> A query is simply an iteration so it is easy to see how parallelization
+>> speeds up response times.  Queries per second should ideally be solved by
+>> adding more hardware with the same indexes on each server.  Then further
+>> dividing these into what can be termed cells which represent different
+>> indexes on sets of servers.
+>>
+>> Having a large index on a single machine does not scale well because most
+>> of
+>> the index will not be in the system cache.  If the index grows so does the
+>> response time.  Dividing the index up into shards and cells allows for
+>> efficient scaling which is proven at the big G.  It puts more of the total
+>> index in the system cache of many machines.
+>>
+>> The general assumption is that hardware is cheap and can be added easily,
+>> search systems can take advantage of this and parallelize as much as
+>> possible, per server, per application.
+>>
+>>
+> One thing I have trouble understanding is how scoring works in this case.
+>  Does Lucene really "just work", or are there special things we have to do
+> to make sure that the scores are coherent so we can actually decide which
+> was the best match?  What kind of constraints are there when breaking up the
+> index into parts to make sure scoring remains coherent?
+>
+> Thanks,
+> Eric
+>
+> --
+> Eric Bowman
+> Boboco Ltd
+> ebowman@boboco.ie
+> http://www.boboco.ie/ebowman/pubkey.pgp
+> +35318394189/+353872801532
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

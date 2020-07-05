@@ -1,0 +1,71 @@
+FROM: Daniel Noll <dan...@nuix.com>
+SUBJECT: Re: "Deleting" documents without deleting them
+DATE: 16 Mar 2010
+
+On Tue, Mar 16, 2010 at 20:45, Rene Hackl-Sommer <rene.a.hackl@gmx.de> wrote:
+> Hi Daniel,
+>
+> Unless you have only a few documents and a small index, I don't think never
+> calling optimize is going to be a means you should rely upon.
+>
+> What about if you reindexed the documents you are deleting, adding a field
+> <excludeFromSearch> with the value "true"? This would imply that either
+>
+> 1) all fields are stored, so you may retrieve them from the original doc and
+> add them to the new one plus the exclusion field
+> 2) or if a lot of fields are only indexed you'd need access to the original
+> source. (With limitations it is also possible to reconstruct a field from
+> indexed data only, but not generally recommendable)
+
+Unfortunately it also makes the assumption that it's OK for the doc
+IDs to shift - in our application this is not the case as we use it to
+key to various databases.  So for us, the effects would be like this:
+   Relocating one document to the end of the index and marking the
+earlier one as fakedeleted => One query to each relevant table to
+update that one document
+   Deleting a document in order to re-add a fakedeleted version at the
+end (implying that merging occurs) => If 100,000 documents shift, up
+to 100,000 IDs in each table need to be updated.
+
+(Why don't we use a separate int field?  Because for tables like tags,
+it's too slow to do an additional query into Lucene to map the virtual
+ID back to the real doc ID when building filters by tag.)
+
+Of course, if it were possible to add one field to a document without
+deleting and re-adding it, yes -- then this would be the way to go for
+sure.  In fact, if Lucene had the ability to incrementally update a
+document in the first place, I would never have needed to embark on
+this whole exercise, as I could just update the document I want to
+update and move the old fields to new fields.  At some point a
+replaceDocument() which maintains doc IDs would be a very nice thing
+to have.
+
+> If you need to keep track of which versions belong together, you may need to
+> think about how you uniquely identify documents, how this changes between
+> versions, and if the update dates might be of any help.
+
+That gives me an idea.  We have a GUID field already, which is
+actually for other purposes, but I could go over TermEnum/TermDocs for
+that field and build a filter which only matches the last doc for each
+term.  Then I don't have to pay for the storage of a filter... but I
+guess it will cost to build this filter anyway so I don't know if it's
+practical yet.
+
+I guess storing the filter on disk would be an easier way to go, with
+the caveat that it will cost a bit to flip bits each time a new
+document is fakedeleted.
+
+Daniel
+
+
+-- 
+Daniel Noll                            Forensic and eDiscovery Software
+Senior Developer                              The world's most advanced
+Nuix                                                email data analysis
+http://nuix.com/                                and eDiscovery software
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

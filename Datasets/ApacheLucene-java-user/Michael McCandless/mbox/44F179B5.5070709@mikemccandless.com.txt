@@ -1,0 +1,87 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: java.io.IOException: Access is denied on java.io.WinNTFileSystem.createFileExclusively
+DATE: 27 Aug 2006
+
+Jason Polites wrote:
+
+>> Are you also running searchers against this index?  Are they re-init'ing
+>> frequently or being opened and then held open?
+> 
+> 
+> No searches running in my initial test, although I can't be certain what is
+> happening under the Compass hood.
+
+OK.
+
+> This looks similar to http://issues.apache.org/jira/browse/LUCENE-665
+>> (that was just opened) as well as other issues in the past, but in these
+>> cases there are usually also IndexReaders/Searchers against the index.
+>> Could you try the patch to FSDirectory.java (in that issue) and see if
+>> it helps?
+> 
+> 
+> Does look related, although I'm not sure I like the suggested fix.
+> Detecting a specific exception is always a tricky deal (if only Sun
+> described error codes in the spec!), but whilst the solution suggested will
+> almost certainly fix my problem, it seems a little "loose".
+> 
+> I think that bug is probably a different issue.
+
+Agreed, it's not a very clean fix.  I'd really love to get to the root 
+cause in your case (and from that bug).  I'm unable to reproduce that 
+bug on my Windows XP machine ...
+
+> Good question ... however, in your use case (the commits that
+>> IndexWriter is doing) the code above Lock.obtain is already
+>> synchronized(directory) so it's only one thread that can make it down
+>> into the Lock.obtain method.  So I don't believe adding synchronization
+>> in this method will help you.
+> 
+> 
+> Maybe I'm off-base here, but I'm not sure how you were able to determine
+> that.  I had to double check, but didn't have the original stack trace 
+> (only
+> the snippet I posted).  When I looked at the source, it seemed that the
+> Lock.obtain() method (in my case) is being called by "public Lock
+> makeLock(String name)"  (FSDirectory: line 344); which in turn is called 
+> by:
+
+I'm sorry, you are correct: I had assumed your case was the commit lock 
+ant it was coming through the standard IndexWriter commit paths (under 
+ther Lock.With() calls).  In fact, even in standard Lucene sources, the 
+write lock obtain is not synchronized.
+
+> Not all of which synchronize on the Directory object.  In my case, the call
+> is made by:
+> 
+> org.apache.lucene.index.TransIndex.<init>(TransIndex.java:137)
+> 
+> (which oddly enough is not actually part of Lucene, but part of Compass).
+> 
+> This does not appear to provide any index-relative synchronization.
+
+Ahh, OK.  It's interesting that compass acquires the lock directly 
+itself.  That line is actually acquiring the write lock.
+
+> Synchronization at this low level would ensure that outer application 
+> layers
+> would be guaranteed of IO isolation.
+
+Agreed, this really hinges on whether java.io.File.createNewFile is 
+thread safe.  I would assume/hope/expect that it would be (??) but alas 
+  the javadocs don't say one way or another.
+
+> Obviously you shouldn't have to bother.  Windows should take care of it, 
+> but
+> in this case it doesn't appear to.
+
+Oh: if you add "synchronized" to the Lock.obtain method, does this in 
+fact completely fix your issue?
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,80 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Starts With x and Ends With x Queries
+DATE: 6 Feb 2005
+
+
+On Feb 4, 2005, at 9:37 PM, Chris Hostetter wrote:
+> If you want to start doing suffix queries (ie: all names ending with
+> "s", or all names ending with "Smith") one approach would be to use
+> WildcarQuery, which as Erik mentioned, will allow you to use a quey 
+> Term
+> that starts with a "*". ie...
+>
+>    Query q3 = new WildcardQuery(new Term("name","*s"));
+>    Query q4 = new WildcardQuery(new Term("name","*Smith"));
+>
+> (NOTE: Erik says you can do this, but the docs for WildcardQuery say 
+> you
+> can't I'll assume the docs are wrong and Erik is correct.)
+
+I assume you mean this comment on WildcardQuery's javadocs:
+
+"In order to prevent extremely slow WildcardQueries, a Wildcard term 
+must not start with one of the wildcards <code>*</code> or 
+<code>?</code>."
+
+I don't read that as saying you cannot use an initial wildcard 
+character, but rather as if you use a leading wildcard character you 
+risk performance issues.  I'm going to change "must" to "should".  And 
+yes, WildcardQuery itself supports a leading wildcard character exactly 
+as you have shown.
+
+> Which leads me to my point: if you denormalize your data so that you 
+> store
+> both the Term you want, and the *reverse* of the term you want, then a
+> Suffix query is just a Prefix query on a reversed field -- by 
+> sacrificing
+> space, you can get all the speed efficiencies of a PrefixQuery when 
+> doing
+> a SuffixQuery...
+>
+>    D1> name:"Adam Smith" rname:"htimS madA" age:13 state:CA ...
+>    D2> name:"Joe Bob" rname:"boB oeJ" age:42 state:WA ...
+>    D3> name:"John Adams" rname:"smadA nhoJ" age:35 state:NV ...
+>    D3> name:"Sue Smith" rname:"htimS euS" age:33 state:CA ...
+>
+>    Query q1 = new PrefixQuery(new Term("name","J*"));
+>    Query q2 = new PrefixQuery(new Term("name","Sue*"));
+>    Query q3 = new PrefixQuery(new Term("rname","s*"));
+>    Query q4 = new PrefixQuery(new Term("rname","htimS*"));
+>
+>
+> (If anyone sees a flaw in my theory, please chime in)
+
+This trick has been mentioned on this list before, and is a good one.  
+I'll go one step further and mention another technique I found in the 
+book Managing Gigabytes, making "*string*" queries drastically more 
+efficient for searching (though also impacting index size).  Take the 
+term "cat".  It would be indexed with all rotated variations with an 
+end of word marker added:
+
+	cat$
+	at$c
+	t$ca
+	$cat
+
+The query for "*at*" would be preprocessed and rotated such that the 
+wildcards are collapsed at the end to search for "at*" as a 
+PrefixQuery.  A wildcard in the middle of a string like "c*t" would 
+become a prefix query for "t$c*".
+
+Has anyone tried this technique with Lucene?
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

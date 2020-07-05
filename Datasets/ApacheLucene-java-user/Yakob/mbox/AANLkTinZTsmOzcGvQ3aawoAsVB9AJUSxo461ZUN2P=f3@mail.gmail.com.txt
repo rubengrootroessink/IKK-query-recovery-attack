@@ -1,0 +1,101 @@
+FROM: Yakob <jacob...@opensuse-id.org>
+SUBJECT: problem with incremental update in lucene
+DATE: 1 Dec 2010
+
+I am creating a program that can index many text files in different
+folder. so that's mean every folder that has text files get indexed
+and its index are stored in another folder. so this another folder
+acts like a universal index of all files in my computer. and I am
+using lucene to achieve this because lucene fully supported
+incremental update. this is the source code into which I use it for
+indexing.
+
+public class SimpleFileIndexer {
+
+public static void main(String[] args) throws Exception   {
+
+    int i=0;
+    while(i<2) {
+    File indexDir = new File("C:/Users/Raden/Documents/myindex");
+    File dataDir = new File("C:/Users/Raden/Documents/indexthis");
+    String suffix = "txt";
+
+    SimpleFileIndexer indexer = new SimpleFileIndexer();
+
+    int numIndex = indexer.index(indexDir, dataDir, suffix);
+
+    System.out.println("Total files indexed " + numIndex);
+    i++;
+    Thread.sleep(1000);
+
+    }
+}
+
+private int index(File indexDir, File dataDir, String suffix) throws Exception {
+    RAMDirectory ramDir = new RAMDirectory();          // 1
+    IndexWriter indexWriter = new IndexWriter(
+            ramDir,                                    // 2
+            new StandardAnalyzer(Version.LUCENE_CURRENT),
+            true,
+            IndexWriter.MaxFieldLength.UNLIMITED);
+    indexWriter.setUseCompoundFile(false);
+    indexDirectory(indexWriter, dataDir, suffix);
+    int numIndexed = indexWriter.maxDoc();
+    indexWriter.optimize();
+    indexWriter.close();
+
+    Directory.copy(ramDir, FSDirectory.open(indexDir), false); // 3
+
+    return numIndexed;
+}
+
+private void indexDirectory(IndexWriter indexWriter, File dataDir,
+String suffix)  throws IOException {
+    File[] files = dataDir.listFiles();
+    for (int i = 0; i < files.length; i++) {
+        File f = files[i];
+        if (f.isDirectory()) {
+            indexDirectory(indexWriter, f, suffix);
+        }
+        else {
+            indexFileWithIndexWriter(indexWriter, f, suffix);
+        }
+    }
+}
+
+private void indexFileWithIndexWriter(IndexWriter indexWriter, File f,
+String suffix) throws IOException {
+    if (f.isHidden() || f.isDirectory() || !f.canRead() || !f.exists()) {
+        return;
+    }
+    if (suffix!=null && !f.getName().endsWith(suffix)) {
+        return;
+    }
+    System.out.println("Indexing file " + f.getCanonicalPath());
+
+    Document doc = new Document();
+    doc.add(new Field("contents", new FileReader(f)));
+doc.add(new Field("filename", f.getCanonicalPath(), Field.Store.YES,
+Field.Index.ANALYZED));
+    indexWriter.addDocument(doc);
+} }
+
+
+the problem I am having now is that the indexing program I created
+above seem can't do any incremental update. I mean I can search for a
+text file but only for the file that existed in the last folder to
+which I already indexed, and the other previous folder that I had
+already indexed seems to be missing in the search result and didn't
+get displayed. can you tell me what went wrong in my code? I just
+wanted to be able to have incremental update feature in my source
+code. so in essence, my program seems to be overwriting the existing
+index with the new one instead of merging it.
+
+-- 
+http://jacobian.web.id
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

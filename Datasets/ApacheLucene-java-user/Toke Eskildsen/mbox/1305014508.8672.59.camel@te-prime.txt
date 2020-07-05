@@ -1,0 +1,55 @@
+FROM: Toke Eskildsen ...@statsbiblioteket.dk>
+SUBJECT: Re: Sharding Techniques
+DATE: 10 May 2011
+
+On Mon, 2011-05-09 at 13:56 +0200, Samarendra Pratap wrote:
+>  We have an index directory of 30 GB which is divided into 3 subdirectories
+> (idx1, idx2, idx3) which are again divided into 21 sub-subdirectories
+> (idx1-1, idx1-2, ...., idx2-1, ...., idx3-1, ...., idx3-21).
+
+So each part is about ½ GB in size? That gives you a serious logistic
+overhead. You state later that you only update the index once a day, so
+it would seem that you have no need for the fast update times that such
+small indexes give you. My guess is that you will get faster search
+times by using a single index.
+
+
+Down to basics, Lucene searches work by locating terms and resolving
+documents from them. For standard term queries, a term is located by a
+process akin to binary search. That means that it uses log(n) seeks to
+get the term. Let's say you have 10M terms in your corpus. If you stored
+that in a single field in a single index with a single segment, it would
+take log(10M) ~= 24 seeks to locate a term. This is of course very
+simplified.
+
+When you have 63 indexes, log(n) works against you. Even with the
+unrealistic assumption that the 10M terms are evenly distributed and
+without duplicates, the number of seeks for a search that hits all parts
+will still be 63 * log(10M/63) ~= 63 * 18 = 1134. And we haven't even
+begun to estimate the merging part.
+
+Due to caching, a seek is not equal to the storage being hit, but the
+probability for a storage hit rises with the number of seeks and the
+inevitable term duplicates when splitting the index.
+
+> We have almost 40 fields in each index (is it a bad to have so many
+> fields?). most of them are id based fields.
+
+Nah, our index is about 40GB with 100+ fields and 8M documents. We use a
+single index, optimized to 5 segments. Response times for raw searches
+are a few ms, while response times for the full package (heavy faceting)
+is generally below 300ms. Our queries are mostly simple boolean queries
+across 13 fields.
+
+> Keeping parts of indexes on different servers search on all of them and then
+> merging the results - what could be the best approach?
+
+Locate your bottleneck. Some well-placed log statements or a quick peek
+with visualvm (comes with the Oracle JVM) should help a lot.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

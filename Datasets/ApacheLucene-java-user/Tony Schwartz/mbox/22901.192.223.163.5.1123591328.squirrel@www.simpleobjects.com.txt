@@ -1,0 +1,102 @@
+FROM: "Tony Schwartz" <t...@simpleobjects.com>
+SUBJECT: Re: Regarding range queries.
+DATE: 9 Aug 2005
+
+1.  Use RangeFilters on the lowest precision date you need.  If you only need to filter
+to the day, index the date in a separate field with day precision.  This will speed up
+filter creation a great deal.
+2.  Use as few characters as possible when indexing, so if you can come up with your own
+date representation as a String, that will work well for you.
+3.  Try to update your index as little as possible.  If you need to update your index
+regularly, consider having two indexes.  For example... 1 small index that allows many
+updates that you use for TODAY.  1 large index that each night is updated with the
+contents of index 1.  then swap out index 1 for a new one.  This is very handy if docs
+are added in date order.  you can use this fact to sort more efficiently (i.e. no cross
+index sorting - just append the sorted results of one index to the other).
+4.  Use a robust filter caching scheme that is shared across users (give the users the
+ability and ease of selecting common date ranges).  By robust, I mean, cache some in
+memory and cache some to disk.  reading a filter from disk can be a heck of a lot
+cheaper than recreating the filter.  Use a simple list and put recently used filters at
+the front.  store a certain number of filters in memory, then store a certain number of
+filters on disk, then drop the rest.
+
+
+
+as a side note:
+
+I think there are a few things that should be added to lucene to really give a huge
+benefit to applications of lucene that are centered around dates.  If documents are
+added in date order (generally but not exactly), you can use this fact to improve memory
+usage of lucene in several ways.
+
+1.  a sparse bitset can be used instead of a full array for Date RangeFilters.
+2.  sorting can improved by storing the StringIndex (sort array) to disk when index is
+updated.  Then, load only the portions required for a particular search.  If most people
+will be searching more recent docs and so you can keep those portions of the sort array
+in memory and load only those "older" portions when needed.
+3.  use the same sparse (and reversible) bitset instead of the lucene BitVector for
+storing the deleted docs for a particular segment. (very old docs are probably deleted
+again, based on date).
+4.  sorting can also be greatly improved by NOT storing the field values in memory if
+the index is not used in a "multi-index" environment.
+
+I have implemented these techniques for my particular implementation of an application
+logs search tool and have seen incredible results.  I have many users searching 50
+million application logs (1k each) with 512 MB memory for my app where users are sorting
+and filtering on every search.
+
+Again, these features will only be useful for indexes that have relative date to docid
+correlation (which I believe happens to be very common).
+
+Tony Schwartz
+tony@simpleobjects.com
+"What we need is more cowbell."
+
+> Hi all,
+> I am new user of lucene. This query is posted at least
+> once on alomost all lucene mailing lists. The query
+> being about handling of date fields.
+>
+> In my case I need to find documents with dates older
+> than a particular date. So ideally I am not supposed
+> to specify the lower bound. When using the default
+> date handling provdied by lucene in conjunction with
+> the RangeQuery, it results in a havaoc.
+>
+> But recently during my search for a solution to this
+> problem I came across a solution  which said to
+> convert the dates to string format of the form
+> YYYY:MM:DD. This is beacuse - "Lucene can handle
+> String ranges without having to add every possible
+> value as a comparison clause". Here is the link
+> http://www.redhillconsulting.com.au/blogs/simon/archives/000232.html
+>
+> Now my question is:-
+> (1) Is the above statement true?
+> (2) If yes will it work with YYYY:MM:DD HH:MM:SS
+> format  too?
+>
+> Other solutions are also welcome.
+>
+> Thanks alot.
+> Santo.
+>
+>
+>
+> ____________________________________________________
+> Start your day with Yahoo! - make it your home page
+> http://www.yahoo.com/r/hs
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

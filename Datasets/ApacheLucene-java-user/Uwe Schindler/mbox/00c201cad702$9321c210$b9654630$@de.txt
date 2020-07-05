@@ -1,0 +1,156 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: IndexWriter memory leak?
+DATE: 8 Apr 2010
+
+Hi Shai, hi Ruben,
+
+I will take care of this in https://issues.apache.org/jira/browse/LUCENE-2074 where some parts
+of the Tokenizer impl are rewritten.
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Ruben Laguna [mailto:ruben.laguna@gmail.com]
+> Sent: Thursday, April 08, 2010 11:51 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: IndexWriter memory leak?
+> 
+> I was investigating this a little further and in the JFlex mailing list
+> I
+> found [1]
+> 
+> I don't know much about flex / JFlex but it seems that this guy resets
+> the
+> zzBuffer to 16384 or less when setting the input for the lexer
+> 
+> 
+> Quoted from  shef <shef31@ya...>
+> 
+> 
+> I set
+> 
+> %buffer 0
+> 
+> in the options section, and then added this method to the lexer:
+> 
+>     /**
+>      * Set the input for the lexer. The size parameter really speeds
+> things up,
+>      * because by default, the lexer allocates an internal buffer of
+> 16k. For
+>      * most strings, this is unnecessarily large. If the size param is
+> 0 or greater
+>      * than 16k, then the buffer is set to 16k. If the size param is
+> smaller, then
+>      * the buf will be set to the exact size.
+>      * @param r the reader that provides the data
+>      * @param the size of the data in the reader.
+>      */
+>     public void reset(Reader r, int size) {
+>         if (size == 0 || size > 16384)
+>             size = 16384;
+>         zzBuffer = new char[size];
+>         yyreset(r);
+>     }
+> 
+> 
+> So maybe there is a way to trim the zzBuffer this way (?).
+> 
+> BTW, I will try to find out which is the "big token" in my dataset this
+> afternoon. Thanks for the help.
+> 
+> I actually workaround this memory problem for the time being by
+> wrapping the
+> IndexWriter in a class that periodically closes the IndexWriter and
+> creates
+> a new one, allowing the old to be GCed, but I would be really good if
+> either
+> JFlex or Lucene can take care of this zzBuffer going berserk.
+> 
+> 
+> Again thanks for the quick response. /Rubén
+> 
+> 
+> [1]
+> https://sourceforge.net/mailarchive/message.php?msg_id=444070.38422.qm@
+> web38901.mail.mud.yahoo.com
+> 
+> On Thu, Apr 8, 2010 at 11:32 AM, Shai Erera <serera@gmail.com> wrote:
+> 
+> > If we could change the Flex file so that yyreset(Reader) would check
+> the
+> > size of zzBuffer, we could trim it when it gets too big. But I don't
+> think
+> > we have such control when writing the flex syntax ... yyreset is
+> generated
+> > by JFlex and that's the only place I can think of to trim the buffer
+> down
+> > when it exceeds a predefined threshold ....
+> >
+> > Maybe what we can do is create our own method which will be called by
+> > StandardTokenizer after yyreset is called, something like
+> > trimBufferIfTooBig(int threshold) which will reallocate zzBuffer if
+> it
+> > exceeded the threshold. We can decide on a reasonable 64K threshold
+> or
+> > something, or simply always cut back to 16 KB. As far as I
+> understand, that
+> > buffer should never grow that much. I.e. in zzRefill, which is the
+> only
+> > place where the buffer gets resized, there is an attempt to first
+> move back
+> > characters that were already consumed and only then allocate a bigger
+> > buffer. Which means only if there is a token whose size is larger
+> than 16KB
+> > (!?), will this buffer get expanded.
+> >
+> > A trimBuffer method might not be that bad .. as a protective measure.
+> What
+> > do you think? Of course, JFlex can fix it on their own ... but until
+> that
+> > happens ...
+> >
+> > Shai
+> >
+> > On Thu, Apr 8, 2010 at 10:35 AM, Uwe Schindler <uwe@thetaphi.de>
+> wrote:
+> >
+> > > > I would like to identify also the problematic document I have
+> 10000 so,
+> > > > what
+> > > > would be the best way of identifying the one that it making
+> zzBuffer to
+> > > > grow
+> > > > without control?
+> > >
+> > > Dont index your documents, but instead pass them directly to the
+> analyzer
+> > > and consume the tokenstream manually. Then visit
+> > TermAttribute.termLength()
+> > > for each Token.
+> > >
+> > >
+> > > -------------------------------------------------------------------
+> --
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> 
+> 
+> 
+> --
+> /Rubén
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

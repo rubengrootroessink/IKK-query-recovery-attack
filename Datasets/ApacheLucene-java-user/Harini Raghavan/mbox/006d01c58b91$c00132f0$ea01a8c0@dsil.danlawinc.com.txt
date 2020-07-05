@@ -1,0 +1,164 @@
+FROM: "Harini Raghavan" <harini.ragha...@insideview.com>
+SUBJECT: Re: Index locked exception while updating index
+DATE: 18 Jul 2005
+
+Chris,
+
+The reason I am creating the IndexWriter for every call to addDocument is 
+because the update to index gets triggered by JMS events, so I will not know 
+at what point to close the IndexWriter.
+Your suggestion to have a separate management thread to close the writer 
+sounds good, I will try that out.
+
+Thanks,
+Harini
+
+----- Original Message ----- 
+From: "Chris Hostetter" <hossman_lucene@fucit.org>
+To: <java-user@lucene.apache.org>
+Sent: Monday, July 18, 2005 1:14 PM
+Subject: Re: Index locked exception while updating index
+
+
+>
+> I freely admit that i wasn't paying much attention to the begining of this
+> thread, so maybe there is some subtlety i'm missing, but i don't
+> understand why your "addDocument" method needs to be synchronized.
+>
+> I believe the reason you are getting the lock exception is because you are
+> opening a seperate IndexWriter for each thread correct? ... you should be
+> able to use one writer for many threads (a singlton writer), and the
+> concurency will be managed for you under the covers.  The only gotcha's to
+> watch out for are:
+>
+>  1) don't let any of your updating threads close the writer
+>  2) have a seperate management thread that periodically closes the
+>     current writer to persist the additions, and opens a new one it it's
+>     palce for future updates.
+>
+> ...if you're using JDK1.5, take a look at
+> java.util.concurrent.atomic.AtomicReference, it should make managing a
+> singleton IndexWriter really easy.
+>
+> : Date: Mon, 18 Jul 2005 10:12:39 +0530
+> : From: Harini Raghavan <harini.raghavan@insideview.com>
+> : Reply-To: java-user@lucene.apache.org
+> : To: otis_gospodnetic@yahoo.com
+> : Cc: java-user@lucene.apache.org
+> : Subject: Re: Index locked exception while updating index
+> :
+> : Hi Otis,
+> :
+> : I tried to print the stack but there was no exception. I think I found 
+> the
+> : cause for the exception. The addDocument was being called by different
+> : threads simultaneously and so when a second thread was trying to access 
+> the
+> : index, it was already locked. So I made the method addDocument 
+> synchronized
+> : and that fixed the problem.
+> :
+> : Thanks for your quick response,
+> : Harini
+> :
+> :
+> : ----- Original Message -----
+> : From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+> : To: <java-user@lucene.apache.org>
+> : Sent: Monday, July 18, 2005 10:03 AM
+> : Subject: Re: Index locked exception while updating index
+> :
+> :
+> : > Harini,
+> : >
+> : > You are catching IOException in the finally block, but you are not 
+> even
+> : > printing out the exception stack trace.  Perhaps you are not able to
+> : > close your IndexWriter for some reason.
+> : >
+> : > Otis
+> : >
+> : >
+> : > --- Harini Raghavan <harini.raghavan@insideview.com> wrote:
+> : >
+> : >> Hi All,
+> : >> I am quite new to Lucene and I have problem with locking. I have a
+> : >> MessageDrivenBean that sends messages to my Lucene indexer whenever
+> : >> there is
+> : >> a  new database update. The indexer updates the index incrementally .
+> : >> Below
+> : >> is the code fragment in the indexer method that gets invoked by the
+> : >> MDB
+> : >> listener.
+> : >>
+> : >>  public void addDocument(Document doc) {
+> : >>      String indexLoc = luceneConfig.getIndexDir();
+> : >>      IndexWriter writer = getIndexWriter(indexLoc, false);
+> : >>      try{
+> : >>           writer.addDocument(doc);
+> : >>      } catch(IOException e) {
+> : >>             logger.error("IOException occurred in addDocument()");
+> : >>      } catch(Exception e) {
+> : >>             logger.error("Exception occurred in addDocument()");
+> : >>      } finally {
+> : >>             try {
+> : >>                 writer.close();
+> : >>            } catch(IOException e){
+> : >>     }
+> : >> }
+> : >>
+> : >> The incremental update works fine twice and the third time it throws
+> : >> the
+> : >> following exception :
+> : >>
+> : >> java.io.IOException: Index locked for write:
+> : >> Lock@C:\tmpIndex\write.lock
+> : >> at org.apache.lucene.index.IndexWriter.<init>(Unknown Source)
+> : >> at org.apache.lucene.index.IndexWriter.<init>(Unknown Source)
+> : >> at lucene.LuceneActions.getIndexWriter(LuceneActions.java:151)
+> : >> at lucene.LuceneActions.addDocument(LuceneActions.java:43)
+> : >> at index.IndexServiceImpl.addData(IndexServiceImpl.java:63)
+> : >> at index.IndexServiceImpl.addToIndex(IndexServiceImpl.java:28)
+> : >>
+> : >> The Index Writer is created every time and also closed in the finally
+> : >> block.
+> : >> Should I be doing something else?
+> : >> Any help would be appreciated.
+> : >> Thanks,
+> : >> Harini
+> : >>
+> : >>
+> : >> ---------------------------------------------------------------------
+> : >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> : >>
+> : >>
+> : >
+> : >
+> : > ---------------------------------------------------------------------
+> : > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : > For additional commands, e-mail: java-user-help@lucene.apache.org
+> : >
+> :
+> :
+> : ---------------------------------------------------------------------
+> : To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> : For additional commands, e-mail: java-user-help@lucene.apache.org
+> :
+>
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

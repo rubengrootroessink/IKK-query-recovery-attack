@@ -1,0 +1,148 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: IndexWriter.optimize and memory usage
+DATE: 3 Dec 2004
+
+
+: See IndexWriter javadoc and in particular mergeFactor, minMergeDocs,
+: and maxMergeDocs.  This will let you control the size of your segments,
+: the frequency of segment merges, the amount of buffered Documents in
+: RAM between segment merges and such.  Also, you ask about calling
+
+Yeah, I'm familiar with those options.  I initially tried just using the
+defaults, and then I tried using a high mergeFactor (100 if i remember
+right) -- both of which had the same result: index built fine, but the
+optimize call at the end ran out of memory.
+
+: optimize periodically - no need, Lucene should already merge segments
+: once in a while for you.  Optimize at the end.  You can also experiment
+
+So, If I'm understanding you (and the javadocs) correctly, the real key
+here is maxMergeDocs.  It seems like addDocument will never merge a
+segment untill maxMergeDocs have been added? ... meaning that I need a
+value less then the default (Integer.MAX_VALUE) if I want IndexWriter to
+do incrimental merges as I go ...
+
+	...except...
+
+...if that were the case, then exactly is the meaning of mergeFactor?
+
+
+: > I've been running into an interesting situation that I wanted to ask
+: > about.
+: >
+: > I've been doing some testing by building up indexes with code that
+: > looks
+: > like this...
+: >
+: >      IndexWriter writer = null;
+: >      try {
+: >          writer = new IndexWriter("index", new StandardAnalyzer(),
+: > true);
+: >          writer.mergeFactor = MERGE_FACTOR;
+: >          PooledExecutor queue = new
+: > PooledExecutor(NUM_UPDATE_THREADS);
+: >          queue.waitWhenBlocked();
+: >
+: >          for (int min=low; min < high; min += BATCH_SIZE) {
+: >              int max = min + BATCH_SIZE;
+: >              if (high < max) {
+: >                  max = high;
+: >              }
+: >              queue.execute(new BatchIndexer(writer, min, max));
+: >          }
+: >          end = new Date();
+: >          System.out.println("Build Time: " + (end.getTime() -
+: > start.getTime()) + "ms");
+: >          start = end;
+: >          writer.optimize();
+: >      } finally {
+: >          if (null != writer) {
+: >              try { writer.close(); } catch (Exception ignore)
+: > {/*NOOP*/; }
+: >          }
+: >      }
+: >      end = new Date();
+: >      System.out.println("Optimize Time: " + (end.getTime() -
+: > start.getTime()) + "ms");
+: >
+: >
+: > (where BatchIndexer is a class i have that gets a DB connection, and
+: > slurps all records from my DB between min and max and builds some
+: > simple
+: > Documents out of them and calls writer.addDocument(doc) on each)
+: >
+: > This was working fine with small ranges, but then i tried building up
+: > a
+: > nice big index for doing some performance testing.  i left it running
+: > overnight and when i came back in the morning i discovered that after
+: > successfully building up the whole index (~112K docs, ~1.5GB disk) it
+: > crashed with an OutOfMemory exception while trying to optimize.
+: >
+: > I then realized i was only running my JVM with a 256m upper limit on
+: > RAM,
+: > and i figured that PooledExecutor was still in scope, and maybe it
+: > was
+: > maintaining some state that was using up a lot of space, so i whiped
+: > up a
+: > quick little app to solve my problem...
+: >
+: >     public static void main(String[] args) throws Exception {
+: >         IndexWriter writer = null;
+: >         try {
+: >             writer = new IndexWriter("index", new StandardAnalyzer(),
+: > false);
+: >             writer.optimize();
+: >         } finally {
+: >             if (null != writer) {
+: >                 try { writer.close(); } catch (Exception ignore) {
+: > /*NOOP*/; }
+: >             }
+: >         }
+: >     }
+: >
+: > ...but I was dissapointed to discover that even this couldn't run
+: > with
+: > only 256m of ram.  I bumped it up to 512m and then it manged to
+: > complete
+: > successfully (the final index was only 1.1GB of disk).
+: >
+: >
+: > This raises a few questions in my mind:
+: >
+: > 1) Is there a rule of thumb for knowing how much memory it takes to
+: >    optimize an index?
+: >
+: > 2) Is there a "Best Practice" to follow when building up a large
+: > index
+: >    from scratch in order to reduce the amount of memory needed to
+: > optimize
+: >    once the whole index is build?  (ie: would spining up a thread
+: > that
+: >    called writer.optimize() every N minutes be a good idea?)
+: >
+: > 3) Given an unoptimized index that's allready been built (ie: in the
+: > case
+: >    where my builder crashed and i wanted to try and optimize it
+: > without
+: >    having to rebuild from scratch) is there anyway to get IndexWriter
+: > to
+: >    use less RAM and more disk (trading spead for a smaller form
+: > factor --
+: >    and aparently: greater stability so that the app doesn't crash)
+: >
+: >
+: > I imagine that the answers to #1 and #2 are largely dependent on the
+: > nature of the data in the index (ie: the frequency of terms) but i'm
+: > wondering if there is a high level formula that could be used to say
+: > "based on the nature of your data, you want to take this approach to
+: > optimizing when you build"
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

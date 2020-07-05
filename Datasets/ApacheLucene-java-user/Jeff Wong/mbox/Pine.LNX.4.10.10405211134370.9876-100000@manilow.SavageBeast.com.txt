@@ -1,0 +1,75 @@
+FROM: Jeff Wong <jeffw...@savagebeast.com>
+SUBJECT: Re: asktog on search problems
+DATE: 21 May 2004
+
+I don't think the first solution will work because the "100AW~" term must
+match either 100 or AW which are your index terms.
+
+Coincidentally,  I have been trying to deal with this very problem over
+the past few days.  
+
+In my situation,  I'm trying to help users find thing when the spacing of
+their queries doesn't match the spacing in an indexed term.  Possible
+errors can be divided into 2 classes.
+
+1) User leaves out  a space where there ought to be one.  Let's say the
+user is trying to find "blue bird" but types in the query "bluebird"
+thinking it is a single word.  Lucene won't catch this because "blue" and
+"bird" are stored as single index tokens.
+
+2) User errantly inserts a space where there shouldn't be one.  An example
+would be an index where the word "blackbird" is stored but the user types
+in "black bird" as a query.
+
+What I tried to do was create an alternate tokenizer which stored the
+entire string in the index in a different field and perform fuzzy search
+on the entire string.  This is possible because I am only doing searches
+on strings of less than 40 characters on average.  To take the "black
+bird" example, I would store the entire string into a field which doesn't
+tokenize on word boundaries.  The query, in turn, would look something
+like this:
+
++title:black +title:bird OR fulltitle:black bird~
+
+Where the tilde applies to the entire "black bird" term.  When I tested it
+it appeared to work, but was really slow for large indexes.  At about
+40000 entries, this query started to take 1 or 2 seconds which was worse
+than my performance requirement.
+
+Actually, I also thought of the last 2 things you suggested and I was
+about to try them out.  However, you do need to apply both of them.
+Adding additional concatenated index terms addresses the problem where
+users leave out spaces.  Add concatenated terms helps users match terms
+in your index when they inject spaces incorrectly.
+
+This may balloon the memory consumption of your Lucene index.  However,
+you can use heuristics to avoid inserting extra terms which won't match
+likely errors.  For example, you could decide that you only want to
+concatenate terms that are parts of model numbers.  Or, if you are dealing
+with compound words, you can choose to only concatenate terms which are
+English words.  For example,  in my situation, concatenating "blue bird"
+as an extra term is useful while doing the same with  "Roy Orbison" is
+not since people aren't likely to neglect the space in that situation.
+
+Hope this helps.
+
+Jeff
+
+
+On Fri, 21 May 2004, David Spencer wrote:
+
+> In the context of Lucene ways to handle this seem to be:
+> - automagically run a fuzzy query (so if a query doesn't work, transform 
+> "Lowepro 100AW" to "Lowepro~ 100AW~"> 
+> - write a query parser that breaks apart unindexed tokens into ones that 
+> are indexed (so "100AW" becomes "100 AW")
+> - write a tokenizer that inserts dummy tokens for every pair of tokens, 
+> so the stream "Lowepro 100 AW" would also have "Lowepro100" and "100AW" 
+> inserted, presumably via magic w/ TokenStream.next()
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

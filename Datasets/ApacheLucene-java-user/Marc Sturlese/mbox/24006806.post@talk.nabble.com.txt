@@ -1,0 +1,81 @@
+FROM: Marc Sturlese <marc.sturl...@gmail.com>
+SUBJECT: memory leak with CustomComparatorSource class variables
+DATE: 12 Jun 2009
+
+
+Hey there,
+I have noticed I am experiencing sort of a memory leak with a
+CustomComparatorSource (wich implements SortComparatorSource).
+I have a HashMap declared as variable of class in CustomComparatorSource:
+
+final HashMap<String,Integer> docs_to_modify
+
+This HashMap contains ids of documents and priorities used for sorting (the
+HashMap is assigned in the constructor).
+Normally the HashMap will have different values depending on the query
+string requested and normally will have a size of 5000 elements.
+
+I have noticed that this HashMap causes a memory leak. GC will always leave
+some memory in use because of this structure. The more requests the more
+memory that keeps in use (after lots of debugging and tracing I know the
+memory leak is that HasMap) until I get a Tomcat heap space
+OutOfMemoryException.
+
+Looks like class variables from a CustomComparatorSource are never freed. I
+have thought this could happen if IndexSeracher keeps an instance of
+CustomComparatorSource and never frees it...
+
+Any clue why this happens?
+
+My Comparator looks like:
+class CustomComparatorSource implements SortComparatorSource 
+{
+  private final HashMap<String,Integer> docs_to_modify;
+  
+  public CustomComparatorSource( HashMap<String,Integer> docs_map) {
+    this.docs_to_modify = docs_map;
+  }
+  
+  public ScoreDocComparator newComparator(final IndexReader index_reader,
+String fieldname) throws IOException 
+  {
+
+    final FieldCache.StringIndex index =
+FieldCache.DEFAULT.getStringIndex(index_reader, fieldname);
+  
+    return new ScoreDocComparator () 
+    {
+      public final int compare (final ScoreDoc d0, final ScoreDoc d1) {
+        //... algorithm used to compare
+        
+        return value_A - value_B;
+      }
+  
+      public Comparable sortValue (final ScoreDoc d0) {
+        //... algorithm used to sort value     
+        return new Integer( value_A );
+      }
+  
+      public int sortType() {
+        return SortField.CUSTOM;
+      }
+    };
+  }
+}
+
+And it's called from:
+new Sort( new SortField[] { new SortField(idField, new
+CustomComparatorSource(docs_map), false )}
+
+Thanks in advance!
+
+-- 
+View this message in context: http://www.nabble.com/memory-leak-with-CustomComparatorSource-class-variables-tp24006806p24006806.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

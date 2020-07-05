@@ -1,0 +1,163 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Query Search returns always the same id
+DATE: 29 Oct 2008
+
+Actually, FWIW, just after I posted last night I realized why the
+ID was always the same, perhaps it'll be useful as an insight
+into how Lucene works...
+
+When you add the same field to a document, all the values are
+added and retrieved in order. So calling " hits.doc(i).get("id")"
+returns the *first* id stored stored. Since you were using
+the same document, the first ID stored was identical for each
+document added..
+
+Had you called getFields instead, you'd have gotten a list of all
+the IDs stored for that document.....
+
+About storing the field, it's an "interesting" balancing act between
+storing data in the index for, say, display and storing it somewhere
+*else* and using the results of a search to retrieve it. Which is
+best completely depends upon your problem space. Personally
+I like to use one data source, either the Lucene index or the DB
+if at all possible, fewer moving parts and all that. Sometimes that's
+not reasonable though....
+
+Best
+Erick
+
+On Tue, Oct 28, 2008 at 4:52 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+
+> I think your root problem is that you're using the same Document
+> over and over to add to the index. Your inner loop should be
+> something like:
+>
+>
+>     for (int j = 0; j < sourcefiles.elementAt(i).getNumberOfRevisions();
+> j++)
+>
+>> {
+>
+>        Document doc = new Document()
+>
+>>
+>>    doc.add(new Field("id",
+>> sourcefiles.elementAt(i).getID(j),Field.Store.YES,
+>> Field.Index.UN_TOKENIZED));
+>>    doc.add(new
+>> Field("message",sourcefiles.elementAt(i).getCommitMessage(j),
+>> Field.Store.NO <http://field.store.no/>,Field.Index.TOKENIZED));
+>>    iwriter.addDocument(doc);
+>>    System.out.println("Indexed: Source: " + (i+1) + " Revision: "
+>>  +(j+1));
+>>    System.out.println(sourcefiles.elementAt(i).getCommitMessage(j));
+>>    System.out.println(sourcefiles.elementAt(i).getID(j));
+>>  }
+>>
+>
+> rather than creating a new document outside the outer loop.
+>
+> If you haven't yet, a copy of Luke (google Lucene Luke) is invaluable for
+> examining indexes and seeing what they look like...
+>
+> I'm not quite sure why the document id is always the same, but try making a
+> new document
+> and let us know if you're still having a problem.
+>
+> Best
+> Erick
+>
+>
+> On Tue, Oct 28, 2008 at 4:35 PM, Sebastian23 <sebi@icu.uzh.ch> wrote:
+>
+>>
+>> hi folks,
+>>
+>> i have great trouble while using lucene to implement search functionality
+>> to
+>> my application:
+>>
+>> this way i index:
+>> [code]
+>> public void indexData() throws CorruptIndexException,
+>> LockObtainFailedException, IOException {
+>>                Analyzer analyzer = new StandardAnalyzer();
+>>                IndexWriter iwriter = new IndexWriter(indexFolder,
+>> analyzer, true);
+>>                iwriter.setMaxFieldLength(25000);
+>>                Document doc = new Document();
+>>                for (int i = 0; i < sourcefiles.size(); i++) {
+>>                        for (int j = 0; j <
+>> sourcefiles.elementAt(i).getNumberOfRevisions(); j++)
+>> {
+>>                                doc.add(new Field("id",
+>> sourcefiles.elementAt(i).getID(j),
+>> Field.Store.YES, Field.Index.UN_TOKENIZED));
+>>                                doc.add(new Field("message",
+>> sourcefiles.elementAt(i).getCommitMessage(j), Field.Store.NO,
+>> Field.Index.TOKENIZED));
+>>                                iwriter.addDocument(doc);
+>>                                System.out.println("Indexed: Source: " +
+>> (i+1) + " Revision: "  +
+>> (j+1));
+>>
+>>  System.out.println(sourcefiles.elementAt(i).getCommitMessage(j));
+>>
+>>  System.out.println(sourcefiles.elementAt(i).getID(j));
+>>                        }
+>>                }
+>>                iwriter.optimize();
+>>                iwriter.close();
+>>        }
+>> [/code]
+>>
+>> and this way i make the query
+>>
+>> [code]
+>> public void luceneSearch(String queryString) throws CorruptIndexException,
+>> IOException, ParseException {
+>>                System.out.println("Searching started");
+>>                IndexSearcher isearcher = new IndexSearcher(indexFolder);
+>>                Analyzer analyzer = new StandardAnalyzer();
+>>                QueryParser parser = new QueryParser("message", analyzer);
+>>                org.apache.lucene.search.Query query =
+>> parser.parse(queryString);
+>>                Hits hits = isearcher.search(query);
+>>
+>>                if(hits.length() > 0) {
+>>                        System.out.println("found: " + hits.length() + "
+>> documents.");
+>>                        for (int i = 0; i < hits.length(); i++) {
+>>                                System.out.println((i + 1) + ". " +
+>> hits.doc(i).get("id") +
+>> hits.doc(i).getField("message"));
+>>                        }
+>>                } else {
+>>                        System.out.println("No matching documents found.");
+>>                }
+>>        }
+>> [/code]
+>>
+>> my  problem is, that the query always returns a lot of too much results.
+>> and
+>> the other problem is, the id is always for every result in the list the
+>> same
+>> id, namly the first i added to the writer. and the message is always null.
+>>
+>> while adding i check with sysout that all the ids are different and the
+>> messages arent null
+>>
+>> whats going wrong?? thx for your hints
+>> --
+>> View this message in context:
+>> http://www.nabble.com/Query-Search-returns-always-the-same-id-tp20215525p20215525.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

@@ -1,0 +1,173 @@
+FROM: "Lee Turner" <Lee.Tur...@oyster.com>
+SUBJECT: Use of ThreadLocal in TermInfosReader
+DATE: 19 Aug 2005
+
+Hi
+
+ 
+
+We am currently investigating an issue I have with our application
+around its memory consumption.  We are running our web application under
+load with 20 users and 1GB heap size and at around 7 hours it runs out
+of memory.  We are using Lucene 1.4.3 and JDK 1.4.2_06.
+
+ 
+
+We are working with a file based index of around 50000 documents with
+frequent updates.  On profiling the application we saw a large number of
+ThreadLocal entries being created containing SegmentTermEnum's.  We
+tracked the use of ThreadLocals to the TermInfosReader class where we
+noticed the enumerator ThreadLocal wasn't being nulled.  We added a
+finalize method to make sure this happened, which also seems to have
+been added to the latest source code in the lucene repository.  This was
+the method we added:
+
+ 
+
+  protected void finalize() throws Throwable {    try {
+
+        enumerators.set(null);
+
+    }
+
+    finally {
+
+        super.finalize();
+
+    }
+
+  }
+
+ 
+
+However, this didn't seem to clear up the Threadlocal's that were
+hanging around.  Upon further investigation of the lucene source we
+realised that the SegmentTermEnum class has a close method that doesn't
+seem to be being called before the enumerator.set(null) method is
+called.  We therefore made sure that this was called in the finalize by
+adding the following:
+
+ 
+
+  protected void finalize() throws Throwable {
+
+    // System.out.println("Calling finalize in TermInfosReader");
+
+    try {
+
+        try {
+
+            getEnum().close();
+
+        }
+
+        catch(IOException ioe)
+
+        {}
+
+        enumerators.set(null);
+
+    }
+
+    finally {
+
+        super.finalize();
+
+    }
+
+  }
+
+ 
+
+After adding the call to close() on the SegmentTermEnum we saw the
+number of ThreadLocal entries drop dramatically.  However, when we now
+try to added things to the index we are getting
+ArrayIndexOutOfBoundsException's:
+
+ 
+
+java.lang.ArrayIndexOutOfBoundsException: 159
+
+            at
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:142)
+
+            at
+org.apache.lucene.index.SegmentReader.docFreq(SegmentReader.java:253)
+
+            at
+org.apache.lucene.index.MultiReader.docFreq(MultiReader.java:192)
+
+            at
+org.apache.lucene.search.IndexSearcher.docFreq(IndexSearcher.java:69)
+
+            at
+org.apache.lucene.search.Similarity.idf(Similarity.java:255)
+
+            at
+org.apache.lucene.search.TermQuery$TermWeight.sumOfSquaredWeights(TermQu
+ery.java:47)
+
+            at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(
+BooleanQuery.java:110)
+
+            at
+org.apache.lucene.search.FilteredQuery$1.sumOfSquaredWeights(FilteredQue
+ry.java:65)
+
+            at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(
+BooleanQuery.java:110)
+
+            at org.apache.lucene.search.Query.weight(Query.java:86)
+
+            at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:85)
+
+            at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:64)
+
+            at org.apache.lucene.search.Hits.<init>(Hits.java:43)
+
+            at
+org.apache.lucene.search.Searcher.search(Searcher.java:33)
+
+            at
+org.apache.lucene.search.Searcher.search(Searcher.java:27)
+
+            at
+com.oyster.mom.search.SearchImpl.doSearch(SearchImpl.java:93)
+
+ 
+
+We are really sorry for the long email and we have to admit that we
+don't know the lucene source very well but we were wondering whether
+anyone could explain why when the SegmentTermEnum is closed in the
+finalize it causes problems and whether anyone else has had issues with
+ThreadLocals hanging around ?
+
+ 
+
+Any help would be greatly appreciated.
+
+ 
+
+Many thanks
+
+Lee
+
+ 
+
+Lee Turner | Java Developer | Oyster Partners 
+
+D. +44 (0)20 74461418
+T. +44 (0)20 7446 7500 
+
+www.oyster.com
+
+ 
+
+
+_________________________________________________________________________________________________________________________
+Internet communications are not secure and therefore Oyster Partners Ltd does not accept legal
+responsibility for the contents of this message. Any views or opinions presented are solely
+those of the author and do not necessarily represent those of Oyster Partners Ltd.

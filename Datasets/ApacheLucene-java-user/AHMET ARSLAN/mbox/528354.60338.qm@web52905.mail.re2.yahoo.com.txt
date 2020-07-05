@@ -1,0 +1,119 @@
+FROM: AHMET ARSLAN <iori...@yahoo.com>
+SUBJECT: Re: Lucene search in URL
+DATE: 20 Sep 2009
+
+> Is there a possibility in Lucene to do a Exact Search with
+> Tokenized text?
+> 
+> Like: "en.wikipedia.org/wiki/production_code" is Tokenized
+> in
+> "en.wikipedia.org"
+> "wiki"
+> "production"
+> "code"
+> with Standardanalyzer.
+> 
+> And a search will match iff(and only if) all the Tokens
+> match?
+> Like "en.wikipedia.org/wiki/production_code" matches
+> "en.wikipedia.org" does not match.
+> 
+> 
+> The Purpose of this is following:
+> I have a Blacklist of URLs.
+> If i want to access a URL the Domain is searched in Lucene.
+> (fast)
+> If there is a match, following will be searched (a bit
+> slowlier)
+> "en.wikipedia.org/wiki" -> does not match
+> "en.wikipedia.org/wiki/production" -> does not match
+> * "en.wikipedia.org/wiki/production_code" -> Matches, so
+> the URL and all subURLs are blocked.
+> 
+> So my Question is, is there a possibility to specify an
+> Query to serch only for exact Document-Matches.
+> 
+
+Document : "en.wikipedia.org/wiki/production_code"
+
+Query 1  : "en.wikipedia.org/wiki/production_code/test"  should match
+Query 2  : "en.wikipedia.org/wiki/test"                  should not match
+Query 3  : "en.wikipedia.org/wiki/production"            should not match
+
+In my proposed solution Query 3 will also match. And you don't want that. 
+
+Am I correct?
+
+So we cannot use letter based NGrams. We need token based Ngrams (aka Shingle)
+
+Regarding your question "search will match iff(and only if) all the Tokens match?"
+1-) all tokens in the query : Yes by setting default operator to AND.
+2-) all tokens in the document: AFAIK There is no such mechanism.
+
+You want a document match if all tokens in the document match query terms.
+IMO to simulate this you need to store docs using keywordanalyzer, and manipulate queries.
+Since you store document as a string, exact match is guaranteed.
+
+Query 1:
+
+en.wikipedia.org
+en.wikipedia.org/wiki
+*en.wikipedia.org/wiki/production_code     [match]
+en.wikipedia.org/wiki/production_code/test
+
+Query 2: 
+
+en.wikipedia.org
+en.wikipedia.org/wiki
+en.wikipedia.org/wiki/test
+
+Query 3:
+
+en.wikipedia.org
+en.wikipedia.org/wiki
+en.wikipedia.org/wiki/production
+
+In this scenario only Q1 matches. Index analyzer is same keyword analyzer.
+
+QueryAnalyzer:
+
+1-) Extension of CharTokenizer that breaks only at '/' character 
+
+protected boolean isTokenChar(char c) {
+        return !(c == '/');
+    }
+
+2-) Modified ShingleFilter that uses '/' as TokenSeperator with  maxShingleSize=512
+
+public static final String TOKEN_SEPARATOR = "/";
+
+In this configuration only Q1 match but this query analyzer produces unnecessary tokens: For
+Q1 it produces 10 tokens: 
+
+en.wikipedia.org word
+en.wikipedia.org/wiki shingle
+en.wikipedia.org/wiki/production_code shingle
+en.wikipedia.org/wiki/production_code/test shingle
+wiki word
+wiki/production_code shingle
+wiki/production_code/test shingle
+production_code word
+production_code/test shingle
+test word
+
+You need only first 4, the rest are not harmfull but unnecessary. May be you can modify this
+filter to output first n tokens only.
+
+Hope this helps.
+
+P.S. I didn't see any methods to change TOKEN_SEPARATOR in ShingleFilter.
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

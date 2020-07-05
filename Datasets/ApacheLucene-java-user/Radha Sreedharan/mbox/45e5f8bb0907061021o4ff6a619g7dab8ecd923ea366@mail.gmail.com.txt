@@ -1,0 +1,178 @@
+FROM: Radha Sreedharan <radh...@gmail.com>
+SUBJECT: Re: Modifying score based on tf and slop
+DATE: 6 Jul 2009
+
+Thanks a lot Mark.
+Do Correct me if I am wrong. but what this  means is tf does not really have
+the same meaning as it does in case of other queries.
+Also I think I understand better what hossman has told -  in the sense that
+BC is there in two matching spans , which is why we get higher score - the
+length of matching span is added twice.
+It also explains why returning tf as 1 actually works because we are now
+returning the distance of the matching Span length and overriding the same.
+
+*What I would like to know are a few details on how I can go ensure that
+only the distance of the shortest matching span should add on to the score?*
+
+On Mon, Jul 6, 2009 at 6:49 PM, Mark Miller <markrmiller@gmail.com> wrote:
+
+> tf() is used, just not with the term freq - the length of the matching
+> Spans is used instead.
+>
+> The terms from nested Spans will still affect the score (you still get
+> IDF), but term freq is substituted with matching Span length.
+>
+> Also, boosts of nested Spans are ignored - only the top level boost is
+> used.
+>
+> Finally, SpanQuerys match non overlapping Spans, but by SpanQuery
+> definition of overlap - if the second Span starts one after the start of the
+> first Span, thats not considered overlap. If it starts before or at the same
+> position, thats overlap, and you won't see a match.
+>
+> - Mark
+>
+>
+> Rads2029 wrote:
+>
+>> Thanks , That helped clear quite a few things.
+>>
+>> A few questions though :
+>>
+>> 1) Regarding tf not making a difference : I do believe that override tf to
+>> return 1 makes a difference.
+>>
+>> When I did not override tf the score on doc(AB BC BC CD) was higher on doc
+>> (
+>> AB BC CD)
+>> When I did not override tf the score on doc(AB BC xx xx CD) was lesser
+>> than
+>> the score on doc ( AB BC CD)
+>>
+>> When I overrode tf to return 1 both doc( AB BC BC CD) and ( AB BC CD) had
+>> the same score. When I overrode tf to return 1 both doc( AB BC xx xx CD)
+>> and ( AB BC CD) had
+>> the same score.
+>> I do want doc( AB BC BC CD) and doc( AB BC CD) to show me same score but I
+>> also want score of doc( AB BC xx xx CD) to be less than score of doc( AB
+>> BC CD) .
+>>
+>> Also in the score() method of the SpanScorer class , this is the code:
+>>
+>> public float score() throws IOException {
+>>    float raw = getSimilarity().tf(freq) * value; // raw score
+>>    return norms == null? raw : raw * Similarity.decodeNorm(norms[doc]); //
+>> normalize
+>>  }
+>>
+>> As you can see, tf is used  here
+>>
+>> 2)" if you really just want to know about the lengths of instances of
+>> Spans
+>> in your index, you can call the getSpans method directly on your
+>> SpanNearQuery and iterate over them yourself, ignoring the ones you want to
+>> ignore"
+>>
+>> Could you throw more light on this? How exactly would I know which ones
+>> are
+>> the spans which I need to ignore
+>>
+>> 2) "subclass SpanQuery so it returns a new NearSpansNoOverlapping that you
+>> would have wrap the NearSpansOrdered and only return the "shortest" span
+>> from each doucment."
+>>
+>> Please give me some more details on how to go about this?
+>>
+>>
+>> Thanks again a lot for ur help.
+>>
+>> hossman wrote:
+>>
+>>
+>>> (Disclaimer: i'm not currently looking at the code, this email is
+>>> entirely a guess based on what i remember about SpanQueries)
+>>>
+>>> : II ) Using default implementation of tf in Similarity class:
+>>> : : Case 1 -  Doc : "AB BC BC CD"
+>>> : Result :  4  - Actual score
+>>> : % match :  ( actual score / max possible score) =  ( 4/3) > 100% - This
+>>> is
+>>> : Wrong as I dont want score to be affected by no of times BC occurs
+>>>
+>>> I suspect you are missunderstanding why you are getting the scores you
+>>> are getting.
+>>>
+>>> if i remember correctly, SpanNearQuery ignores all score information
+>>> coming from the sub-queries it contains and only scores documents based on
+>>> the distances of the matching Spans (this is true for all of hte "container"
+>>> span queries i believe - because they all use SpanScorer does and it *only*
+>>> looks at the Spans)
+>>>
+>>> So i don't think anything in your SpanNearQuery is actually rewarding a
+>>> doc for matching one of the individual terms more then once, because nothing
+>>> ever looks at the tf() of the individual terms.  (if you use a custom
+>>> Similarity, and override the tf(int) method to include some logging, i'm 90%
+>>> certain you'll see that that method never get called with any SpanQuery)
+>>>
+>>> SpanScorer *does* look at every matching Span in a document however --
+>>> and assuming you are allowing slop (and it appears you are since other
+>>> examples you list depend on it) the sequence "AB BC CD" exists twice in your
+>>> example document above -- once using the BC at position 2, and once using
+>>> the BC at position 3 - hence the higher then (you) expected score.  (if you
+>>> use a custom Similarity, and override the tf(float) method to include some
+>>> logging, i'm 90% certain you'll see that that method get  called twice for
+>>> that span query against an index with only that document -- once per
+>>> instance of the span.
+>>>
+>>> I'm fairly certain that finding overlapping spans is considered a
+>>> "feature" of SpanQuery.  I suspect if you look through the test cases for
+>>> SpanNearQuery you'll even find some examples just like yours where it
+>>> requires that their be multiple matches.
+>>>
+>>>
+>>> looking at the online javadocs, i don't see any simple option to prevent
+>>> overlapping spans when constructing the SpanNearQuery, but i think it would
+>>> be fairly easy for you to subclass SpanQuery so it returns a new
+>>> NearSpansNoOverlapping that you would have wrap the NearSpansOrdered and
+>>> only return the "shortest" span from each doucment.
+>>>
+>>> Incidently: if you find subclassing SpanNearQuery tedious to do what you,
+>>> keep in mind that you don't have to go use IndexSearcher and and deal with
+>>> the normal scoring (Using slopyFreq & tf) if you don't wnat to -- if you
+>>> really just want to know about the lengths of instances of Spans in your
+>>> index, you can call the getSpans method directly on your SpanNearQuery and
+>>> iterate over them yourself, ignoring the ones you want to ignore.
+>>>
+>>>
+>>>
+>>> -Hoss
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>>
+>>>
+>>
+>>
+>>
+>
+>
+> --
+> - Mark
+>
+> http://www.lucidimagination.com
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

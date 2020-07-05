@@ -1,0 +1,103 @@
+FROM: Mike Sokolov <soko...@ifactory.com>
+SUBJECT: highlighting performance
+DATE: 20 Jun 2011
+
+Our apps use highlighting, and I expect that highlighting is an 
+expensive operation since it requires processing the text of the 
+documents, but I ran a test and was surprised just how expensive it is.  
+I made a test index with three fields: path, modified, and contents.  I 
+made the index using org.apache.lucene.demo.IndexFiles modified so that 
+the contents field is stored and analyzed:
+
+           doc.add(new Field("contents", false, buf.toString(),
+                   Store.YES, Index.ANALYZED, 
+TermVector.WITH_POSITIONS_OFFSETS));
+
+There are about 8000 documents in the index, and the contents field 
+averages around 7500 bytes.  The total index directory size is about 242M.
+
+I ran a modified version of the demo.SearchFiles class that doesn't 
+print anything out (printing results takes most of the time for faster 
+queries), and runs random queries drawn from the text of the documents: 
+these are a mix of (mostly) term queries, and about 20% phrase queries 
+(that are phrases from the text).
+
+I compared a few cases: no field access, un-highlighted retrieval, 
+highlighting, Highlighter and FastVectorHighlighter, always asking for 
+10 top scoring docs per query, and running at least 1000 queries for 
+each case.
+
+No field access at all gets about 7000 qps; basically we just call 
+searcher.search(query, 10)
+
+Then there is a big cost for retrieving the stored documents from the index:
+
+Retrieving each document (calling search.doc(docID)) and the path field 
+only (a small field) gets about 250 qps
+
+As a comparison, if I don't store the contents field in the index (and 
+don't retrieve it at all), I get similar performance to the no retrieval 
+case (around 7000 qps).  OK - so there is a fair amount of I/O required 
+to retrieve the stored doc; this may be unavoidable, although do 
+consider that for highlighting only a small portion of the doc may 
+ultimately be required.
+
+Then another big penalty is paid for highlighting:
+
+Highlighter gets about 60 qps
+
+And finally I am really mystified about this one:
+
+FastVectorHighlighter gets about 20 qps. There is a lot of variance here 
+(say 9-44 qps), although always worse than Highlighter.
+
+If these results hold up I'll be astonished, since they imply:
+
+(1) FVH is not fast
+(2) Highlighting consumes most processing time  (around 80%) in the best 
+case, as compared to just retrieving un-highlighted documents.
+
+and the follow on is that at least for users that need highlighting, 
+there is hardly any point in optimizing anything else!
+
+I thought maybe FVH required a lot of memory, so I changed the -Xmx512m 
+(from the default: 64m I think), but this had no effect.
+
+I also tried optimizing the index, and although this improved query 
+performance somewhat across the board, it actually accentuated the cost 
+of highlighting since the most marked improvement was in the basic 
+unhighlighted query.
+
+Here is what the highlighting looks like:
+
+For FVH we allocate a single SimpleFragsListBuilder, 
+SimpleFragmentBuilder, preTags[1], postTags[1] and DefaultEncoder so 
+these don't have to be created for each query. We also cache the 
+FastVectorHighlighter itself, and we call:
+
+highlighter.getBestFragment(highlighter.getFieldQuery(query), 
+searcher.getIndexReader(), hits[i].doc, "contents", 40, flb, fb, 
+preTags, postTags, encoder);
+
+once for each result.
+
+In the Highlighter case, we also cache the Highlighter and call:
+
+highlighter.getBestFragment(analyzer, "contents", doc.get("contents"));
+
+does this performance profile match up with your expectations?  Did I do 
+something stupid? Please let me know if I can provide more info.  I'm 
+considering what can be done to speed up highlighting, but don't want to 
+go off half-cocked..
+
+-- 
+Michael Sokolov
+Engineering Director
+www.ifactory.com
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

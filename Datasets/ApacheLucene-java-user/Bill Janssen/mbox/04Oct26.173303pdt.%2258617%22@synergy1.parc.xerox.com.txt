@@ -1,0 +1,80 @@
+FROM: Bill Janssen <jans...@parc.com>
+SUBJECT: new version of NewMultiFieldQueryParser
+DATE: 26 Oct 2004
+
+Thanks to something Doug said when I first opened this discussion, I
+went back and looked at my implementation.  He said, "Can't we just do
+this in getFieldQuery?".  Figuring that he probably knew what he was
+talking about, I looked a bit harder, and it turns out he was right.
+Here's a much simpler version of NewMultiFieldQueryParser that seems
+to work.
+
+[For those just tuning in, this is a version of MultiFieldQueryParser
+that will work with a default query operator of AND, as well as with
+OR.]
+
+Enjoy!
+
+Bill
+
+class NewMultiFieldQueryParser extends QueryParser {
+
+    static private final String DEFAULT_FIELD = "%%";
+
+    protected String[] fieldnames = null;
+    private Analyzer analyzer = null;
+
+    public NewMultiFieldQueryParser (Analyzer a) {
+        super(DEFAULT_FIELD, a);
+    }
+
+    public NewMultiFieldQueryParser (String[] f, Analyzer a) {
+        super(DEFAULT_FIELD, a);
+        fieldnames = f;
+        analyzer = a;
+    }
+
+    public void setFieldNames (String[] f) {
+        fieldnames = f;
+    }
+
+    protected Query getFieldQuery (String field,
+                                   Analyzer a,
+                                   String queryText)
+        throws ParseException {
+
+        Query x = super.getFieldQuery(field, a, queryText);
+
+        if (field == DEFAULT_FIELD && (fieldnames != null)) {
+
+            BooleanQuery q2 = new BooleanQuery();
+
+            if (x instanceof PhraseQuery) {
+                Term[] terms = ((PhraseQuery)x).getTerms();
+                for (int i = 0;  i < fieldnames.length;  i++) {
+                    PhraseQuery q3 = new PhraseQuery();
+                    q3.setSlop(((PhraseQuery)x).getSlop());
+                    for (int j = 0;  j < terms.length;  j++) {
+                        q3.add(new Term(fieldnames[i], terms[j].text()));
+                    }
+                    q2.add(q3, false, false);
+                }
+            } else if (x instanceof TermQuery) {
+                String text = ((TermQuery)x).getTerm().text();
+                for (int i = 0;  i < fieldnames.length;  i++) {
+                    q2.add(new TermQuery(new Term(fieldnames[i], text)), false, false);
+                }
+            }
+
+            return q2;
+        }
+        return x;
+    }
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

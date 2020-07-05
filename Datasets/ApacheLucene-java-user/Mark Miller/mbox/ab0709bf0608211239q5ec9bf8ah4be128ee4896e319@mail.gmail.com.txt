@@ -1,0 +1,117 @@
+FROM: "Mark Miller" <markrmil...@gmail.com>
+SUBJECT: Test new query parser?
+DATE: 21 Aug 2006
+
+Is anyone interested in helping me test out a new query parser (i.e is
+anyone interested in using this, thereby helping me test it) ?
+
+ The parser uses a intermediate parse tree representation, unlike Lucene's
+Query Filter.
+
+
+The syntax:
+
+date[april 6, 1992] & field2,field3[parrot ~3s yore] | ((cat | horse) &
+rabbit ~6 pete)
+
+'&' is an 'and'
+
+
+'|' is an 'or'
+
+
+~2 is a 'within 2 words'
+
+
+~5p is a 'within 5 paragraphs'
+
+
+~6s is a 'within 6 sentences'
+
+
+'!' is 'butnot'
+
+
+' ' is an 'and' that binds tighter than anything else but can only connect
+search tokens (i.e 'old man' not 'date[today] man'--that would be
+date[today] & man...changeable of course:_)
+
+
+field1, field2, field3[mark | butternut] performs a search on all 3 fields
+
+
+date[20050601 to 20060504] uses constant scoring range query filter to date
+search (can parse most date formats).
+
+
+no arbitrary range search yet...
+
+paragraph/sentence support requires a replacement (supplied) standard
+analyzer and is optional.
+there is also support for a "did you mean" feature that spits back the query
+substituted with a did you mean guess based on the words in a supplied index
+(the corpus or a dictionary maybe):
+
+
+field1,field2[horke | tomcat] might return a suggested search of =
+field1,field2[horse | tomcat]
+
+I am about to add quoted searches as well as the ability to escape query
+keywords.
+
+more feature to come, there is a lot I want to change and add (and fix)...
+
+if you are interested, drop me a line at markrmiller@gmail.com
+
+- mark
+
+Some sample proximity queries:
+
+        example = "monkey fowl ~3 man ~5 horse head ~4 lamb";
+        expected = "+(+spanNear([allFields:monkey, allFields:man], 3, false)
++spanNear([allFields:fowl, allFields:man], 3, false))
++(+spanNear([allFields:man, allFields:horse], 5, false)
++spanNear([allFields:man, allFields:head], 5, false)
++(+spanNear([allFields:horse, allFields:lamb], 4, false)
++spanNear([allFields:head, allFields:lamb], 4, false)))";
+        assertEquals(expected, parse(example));
+//
+        example = "monkey ~3 man";
+        expected = "spanNear([allFields:monkey, allFields:man], 3, false)";
+        assertEquals(expected, parse(example));
+
+        example = "monkey ord~3 man";
+        expected = "spanNear([allFields:monkey, allFields:man], 3, true)";
+        assertEquals(expected, parse(example));
+
+        example = "monkey ~3 man ~2 her";
+        expected = "+spanNear([allFields:monkey, allFields:man], 3, false)
++spanNear([allFields:man, allFields:her], 2, false)";
+        assertEquals(expected, parse(example));
+
+        example = "(fowl & helicopter) ~8 hillary";
+        expected = "+spanNear([allFields:fowl, allFields:hillary], 8, false)
++spanNear([allFields:helicopter, allFields:hillary], 8, false)";
+        assertEquals(expected, parse(example));
+
+        example = "(fowl | helicopter) ~6 hillary";
+        expected = "+spanNear([allFields:fowl, allFields:hillary], 8, false)
++spanNear([allFields:helicopter, allFields:hillary], 8, false)";
+        assertEquals(expected, parse(example));
+//
+//        // butnot resolves before proximity search
+//        example = "(cop | fowl) & (fowl & priest man) ! helicopter ~8
+hillary";
+//        expected = "+(allFields:cop allFields:fowl)
++(+spanNear([allFields:fowl, allFields:hillary], 8, false)
++spanNear([allFields:priest, allFields:hillary], 8, false)
++spanNear([allFields:man, allFields:hillary], 8, false)
+-spanNear([allFields:helicopter, allFields:hillary], 8, false))";
+//        assertEquals(expected, parse(example));
+//
+        example = "priest man ! helicopter ~8 hillary";
+        expected = "+spanNear([allFields:priest, allFields:hillary], 8,
+false) +spanNear([allFields:man, allFields:hillary], 8, false)
+-spanNear([allFields:helicopter, allFields:hillary], 8, false)";
+        assertEquals(expected, parse(example));
+

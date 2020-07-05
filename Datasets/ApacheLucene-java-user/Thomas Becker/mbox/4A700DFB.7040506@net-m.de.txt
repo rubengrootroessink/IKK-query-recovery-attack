@@ -1,0 +1,153 @@
+FROM: Thomas Becker <thomas.bec...@net-m.de>
+SUBJECT: 2.9 - leftover (deleted) filehandles after upgrade
+DATE: 29 Jul 2009
+
+Hi everybody,
+
+we just recently upgraded to lucene 2.9 nightly build, since we needed some of the comparator
+fixes. We got ooms with some ScoreDocComparators which are now replaced with FieldComparators.
+I refactored the usages of deprecated apis and changed only small things. However during index
+updates, lucene now seems to leave files open.
+
+The files are deleted, but the jvm is still holding filehandles on them:
+
+-bash-3.2$ /usr/sbin/lsof | grep 31159| grep deleted
+java      31159  asuser   72r      REG              253,3   18596499  3680841 /var/APP/ME.local/lucene/indexWriter/editorialContent/_pzd.cfs
+(deleted)
+java      31159  asuser   78r      REG              253,3 2750904146  3035091 /var/APP/ME.local/lucene/indexWriter/items/_3e.cfs
+(deleted)
+java      31159  asuser  381r      REG              253,3 2750298670  3713134 /var/APP/ME.local/lucene-local/indexWriter/items/_3c.cfs
+(deleted)
+java      31159  asuser  384r      REG              253,3   41138379  3713132 /var/APP/ME.local/lucene-local/indexWriter/contributors/_gp.cfs
+(deleted)
+java      31159  asuser  386r      REG              253,3   18596353  3713127 /var/APP/ME.local/lucene-local/indexWriter/editorialContent/_pzb.cfs
+(deleted)
+java      31159  asuser  429r      REG              253,3 2750298670  3035086 /var/APP/ME.local/lucene/indexWriter/items/_3c.cfs
+(deleted)
+
+Our lucene index is based on a shared index lying around on nfs. The shared index is the one
+which gets all updates from our database. The lucene instances will notice the updates and
+have a running
+copy on a tmpfs ramdisk for performance reasons.
+Since searching on the nfs index is very slow, we copy the index first to local disk and use
+it temporarily for indexSearcher during update. Then we delete the ramdisk index and replace
+it.
+
+This is the method responsible for an indexSearcher update:
+	public void updateIndexSearcher() {
+		if (!isReaderUp2Date() && !disableUpdates) {
+			if (fileLockService.lock("locked for indexSearcher update", false)) {
+				if (isIndexValid(getIndexWriterPath())) {
+					try {
+						log.info("updateIndexSearcher: {} updating IndexSearcher", indexAlias);
+						long startTime = System.currentTimeMillis();
+						// Temporary we need a copy of the current local index
+						FileUtils.deleteDirectory(new File(getTempIndexWriterLocalPath()));
+						Directory tmpDir = FSDirectory.open(new File(getTempIndexWriterLocalPath()), lockFactory);
+						Directory.copy(directory, tmpDir, false);
+						log.info("updateIndexSearcher: finished copy of {} to {}", directory, tmpDir);
+						// Before switching the reference of indexSearcher we
+						// create
+						// the new indexSearcher in a temporary reference. Going
+						// this way we guarantee that we've never a corrupt
+						// indexSearcher during recreation.
+						IndexSearcher indexSearcherTmp = new IndexSearcher(tmpDir, true);
+						// temporary store the indexSearcher ref. for closing
+						IndexSearcher tempIndexSearcher = indexSearcher;
+						log.info("updateIndexSearcher: Now starting to read from {}", indexSearcherTmp.getIndexReader().directory());
+						indexSearcher = indexSearcherTmp;
+						// Give all remaining searches a chance to finish,
+						// before closing the indexSearcher. Lucene doesn't seem
+						// to gracefully close IndexSearcher (at least not in
+						// the current release
+						try {
+							Thread.sleep(15000);
+						} catch (InterruptedException e) {
+							log.error("updateIndexSearcher: InterruptedException", e);
+						}
+						if (tempIndexSearcher != null)
+							tempIndexSearcher.close();
+						localDirectory.close();
+						log.info("updateIndexSearcher: Now deleting {}. And starting to copy {} to {}", new
+Object[] { getIndexWriterLocalPath(), tmpDir,
+								localDirectory });
+						FileUtils.deleteDirectory(new File(getIndexWriterLocalPath()));
+						// indexSearcher is now reading from the tmp local index
+						// so
+						// we recreate the localDirectory
+						localDirectory = FSDirectory.open(new File(getIndexWriterLocalPath()), lockFactory);
+						Directory.copy(tmpDir, localDirectory, true);
+						// and finally switch back to a new localDirectory
+						tempIndexSearcher = new IndexSearcher(localDirectory, true);
+						indexSearcher = tempIndexSearcher;
+						indexSearcherTmp.close();
+						tmpDir.close();
+						log.info("updateIndexSearcher: {} finished {}ms", indexAlias, System.currentTimeMillis()
+- startTime);
+						// set lastIndexSearcherUpdate to value from
+						// index.properties since indexReader is now up2date
+						lastIndexSearcherUpdate = getLastUpdateTimestmp();
+					} catch (CorruptIndexException e) {
+						log.error("updateIndexSearcher: " + indexAlias + " Index CorruptIndexException ", e);
+					} catch (IOException e) {
+						log.error("updateIndexSearcher: " + indexAlias + " Index: IOException ", e);
+					} finally {
+						fileLockService.releaseLock();
+					}
+				} else {
+					log.warn("updateIndexSearcher: {} index validation failed. Keeping old index.", indexAlias);
+					fileLockService.releaseLock();
+				}
+			} else {
+				log.info("updateIndexSearcher: {} Couldn't get file lock...so I assume an index update
+is happening...no update of IndexSearcher", indexAlias);
+			}
+		}
+	}
+
+As far as I can see each IndexSearcher and Directory is closed properly. It worked well with
+2.4. Part of the refactoring I did which might be related is to replace:
+
+Directory tmpDir = FSDirectory.getDirectory(getTempIndexWriterLocalPath());
+with
+Directory tmpDir = FSDirectory.open(new File(getTempIndexWriterLocalPath()), lockFactory);
+
+and:
+IndexSearcher indexSearcherTmp = new IndexSearcher(tmpDir);
+with
+IndexSearcher indexSearcherTmp = new IndexSearcher(tmpDir, true);
+
+No errors in the logfiles, no catched exceptions, etc. I'm a kinda out of ideas at the moment.
+I googled and tried couple of things (IndexWriter.setUseCompoundFile(true), etc.) but didn't
+find a
+solution. Any help is appreciated.
+
+Cheers,
+Thomas
+
+-- 
+Thomas Becker
+Senior JEE Developer
+
+net mobile AG
+Zollhof 17
+40221 Düsseldorf
+GERMANY
+
+Phone:    +49 211 97020-195
+Fax:      +49 211 97020-949
+Mobile:   +49 173 5146567 (private)
+E-Mail:   mailto:thomas.becker@net-m.de
+Internet: http://www.net-m.de
+
+Registergericht:  Amtsgericht Düsseldorf, HRB 48022
+Vorstand:         Theodor Niehues (Vorsitzender), Frank Hartmann,
+                 Kai Markus Kulas, Dieter Plassmann
+Vorsitzender des
+Aufsichtsrates:   Dr. Michael Briem
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

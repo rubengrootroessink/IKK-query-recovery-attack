@@ -1,0 +1,193 @@
+FROM: Tim Sturge <tstu...@hi5.com>
+SUBJECT: Re: Issue upgrading from lucene 2.3.2 to 2.4 (moving from bitset to docidset)
+DATE: 10 Dec 2008
+
+It's LUCENE-1487. 
+
+Tim
+
+
+On 12/10/08 1:13 PM, "Tim Sturge" <tsturge@hi5.com> wrote:
+
+> Yes (mostly). It turns those terms into an OpenBitSet on the term array.
+> Then it does a fastGet() in the next() and skipTo() loops to see if the term
+> for that document is in the set.
+> 
+> The issue is that fastGet() is not as fast as the two inequalities in FCRF.
+> I didn't directly benchmark FCTF against FCRF because I had a different
+> application in mind for FCTF (location boxes). However it wasn't as
+> efficient in that case as directly realizing the bit sets. This was mostly
+> because in the application I had in mind there were a lot (>100K) of terms
+> with relatively low frequency and queries that needed only a few hundred
+> terms in the set.
+> 
+> I tried a sorted list of terms and Arrays.binarySearch() but that is way
+> slower as is Set<Integer> (no surprise there). I was thinking about a custom
+> hash table implementation but I'm not hopeful; it increases cycle cost and
+> means 
+> 
+> So it is efficient but for a more limited set of cases than FCRF. My gut
+> feeling is that FCRF is a better solution for "most" range filters, whereas
+> FCTF is a better solution for "some" term set filters (versus creating
+> TermsFilter objects on the fly each time) It all depends on how common the
+> terms are and how large the sets of terms are. Lots of terms (or a few very
+> common terms) it wins. A few less common terms it loses.
+> 
+> I'll open a JIRA issue for it.
+> 
+> Tim
+> 
+> On 12/10/08 12:45 PM, "Michael McCandless" <lucene@mikemccandless.com>
+> wrote:
+> 
+>> 
+>> It'd be great to get this into Lucene.
+>> 
+>> Does FieldCacheTermsFilter let you specify a set of arbitrary terms to
+>> filter for, like TermsFilter in contrib/queries?  And it's space/time
+>> efficient once FieldCache is populated?
+>> 
+>> Mike
+>> 
+>> Tim Sturge wrote:
+>> 
+>>> Mike, Mike,
+>>> 
+>>> I have an implementation of FieldCacheTermsFilter (which uses field
+>>> cache to
+>>> filter for a predefined set of terms) around if either of you are
+>>> interested. It is faster than materializing the filter roughly when
+>>> the
+>>> filter matches more than 1% of the documents.
+>>> 
+>>> So it's not better for a large set of small filters (which you can
+>>> materialize on the spot) but it is better for a small set (but more
+>>> than 32)
+>>> large filters.
+>>> 
+>>> Let me know if you're interested and I'll send it in.
+>>> 
+>>> Tim
+>>> 
+>>> On 12/10/08 3:34 AM, "Michael McCandless"
+>>> <lucene@mikemccandless.com> wrote:
+>>> 
+>>>> 
+>>>> In your approach, roughly how many filters do you have cached?  It
+>>>> seems like it could be quite a few (one for each color, one for each
+>>>> type, etc)?
+>>>> 
+>>>> You might be able to modify the new (on Lucene trunk)
+>>>> FieldCacheRangeFilter to achieve this same filtering without actually
+>>>> having to materialize the full bitset for each.
+>>>> 
+>>>> Mike
+>>>> 
+>>>> Michael Stoppelman wrote:
+>>>> 
+>>>>> Yeah looks similar to what we've implemented for ourselves
+>>>>> (although I
+>>>>> haven't looked at the implementation). We've got quite a custom
+>>>>> version of
+>>>>> lucene at this point. Using Solr at this point really isn't a viable
+>>>>> option,
+>>>>> but thanks for pointing this out.
+>>>>> 
+>>>>> M
+>>>>> 
+>>>>> On Tue, Dec 9, 2008 at 1:47 AM, Michael McCandless <
+>>>>> lucene@mikemccandless.com> wrote:
+>>>>> 
+>>>>>> 
+>>>>>> This use case sounds alot like faceted navigation, which Solr
+>>>>>> provides.
+>>>>>> 
+>>>>>> Mike
+>>>>>> 
+>>>>>> 
+>>>>>> Michael Stoppelman wrote:
+>>>>>> 
+>>>>>> Hi all,
+>>>>>>> 
+>>>>>>> I'm working on upgrading to Lucene 2.4.0 from 2.3.2 and was trying
+>>>>>>> to
+>>>>>>> integrate the new DodIdSet changes since
+>>>>>>> o.a.l.search.Filter#bits() method
+>>>>>>> is now depreciated. For our app we actually heavily rely on bits
+>>>>>>> from the
+>>>>>>> Filter to do post-query filtering (I explain why below).
+>>>>>>> 
+>>>>>>> For example, if someone searches for product: "ipod" and then
+>>>>>>> filters a
+>>>>>>> type: "nano" (e.g. mini/nano/regular) AND color: "red" (e.g.
+>>>>>>> red/yellow/blue). In our current model the results are gathered
+in
+>>>>>>> the
+>>>>>>> following way:
+>>>>>>> 
+>>>>>>> 1) "ipod" w/o attributes is run and the results are stored in
+a
+>>>>>>> hitcollector
+>>>>>>> 2) "ipod" results are now filtered for color="red" AND type="mini"
+>>>>>>> using
+>>>>>>> the
+>>>>>>> lucene Filters
+>>>>>>> 3) The filtered results are returned to the user.
+>>>>>>> 
+>>>>>>> The reason that the attributes are filtered post-query is so
+that
+>>>>>>> we can
+>>>>>>> return the other types and colors the user can filter by in the
+>>>>>>> future.
+>>>>>>> Meaning the UI would be able to show "blue", "green", "pink",
+>>>>>>> etc... if we
+>>>>>>> pre-filtered results by color and type before hand we wouldn't
+>>>>>>> know what
+>>>>>>> the
+>>>>>>> other filter options would be there for a broader result set.
+>>>>>>> 
+>>>>>>> Does anyone else have this use case? I'd imagine other folks
+are
+>>>>>>> probably
+>>>>>>> doing similar things to accomplish this.
+>>>>>>> 
+>>>>>>> M
+>>>>>>> 
+>>>>>> 
+>>>>>> 
+>>>>>> ---------------------------------------------------------------------
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>> 
+>>>>>> 
+>>>> 
+>>>> 
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>> 
+>>> 
+>>> 
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> 
+>> 
+>> 
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

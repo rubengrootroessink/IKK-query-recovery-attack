@@ -1,0 +1,129 @@
+FROM: "Namit Yadav" <namitya...@gmail.com>
+SUBJECT: Re: Index Rows as Documents? Help me design a solution
+DATE: 26 Jul 2006
+
+Thanks for the suggestions !
+
+I am still talking about Indexing. The 'split the files' implementation was
+just an experiment as I wasn't able to get the kind of performance I needed
+from making rows as Documents. Now back to using rows as Documents:
+
+As Erick and Jeremy suggested, the MaxBufferedDocs has helped improve the
+performance a lot. I have set it to 1000 (Because each row is a Document for
+me), and maxFieldLength to 50 (Although changing it hasn't shown any
+difference in performance .. which surprised me). Now I see that a 2MB log
+file was indexed in 30 secs. It has 66000 rows. Considering that Erick was
+seeing 10000 XML docs getting indexed in 15 secs, I am assuming that 66000
+much simpler documents getting indexed in 30 secs can still be improved?
+
+Optimization is taking under 2 secs, so I am assuming that's not a problem
+for now.
+
+This is what my indexing is like:
+
+        try {
+            System.out.println("Indexing " + f.getCanonicalPath());
+            BufferedReader br = new BufferedReader(new FileReader(f));
+            String line = null;
+            String[] columns = null;
+            while((line = br.readLine())!=null) {
+                columns = line.split("#");
+                if(columns.length == 4) {
+                        Document doc = new Document();
+                        doc.add(new Field("msisdn", columns[0],
+Field.Store.YES, Field.Index.NO));
+                        doc.add(new Field("messageid", columns[2],
+Field.Store.YES, Field.Index.NO));
+                        doc.add(new Field("line", line, Field.Store.YES,
+Field.Index.TOKENIZED));
+                        writer.addDocument(doc);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+It takes the BufferedReader 5 secs to read a 100 MB log file. So I am
+assuming that the file-reading is not taking too much time here. I even
+tried to just readLine and index it (Without the split() and without the
+fields msisdn and messageid). It still took 30secs to index the file. So I
+am almost sure that almost all the time is taken in the actual indexing.
+
+Then I search like this (Search takes just a few millisecs, so I am happy
+there. But I still want to let you experts tell me if I am doing something
+wrong):
+
+        Directory fsDir = FSDirectory.getDirectory(indexDir, false);
+        IndexSearcher is = new IndexSearcher(fsDir);
+        QueryParser parser = new QueryParser("line", new
+StandardAnalyzer());
+        Query query = parser.parse(q);
+        Hits hits = is.search(query);
+        int length = hits.length();
+        if (length>100) length = 100;
+        for (int i = 0; i < length; i++) {
+            Document doc = hits.doc(i);
+            String messageid = doc.get("messageid");
+            // Ensure uniqueness of messageid before sending it to GUI
+            System.out.println("messageid[" + i + "] = " + messageid);
+        }
+        // one messageID search
+        System.out.print("Enter the messageID to get details of: ");
+        String mid = new BufferedReader(new InputStreamReader(System.in
+)).readLine().trim();
+        System.out.println("Result: ");
+        parser = new QueryParser("line", new StandardAnalyzer());
+        query = parser.parse(mid);
+        hits = is.search(query);
+        for (int i = 0; i < hits.length(); i++) {
+            Document doc = hits.doc(i);
+            String row = doc.get("line");
+            System.out.println(row);
+        }
+
+Regards
+Namit
+
+On 7/26/06, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> It feels to me like you're major problem might be file IO with all those
+> files. There's no need to split the files up first and then index the
+> files.
+> Just read through the log and index each row. The code fragment you posted
+> should allow you to get the line back from the "line" field of each
+> document. That way, when you execute searches, you also avoid the file
+> I/O.
+> Once indexed, you shouldn't have to go back to the disk to get the
+> data......
+>
+> This scares me...
+>
+> *********************
+> ....Then
+> when I search for a term, I get the log-file names that contain the data.
+> Then I buffer-read those files and find out rows containing the data....
+> *********************
+>
+> According to the fragment you posted, you already have the data in the
+> index
+> and don't need to go to disk and get it. Which could be a major issue.....
+>
+> Are we still talking about indexing speed or have we segued to search
+> speed?
+> Jeremy's suggestion about MaxBufferedDocs is well heeded.....
+>
+> One final confusion.... Watch the Hits object when searching. The hits
+> object is built for getting the first few hits (100 or so). If you iterate
+> over more documents than that, the Hits object will re-execute your query
+> every 100 or so documents. You'll want to think about a HitCollector or
+> TopDocs object for large result sets. Again, the quick timing thing is to
+> cut off your responses at, say, 50 and see how long the search takes as
+> opposed to collecting all responses. Ditto for the file I/O. If we're
+> talking about the search speed, try it without reading the files....
+>
+>
+> Keep us posted
+> Erick
+>
+>
+

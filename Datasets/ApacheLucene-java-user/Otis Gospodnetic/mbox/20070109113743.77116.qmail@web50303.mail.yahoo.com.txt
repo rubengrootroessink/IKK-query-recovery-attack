@@ -1,0 +1,120 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: .sN (separate norms files) and NO_NORMS
+DATE: 9 Jan 2007
+
+Hi,
+
+After a little digging/debugging, it seems to me that what I am seeing is actually normal
+and expected behaviour.  Morever, it seems that once a Field is indexed without it being NO_NORMS
+field, it is not really possible to make it a trully NO_NORMS field.  From what I can tell,
+one of the key methods is in DocumentWriter:
+
+  private final void writeNorms(String segment) throws IOException { 
+    for(int n = 0; n < fieldInfos.size(); n++){
+      FieldInfo fi = fieldInfos.fieldInfo(n);
+      if(fi.isIndexed && !fi.omitNorms){                                         
+                       <== here
+        float norm = fieldBoosts[n] * similarity.lengthNorm(fi.name, fieldLengths[n]);
+        IndexOutput norms = directory.createOutput(segment + ".f" + n);
+        try {
+          norms.writeByte(Similarity.encodeNorm(norm));
+        } finally {
+          norms.close();
+        }
+      }
+    }
+  }
+
+This is where norms for a field are either written if the field is indexed and *not* a NO_NORMS
+field, or not written if the field is indexed and *is* a NO_NORMS field.
+
+I also see this in the FieldInfo class:
+
+      if (fi.omitNorms != omitNorms) {
+        fi.omitNorms = false;                // once norms are stored, always store
+      }
+
+Thus, it's not really possible to completely kill field norms and make the field a genuine
+NO_NORMS field after the fact... is this correct?
+Therefore, that FieldNormModifier call that tries to turn an existing field into a NO_NORMS
+field doesn't really work:
+
+            reader.setNorm(d, fieldName, fakeNorms[0]);        // this
+is my case - turning existing fields into Field.NO_NORMS fields.
+
+I think this just fakes out a norms file for a given field, and this norms file ends up containing
+a byte[] of encoded 1.0f's, one for each Document.  But this really is completely fake - this
+just makes the norms be 1.0, while NO_NORMS skips the *writing* of norms file for a given
+field completely.
+
+Is the above correct?
+If so, is there any way to turn an existing field into a genuine NO_NORMS field?
+
+Thanks,
+Otis
+
+
+
+----- Original Message ----
+From: Otis Gospodnetic <otis_gospodnetic@yahoo.com>
+To: java-user@lucene.apache.org
+Sent: Tuesday, January 9, 2007 2:36:46 AM
+Subject: .sN (separate norms files) and NO_NORMS
+
+Hi,
+
+I recently run the FieldNormModifier (see http://issues.apache.org/jira/browse/LUCENE-741
+) on 8 fields that I wanted to turn into NO_NORMS fields.  I run this on several optimized
+.cfs indices.  Afterwards I noticed that *some* (but not all!) indices contained 8 .sN (where
+N is a number) files.  Those are norm files, I believe (Lucene 2.0.0).  Meanwhile, the .cfs
+file remained untouched.  Does anyone know how to explain this?
+
+What bugs me is:
+- Why was the original .cfs not modified?
+- Why did .sN files show up separately?
+
+What bugs my colleague (hi Brian!) is:
+- Why are there separate norms for each NO_NORMS field, and not just 1 for all of them?
+(my answer is that the files still exists like they exist for non-NO_NORMS fields, it's just
+that they are full of 1.0s, but I'm not absolutely sure that's the correct answer.)
+
+I would have expected the .cfs file to get modified.  Or I'd expect to see 8 .sN files along
+the unmodified .cfs in *all* index directories I run this against, and not just some.
+
+The essential, index-modifying part of FieldNormModifier is this:
+
+      reader = IndexReader.open(dir);
+      for (int d = 0; d < termCounts.length; d++) {
+        if (! reader.isDeleted(d)) {
+          if (sim == null)
+            reader.setNorm(d, fieldName, fakeNorms[0]);        // this is my case - turning
+existing fields into Field.NO_NORMS fields.
+          else
+            reader.setNorm(d, fieldName, sim.encodeNorm(sim.lengthNorm(fieldName, termCounts[d])));
+        }
+      }
+
+Also, looking at http://lucene.apache.org/java/docs/fileformats.html I don't even see any
+mention of .sN files.
+
+Does anyone has an explanation for this before I start digging? 
+
+Thanks,
+Otis
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

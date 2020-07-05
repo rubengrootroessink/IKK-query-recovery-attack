@@ -1,0 +1,45 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Does Lucene fail fast on boolean queries?
+DATE: 21 May 2009
+
+On Thu, May 21, 2009 at 10:58 AM, Joel Halbert <joel@su3analytics.com> wrote:
+> Thx.  We're not relying on the internal implementation, but I was
+> wondering with respect to how efficient it is with respect to doing a
+> boolean AND query.
+>
+> i.e. does clause precedence effect the efficiency of the query - so is X
+> && Y faster than Y && X if there are fewer hits for X. From how you
+> describe it it is equally efficient, either way.
+
+Lucene has a simple heuristic (in ConjunctionScorer): it first calls
+next() on each of X and Y, then it looks at that first docID for each
+and re-orders the clauses so that whichever of X or Y had the largest
+first docID is the one that "drives" the intersection.  But that
+heuristic could easily be wrong if it just so happened that a rare
+term appears in an early document.  A simple improvement would be to
+add an approxCount() to Query or Scorer/DocIdSet and then order based
+on that.  But we haven't done so yet...
+
+> In particular we are trying to work out whether a particular numerical
+> RangeQuery that needs to be AND'd with a TermQuery is fastest as:
+>
+> BooleanQuery(RangeQuery && TermQuery)
+>
+> or as a TermQuery which then has it's results filtered by processing
+> each in turn.
+
+If the RangeQuery will hit lots of terms and/or docs, you're likely
+better off building the filter; else, the query.  Test both and let
+the machine tell you :)
+
+But: orthogonal to that decision, you should look @ TrieRangeQuery (in
+2.9-dev, contrib/queries) which does numeric filtering typically with
+far fewer terms needing to be visited.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

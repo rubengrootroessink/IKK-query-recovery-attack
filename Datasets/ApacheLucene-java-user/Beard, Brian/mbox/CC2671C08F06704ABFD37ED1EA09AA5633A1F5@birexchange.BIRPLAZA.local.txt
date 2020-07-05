@@ -1,0 +1,115 @@
+FROM: "Beard, Brian" <Brian.Be...@mybir.com>
+SUBJECT: RE: Post processing to get around TooManyClauses?
+DATE: 11 Dec 2007
+
+I had a similar problem (I think). Look at using a WildcardFilter
+(below), possibly wrapped in a CachingWrapperFilter, depending if you
+want to re-use it. I over-rode the method QueryParser.getWildcardQuery
+to customize it. In your case you would probably have to specifically
+detect for the presence of a wildcard to use this.
+
+Someone posted this a while back which I found helpful.
+
+/**
+ * This is used to construct wildcard queries
+ * to avoid the 'too many boolean clauses' exception.
+ *
+ */
+public class WildcardFilter extends Filter {
+
+    private Term term;
+
+    public WildcardFilter(Term term) {
+        this.term = term;
+    }
+
+    /**
+     * A bit corrresponds to each document in the index and is set to
+true if
+     * it matches the criterion in the wildcard search.
+     * 
+     * @param reader - the indexReader @see
+org.apache.lucene.index.IndexReader
+     * @return @see org.apache.lucene.search.Filter#bits()
+     */
+    @Override
+    public BitSet bits(IndexReader reader) throws IOException {
+        BitSet bits = new BitSet(reader.maxDoc());
+        WildcardTermEnum enumerator = new WildcardTermEnum(reader,
+term);
+        TermDocs termDocs = reader.termDocs();
+
+        try {
+            do {
+                Term term = enumerator.term();
+
+                if (term != null) {
+                    termDocs.seek(term);
+
+                    while (termDocs.next()) {
+                        bits.set(termDocs.doc());
+                    }
+                } else {
+                    break;
+                }
+            } while (enumerator.next());
+        } finally {
+            termDocs.close();
+            enumerator.close();
+        }
+
+        return bits;
+    }
+}
+
+-----Original Message-----
+From: d33mb33 [mailto:david.balzan@entity.co.uk] 
+Sent: Tuesday, December 11, 2007 8:18 AM
+To: java-user@lucene.apache.org
+Subject: Re: Post processing to get around TooManyClauses?
+
+
+Ok I'm still struggling with this and a QueryFilter didn't help me one
+bit
+:-(
+
+I'm trying to query for books by "Charles Dickens" that start with "m".
+I
+have constructed a QueryFilter for the author search and a PrefixQuery
+for
+the title search.  A simplified version of my code is below.
+
+    ' Charles Dickens query filter
+    Dim authorQry As TermQuery = New TermQuery(New
+Term("ContributorName",
+"dickens"))
+    Dim authorFlter As QueryFilter = New QueryFilter(authorQry)
+
+    ' M* query
+    Dim titleQry As PrefixQuery = New PrefixQuery(New Term("Title",
+"m"))
+
+    Dim topDocs As TopDocs = GetIndexSearcher().Search(titleQry,
+authorFlter, maxResults)
+
+This still throws a TooManyClauses exception because the PrefixQuery is
+being expanded across the entire index.  
+-- 
+View this message in context:
+http://www.nabble.com/Post-processing-to-get-around-TooManyClauses--tp14
+210833p14273737.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

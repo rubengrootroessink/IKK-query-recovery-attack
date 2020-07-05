@@ -1,0 +1,106 @@
+FROM: Gusenbauer Stefan <gusenba...@eduhi.at>
+SUBJECT: Re: OutOfMemory when indexing
+DATE: 13 Jun 2005
+
+Harald Stowasser wrote:
+
+>Stanislav Jordanov schrieb:
+>
+>  
+>
+>>High guys,
+>>Building some huge index (about 500,000 docs totaling to 10megs of plain
+>>text) we've run into the following problem:
+>>Most of the time the IndexWriter process consumes a fairly small amount
+>>of memory (about 32 megs).
+>>However, as the index size grows, the memory usage sporadically bursts
+>>to levels of (say) 1000 gigs and then falls back to its level.
+>>The problem is that unless te process is started with some option like
+>>-Xmx1000m this situation causes an OutOfMemoryException which terminates
+>>the indexing process.
+>>
+>>My question is - is there a way to avoid it?
+>>    
+>>
+>
+>
+>1.
+>I start my programm with:
+>java -Xms256M -Xmx512M -jar Suchmaschine.jar &
+>
+>This protect me now from OutOfMemoryException. After I use
+>iterative-subroutines.
+>
+>2.
+>Free your variables as soon as possible.
+>like "term=null;"
+>This will help your Garbage-Collector!
+>
+>3.
+>Maybe you should watch totalMemory and R.freeMemory() from
+>Runtime.getRuntime()
+>That will help you to find the "Memory-dissipater"
+>
+>4.
+>I had the problem when deleting Documents from Index. I used a
+>Subroutine to delete single Documents.
+>It runs much better when I replaced it into a "iterative" subroutine
+>like this:
+>
+>  public int deleteMany(String keywords)
+>  {
+>    int anzahl=0;
+>    try
+>    {
+>      openReader();
+>      String[] temp = keywords.split(",");
+>      //Runtime R = Runtime.getRuntime();
+>      for (int i = 0 ; i < temp.length ; i++)
+>      {
+>        Term term =new Term("keyword",temp[i]);
+>        anzahl+= mReader.delete(term);
+>        term=null;
+>        /*System.out.println("deleted " + temp[i]
+>                   +" t:"+R.totalMemory()
+>                   +" f:"+R.freeMemory()
+>                   +" m"+R.maxMemory());
+>        */
+>      }
+>      close();
+>    } catch (Exception e){
+>      cIdowa.error( "Could not delete Documents:" + keywords
+>            +". Because:"+ e.getMessage() + "\n" +e.toString() );
+>    }
+>    return anzahl;
+>  }
+>
+>
+>
+>  
+>
+A few weeks before I had a similar problem too. I will write my problem
+and the solution for it:
+I'm indexing docs and every parsed document is stored in an ArrayList.
+This solution worked for little directories with a little number of
+files in it but when the things are growing you're in trouble.
+My solution was whenever I will run out of memory I will "save" the
+documents. I open the indexwriter and write every document from the
+arraylist to the index. Then I set the arraylist and some other stuff =
+null and try to invoke the garbage collector. Then I do some
+reinitializing and continue indexing.
+ Looks easy but it wasn't. How do I check if i will run out of memory?
+Runtimeclass and its methods for getting information about the free
+memory were very unreliable.
+Therefore I changed to Java 1.5 and implemented a memorynotification
+listener which is support by the java.lang.management package. There you
+can adjust a threshold when you should be informed. After the
+notification I perform a "save".
+
+Hope this will help you
+Stefan
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

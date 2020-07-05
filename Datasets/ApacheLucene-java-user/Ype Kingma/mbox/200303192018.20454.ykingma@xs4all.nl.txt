@@ -1,0 +1,118 @@
+FROM: Ype Kingma <ykin...@xs4all.nl>
+SUBJECT: Re: multiple collections indexing
+DATE: 20 Mar 2003
+
+Morus,
+
+On Wednesday 19 March 2003 00:44, Morus Walter wrote:
+> Hi,
+>
+> we are currently evaluating lucene.
+>
+> The data we'd like to index consists of ~ 80 collections of documents
+> (a few hundred up to 200000 documents per collection, ~ 1.5 million
+> documents total; medium document size is in the order of 1 kB).
+>
+> Searches must be able on any combination of collections.
+> A typical search includes ~ 40 collections.
+>
+> Now the question is, how to implement this in lucene best.
+>
+> Currently I see basically three possibilities:
+> - create a data field containing the collection name for each document
+>   and extend the query by a or-combined list of queries on this name filed.
+> - create an index per collection and use a MultiSearcher to search all
+>   interesting indexes.
+> - (a third on I just discovered): create a data field containing a
+>   marker for each collection
+>   x100000000000000000... for the first collection
+>   x010000000000000000... for the second
+>   x001000000000000000... for the third
+>   and so on.
+>   The query might use a wildcard search on this field using x?0?00000...
+>   specifying '?' for each collection that should be searched on, and '0'
+>   for the others.
+>   The marker would be very long though (the number of collections is
+>   growing, so we have to keep space for new one also).
+>
+> So far we set up the first aproach (one index; size ~ 750 M) and this
+> seems to work in principle and with reasonable performance.
+> I'm not too optimistic about the second aproach. If I understand the docs
+> correctly this would be a sequential search on each involved index and
+> combining the results.
+>
+> So questions:
+> - has anyone experience with such a setup?
+
+I'm dealing with 26 collections searchable in any combination. Total index 
+size currently about 250 MB, very little stored text, ie. with stored text 
+the index would be about 1.2GB. I have currently no performance problems.
+
+An advantage of using multiple collections is that optimizing takes less
+time. A disadvantage is that you have to deal with quite a few files for
+all the segments (esp. non opimized segments), which can be problematic
+under Windows (max. total 2000 open files per machine iirc.)
+
+Whether query times would change when merging the collections I can't
+say. It depends on the performance of the query method used to search
+a fully merged index. It also depends on the distribution of terms over
+your collection. When a lot of your queries are on a small subset of the 
+collection, I'd keep them non merged.
+It also depends on the number of disks you are using: in case you 
+have multiple disks it's probably worthwhile to put at least one
+collection on each disk and use a parallelized version of the MultiSearcher.
+
+I would advise to prepare for a merge anyway by using a field identifying
+the collection of each document (ie. your 3rd method.) Using this 3rd option 
+you can then either add a boolean query to all your queries to select the 
+combination of collections, or use a filter for the combination of 
+collections. You can use a (user) name for a collection instead of the bit
+mask. Lucene nicely compresses this information in its indexes anyway.
+
+> - are there other aproaches to deal with it?
+
+Not that I know of.
+
+> - is my expectation, that multiple indexes are worse reasonable or should
+>   we give it a try?
+
+Depends on your requirements: in case you need to update one collection
+while searching others, it is preferable to have to have a Lucene index
+per collection.  Anyway it's mostly a technical decision.
+I have no problems with my 26 collections (on a single disk).
+
+The only user aspect of this is the way ranking is done:
+it uses the inverse document frequency of each query term.
+When you use different combinations of collections in a MultiSearcher
+(Lucene 1.3) the document frequency may be different for each combination
+because it computes the total document frequency for each term
+over the combination of collections queried.
+
+I'm currently using Lucene 1.2 with my own multi searcher which
+just sends the query off to each database and uses the
+document frequency of each term in each collection seperately
+for its ranking. Even this works fine, although merging query results is less 
+valid in this case.
+
+When you only use a single index, the document frequency
+is always the same for each query term, and you may have to make
+sure that the terms you use to identify the collections get a
+very low weight.
+
+> - how is wildcard search done? Could this be an improvement?
+
+I seem to miss the point.
+
+> I understand that in the end, we have to check this ourselfs, but I'd
+> appreciate any hints and advices since I couln'd find much on this
+> issue in the docs.
+
+My pleasure,
+Ype
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,67 @@
+FROM: Shaun Senecal <ssenecal.w...@gmail.com>
+SUBJECT: Re: PrefixQueries on large indexes (4M+ Documents) using a partial	Query partial Filter solution
+DATE: 15 Oct 2009
+
+Sorry for the double post, but I think I can clarify the problem a little
+more.
+
+We want to execute:
+    query: A | B | C | D
+    filter: null
+
+However, C and D cause TooManyClauses, so instead we execute:
+    query: A | B
+    filter: C | D
+
+My understanding is that Lucene will apply the Filter (C | D) first,
+limiting the result set, then apply the Query (A | B).  Is this correct?
+
+If so, the end result is essentially the query: (A | B) & (C | D)
+
+Is there any way I can achieve (A | B | C | D) without putting the entire
+query into a filter (which is too slow)?
+
+
+
+Shaun
+
+
+On Thu, Oct 15, 2009 at 5:14 PM, Shaun Senecal <ssenecal.work@gmail.com>wrote:
+
+> I know this has been discussed to great length, but I still have not found
+> a satisfactory solution and I am hoping someone on the list has some
+> ideas...
+>
+> We have a large index (4M+ Documents) with a handful of Fields.  We need to
+> perform PrefixQueries on multiple fields.  The problem is that when the
+> Query gets rewritten, certain fields expand to too many terms and we end up
+> with TooManyClauses (I know, I know, read the FAQ).  The solution so far has
+> been to extract the bits of the query which cause TooManyClauses to be
+> thrown and make them filters:
+>
+> for every field to be searched {
+>     try {
+>         PrefixQuery(term).rewrite();
+>
+>         if (resulting BooleanQuery contains at least 1 clause) //
+> important, otherwise 0 results can be returned when >0 should be returned
+>             add the rewritten query to a BooleanQuery (using SHOULD)
+>     catch (TMC) {
+>         PrefixFilter(term)
+>         add the filter to a BooleanFilter(using SHOULD)
+>     }
+> }
+>
+>
+> Up to Lucene 2.4, this has been working out for us.  However, in Lucene 2.9
+> this breaks since rewrite() now returns a ConstantScoreQuery.  I changed the
+> code to automatically make the entire query a filter if TooManyClauses is
+> ever caught, but this had massive performance implications.  It seems to
+> have doubled our average query execution time!
+>
+> Is there a solution to this?  Is there a way I can know that a
+> ConstantScoreQuery will match at least 1 term (if not, I dont want to add it
+> to the BooleanQuery)?  Does 2.9 support new features that would aid in this
+> area?
+>
+

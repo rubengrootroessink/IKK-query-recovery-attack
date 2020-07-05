@@ -1,0 +1,48 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: "docMap" array in SegmentMergeInfo
+DATE: 12 Oct 2005
+
+I'm not sure that looks like a safe patch.
+Synchronization does more than help prevent races... it also introduces
+memory barriers.
+Removing synchronization to objects that can change is very tricky business
+(witness the double-checked locking antipattern).
+
+-Yonik
+Now hiring -- http://tinyurl.com/7m67g
+
+On 10/11/05, Chris Lamprecht <clamprecht@gmail.com> wrote:
+>
+> Hi Peter,
+>
+> I observed the same issue on a multiprocessor machine. I included a
+> small fix for this in the NIO patch (against the 1.9 trunk) here:
+> http://issues.apache.org/jira/browse/LUCENE-414#action_12322523
+>
+> The change amounts to the following methods in SegmentReader.java, to
+> remove the need synchronized() block by taking a "snapshot" of the
+> variable:
+>
+> // Removed synchronized from document(int)
+> public Document document(int n) throws IOException {
+> if (isDeleted(n))
+> throw new IllegalArgumentException
+> ("attempt to access a deleted document");
+> return fieldsReader.doc(n);
+> }
+>
+> // removed synchronized from isDeleted(int)
+> public boolean isDeleted(int n) {
+> // avoid race condition by getting a snapshot reference
+> final BitVector snapshot = deletedDocs;
+> return (snapshot != null && snapshot.get(n));
+> }
+>
+> We've been using this in production for a while and it fixed the
+> extremely slow searches when there are deleted documents. Maybe it
+> could be applied to the trunk, independent of the full NIO patch.
+>
+> -chris
+>
+>
+

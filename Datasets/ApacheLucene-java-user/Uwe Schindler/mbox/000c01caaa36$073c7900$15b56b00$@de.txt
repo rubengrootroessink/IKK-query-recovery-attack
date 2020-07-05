@@ -1,0 +1,90 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Flex & Docs/AndPositionsEnum
+DATE: 10 Feb 2010
+
+> > And we don't return "objects or aggregates" with Multi*Enum now...
+> 
+> Yeah, this is different.  In KS right now, we use a generic
+> PostingList, which
+> conveys different information depending on what class of Posting it
+> contains.
+> 
+> > In flex right now the codec is unware that it's being "consumed" by a
+> > Multi*Enum.
+> 
+> Right, but in KinoSearch's case PostingList had to be aware of that
+> because
+> the Posting object could be consumed at either the segment level or the
+> index
+> level -- so it needed a setDocBase(offset) method which adjusted the
+> doc num in
+> the Posting.  It was messy.
+
+The doc base adaption is done in the MultiDocsEnum in Lucene.
+
+> The change I made was to eliminate PolyPostingList and
+> PolyPostingListReader,
+> which made it possible to remove the setDocBase() method from
+> SegPostingList.
+> 
+> > It still returns primitives.  If instead we returned an int[] for
+> positions
+> > (hmm -- may be a good reason to make positions be an Attribute, Uwe),
+> I
+> > think it would still be OK?
+
+Positions as attributes would be good. For positions we need a new Attribute (not PositionIncrement),
+but e.g. for offsets and payloads we can use the standard attributes from the analysis, which
+is really cool. This would also make it possible to add all custom attributes from the analysis
+phase to the posting list and make them visible in the TermDocs enum. In my opinion, there
+should be no DocsEnum, DocsAndPositionsEnum and so on enums, just one class, which only differes
+in provided attributes. So if you want the payloads, ask for a standard DocsEnum and pass
+the requested attribute classes as parameter):
+	IndexReader.termDocsEnum(Bits skipDocs, String field, BytesRef term, Class<? extends Attribute>...
+atts)
+
+If somebody wants offsets and payloads:
+	reader.termDocsEnum(skipDocs, "field", term, OffsetAttribute.class, PayloadAttribute.class);
+
+But before we can implement this for MultiEnums we need the Proxy attributes or we need to
+copy them around (and the MultiEnums get their own AttributeSource). For this to work I will
+add a AttributeSource.copyTo(AttributeSource), which is on my todolist, but still missing.
+For some TokenStreams this method may also be convenient (e.g. concenating TokenStreams).
+
+On the other hand: with Proxy attributes, concenating TokenStreams are easy (and very performant!),
+too.
+
+> > You should (when possible/reasonable) instead use
+> > ReaderUtil.gatherSubReaders, then iterate through those sub readers
+> > asking each for its flex fields.
+> >
+> > But if this is only for testing purposes, and Multi*Enum is more
+> > convenient (and, once attrs work correctly), then Multi*Enum is
+> > perfectly fine.
+> 
+> Mike, FWIW, I've removed the ability to iterate over posting data at
+> anything
+> other than the segment level from KS.  There's still a priority-queue-
+> based
+> aggregator for iterating over all terms in a multi-segment index, but
+> not for
+> anything lower.
+
+I am not sure if this is very good in Lucene as it would break lots of apps. E.g. simple autocompletes
+use a PrefixTerm(s)Enums, but must use the top-level reader or they have to emulate merging
+of all TermsEnums themselves. A second problem (currently) is rewrites (e.g. Fuzzy) to BooleanQuery
+for MTQs. They operate on the top level reader.
+
+So I propose "simple" and not so performant Enums for MultiReaders. In my opinion, it would
+also be possible without ProxyAttributes, if we simply copy them around. It’s a performance
+problem, but if somebody needs speed, segment-level enums should be used (and search does
+this by the way).
+
+Uwe
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

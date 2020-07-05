@@ -1,0 +1,243 @@
+FROM: "David Fertig" <dfer...@cymfony.com>
+SUBJECT: RE: Search returning documents matching a NOT range
+DATE: 8 Nov 2010
+
+publish_date is a string, formatted as YYYYMMDD, so it string sorting
+should work correctly for this field.
+
+The field is indexed as a keyword and the field's value is also stored.
+
+I have previously reviewed the terms and optimized the index with luke
+1.0.1 to make sure there was no index corruption. It is a very useful
+tool, however it can only open 1 index at a time so I can't reproduce
+the issue with it.
+
+At your suggestion I added code to enumerate all terms in the indexes
+and there are no inconsistencies.
+
+The two fields being searched each only have 1 term in the first index
+(as expected) and those terms are not in the second index.
+
+David
+
+
+
+-----Original Message-----
+From: Erick Erickson [mailto:erickerickson@gmail.com] 
+Sent: Sunday, November 7, 2010 11:12 AM
+To: java-user@lucene.apache.org
+Subject: Re: Search returning documents matching a NOT range
+
+What kind of field is publish_date? And how do you store data there?
+Is it possible you're getting some date presentation wonkiness in here?
+One thing that might shed light on your problem is if you enumerated the
+terms in that field and
+printed them out rather than the document.get. That is, be sure you're
+getting what's in the index
+(and thus being searched) rather than wha's stored in the document.
+
+Luke might get you there faster/easier....
+
+Best
+Erick
+
+On Fri, Nov 5, 2010 at 5:18 PM, David Fertig <dfertig@cymfony.com>
+wrote:
+
+> Ian,
+> Thank you for getting back to me.  No, I do not get a bogus hit from
+> searching the small index alone.  Also, I do not get a hit if I delete
+any
+> more documents from the larger index.
+>
+> I have updated my test to use RamDirectory and also print maxDoc() for
+the
+> searchables and the searcher, all numbers are as expected.  I have
+posted
+> all the code, but did not want to post the indexes due to their size
+(2.2
+> meg uncompressed).  I will mail them to anyone who can help.
+>
+> Here is the complete latest test code and its output
+>
+>
+>
+> public class LuceneTest {
+>    static public void main(String[] args) {
+>        try {
+>            QueryParser queryParser = new
+QueryParser(Version.LUCENE_30,
+> "author", new KeywordAnalyzer());
+>            Query query = queryParser.parse("author:bentalcella AND NOT
+> publish_date:[20100601 TO 20100630]");
+>            Searchable[] searchables = new Searchable[2];
+>             RAMDirectory ram1 = new RAMDirectory(new
+NIOFSDirectory(new
+> File("/home/dfertig/testIndexes/b1")));
+>            RAMDirectory ram2 = new RAMDirectory(new NIOFSDirectory(new
+> File("/home/dfertig/testIndexes/m1")));
+>            searchables[0] = new IndexSearcher(ram1, true);
+>            searchables[1] = new IndexSearcher(ram2, true);
+>            MultiSearcher searcher = new MultiSearcher(searchables);
+>            System.out.println("MaxDocs for index 1: " +
+> searchables[0].maxDoc());
+>            System.out.println("MaxDocs for index 2: " +
+> searchables[1].maxDoc());
+>            System.out.println("MaxDocs for MultiSearcher: " +
+> searcher.maxDoc());
+>             System.out.println("Query: " + query.toString());
+>            TopDocs topDocs = searcher.search(query, 10);
+>            System.out.println("Results: " + topDocs.totalHits);
+>            for (int in = 0; in < topDocs.totalHits; in++) {
+>                Document document =
+searcher.doc(topDocs.scoreDocs[in].doc);
+>                System.out.println("publish_date: " +
+> document.get("publish_date"));
+>            }
+>            searcher.close();
+>             ram1.close();
+>            ram2.close();
+>         } catch (Exception e) {
+>            System.out.println(e.getMessage());
+>            e.printStackTrace();
+>        }
+>    }
+> }
+>
+> Output:
+> MaxDocs for index 1: 1
+> MaxDocs for index 2: 1000
+> MaxDocs for MultiSearcher: 1001
+> Query: +author:bentalcella -publish_date:[20100601 TO 20100630]
+> Results: 1
+> publish_date: 20100606
+>
+>
+>
+>
+> -----Original Message-----
+> From: Ian Lea [mailto:ian.lea@gmail.com]
+> Sent: Friday, November 5, 2010 4:57 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: Search returning documents matching a NOT range
+>
+> Do you get the bogus hit on the small index if search that index
+> alone?  Are you positive it only holds the one doc? Loading the one
+> doc into a new RAM based index in the test would prove it.
+>
+> You are more likely to get help if post a self-contained example -
+> people can see everything relevant and are more likely to spot a
+> problem.
+>
+>
+> --
+> Ian.
+>
+>
+> On Thu, Nov 4, 2010 at 4:52 PM, David Fertig <dfertig@cymfony.com>
+wrote:
+> > I have an active lucene implementation that has been in place for a
+> > couple years and was recently upgraded to the 3.02 branch. We are
+now
+> > occasionally seeing documents returned from searches that should not
+be
+> > returned. I have reduced the code and indexes to the smallest set
+> > possible where I can still repeat the issue.
+> >
+> >
+> >
+> > My test cases uses 2 indexes.  These indexes have been
+rebuilt/optimized
+> > using Luke 1.0.1 to make them the smallest possible.  One index has
+1
+> > document, which is being returned by the query but should not.   The
+> > other index has 1000 documents, none of which match the search
+criteria.
+> > The query should bring back 0 results, but brings back 1.  I can zip
+and
+> > mail the indexes if it would aid in helping track down this issue.
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> > public class LuceneTest {
+> >
+> >    static public void main(String[] args) {
+> >
+> >        try {
+> >
+> >            QueryParser queryParser = new
+QueryParser(Version.LUCENE_30,
+> > "author", new KeywordAnalyzer());
+> >
+> >            Query query = queryParser.parse("author:bentalcella AND
+NOT
+> > publish_date:[20100601 TO 20100630]");
+> >
+> >            Searchable[] searchables = new Searchable[2];
+> >
+> >            searchables[0] = new IndexSearcher(new NIOFSDirectory(new
+> > File("/home/dfertig/testIndexes/b1")), true);
+> >
+> >            searchables[1] = new IndexSearcher(new NIOFSDirectory(new
+> > File("/home/dfertig/testIndexes/m1")), true);
+> >
+> >            Searcher searcher = new MultiSearcher(searchables);
+> >
+> >            System.out.println("Query: " + query.toString());
+> >
+> >            TopDocs topDocs = searcher.search(query, 10);
+> >
+> >            System.out.println("Results: " + topDocs.totalHits);
+> >
+> >            for (int in = 0; in < topDocs.totalHits; in++) {
+> >
+> >                Document document =
+> > searcher.doc(topDocs.scoreDocs[in].doc);
+> >
+> >                System.out.println("publish_date: " +
+> > document.get("publish_date"));
+> >
+> >            }
+> >
+> >            searcher.close();
+> >
+> >        } catch (Exception e) {
+> >
+> >            System.out.println(e.getMessage());
+> >
+> >            e.printStackTrace();
+> >
+> >        }
+> >
+> >    }
+> >
+> > }
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

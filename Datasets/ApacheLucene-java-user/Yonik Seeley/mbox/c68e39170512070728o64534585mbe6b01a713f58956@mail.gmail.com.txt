@@ -1,0 +1,278 @@
+FROM: Yonik Seeley <ysee...@gmail.com>
+SUBJECT: Re: Lucene performance bottlenecks
+DATE: 7 Dec 2005
+
+On 12/7/05, Vanlerberghe, Luc <Luc.Vanlerberghe@bvdep.com> wrote:
+> Since 'byte' is signed in Java, can't the first test be simply written
+> as
+> if (b>0) return b;
+> Doing an 'and' of two bytes and checking if the result is 0 probably
+> requires masking operations on >8 bit processors...
+
+Yep, that was my assumption and what I started off with actually.
+Lo and behold, it was slower than the mask.  I have no idea why.
+
+> Also perhaps change to
+> int b=readByte()) so that all operators use int's...
+
+That was also my instinct... didn't pan out.
+
+Below is the test program I used, as well as most of the variations
+(some I just edited and are gone...).  VInt2a was consistently fastest
+of the variations.  VInt1 is the original nad is fastest for all
+single byte vints.
+
+-Yonik
+
+
+import java.io.IOException;
+import java.util.Random;
+
+/**
+ * @author yonik
+ */
+
+
+class VInt1 extends VInt {
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    int i = b & 0x7F;
+    for (int shift = 7; (b & 0x80) != 0; shift += 7) {
+      b = readByte();
+      i |= (b & 0x7F) << shift;
+    }
+    return i;
+  }
+}
+
+
+
+class VInt2 extends VInt {
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    if (b>=0) return b;
+    b &= 0x7f;
+    byte b2 = readByte();
+    if (b2>=0) return (b2<<7) | b;
+    b2 &= 0x7f;
+    byte b3 = readByte();
+    if (b3>=0) return (b3<<14) | (b2<<7) | b;
+    b3 &= 0x7f;
+    byte b4 = readByte();
+    if (b4>=0) return (b4<<21) | (b3<<14) | (b2<<7) | b;
+    b4 &= 0x7f;
+    byte b5 = readByte();
+    return (b5<<28) | (b4<<21) | (b3<<14) | (b2<<7) | b;
+  }
+}
+
+class VInt2a extends VInt {
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    if ((b&0x80)==0) return b;
+    b &= 0x7f;
+    byte b2 = readByte();
+    if ((b&0x80)==0) return (b2<<7) | b;
+    b2 &= 0x7f;
+    byte b3 = readByte();
+    if ((b&0x80)==0) return (b3<<14) | (b2<<7) | b;
+    b3 &= 0x7f;
+    byte b4 = readByte();
+    if ((b&0x80)==0) return (b4<<21) | (b3<<14) | (b2<<7) | b;
+    b4 &= 0x7f;
+    byte b5 = readByte();
+    return (b5<<28) | (b4<<21) | (b3<<14) | (b2<<7) | b;
+  }
+}
+
+
+class VInt3 extends VInt {
+  public int readVInt() throws IOException {
+    int b = readByte();
+    if (b>=0) return b;
+    b &= 0x7f;
+    int b2 = readByte();
+    if (b2>=0) return (b2<<7) | b;
+    b2 &= 0x7f;
+    int b3 = readByte();
+    if (b3>=0) return (b3<<14) | (b2<<7) | b;
+    b3 &= 0x7f;
+    int b4 = readByte();
+    if (b4>=0) return (b4<<21) | (b3<<14) | (b2<<7) | b;
+    b4 &= 0x7f;
+    int b5 = readByte();
+    return (b5<<28) | (b4<<21) | (b3<<14) | (b2<<7) | b;
+  }
+}
+
+class VInt3a extends VInt {
+  public int readVInt() throws IOException {
+    int b = readByte();
+    if (b>=0) return b;
+    b &= 0x7f;
+    int b2 = readByte();
+    if (b2>=0) return (b2<<7) | b;
+    b2 &= 0x7f;
+    int b3 = readByte();
+    if (b3>=0) return (b3<<14) | (b2<<7) | b;
+    b3 &= 0x7f;
+    int b4 = readByte();
+    if (b4>=0) return (b4<<21) | (b3<<14) | (b2<<7) | b;
+    b4 &= 0x7f;
+    int b5 = readByte();
+    return (b5<<28) | (b4<<21) | (b3<<14) | (b2<<7) | b;
+  }
+}
+
+class VInt4 extends VInt {
+  public int readVInt() throws IOException {
+     byte b = readByte();
+     if (b>=0) return b;
+     byte b2 = readByte();
+     if (b2>=0) return (b2<<7) | (b&0x7f);
+     byte b3 = readByte();
+     if (b3>=0) return (b3<<14) | ((b2&0x7f)<<7) | (b&0x7f);
+     byte b4 = readByte();
+     if (b4>=0) return (b4<<21) | ((b3&0x7f)<<14) | ((b2&0x7f)<<7)
+| (b&0x7f);
+     byte b5 = readByte();
+     return (b5<<28) | ((b4&0x7f)<<21) | ((b3&0x7f)<<14) |
+((b2&0x7f)<<7) | (b&0x7f);
+   }
+}
+
+class VInt5 extends VInt {
+  public int readVInt() throws IOException {
+    int i = readByte();
+    if (i>=0) return i;
+    i = (i & 0x7f) | (readByte() << 7);
+    if (i>=0) return i;
+    i = (i & (-1>>>(32-14))) | (readByte() << 14);
+    if (i>=0) return i;
+    i = (i & (-1>>>(32-21))) | (readByte() << 21);
+    if (i>=0) return i;
+    i = (i & (-1>>>(32-28))) | (readByte() << 28);
+    return i;
+  }
+}
+
+class VInt6 extends VInt {
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    int i = b;
+    if (b>=0) return i;
+    i &= 0x7f;
+    b = readByte();
+    i |= (b & 0x7f)<<7;
+    if (b>=0) return i;
+    b = readByte();
+    i |= (b & 0x7f)<<14;
+    if (b>=0) return i;
+    b = readByte();
+    i |= (b & 0x7f)<<21;
+    if (b>=0) return i;
+    b = readByte();
+    i |= b<<28;
+    return i;
+  }
+}
+
+class VInt6a extends VInt {
+  public int readVInt() throws IOException {
+    byte b = readByte();
+    int i = b;
+    if ((b&0x80)==0) return i;
+    i &= 0x7f;
+    b = readByte();
+    i |= (b & 0x7f)<<7;
+    if ((b&0x80)==0) return i;
+    b = readByte();
+    i |= (b & 0x7f)<<14;
+    if ((b&0x80)==0) return i;
+    b = readByte();
+    i |= (b & 0x7f)<<21;
+    if ((b&0x80)==0) return i;
+    b = readByte();
+    i |= b<<28;
+    return i;
+  }
+}
+
+
+public class VInt {
+  byte[] arr = new byte[4096];
+  int pos = 0;
+
+  public void reset() { pos=0; }
+
+  public byte readByte() {
+    return arr[pos++];
+  }
+
+  public void writeByte(byte b) {
+    arr[pos++] = b;
+  }
+
+  public int readVInt() throws IOException {
+    return 0;
+  }
+
+  public void writeVInt(int i) throws IOException {
+    while ((i & ~0x7F) != 0) {
+      writeByte((byte)((i & 0x7f) | 0x80));
+      i >>>= 7;
+    }
+    writeByte((byte)i);
+  }
+
+
+  public static void main(String[] args) throws IOException,
+ClassNotFoundException, IllegalAccessException, InstantiationException
+{
+    String impl = args[0];
+    int maxnum= Integer.parseInt(args[1]);  // maximum vint value
+    int iter = Integer.parseInt(args[2]);
+
+    VInt vint = new VInt1();
+    VInt test = (VInt)Class.forName(impl).newInstance();
+
+    Random rand = new Random(0);
+   while (vint.pos<vint.arr.length-5) {
+      int i = rand.nextInt(maxnum);
+      vint.writeVInt(i);
+      test.writeVInt(i);
+    }
+    int end = vint.pos+1;
+
+
+
+    test.reset(); vint.reset();
+    while (vint.pos<end) {
+      int i = vint.readVInt();
+      int i2 = test.readVInt();
+      if (i != i2) {
+        System.out.println("ERROR!!! " + Integer.toHexString(i) + ","
++ Integer.toHexString(i2));
+      }
+    }
+
+    int ret=0;
+    long start = System.currentTimeMillis();
+    for (int i=0; i<iter; i++) {
+      test.reset();
+      while (test.pos < end) {
+        ret += test.readVInt();
+      }
+    }
+
+    long stop = System.currentTimeMillis();
+    System.out.println("TIME="+(stop-start) + "\tret="+ret);
+  }
+
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

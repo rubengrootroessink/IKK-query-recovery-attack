@@ -1,0 +1,91 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Does highlighter highlight phrases only?
+DATE: 30 Jun 2005
+
+
+On Jun 30, 2005, at 4:12 PM, Bohl, David wrote:
+
+> FYI, I made an update to this (I'm the author) to handle span  
+> queries.  I
+> uploaded the updated code to the same bugzilla link.  The code  
+> doesn't treat
+> span queries like phrases - it just highlights the terms  
+> individually (if
+> someone can find a way to highlight it as a phrase, feel free to  
+> update it).
+
+I'm not sure, at the moment, how this could integrate with the  
+Highlighter, but I wrote some code for Lucene in Action that displays  
+spans like this:
+
+spanOr([f:quick, f:fox]):
+    the <quick> brown fox jumps over the lazy dog (0.37158427)
+    the quick brown <fox> jumps over the lazy dog (0.37158427)
+    the <quick> red fox jumps over the sleepy cat (0.37158427)
+    the quick red <fox> jumps over the sleepy cat (0.37158427)
+
+spanFirst(spanNear([f:quick, f:fox], 1, true), 4):
+    the <quick brown fox> jumps over the lazy dog (0.18579213)
+    the <quick red fox> jumps over the sleepy cat (0.18579213)
+
+f:the:
+    <the> quick brown fox jumps over the lazy dog (0.18579213)
+    the quick brown fox jumps over <the> lazy dog (0.18579213)
+    <the> quick red fox jumps over the sleepy cat (0.18579213)
+    the quick red fox jumps over <the> sleepy cat (0.18579213)
+
+spanNear([f:quick, f:brown], 0, false):
+    the <quick brown> fox jumps over the lazy dog (0.2876891)
+
+
+The relevant code is pasted below (and found in SpanQueryTest.java in  
+the Lucene in Action code):
+
+   private void dumpSpans(SpanQuery query) throws IOException {
+     Spans spans = query.getSpans(reader);
+     System.out.println(query + ":");
+     int numSpans = 0;
+
+     Hits hits = searcher.search(query);
+     float[] scores = new float[2];
+     for (int i = 0; i < hits.length(); i++) {
+       scores[hits.id(i)] = hits.score(i);
+     }
+
+     while (spans.next()) {
+       numSpans++;
+
+       int id = spans.doc();
+       Document doc = reader.document(id);
+
+       // for simplicity - assume tokens are in sequential,
+       // positions, starting from 0
+       Token[] tokens = AnalyzerUtils.tokensFromAnalysis(
+           analyzer, doc.get("f"));
+       StringBuffer buffer = new StringBuffer();
+       buffer.append("   ");
+       for (int i = 0; i < tokens.length; i++) {
+         if (i == spans.start()) {
+           buffer.append("<");
+         }
+         buffer.append(tokens[i].termText());
+         if (i + 1 == spans.end()) {
+           buffer.append(">");
+         }
+         buffer.append(" ");
+       }
+       buffer.append("(" + scores[id] + ") ");
+       System.out.println(buffer);
+     }
+
+     if (numSpans == 0) {
+       System.out.println("   No spans");
+     }
+     System.out.println();
+   }
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

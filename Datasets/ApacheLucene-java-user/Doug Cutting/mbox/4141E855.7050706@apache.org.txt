@@ -1,0 +1,270 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: Out of memory in lucene 1.4.1 when re-indexing  large number of documents
+DATE: 10 Sep 2004
+
+It sounds like the ThreadLocal in TermInfosReader is not getting 
+correctly garbage collected when the TermInfosReader is collected. 
+Researching a bit, this was a bug in JVMs prior to 1.4.2, so my guess is 
+that you're running in an older JVM.  Is that right?
+
+I've attached a patch which should fix this.  Please tell me if it works 
+for you.
+
+Doug
+
+Daniel Taurat wrote:
+> Okay, that (1.4rc3)worked fine, too!
+> Got only 257 SegmentTermEnums for 1900 objects.
+> 
+> Now I will go for the final test on the production server with the 
+> 1.4rc3 version  and about 40.000 objects.
+> 
+> Daniel
+> 
+> Daniel Taurat schrieb:
+> 
+>> Hi all,
+>> here is some update for you:
+>> I switched back to Lucene 1.3-final and now the  number of the  
+>> SegmentTermEnum objects is controlled by gc again:
+>> it goes up to about 1000 and then it is down again to 254 after 
+>> indexing my 1900 test-objects.
+>> Stay tuned, I will try 1.4RC3 now, the last version before FieldCache 
+>> was introduced...
+>>
+>> Daniel
+>>
+>>
+>> Rupinder Singh Mazara schrieb:
+>>
+>>> hi all
+>>>  I had a similar problem, i have  database of documents with 24 
+>>> fields, and a average content of 7K, with  16M+ records
+>>>
+>>>  i had to split the jobs into slabs of 1M each and merging the 
+>>> resulting indexes, submissions to our job queue looked like
+>>>
+>>>  java -Xms100M -Xcompactexplicitgc -cp $CLASSPATH lucene.Indexer 22
+>>>  
+>>> and i still had outofmemory exception , the solution that i created 
+>>> was to after every 200K, documents create a temp directory, and merge 
+>>> them together, this was done to do the first production run, updates 
+>>> are now being handled incrementally
+>>>
+>>>  
+>>>
+>>> Exception in thread "main" java.lang.OutOfMemoryError
+>>> at 
+>>> org.apache.lucene.store.RAMOutputStream.flushBuffer(RAMOutputStream.java(Compiled
+
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.store.OutputStream.flush(OutputStream.java(Inlined 
+>>> Compiled Code))
+>>>     at 
+>>> org.apache.lucene.store.OutputStream.writeByte(OutputStream.java(Inlined 
+>>> Compiled Code))
+>>>     at 
+>>> org.apache.lucene.store.OutputStream.writeBytes(OutputStream.java(Compiled 
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java(Compiled
+
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java(Compiled
+
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java(Compiled
+
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java(Compiled 
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java(Compiled 
+>>> Code))
+>>>     at 
+>>> org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:366)
+>>>     at lucene.Indexer.doIndex(CDBIndexer.java(Compiled Code))
+>>>     at lucene.Indexer.main(CDBIndexer.java:168)
+>>>
+>>>  
+>>>
+>>>> -----Original Message-----
+>>>> From: Daniel Taurat [mailto:daniel.taurat@gaussvip.com]
+>>>> Sent: 10 September 2004 14:42
+>>>> To: Lucene Users List
+>>>> Subject: Re: Out of memory in lucene 1.4.1 when re-indexing large 
+>>>> number
+>>>> of documents
+>>>>
+>>>>
+>>>> Hi Pete,
+>>>> good hint, but we actually do have physical memory of  4Gb on the 
+>>>> system. But then: we also have experienced that the gc of ibm 
+>>>> jdk1.3.1 that we use is sometimes
+>>>> behaving strangely with too large heap space anyway. (Limit seems to 
+>>>> be 1.2 Gb)
+>>>> I can say that gc is not collecting these objects since I  forced gc 
+>>>> runs when indexing every now and then (when parsing pdf-type 
+>>>> objects, that is): No effect.
+>>>>
+>>>> regards,
+>>>>
+>>>> Daniel
+>>>>
+>>>>
+>>>> Pete Lewis wrote:
+>>>>
+>>>>  
+>>>>
+>>>>> Hi all
+>>>>>
+>>>>> Reading the thread with interest, there is another way I've come    
+
+>>>>
+>>>>
+>>>> across out
+>>>>  
+>>>>
+>>>>> of memory errors when indexing large batches of documents.
+>>>>>
+>>>>> If you have your heap space settings too high, then you get     
+>>>>
+>>>>
+>>>> swapping (which
+>>>>  
+>>>>
+>>>>> impacts performance) plus you never reach the trigger for garbage
+>>>>> collection, hence you don't garbage collect and hence you run out   
+ 
+>>>>
+>>>>
+>>>> of memory.
+>>>>  
+>>>>
+>>>>> Can you check whether or not your garbage collection is being 
+>>>>> triggered?
+>>>>>
+>>>>> Anomalously therefore if this is the case, by reducing the heap 
+>>>>> space you
+>>>>> can improve performance get rid of the out of memory errors.
+>>>>>
+>>>>> Cheers
+>>>>> Pete Lewis
+>>>>>
+>>>>> ----- Original Message ----- From: "Daniel Taurat" 
+>>>>> <daniel.taurat@gaussvip.com>
+>>>>> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+>>>>> Sent: Friday, September 10, 2004 1:10 PM
+>>>>> Subject: Re: Out of memory in lucene 1.4.1 when re-indexing large   
+ 
+>>>>
+>>>>
+>>>> number of
+>>>>  
+>>>>
+>>>>> documents
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>    
+>>>>>
+>>>>>> Daniel Aber schrieb:
+>>>>>>
+>>>>>>  
+>>>>>>      
+>>>>>>
+>>>>>>> On Thursday 09 September 2004 19:47, Daniel Taurat wrote:
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>           
+>>>>>>>
+>>>>>>>> I am facing an out of memory problem using  Lucene 1.4.1.
+>>>>>>>>
+>>>>>>>>
+>>>>>>>>                
+>>>>>>>
+>>>>>>>
+>>>>>>> Could you try with a recent CVS version? There has been a fix
+
+>>>>>>>         
+>>>>>>
+>>>>>>
+>>>> about files
+>>>>  
+>>>>
+>>>>>>> not being deleted after 1.4.1. Not sure if that could cause the
+
+>>>>>>> problems
+>>>>>>> you're experiencing.
+>>>>>>>
+>>>>>>> Regards
+>>>>>>> Daniel
+>>>>>>>
+>>>>>>>
+>>>>>>>
+>>>>>>>            
+>>>>>>
+>>>>>>
+>>>>>> Well, it seems not to be files, it looks more like those 
+>>>>>> SegmentTermEnum
+>>>>>> objects accumulating in memory.
+>>>>>> #I've seen some discussion on these objects in the 
+>>>>>> developer-newsgroup
+>>>>>> that had taken place some time ago.
+>>>>>> I am afraid this is some kind of runaway caching I have to deal with.
+>>>>>> Maybe not  correctly addressed in this newsgroup, after all...
+>>>>>>
+>>>>>> Anyway: any idea if there is an API command to re-init caches?
+>>>>>>
+>>>>>> Thanks,
+>>>>>>
+>>>>>> Daniel
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> ---------------------------------------------------------------------
+>>>>>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>>>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>>>>
+>>>>>>  
+>>>>>>       
+>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>>>
+>>>>>
+>>>>>
+>>>>>     
+>>>>
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>>
+>>>>
+>>>>   
+>>>
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>
+>>>
+>>>  
+>>>
+>>
+>>
+> 
+> 
+

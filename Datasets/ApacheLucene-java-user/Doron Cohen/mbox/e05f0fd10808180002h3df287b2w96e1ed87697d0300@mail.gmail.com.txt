@@ -1,0 +1,107 @@
+FROM: "Doron Cohen" <cdor...@gmail.com>
+SUBJECT: Re: Fields with the same name?? - Was Re: Payloads and tokenizers
+DATE: 18 Aug 2008
+
+>
+> payload and the other part for storing, i.e. something like this:
+>>
+>>    Token token = new Token(...);
+>>    token.setPayload(...);
+>>    SingleTokenTokenStream ts = new SingleTokenTokenStream(token);
+>>
+>>    Field f1 = new Field("f","some-stored-content",Store.YES,Index.NO);
+>>    Field f2 = new Field("f", ts);
+>>
+> How about adding this field in two parts, one part for indexing with the
+>
+> Now that got me thinking and I have exposed a rather large misconception in
+> my understanding of the Lucene internals when consider fields of the same
+> name.
+>
+> Your idea above looked like a good one.  However, I realise I am probably
+> trying to use payloads wrongly.  I have the following information to store
+> for a single Document
+>
+> contentId - 1 instance
+> ownerId 1..n instances
+> accessId 1..n instances
+>
+> One ownerId has a corresponding accessId for the contentId.
+>
+> My search criteria are ownerId:XXX + user criteria.  When there is a hit, I
+> need the contentId and the corresponding accessId (for the owner) back.  So,
+> I wanted to store the accessId as a payload to the ownerId.
+>
+> This is where I came unstuck.  For 'n=3' above, I used the
+> SingleTokenTokenStream as you suggested with the accessId as the payload for
+> ownerId.  However, at the Document level, I cannot get the payloads from the
+> field so, in trying to understand fields with the same name, I discovered
+> that there is a big difference between
+>
+> (a)
+> Field f = new Field("ownerId", "OID1", Store.YES, Index.NO_NORMS);
+> f = new Field("ownerId", "OID2", Store.YES, Index.NO_NORMS);
+> f = new Field("ownerId", "OID3", Store.YES, Index.NO_NORMS);
+>
+> and (b)
+> Field f = new Field("ownerId", "OID1 OID2 OID3", Store.YES,
+> Index.NO_NORMS);
+>
+> as Document.getFields("ownerId") for (a) will be 3 and for (b) it will be
+> 1.
+>
+> My question then is, if I do
+>
+> for (int i = 0; i < owners; i++)
+> {
+>    f = new Field("ownerId", oid[i], Store.YES, Index.NO_NORMS);
+>    doc.add(f);
+>    f = new Field("accessId", aid[i], Store.YES, Index.NO_NORMS);
+>    doc.add(f);
+> }
+>
+> then will the array elements for the corresponding Field arrays returned by
+>
+> Document.getFields("ownerId")
+> Document.getFields("accessId")
+>
+> **guarantee** that the array element order is the same as the order they
+> were added?
+>
+
+
+The API definitely doesn't promise this.
+AFAIK implementation wise it happens to be like this but I can be wrong and
+plus it might change in the future. It would make me nervous to rely on
+this.
+
+The difficulty stems from that any specific information on the actual
+matching token is digested at scoring and not reaching the hit collector in
+effect. It somewhat reminds me the situation with highlighting, where
+positions might have been considered for scoring, yet for a certain matching
+doc of interest that is being displayed with highlighting, positions (and
+offsets) need to be found again.
+
+Anyhow, for your need I can think of two options:
+
+Option 1:  just index the owenerID, do not store it, do not index or store
+accessID (unless you wish to search by it, in this case just index it). In
+addition store a dedicated mapping field that maps from ownerID to accessID.
+E.g. with serialization of HashMap or something thinner. At runtime retrieve
+this map from the document and it has all that information.
+
+Option 2: as you describe above, just index the ownerID with accessID as
+payload, and then for the hitting docid of interest use termPositions to get
+the payload, i.e. something like:
+    TermPositions tp = reader.termPositions();
+    tp.seek(new Term("ownerID",oid));
+    tp.skipTo(docid);
+    tp.nextPosition();
+    if (tp.isPayloadAvailable()) {
+      byte [] accessIDBytes = tp.getPayload(...);
+      ...
+
+Each has its overhead but I think both should work...
+
+Doron
+

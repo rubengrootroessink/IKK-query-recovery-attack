@@ -1,0 +1,91 @@
+FROM: Theodan <...@theodan.com>
+SUBJECT: Re: Sorting on a field that can have null values
+DATE: 9 May 2007
+
+
+
+Chris Hostetter wrote:
+> 
+> 
+> : If i rememebr correctly (you'll have to test this) sorting on a field
+> : which doesn't exist for every doc does what you would want (docs with
+> : values are listed before docs without)
+> 
+> : The actual behavior is different than described above. I modified
+> : TestSort.java:
+> 
+> : The actual order of the results is: "ZJI". I believe this happens
+> because
+> : the field string cache 'order' array contains 0's for all the documents
+> that
+> : don't contain the field and thus sort first.
+> 
+> i guess wasn't precise enough in that old thread, what i ment was that not
+> having a vlaue results in the docs sorting the same as if they had a value
+> lower then the lowest existing value -- so they sort at the end of the
+> list if you are doing a descending sort, and at the begining of the list
+> if you do an ascending sort.  If you want to always have them come "last"
+> regardless of order, there is a SortComparator for that purpose in Solr...
+> 
+> https://issues.apache.org/jira/browse/LUCENE-406
+> http://svn.apache.org/viewvc/lucene/solr/trunk/src/java/org/apache/solr/search/MissingStringLastComparatorSource.java?view=log
+> 
+> 
+
+But how can you use both the MissingStringLastComparatorSource and also your
+own custom SortComparator (i.e. having a custom getComparable() method)?
+
+I have tried the obvious, which was to make my custom SortComparator extend
+MissingStringLastComparatorSource instead of SortComparator.  But then it
+seems that my custom getComparable() method is ignored.  The sorting
+framework doesn't seem to use the Comparables returned from my
+getComparable() method to sort the results; instead, it seems to use the
+ScoreDocComparator returned from the newComparator() method of
+MissingStringLastComparatorSource.
+
+FYI, my end goal is to be able to sort on a field called "AssetType".  Some
+of the docs in the index may be missing this field (and I'd like those docs
+to be sorted at the end of the results).  Furthermore, I need a custom
+sorting order on the values in this "AssetType" field (first videos, then
+articles, then images, etc.).
+
+Here is my custom comparator, after changing it to extend
+MissingStringLastComparatorSource (all that I changed was the "extends"
+clause; the body remained the same):
+
+======================================================================
+private static class AssetTypeSortComparator extends
+MissingStringLastComparatorSource /*SortComparator*/ {
+
+	private static final Map ASSET_TYPE_ORDER_MAP = new HashMap();
+	static {
+		ASSET_TYPE_ORDER_MAP.put("Video", new Integer(0));
+		ASSET_TYPE_ORDER_MAP.put("Article", new Integer(1));
+		ASSET_TYPE_ORDER_MAP.put("Image", new Integer(2));
+	}
+
+	private static final Integer DEFAULT_ORDER = new Integer(3);
+
+	protected Comparable getComparable(String termtext) {
+		if (ASSET_TYPE_ORDER_MAP.containsKey(termtext)) {
+			return (Integer)ASSET_TYPE_ORDER_MAP.get(termtext);
+		}
+		else {
+			return DEFAULT_ORDER;
+		}
+	}
+
+}
+======================================================================
+
+-Theo
+-- 
+View this message in context: http://www.nabble.com/Sorting-on-a-field-that-can-have-null-values-tf3568102.html#a10404218
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

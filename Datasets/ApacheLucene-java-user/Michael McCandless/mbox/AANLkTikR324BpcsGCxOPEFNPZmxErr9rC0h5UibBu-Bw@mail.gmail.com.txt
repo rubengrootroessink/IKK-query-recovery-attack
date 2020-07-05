@@ -1,0 +1,132 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Unsupported operation in TermDocs.next() when migrating from 2.4	to 2.9
+DATE: 4 Jul 2010
+
+That is spooky.  It certainly sounds like a regression.
+
+It's odd that your MultiTermEnum is pulling an AllTermDocs under the
+hood -- this should only happen if you did a .seek(null) on it, but
+your code seems to first check that term != null, so it should never
+pass a null term.
+
+Can you add a temporary assert to DirectoryReader.java, in 29x, around
+line 1191.  It should be this method:
+
+    protected TermDocs termDocs(IndexReader reader)
+      throws IOException {
+      return term==null ? reader.termDocs(null) : reader.termDocs();
+    }
+
+Add an assert term != null, and run you code w/ assertions on, and see
+if it trips (the assert is not safe, in general, but should not trip
+in how I think you are using it).  If it does trip... try to track
+down how a null term got in there?
+
+Mike
+
+On Tue, Jun 29, 2010 at 5:24 AM, Jerven Bolleman
+<jerven.bolleman@isb-sib.ch> wrote:
+> Hi All,
+>
+> I am finally having some time to upgrade our lucene from the 2.4 series to
+> the 2.9 series. And I am having a problem that while everything compiles
+> great I am getting a new UnsupportedOperationException.
+>
+>
+> java.lang.UnsupportedOperationException
+>        at
+> org.apache.lucene.index.AbstractAllTermDocs.seek(AbstractAllTermDocs.java:42)
+>        at
+> org.apache.lucene.index.DirectoryReader$MultiTermDocs.termDocs(DirectoryReader.java:1186)
+>        at
+> org.apache.lucene.index.DirectoryReader$MultiTermDocs.next(DirectoryReader.java:1118)
+>        at
+> org.expasy.core.index.SubQueryFilter.fastForLargeResultSets(SubQueryFilter.java:129)
+>
+> I copied in the code that calls this. See an explanation of what it tries to
+> achieve underneath.
+>
+> private void fastForLargeResultSets(String foreignField, BitSet bits,
+> TermDocs docs, TermDocs foreignDocs, IndexReader foreignReader, BitSet
+> queryResults)
+>        throws IOException
+> {
+>        int start = queryResults.nextSetBit(0);
+>        TermEnum foreignEnum = foreignReader.terms(new Term(foreignField,
+> ""));
+>        while (foreignEnum.next())
+>                {
+>                Term term = foreignEnum.term();
+>                if (term == null || !term.field().equals(foreignField))
+>                        break;
+>                if (!term.text().equals("not_null"))
+>                {
+>                        foreignDocs.skipTo(start);
+>                        foreignDocs.seek(term);
+> //Source of exception in my code
+>                        while (foreignDocs.next())
+>                        {
+>                                int doc = foreignDocs.doc();
+>                                if (queryResults.get(doc))
+>                                {
+>                                        foreignDocs.skipTo(doc);
+>                                        if (term != null &&
+term.text() !=
+> null)
+>                                                buffer.add(term.text());
+>                                }
+> // Use a buffer to avoid jumping around on disk to much.
+> //
+>                                if (buffer.size() >= BUFFERSIZE)
+>                                {
+>                                        emptyBuffer(buffer, bits,
+docs);
+>                                }
+>                        }
+>                }
+>        }
+>
+>        if (!buffer.isEmpty())
+>        {
+>                emptyBuffer(buffer, bits, docs);
+>        }
+> }
+>
+> The purpose of this code is to fill a bitset as a filter. The filter is used
+> to find documents in index a who have a linking key value to them in index
+> b.
+>
+> While resource intensive this code path was quite fast for when you have
+> multimillion documents in index b pointing to multimillion documents in
+> index b.
+>
+> i.e. it creates a "join" between two queries on different indexes.
+>
+> for a live example
+> http://www.uniprot.org/uniprot/?query=citation%3A%28author%3Afink%29
+> this a search for fink in the field author in the "citation" index.
+> For each document in the "citation" index that matches term "fink" in the
+> field "author" retrieve the terms that contain an uniquely identifying key
+> value for documents in the "uniprot" index. Generate a bitset to use in
+> filtering the documents in the "uniprot" index (done in the emptybuffer
+> method).
+>
+> Is this a bug? and does anyone have ideas for an effective (maybe superior)
+> work around?
+>
+> Regards and thanks for a great project!
+>
+> Jerven
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

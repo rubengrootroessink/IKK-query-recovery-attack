@@ -1,0 +1,113 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: highlighting phrase query
+DATE: 2 Jul 2007
+
+There has been a lot of Highlighter discussion lately, but just to try 
+and sum up the state of Highlighting in the Lucene world:
+
+There are four Highlighter implementations that I know of. From what I 
+can tell, only the original Contrib Highlighter has received sustained 
+active development by more than one individual.
+
+Contrib Highlighter:
+The Contrib Highlighter supports the widest array of analyzers and 
+corner cases and has had the widest exposure. It is generally slower on 
+larger documents due to the requirement that you re-analyze text and to 
+support a wider variety of use cases -- the TokenGroup for token 
+overlaps and inspecting every term for Fragmentation contribute to a 
+huge performance drain on large documents. This highlighter does not 
+support highlighting based on position and all terms from the query will 
+be highlighted in the text. You can avoid some of the cost of 
+re-analyzing by using the TokenSources class to rebuild a TokenStream 
+using stored offsets and/or positions, but this is unlikely to be faster 
+unless you are using very large documents with a complex analyzer. 
+Getting and sorting offsets/positions is relatively slow and for smaller 
+docs it is faster to just re-analyze.
+
+LUCENE-403:
+I have not spent a lot of time with this approach, but it is similar to 
+the Contrib Highlighter approach. It almost certainly does not cover as 
+many odd corner cases as Contrib Highlighter and the framework is 
+lacking, but it does add some support for proper PhraseQuery 
+highlighting by implementing some custom PhraseQuery search logic. 
+Because LUCENE-403 is not as rigorous as the Contrib Highlighter, it may 
+well be a bit faster. The author claims that HTML tags will not be 
+broken when fragmenting.
+
+LUCENE-644:
+This Highlighter approach requires that you have stored term offsets in 
+the index. This Highlighter can be very fast if you are using a 
+complicated analyzer since there is no need for re-analyzing the text 
+(due to the stored offsets). Also, rather then scoring every term like 
+the Contrib Highlighter, only terms from the query are effectively 
+"handled". For smaller documents and simpler analyzers there is not much 
+speed improvement over the Contrib Highlighter (due to the time it takes 
+to retrieve and sort offsets), but for larger documents , especially 
+with more complex analyzers,  this Highlighter can be extremely fast. 
+Again, positional highlighting for Phrase and Span queries is not 
+supported.  
+
+The biggest reason this implementation performs so well is that it deals 
+with the text in much bigger chunks. Contrib Highlighter can also avoid 
+re-analyzing by storing offsets and positions, but then it scores the 
+document and rebuilds the text one token at a time using the performance 
+draining TokenGroup (which helps cover some of those corner cases). This 
+is very slow on very large documents.
+
+LUCENE-794:
+This approach extends the Contrib Highlighter to support Highlighting 
+Span and Phrase queries. The approach used for non position sensitive 
+Query clauses is the same as the Contrib Highlighter, and if you use the 
+latest CachingTokenFilter the speed is roughly about the same. Position 
+sensitive Query clauses are a bit slower as a MemoryIndex is used to 
+retrieve the correct positions to Highlight. This gives exact 
+highlighting without reimplementing search logic. Also, all of the use 
+cases and corner cases that have been solved for the Contrib Highlighter 
+are retained. All of the deficiencies of the Contrib Highlighter (slower 
+on large docs) are also retained. The majority of the code for this 
+comes from the Contrib Highlighter -- it uses the Contrib Highlighter 
+framework. Which points out a plus for the Contrib Highlighter setup -- 
+it allows for an extension like this, while LUCENE-644 could not easily 
+be expanded to handle position sensitive queries.
+
+
+There has been some discussion of getting Lucene to identify correct 
+highlights as the search is processed. I am not very optimistic that 
+this will be fruitful, but those that are discussing it know more more 
+about this than I do.
+
+- Mark
+
+sandeep chawla wrote:
+> Hi All,
+>
+> I am developing a search tool using lucene. I am using lucene 2.1.
+>
+> i have a requirement to highlight query words in the results.
+> .Lucene-highlighter 2.1 doesn't work well in highlighting phase query.
+>
+> For example - if i have a query string "lucene Java" .It highlights
+> not only occurrences of "lucene java" but occurrences of lucene and
+> java too in the text.
+>
+> I think, this is a known problem..is this issue solved in lucene 2.2.
+> well my application is almost complete and i really don't wanna switch
+> to lucene 2.2.
+>
+> I was going through previous posts but i couldn't find a solution of
+> this problem. There r some alternate highlighter s but it seems, they
+> r not stable and still in evolution phase.
+>
+> I am looking for a standard n stable API for this purpose..
+>
+> I'd appreciate any thoughts/guidance in this issue.
+>
+> Thanks
+> Sandeep
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

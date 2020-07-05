@@ -1,0 +1,144 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: distinct query how to???
+DATE: 19 Jul 2007
+
+You get non relevant results because normally a HitCollector will only 
+collect documents with scores greater than 0.
+
+Hits normalizes raw scores like this:
+
+    if (hitDocs.size() > min) {
+      min = hitDocs.size();
+    }
+
+    int n = min * 2;    // double # retrieved
+    TopDocs topDocs = (sort == null) ? searcher.search(weight, filter, 
+n) : searcher.search(weight, filter, n, sort);
+    length = topDocs.totalHits;
+    ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+
+    float scoreNorm = 1.0f;
+   
+    if (length > 0 && topDocs.getMaxScore() > 1.0f) {
+      scoreNorm = 1.0f / topDocs.getMaxScore();
+    }
+
+    int end = scoreDocs.length < length ? scoreDocs.length : length;
+    for (int i = hitDocs.size(); i < end; i++) {
+      hitDocs.addElement(new HitDoc(scoreDocs[i].score * scoreNorm,
+                                    scoreDocs[i].doc));
+    }
+
+- Mark
+
+Bhavin Pandya wrote:
+> Hi erick,
+> Thanks for your prompt reply...
+>
+> Let me explain what i m doing....
+>
+> There is lucene query which returns relevant result when i am 
+> searching through Hits object.
+> But when i m using same query using DocCollector ( I want this way  
+> because want to remove duplicate records at search time )
+> .. Its giving results which is not relevant although its printing 
+> score in descending order.
+>
+> Here is what i am doing in DocCollector...
+>
+> ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+>
+> public void collect(int doc, float score)
+> {
+>
+>    Document document = reader.document(doc);
+>    String photoid = document.get("photoid");
+>    if (!uniquelist.contains(photoid))
+>    {
+>        uniquelist.add(photoid);
+>        hq.insert(new ScoreDoc(doc, score));
+>        minScore = ((ScoreDoc)hq.top()).score; // maintain minScore
+>    }
+> }
+>
+> public TopDocs topDocs() {
+>
+>    ScoreDoc[] scoreDocs = new ScoreDoc[hq.size()];
+>    for (int i = hq.size()-1; i >= 0; i--)      // put docs in array
+>      scoreDocs[i] = (ScoreDoc)hq.pop();
+>
+>    float maxScore = (totalHits==0)
+>      ? Float.NEGATIVE_INFINITY
+>      : scoreDocs[0].score;
+>
+>    return new TopDocs(totalHits, scoreDocs, maxScore);
+>  }
+>
+>
+> public ArrayList getAllDocIds()
+>  {
+>   ArrayList docidlist = new ArrayList();
+>   ArrayList mainlist = new ArrayList();
+>   TopDocs tc = topDocs();
+>   ScoreDoc[] scoredoc = tc.scoreDocs;
+>
+>   for (int i=0;i<scoredoc.length;i++)
+>   {
+>        doclist.add(new Integer(scoredoc[i].doc).toString());
+>    }
+>    return doclist;
+> }
+> ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+>
+>
+> Is this a proper way to find duplicate records ???  If yes please let 
+> me know where i am wrong.. ???
+> Note: In this case, i can not handle duplicate records at index time...
+>
+> Thanks.
+> Bhavin pandya
+>
+>
+>
+>
+> ----- Original Message ----- From: "Erick Erickson" 
+> <erickerickson@gmail.com>
+> To: <java-user@lucene.apache.org>; "Bhavin Pandya" <bhavinp@rediff.co.in>
+> Sent: Thursday, July 19, 2007 7:21 PM
+> Subject: Re: Where exact score is getting calculate?
+>
+>
+>> I don't think you can using a HitCollector. If you used a TopDocs 
+>> instead,
+>> you have access to the maximum score and can normalize the
+>> scores to between 0 and 1, but I don't know if that suits your needs.
+>>
+>> Erick
+>>
+>> On 7/19/07, Bhavin Pandya <bhavinp@rediff.co.in> wrote:
+>>>
+>>> Hi,
+>>>
+>>> The score i am getting in DocCollector is raw score... which is not
+>>> necessary between 0 and 1.
+>>> Where lucene exactly calculating the final score...? Or
+>>> what if i want final score in DocCollector ??? How to ???
+>>>
+>>> Regards.
+>>> Bhavin pandya
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

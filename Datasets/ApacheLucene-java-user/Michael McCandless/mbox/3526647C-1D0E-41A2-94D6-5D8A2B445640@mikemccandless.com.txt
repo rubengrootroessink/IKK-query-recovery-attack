@@ -1,0 +1,125 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: ThreadLocal in SegmentReader
+DATE: 7 Jul 2008
+
+
+Hmmm, I see... you're right.  ThreadLocal is dangerous.
+
+So how would you recommend fixing it?
+
+One thing we can do, in SegmentReader.close, is to call  
+termVectorsLocal.set(null).  We do this eg in FieldsReader.close,  
+which uses a ThreadLocal to hold thread-private clones of the  
+fieldsStream
+
+However, that only works if the very same thread that had opened the  
+reader also calls close... which likely often is the case but in  
+general is not guaranteed and we should not expect/require.
+
+How about if we set termVectorsLocal itself to null?  Will GC then "do  
+the right thing", ie, recognize (eventually) that this ThreadLocal  
+instance is no longer referenced, and clear all Objects for all  
+threads that were held in it?
+
+Mike
+
+Roman Puchkovskiy wrote:
+
+>
+> Unfortunately, it's not ok sometimes. For instance, when Lucene is  
+> loaded by
+> a web-application from its WEB-INF/lib and SegmentReader is  
+> initialized
+> during the application start-up (i.e. it's initialized in the thread  
+> which
+> will never die), this causes problems with unloading of a  
+> classloader of the
+> web-application. When web-application is undeployed, there's still a
+> ThreadLocal in a thread which is external to webapp classloader, and  
+> this
+> ThreadLocal contains an object which references its class, and this  
+> class
+> was loaded through web-app classloader and hence references it... so  
+> we have
+> a chain of hard links from an alive thread to our classloader. In the
+> result, the classloader cannot be unloaded together will all its  
+> classes, so
+> memory waste is considerable.
+>
+> I've found a way to work this around by creating a new thread during  
+> webapp
+> start-up and executing code which eventually initializes Lucene  
+> indices from
+> this thread, so all spawned ThreadLocals go to this short-lived  
+> thread and
+> get garbage-collected shortly after the webapp start-up is finished.  
+> But
+> this does not seem to be a pretty solution. Besides, one has to  
+> guess that
+> ThreadLocals are the problem to invent such a work-around :)
+>
+>
+> Michael McCandless-2 wrote:
+>>
+>>
+>> Well ... if the thread dies, the value in its ThreadLocal should be
+>> GC'd.
+>>
+>> If the thread does not die (eg thread pool in an app server) then the
+>> ThreadLocal value remains, but that value is a shallow clone of the
+>> original TermVectorsReader and should not be consuming that much RAM
+>> per thread.
+>>
+>> So I think it's OK?
+>>
+>> Mike
+>>
+>> Roman Puchkovskiy wrote:
+>>
+>>>
+>>> Hi.
+>>>
+>>> There's a ThreadLocal field in SegmentReader (it's called
+>>> termVectorsLocal).
+>>> Some value is put to it, but it's never cleared.
+>>> Is it ok? It looks like sometimes this behavior may lead to leaks.
+>>>
+>>> This is the same in lucene-2.2.0 and lucene-2.3.2.
+>>>
+>>> Thanks in advance.
+>>> -- 
+>>> View this message in context:
+>>> http://www.nabble.com/ThreadLocal-in-SegmentReader-tp18306230p18306230.html
+>>> Sent from the Lucene - Java Users mailing list archive at  
+>>> Nabble.com.
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>
+> -- 
+> View this message in context: http://www.nabble.com/ThreadLocal-in-SegmentReader-tp18306230p18314310.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

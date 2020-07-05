@@ -1,0 +1,219 @@
+FROM: vsevel <v.se...@lombardodier.com>
+SUBJECT: Re: Searching while optimizing
+DATE: 28 Nov 2009
+
+
+Hi, thanks for the explanations. Though I had no luck...
+
+I now do the close of the reader before the commit. But still, only the
+close get us back to nominal. Here is the complete test:
+
+    @Test
+    public void optimize() throws Exception {
+        final File dir = new File("lucene_work/optimize");
+        dir.mkdirs();
+
+        for (File f : dir.listFiles()) {
+            f.delete();
+        }
+
+        Assert.assertEquals(0, dir.listFiles().length);
+
+        Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_CURRENT);
+        MaxFieldLength maxLength = IndexWriter.MaxFieldLength.UNLIMITED;
+        IndexWriter writer = new IndexWriter(FSDirectory.open(dir),
+analyzer, true, maxLength);
+        monitorIndexSize(dir);
+        long time = 2000;
+
+        log.info("writing...");
+        for (int i = 0; i < 1000000; i++) {
+            Document doc = new Document();
+            doc.add(new Field("foo", "bar " + i, Store.YES,
+Index.NOT_ANALYZED));
+            writer.addDocument(doc);
+        }
+
+        writer.commit();
+        log.info("done write");
+        Thread.sleep(time);
+        
+        log.info("opening reader...");
+        IndexReader reader = writer.getReader();
+        log.info("done open reader");
+        Thread.sleep(time);
+        
+        log.info("optimizing...");
+        writer.optimize();
+        log.info("done optimize");
+        Thread.sleep(time);
+
+        log.info("closing reader...");
+        reader.close();
+        log.info("done reader close");
+        Thread.sleep(time);
+        
+        log.info("committing...");
+        writer.commit();
+        log.info("done commit");
+        Thread.sleep(time);
+        
+        log.info("closing writer...");
+        writer.close();
+        log.info("done writer close");
+        Thread.sleep(time);
+    }
+
+And an exec log:
+
+15:58:46,875  INFO logserver.LuceneSystemTest     writing...
+15:58:46,875  INFO logserver.LuceneSystemTest     size=0Mb
+15:58:47,891  INFO logserver.LuceneSystemTest     size=1Mb
+15:58:48,891  INFO logserver.LuceneSystemTest     size=3Mb
+15:58:49,891  INFO logserver.LuceneSystemTest     size=5Mb
+15:58:50,906  INFO logserver.LuceneSystemTest     size=8Mb
+15:58:51,906  INFO logserver.LuceneSystemTest     size=9Mb
+15:58:52,906  INFO logserver.LuceneSystemTest     size=12Mb
+15:58:53,922  INFO logserver.LuceneSystemTest     size=14Mb
+15:58:54,984  INFO logserver.LuceneSystemTest     size=15Mb
+15:58:55,984  INFO logserver.LuceneSystemTest     size=18Mb
+15:58:56,984  INFO logserver.LuceneSystemTest     size=20Mb
+15:58:58,000  INFO logserver.LuceneSystemTest     size=21Mb
+15:58:59,000  INFO logserver.LuceneSystemTest     size=25Mb
+15:59:00,016  INFO logserver.LuceneSystemTest     size=27Mb
+15:59:01,016  INFO logserver.LuceneSystemTest     size=29Mb
+15:59:02,016  INFO logserver.LuceneSystemTest     size=52Mb
+15:59:03,031  INFO logserver.LuceneSystemTest     size=52Mb
+15:59:04,031  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:04,328  INFO logserver.LuceneSystemTest     done write
+15:59:05,031  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:06,031  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:06,328  INFO logserver.LuceneSystemTest     opening reader...
+15:59:06,453  INFO logserver.LuceneSystemTest     done open reader
+15:59:07,031  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:08,031  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:08,453  INFO logserver.LuceneSystemTest     optimizing...
+15:59:09,047  INFO logserver.LuceneSystemTest     size=34Mb
+15:59:10,047  INFO logserver.LuceneSystemTest     size=37Mb
+15:59:11,047  INFO logserver.LuceneSystemTest     size=40Mb
+15:59:12,047  INFO logserver.LuceneSystemTest     size=42Mb
+15:59:12,391  INFO logserver.LuceneSystemTest     done optimize
+15:59:13,062  INFO logserver.LuceneSystemTest     size=55Mb
+15:59:14,062  INFO logserver.LuceneSystemTest     size=55Mb
+15:59:14,391  INFO logserver.LuceneSystemTest     closing reader...
+15:59:14,406  INFO logserver.LuceneSystemTest     done reader close
+15:59:15,062  INFO logserver.LuceneSystemTest     size=55Mb
+15:59:16,062  INFO logserver.LuceneSystemTest     size=55Mb
+15:59:16,406  INFO logserver.LuceneSystemTest     committing...
+15:59:16,469  INFO logserver.LuceneSystemTest     done commit
+15:59:17,062  INFO logserver.LuceneSystemTest     size=43Mb
+15:59:18,062  INFO logserver.LuceneSystemTest     size=43Mb
+15:59:18,469  INFO logserver.LuceneSystemTest     closing writer...
+15:59:18,484  INFO logserver.LuceneSystemTest     done writer close
+15:59:19,062  INFO logserver.LuceneSystemTest     size=32Mb
+15:59:20,078  INFO logserver.LuceneSystemTest     size=32Mb
+
+I guess I would be able to do a close and reopen if really I need to. But if
+there is a nicer and more natural solution, I would love to know about it.
+
+thanks,
+vincent
+
+
+Michael McCandless-2 wrote:
+> 
+> Phew, thanks for testing!  It's all explainable...
+> 
+> When you have a reader open, it prevents the segments it had opened
+> from being deleted.
+> 
+> When you close that reader, the segments could be deleted, however,
+> that won't happen until the writer next tries to delete, which it does
+> only periodically (eg, on flushing a new segment, committing a new
+> merge, etc.).
+> 
+> Could you try closing your reader, then calling writer.commit() (which
+> is a no-op, since you had already committed, but it may tickle the
+> writer into attempting the deletions), and see if that frees up disk
+> space w/o closing?
+> 
+> Mike
+> 
+> On Fri, Nov 27, 2009 at 4:12 PM, vsevel <v.sevel@lombardodier.com> wrote:
+>> I am starting my tests with an unoptimized 40Mb index. I have 3 test
+>> cases:
+>> 1) open a writer, optimize, commit, close
+>> 2) open a writer, open a reader from the writer, optimize, commit, close
+>> 3) same as 2) except the reader is opened while the optimize is done in a
+>> different thread
+>>
+>> During all the tests, I monitor the size of the index on the disk. The
+>> results are:
+>> 1) initial=41Mb, before end of optimize=122Mb, after end of
+>> optimize=81Mb,
+>> after commit=40Mb,                            after writer close=40Mb
+>> 2) initial=41Mb, before end of optimize=122Mb, after end of
+>> optimize=104Mb,
+>> after commit=104Mb, after reader close=104Mb, after writer close=40Mb
+>> 3) initial=41Mb, before end of optimize=145Mb, after end of
+>> optimize=127Mb,
+>> after commit=103Mb, after reader close=103Mb, after writer close=40Mb
+>>
+>> From your different posts I assumed that a commit would have the same
+>> effect
+>> as a close as far as reclaiming disk space is concerned. however test
+>> cases
+>> 2 and 3 show that whether the reader is opened before or during the
+>> optimize
+>> we end up after commit with an index that is 2.5 times the nominal size.
+>> closing the reader does not change anything. only a close can get us the
+>> index back to nominal.
+>>
+>> What is the reason why the commit nor closing the reader can get us back
+>> to
+>> nominal?
+>> Do you recommend closing and recreating a new writer after an optimize?
+>>
+>> thanks
+>> vincent
+>>
+>>
+>> Michael McCandless-2 wrote:
+>>>
+>>> OK, I'll add that to the javadocs; thanks.
+>>>
+>>> But the fact that you weren't closing the old readers was probably
+>>> also tying up lots of disk space...
+>>>
+>>> Mike
+>>>
+>>
+>> --
+>> View this message in context:
+>> http://old.nabble.com/Searching-while-optimizing-tp26485138p26545384.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://old.nabble.com/Searching-while-optimizing-tp26485138p26556468.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

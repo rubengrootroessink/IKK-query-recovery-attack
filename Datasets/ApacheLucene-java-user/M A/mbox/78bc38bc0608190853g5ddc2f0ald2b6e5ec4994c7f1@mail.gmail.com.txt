@@ -1,0 +1,208 @@
+FROM: "M A" <geneticfl...@googlemail.com>
+SUBJECT: Re: Search Performance Problem 16 sec for 250K docs
+DATE: 19 Aug 2006
+
+what i am measuring is this
+
+Analyzer analyzer = new StandardAnalyzer(new String[]{});
+
+    if(fldArray.length > 1)
+    {
+      BooleanClause.Occur[] flags = {BooleanClause.Occur.SHOULD,
+BooleanClause.Occur.SHOULD, BooleanClause.Occur.SHOULD,
+BooleanClause.Occur.SHOULD};
+      query = MultiFieldQueryParser.parse(queryString, fldArray, flags,
+analyzer); //parse the
+    }
+    else
+    {
+      query = new QueryParser("tags", analyzer).parse(queryString);
+      System.err.println("QUERY IS " + query.toString());
+
+    }
+
+long ts = System.currentTimeMillis();
+
+    hits = searcher.search(query, new Sort("sid", true));
+    java.util.Set terms = new java.util.HashSet();
+    query.extractTerms(terms);
+    Object[] strTerms = terms.toArray();
+
+long ta = System.currentTimeMillis();
+
+ System.err.println("Retrived Hits in " + (ta - ts));
+
+ recent figures for this ..
+
+Retrived Hits in 26974 (msec)
+Retrived Hits in 61415 (msec)
+
+The query itself is just a word, eg "apple"
+
+The index is contructed as follows ..
+
+// this process runs as a daemon process ...
+
+                iwriter = new IndexWriter(INDEX_PATH, new
+StandardAnalyzer(new String[]{}), false);
+                Document doc = new Document();
+                doc.add(new Field("id", String.valueOf(story.getId()),
+Field.Store.YES, Field.Index.NO));
+                doc.add(new
+Field("sid",String.valueOf(story.getDate().getTime()),
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+                String tags = getTags(story.getId());
+                doc.add(new Field("tags", tags, Field.Store.YES,
+Field.Index.TOKENIZED));
+                doc.add(new Field("headline", story.getHeadline(),
+Field.Store.YES, Field.Index.TOKENIZED));
+                doc.add(new Field("blurb", story.getBlurb(), Field.Store.YES,
+Field.Index.TOKENIZED));
+                doc.add(new Field("content", story.getContent(),
+Field.Store.YES, Field.Index.TOKENIZED));
+                doc.add(new Field("catid", String.valueOf(story.getCategory()),
+Field.Store.YES, Field.Index.TOKENIZED));
+                iwriter.addDocument(doc);
+
+// then iwriter.close()
+
+optimize just runs once a day, after some deletions .
+
+The tags are select words  .. in total about 20K different ones in
+combination ..
+
+so story.getTags() -> Returns a string of the type "XXX YYY ZZZ YYY CCC DDD"
+story.getId() -> returns a long
+story.sid -> thats a long too
+story.getContent() -> returns text in most cases sometimes its blank
+story.getHeadline() -> returns text usually about 512 chars
+story.getBlurb() -> returns text about 255 chars
+story.getCatid() -> returns a long
+
+
+that covers both sections i.e. the read and the write ..
+
+I did look at luke, but unfortunately the docs dont seem to refer to a
+commandline interface to it (unless i missed something).. This is running on
+a headless box ..
+
+Cheers
+
+Mohammed.
+
+
+
+On 8/19/06, Erick Erickson <erickerickson@gmail.com> wrote:
+>
+> This is a loooonnnnnggg time, I think you're right, it's excessive.
+>
+> What are you timing? The time to complete the search (i.e. get a Hits
+> object
+> back) or the total time to assemble the response? Why I ask is that the
+> Hits
+> object is designed to return the fir st100 or so docs efficiently. Every
+> 100
+> docs or so, it re-executes the query. So, if you're returning a large
+> result
+> set, the using the Hits object to iterate over them, this could account
+> for
+> your time. Use a HitCollector instead... But do note this from the javadoc
+> for hitcollector
+>
+> ----
+> . For good search performance, implementations of this method should not
+> call Searcher.doc(int)<
+> file:///C:/lucene_1.9.1/docs/api/org/apache/lucene/search/Searcher.html#doc%28int%29
+> >or
+> IndexReader.document(int)<
+> file:///C:/lucene_1.9.1/docs/api/org/apache/lucene/index/IndexReader.html#document%28int%29
+> >on
+> every document number encountered. Doing so can slow searches by an
+> order
+> of magnitude or more.
+> -----
+>
+> FWIW, I have indexes larger that 1G that return in far less time than you
+> are indicating, through three layers and constructing web pages in the
+> meantime. It contains over 800K documents and the response time is around
+> a
+> second (haven't timed it lately). This includes 5-way sorts.
+>
+> You might also either get a copy of Luke and have it explain exactly what
+> the parse does or use one of the query exlain calls (sorry, don't remember
+> them off the top of my head) to see what query is *actually* submitted and
+> whether it's what you expect.
+>
+> Are you using wildcards? They also have an effect on query speed.
+>
+> If none of this applies, perhaps you could post the query and the how the
+> index is constructed. If you haven't already gotten a copy of Luke, I
+> heartily recommend it....
+>
+> Hope this helps
+> Erick
+>
+> On 8/19/06, M A <geneticflyer@googlemail.com> wrote:
+> >
+> > Hi there,
+> >
+> > I have an index with about 250K document, to be indexed full text.
+> >
+> > there are 2 types of searches carried out, 1. using 1 field, the other
+> > using
+> > 4 .. for a query string ...
+> >
+> > given the nature of the queries required, all stop words are maintained
+> in
+> > the index, thereby allowing for phrasal queries, (this is a requirement)
+> > ..
+> >
+> > So search I am using the following ..
+> >
+> > if(fldArray.length > 1)
+> >     {
+> >       // use four fields
+> >       BooleanClause.Occur[] flags = {BooleanClause.Occur.SHOULD,
+> > BooleanClause.Occur.SHOULD, BooleanClause.Occur.SHOULD,
+> > BooleanClause.Occur.SHOULD};
+> >       query = MultiFieldQueryParser.parse(queryString, fldArray, flags,
+> > analyzer); //parse the
+> >     }
+> >     else
+> >     {
+> >       //use only 1 field
+> >       query = new QueryParser("tags", analyzer).parse(queryString);
+> >     }
+> >
+> >
+> > When i search on the 4 fields the average search time is 16 sec ..
+> > When i search on the 1 field the average search time is 9 secs ...
+> >
+> > The Analyzer used for both searching and indexing is
+> > Analyzer analyzer = new StandardAnalyzer(new String[]{});
+> >
+> > The index size is about a 1GB ..
+> >
+> > The documents vary in size some are less than 1K max size is about 5k
+> >
+> >
+> >
+> > Is there anything I can do to make this faster.... 16 secs is just not
+> > acceptable ..
+> >
+> > Machine : 512MB, celeron 2600 ...  Lucene 2.0
+> >
+> > I could go for a bigger machine but wanted to make sure that the problem
+> > was
+> > not something I was doing, given 250K is not that large a figure ..
+> >
+> > Please Help
+> >
+> > Thanx
+> >
+> > Mo
+> >
+> >
+>
+>
+

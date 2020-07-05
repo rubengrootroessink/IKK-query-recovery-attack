@@ -1,0 +1,71 @@
+FROM: "Chris Lu" <chris...@gmail.com>
+SUBJECT: sharing my experience for upgrading from Lucene 1.9 to Lucene 2.2-dev
+DATE: 8 Mar 2007
+
+I would like to share my experience for upgrading from Lucene 1.9 to
+Lucene 2.2, build 515893.
+
+I have been working on a product called DBSight. It has both a
+designing web UI for configuring database crawl, and also capabilities
+to serve search requests like later-emerged SOLR. So DBSight can do
+both indexing and searching. Previously I have upgraded to 1.3, 1.4,
+and 1.9, all were pretty easy and went through well. Upgrading to 2.2
+isn't so straight forward though.
+
+Last time when Lucene 2.0 came out, I tried it by simply dropping
+lucene-2.0.jar onto the classpath. The indexing went well, but somehow
+the searching didn't work any more, no results and without any
+exceptions! That's wierd and I have to back off.
+
+Now with Lucene 2.2, I tried it again. This time, there are a bunch of
+NullPointerException when starting DBSight. But at least I can fix
+those. So I take some time to write down anything that may need to
+change. Your code may differ depending on which API you use.
+
+1. Use document.getFields() instead of deprecated document.fields()
+  This is an easy one, but with some code change. The return type
+changed from Enumeration to List. So you may need to write 2~3 lines
+of code. The upgrading should be easy and not even need a QA(really?).
+2. Use FSDirectory.getDirectory(file) instead of
+FSDirectory.getDirectory(file, isCreating)
+  FSDirectory.getDirectory(file) will not automatically create
+directory any more. I missed this deprecated yet convenient parameter.
+However, not so bad.
+3. RAMDirectory related changes
+  It took me something to find this out. Previously, after
+    ramDirectory = new RAMDirectory(file)
+  I could ramDirectory.close() to release the resources. And later, I
+could do a check for IndexReader.indexExists(ramDirectory) to see if
+there is an index in the directory. FSDirectory behaves this way also.
+  But with lucene 2.2, NullPointerExceptions came out. It turns out
+when ramDirectory.close(), the instance variable fileMap is set to
+null. And IndexReader.indexExists(ramDirectory) is reading fileMap to
+look for indexes, causing the NPE.
+4. clearing remaining locks from last indexing
+  In order to clear indexing locks, previously I manually cleared
+write lock and commit lock. As pointed out by others, the commit lock
+now is gone. And the unlocking logic is already wrapped in
+IndexReader.unlock(directory), I should use that directly.
+
+In general, the upgrade is smooth, and I can compile Lucene in JDK 1.4
+without any problem.
+
+Now I can try out the new optimizations and features, especially on
+merging, and test out whether the query performance improves or not.
+This feature sounds interesting:
+indexWriter.addIndexesNoOptimize(directories), but the result is, no
+obvious speedup, and the worst part: the dreaded "java.io.IOException:
+read past EOF". Guess I will skip this feature for now.
+
+-- 
+Chris Lu
+-------------------------
+Instant Full-Text Search On Any Database/Application
+site: http://www.dbsight.net
+demo: http://search.dbsight.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,184 @@
+FROM: "Yonik Seeley" <yo...@apache.org>
+SUBJECT: Re: NO_NORMS and TOKENIZED?
+DATE: 15 Feb 2007
+
+I originally added it without an Index param at all.
+I can't say I'm a fan of the way Field currently does things, and I
+didn't want everyone to pay the price for yet more options.
+
+Look at the code for the Field constructor:
+
+  public Field(String name, String value, Store store, Index index,
+TermVector termVector) {
+    if (name == null)
+      throw new NullPointerException("name cannot be null");
+    if (value == null)
+      throw new NullPointerException("value cannot be null");
+    if (name.length() == 0 && value.length() == 0)
+      throw new IllegalArgumentException("name and value cannot both be empty");
+    if (index == Index.NO && store == Store.NO)
+      throw new IllegalArgumentException("it doesn't make sense to
+have a field that "
+         + "is neither indexed nor stored");
+    if (index == Index.NO && termVector != TermVector.NO)
+      throw new IllegalArgumentException("cannot store term vector information "
+         + "for a field that is not indexed");
+
+    this.name = name.intern();        // field names are interned
+    this.fieldsData = value;
+
+    if (store == Store.YES){
+      this.isStored = true;
+      this.isCompressed = false;
+    }
+    else if (store == Store.COMPRESS) {
+      this.isStored = true;
+      this.isCompressed = true;
+    }
+    else if (store == Store.NO){
+      this.isStored = false;
+      this.isCompressed = false;
+    }
+    else
+      throw new IllegalArgumentException("unknown store parameter " + store);
+
+    if (index == Index.NO) {
+      this.isIndexed = false;
+      this.isTokenized = false;
+    } else if (index == Index.TOKENIZED) {
+      this.isIndexed = true;
+      this.isTokenized = true;
+    } else if (index == Index.UN_TOKENIZED) {
+      this.isIndexed = true;
+      this.isTokenized = false;
+    } else if (index == Index.NO_NORMS) {
+      this.isIndexed = true;
+      this.isTokenized = false;
+      this.omitNorms = true;
+    } else {
+      throw new IllegalArgumentException("unknown index parameter " + index);
+    }
+
+    this.isBinary = false;
+
+    setStoreTermVector(termVector);
+  }
+
+ protected void setStoreTermVector(Field.TermVector termVector) {
+    if (termVector == Field.TermVector.NO) {
+      this.storeTermVector = false;
+      this.storePositionWithTermVector = false;
+      this.storeOffsetWithTermVector = false;
+    }
+    else if (termVector == Field.TermVector.YES) {
+      this.storeTermVector = true;
+      this.storePositionWithTermVector = false;
+      this.storeOffsetWithTermVector = false;
+    }
+    else if (termVector == Field.TermVector.WITH_POSITIONS) {
+      this.storeTermVector = true;
+      this.storePositionWithTermVector = true;
+      this.storeOffsetWithTermVector = false;
+    }
+    else if (termVector == Field.TermVector.WITH_OFFSETS) {
+      this.storeTermVector = true;
+      this.storePositionWithTermVector = false;
+      this.storeOffsetWithTermVector = true;
+    }
+    else if (termVector == Field.TermVector.WITH_POSITIONS_OFFSETS) {
+      this.storeTermVector = true;
+      this.storePositionWithTermVector = true;
+      this.storeOffsetWithTermVector = true;
+    }
+    else {
+      throw new IllegalArgumentException("unknown termVector parameter
+" + termVector);
+    }
+  }
+
+
+I simply think this is too high of a price to pay for "type safety".
+Everyone shouldn't have to pay a performance penalty for making things
+a little "safer".  I'm probably in the minority, hence I never said
+anything about it before.
+
+It's also made Solr code worse because it stores these things as
+flags, but has to go through the same if-then-else contortions to
+construct a Field with the proper parameters (just to have Field go
+through the reverse contortions to de-multiplex these options).
+
+Think about what would happen if we added a few more options on
+storing term vectors... exponential explosion in those if-then-else
+statements.
+
+How would I have handled it?
+  With a single Field class, I would probably have used old-fashion
+c-style flags (a bit field).  Nice an extensible (you can add new
+flags without adding/changing any APIs, no performance impact to
+adding new options, you can pass around all these flags as a unit,
+check multiple flags with a single instruction, etc.
+  If we look at inheritance, I'd be tempted to let people subclass and
+allow them to pass data directly to the indexer rather than trying to
+store it all and enumerate all the possibilities in the single Field
+class.
+   Reader getBinaryValue()  or even int writeBinaryValue(Writer or IndexOutput)
+   TokenStream getTokens()
+   boolean isIndexed()
+
+Sorry for the rant... I guess my short answer is that I don't have an
+opinion on adding another type-safe constant TOKENIZED_NO_NORMS
+because I don't like the whole scheme.
+
+-Yonik
+
+
+On 2/15/07, Nadav Har'El <nyh@math.technion.ac.il> wrote:
+> On Fri, Jan 26, 2007, Otis Gospodnetic wrote about "Re: NO_NORMS and TOKENIZED?":
+> > Funny, I was looking to do the same thing the other day and gave up thinking it
+wasn't possible, not being aware of setOmitNorms().  Yeah, a javadoc patch would be welcome.
+> >
+> > Otis
+>
+> Before I go ahead and post a javadoc patch, I want to question again the
+> wisdom of this whole situation:
+>
+> Currently, most of a Field's parameters must be defined during its
+> construction. There is no method to change whether this Field object is to
+> be stored, to be compressed, to be indexed, to be tokenized - all these
+> things MUST be defined during the field's construction. So it is very
+> strange, and completely unexpected (at least to me and to Otis), that just
+> the "omitNorms" parameter can be changed after after construction, with a
+> "setOmitNorms" method - and not only can it be set after construction, in
+> some cases it must be set after construction, because the constructor doesn't
+> allow you to set it if you want an analyzer...
+>
+> So perhaps changing the code, not just the javadoc, would be better?
+> One way to do it while keeping backward compatibility is to add something
+> like TOKENIZED_NO_NORMS to Field.Index.
+>
+> > >...
+> > > I hadn't added a Field.Index option at all, and Doug suggested
+> > > NO_NORMS, probably because it's mostly harmless to new users who might
+> > > disable length normalization without realizing the implications.
+>
+> If we had also a "TOKENIZED_NO_NORMS", why would new users accidentally
+> use it? I guess the javadoc of this parameter could also warn against its
+> use (something like "not recommended for general use", or whatever)?
+>
+> --
+> Nadav Har'El                        |    Thursday, Feb 15 2007, 27 Shevat 5767
+> IBM Haifa Research Lab              |-----------------------------------------
+>                                     |How long a minute depends on what side of
+> http://nadav.harel.org.il           |the bathroom door you're on.
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

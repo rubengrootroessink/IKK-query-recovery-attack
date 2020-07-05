@@ -1,0 +1,60 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: search performance degrades by order of magnitude when using SortField.
+DATE: 29 May 2006
+
+: default Sort.RELEVANCE, query response time is ~6ms.  However, when I
+: specify a sort, e.g. Searcher.search( query, new Sort( "mydatefield" )
+:  ), the query response time gets multiplied by a factor of 10 or 20.
+	...
+: do a top-K ranking over the same number of raw hits.   The performance
+: gets disproportionately worse as I increase the number of parallel
+: threads that query the same Searcher object.
+
+How many sequential queries are you running against the same Searcher
+instance? ... the performance drop you are seeing may be a result of each
+of those threads trying to build the same FieldCache on your sort field in
+parrallel.
+
+being 10x or 20x slower sounds like a lot .. but 10x 6ms is still only
+60ms :) .. have you timed how long it takes just to build a FieldCache on
+that field?
+
+: Also, in my previous experience with sorting by a field in Lucene, I
+: seem to remember there being a preload time when you first search with
+: a sort by field, sometimes taking 30 seconds or so to load all of the
+: field's values into the in-memory cache associated with the Searcher
+: object.  This initial preload time doesn't seem to be happening in my
+: case -- does that mean that for some reason Lucene is not caching the
+: field values?
+
+that's the FieldCache initialization i was refering to -- it's based on
+reusing the same instenad of IndexReader (or IndexSearcher), as long as
+you are using the same instance over and over you'll reuse the
+FieldCache and only pay that cost once (or maybe N times if you have N
+parrallel query threads and they all try to hit the FieldCache
+immediately).
+
+30 seconds sounds extremely long though ... you may be remembering
+incorrectly how significant the penalty was.
+
+: I have an index of 1 million documents, taking up about 1.7G of
+: diskspace.  I specify -Xmx2000m when running my java search
+: application.
+
+the big issue when sorting on a field is what type of data is in that
+field: is it a int? a long? a String? .. if it is a String how often does
+the same String value appear for multiple documents? .. these all affect
+how much RAM the FieldCache takes up.  you mentioned sorting by date, did
+you store the date as a String? in what format? with what precision?
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

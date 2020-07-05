@@ -1,0 +1,227 @@
+FROM: Paul Waite <p...@waite.net.nz>
+SUBJECT: Re: java-user Digest 26 Oct 2006 13:22:18 -0000 Issue 474
+DATE: 26 Oct 2006
+
+Doron Cohen <DORONC@il.ibm.com> wrote:
+
+> Perhaps another comment on the same line - I think you would be able to
+> get more from your system by bounding the number of open searchers to 2:
+
+Yep, this is exactly what I've done.
+
+
+>  - old, serving 'old' queries, would be soon closed;
+>  - new, being opened and warmed up, and then serving 'new' queries;
+> 
+> Because... - if I understood how your current setting is working, the
+> following timed sequence is possible:
+>  t1.  index updated;
+>  t2.  query q2 arrives; new searcher s2 opened; s2 starts serving q2;
+>  t3.  index updated;
+>  t4.  query q3 arrives; s3 opened; s3 starts serving q3;
+>  t5.  index updated;
+>  t6.  q6 arrives; s6 starts to open (takes long, system busy);
+>  t7.  index updated;
+>  t8.  q8 arrives; s8 starts to open;
+>  t9.  s2 done serving q2; s2 is closed;
+>  t10. s6 done opening; s6 starts serving q6;
+>  t11. index updated;
+> And so on...
+> 
+> So, if this is indeed possible (otherwise how would you be able to set
+> different limits on number of open searchers) I think it would make more
+> sense to have the following sequence instead:
+>  t1.  index updated; a background thread starts to open and warm searcher
+> s1;
+>  t2.  query q2 arrives; s1 not ready yet, hence s0 start serving q2;
+>  t3.  index updated; two active searchers exist, so do nothing further.
+>  t3a. s1 is ready, s0 marked to be retired when free;
+>  t4.  query q3 arrives; s1 start serving q3;
+>  t5.  index updated;
+>  t6.  q6 arrives; s1 starts serving q6;
+>  t7.  index updated;
+>  t8.  q8 arrives; s2 starts serving q8;
+>  t9.  s0 done serving q2; background thread closes s0, start opening &
+> warming s9.
+>  t10. index updated;
+> And so on...
+> 
+> So you avoid exhausting IO resources, by waiting with opening a new
+> searcher until the previously opened searcher is up and running, and the
+> previous previous searcher is done and gone. This assumes that your 
+search
+> application does not keep search references too long when serving a 
+query.
+> In addition, a query never waits for a searcher to open - it always uses
+> the most recent available searcher.
+> 
+> Hope this makes sense,
+> Doron
+
+
+Absolutely. I have implemented the above scheme, but without the nice
+feature of background warming. So the users will have to wear the cost of
+that by waiting a bit longer than usual when we are updating the index.
+
+I'm planning to move our system to using Solr, which does have this nice
+feature built-in, so I probably won't bother implementing it in our current
+search daemon. At least I've stopped the out-of-memory errors.
+
+Cheers,
+Paul.
+
+> 
+> Paul Waite <paul@waite.net.nz> wrote on 20/10/2006 12:52:01:
+> 
+> Paul Waite wrote on 20/10/2006 12:52:01:
+> > Doron wrote:
+> >
+> > > Not sure if this is the case, but you said "searchers", so might be 
+it
+> -
+> > > you can (and should) reuse searchers for multiple/concurrent queries.
+> > > IndexSearcher is thread-safe, so no need to have a different searcher
+> for
+> > > each query. Keep using this searcher until you decide to open a new
+> > > searcher - actually until you 'warmed up' the new (updated) searcher,
+> > > then switch to using the new searcher and close the old one.
+> > >
+> > > - Doron
+> >
+> >
+> > Thanks Doron, yes we are re-using our Searchers. The particular piece 
+of
+> > code I refer to below, written by Peter Halcsy contains a method called
+> > 'getSearcher()' and this returns a cached IndexSearcher. However first
+> > it checks whether the index has been changed since the current Searcher
+> > was instantiated, and if so, 'retires' the current, cached Searcher and
+> > returns a brand new one. Any retired Searchers get removed once all 
+their
+> > current queries are finished.
+> >
+> > I have re-worked that piece to put a configurable cap on the number of
+> > these, which should stop the open-ended behaviour which would lead to
+> > our OOM's. Once that max is reached, getSearcher() keeps returning
+> > the current cached Searcher whether the index is changed or not.
+> >
+> > I've tested this and seen it in action by continuously indexing docs at
+> > about 40ms per document, and writing a query benchmarker client which
+> > forks N times, with each child looping through a bunch of pre-prepared
+> > queries. Together with some good logging I can see the searchers being
+> > created up to the max. number, then as I vary the indexing throughput
+> > it drops back and new Searchers are once more created to get searching
+> > back up to date with the index changes.
+> >
+> >
+> > Cheers,
+> > Paul.
+> >
+> >
+> >
+> > > Paul Waite <paul@waite.net.nz> wrote on 18/10/2006 18:22:30:
+> > >
+> > > > Some excellent feedback guys - thanks heaps.
+> > > >
+> > > >
+> > > > On my OOM issue, I think Hoss has nailed it here:
+> > > >
+> > > > > That said: if you are seeing OOM errors when you sort by a field
+> (but
+> > > > > not when you use the docId ordering, or sort by score) then it
+> sounds
+> > > > > like  you are keeping refrences to IndexReaders arround after
+> you've
+> > > > > stoped using them -- the FieldCache is kept in a WeakHashMap 
+keyed
+> > off
+> > > of
+> > > > > hte IndexReader, so it should get garbage collected as soon sa 
+you
+> > let
+> > > go
+> > > > > of it.  Another possibility is that you are sorting on too many
+> > fields
+> > > > > for it to be able to build the FieldCache for all of them in the
+> RAM
+> > > you
+> > > > > have available.
+> > > >
+> > > >
+> > > > I'm using a piece of code written by Peter Halacsy which implements 
+a
+> > > > SearcherCache class. When we do a search we request a searcher, and
+> > this
+> > > > class looks after giving us one.
+> > > >
+> > > > It checks whether the index has been updated since the most recent
+> > > Searcher
+> > > > was created. If so it creates a new one.
+> > > >
+> > > > At the same time it 'retires' outdated Searchers, once they have no
+> > > queries
+> > > > busy with them.
+> > > >
+> > > > Looking at that code, if the system gets busy indexing new stuff, 
+and
+> > > doing
+> > > > complex searches this is all rather open-ended as to the potential
+> > number
+> > > > of fresh Searchers being created, each with the overhead of 
+building
+> > its
+> > > > FieldCache for the first time. No wonder I'm having problems as the
+> > > archive
+> > > > has grown! Looking at it in this light, my OOM's all seem to come
+> just
+> > > > after a bout of articles have been indexed, and querying is being
+> done
+> > > > simultaneously, so it does fit.
+> > > >
+> > > > I guess a solution is probably to cap this process with a maximum
+> > number
+> > > > of active Searchers, meaning potentially some queries might be 
+fobbed
+> 
+> > off
+> > > > with slightly out of date versions of the index, in extremis, but 
+it
+> > > would
+> > > > right itself once everything settles down again.
+> > > >
+> > > > Obviously the index partitioning would probably make this a
+> non-issue,
+> > > but
+> > > > it seems better to sort the basic problem out anyway, and make it
+> 100%
+> > > > stable.
+> > > >
+> > > > Thanks Hoss!
+> > > >
+> > > > Cheers,
+> > > > Paul.
+> > > >
+> > > 
+> ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> >
+> > --
+> > Suspicion always haunts the guilty mind.
+> >       -- Wm. Shakespeare
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> 
+
+-- 
+Life, like beer, is merely borrowed.
+		-- Don Reed
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

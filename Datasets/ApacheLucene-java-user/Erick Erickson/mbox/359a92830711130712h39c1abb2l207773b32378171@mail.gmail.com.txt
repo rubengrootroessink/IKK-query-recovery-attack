@@ -1,0 +1,105 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: substring indexing to avoid 'TooManyClauses' exception
+DATE: 13 Nov 2007
+
+Hardy:
+
+I'm certainly not an expert on ranking and scoring, but I've got to assume
+that this approach influences scoring.
+
+Another issue is how you indexed multiple values. If you took a hint from
+the SynonymAnalyzer example in Lucene In Action, and indexed all the
+substrings with an increment of 0, you're probably OK with phrase and
+span queries. Consider indexing the following "anne gables". You'd
+index a, an, ann and anne followed by g, ga, gab, gabl, gable, gables.
+If the increments for the variants of anne were the default of 1, searching
+for the phrase "anne gables"~2 would fail because anne is really 5 or so
+terms away from gables. You can fix this by insuring that the gap
+is 0 for the variants, but you need to be aware of this.
+
+What about false hits? I don't know enough about your problem
+space to know whether matching on "ann AND gab" in the
+above example would be acceptable (note: no wild cards,
+so the user might be left scratching her head wondering why
+she got a match).
+
+There are several approaches. There is a thread titled "I just don't
+understand wildcards at all" that has a bunch of information about
+wildcards, and searching the archive for "wildcards" will turn up a
+wealth of information.
+
+But here are a couple of approaches:
+1> use filters. This has worked quite well for me where I construct
+the filter by WildCardTermEnum. If you have potential to re-use
+these you can always use CachingWrapperFilter (?) to keep
+them around.
+
+1a> you could pre-compute, say, 1 filter for each of the
+one-letter possibilities (e.g. a filter for a*, one for b*, etc)
+and use the filters for the pathological case of one leading
+character and wildcard queries for the 2 or more leading
+character wildcard queries. Assuming this performance
+was acceptable for the two-leading character case.
+
+2> ask your users whether there's really much value in getting
+so many hits. That is, if you can restrict the leading number
+of characters to, say, two (e.g. ab*), wildcarding might
+work acceptably out of the box. I think a legitimate question
+is "is 10,000 matching terms a useful thing to allow?" Of course
+the immediate response is "yes", but challenging the person
+to with producing an actual use case often results in the
+realization that catching the "too many clauses" error and
+responding with a message of "your search is too broad to
+be useful" is reasonable.
+
+Best
+Erick
+
+On Nov 12, 2007 4:44 PM, Hardy Ferentschik <hardy@ferentschik.de> wrote:
+
+> Hi,
+>
+> I have a question regarding the way I got around the 'TooManyClauses'
+> exception when using wild card queries
+> (
+> http://wiki.apache.org/lucene-java/LuceneFAQ#head-06fafb5d19e786a50fb3dfb8821a6af9f37aa831
+> ).
+>
+>
+> I am using Lucene in conjunction with Hibernate Search
+> (http://www.hibernate.org/410.html). I am indexing 'Compmany' objects
+> which contain multiple attibutes and the application supports different
+> types of searches.
+>
+> One type of search is a right hand truncated (wildcard query) search of
+> the company name. If eg the user searches for 'M' I constructed initially
+> a 'M*' query. I have about 250.000 companies in the index. Without any
+> modifications I get the 'TooManyClauses' exception and I initially kept
+> increasing the 'maxClauseCount'. It works, but performace was terrible. I
+> haven't tried working with a filter, but instead decided to try a
+> different approach. I index all possible substrings of a string , eg 'Foo'
+> would be indexed as 'F', 'Fo' and 'Foo'.
+>
+> I got rid of the 'TooManyClauses' exception and performace improved by
+> magnitude, but I would like to get some feedback from other users whether
+> this is a good approach or not.
+>
+> Of course the index size increased, but that was no issue in this case.
+> Are there any potential problems with ranking/scoring?
+>
+> Thanks for any feedback.
+>
+> --Hardy
+>
+>
+> --
+> Hartmut Ferentschik
+> Ekholmsv.339 ,1, 127 45 Skärholmen, Sweden
+> Phone: +46 855 923 676 (h); +46 704 225 097 (m)
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,241 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: BooleanQuery TooManyClauses in wildcard search
+DATE: 1 Dec 2007
+
+See below:
+
+On Dec 1, 2007 1:16 AM, Ruchi Thakur <ruchi.thak11@yahoo.com> wrote:
+
+>
+>  Erick/John, thank you so much for the reply. I have gone through the
+> mailing list u have redirected me  to. I know i need to read more, but some
+> quick questions. Please bear with me if they appear to be too simple.
+>  Below is the code snippet of my current search. Also i need to get score
+> info of each of my document returned in search, as i display the search
+> result in the order of scroing.
+>    {
+>   Directory fsDir = FSDirectory.getDirectory(aIndexDir, false);
+>   IndexSearcher is = new IndexSearcher(fsDir);
+>   ELSAnalyser elsAnalyser = new ELSStopAnalyser();
+>   Analyzer analyzer = elsAnalyser.getAnalyzer();
+>     QueryParser parser = new QueryParser(aIndexField, analyzer);
+>     Query query = parser.parse(aSearchStr);
+>     hits = is.search(query);
+>  }
+>
+
+EOE: Minor point that you probably already know, but opening a searcher is
+expensive.
+         I'm assuming you put it in here for clarity, but in case not be
+aware you should
+         open a reader and re-use it as much as posslble.
+
+         Also, it looks like you're using an older version of Lucene, since
+the
+         getDirecotory(dir, bool) is deprecated.....
+
+
+>
+>  Now as i have understood, through the mail archives you have suggsted,
+> below is what we need to do.
+>  1)The second was to build a *Filter* that uses WildcardTermEnum -- not a
+> Query.
+>  because it's a filter, the scoring aspects of each document are taken out
+> of the equation (I am worried abt it , as i need scoring info)
+>
+
+This is true *for the wildcard clause*. It's a legitimate question to ask
+what
+scoring means for a wildcard clause. Rather, it's legitimate to ask whether
+that adds much value. I managed to convince my product manager that
+the end user experience didn't suffer enough to matter, but it can be argued
+either way.
+
+That said, I'm pretty sure that if you make this a sub-clause of a boolean
+query,
+you still get scoring for the *other* parts of the query. That is,
+BooleanQuery bq = ....
+bq.add(regular query);
+bq.add(filtered wildcard query);
+
+search (bq);
+
+(note, really sloppy pseudo code there) will give you scoring for
+the "regular query" part of the bq. Of course that requires you to
+break up the incoming query to the wildcard parts and the not
+wildcard parts.......
+
+
+>
+>  2)Once you have a "WildcardFilter" wrapping it in a ConstantScoreQuery
+> would give you a drop in replacement for WildCardQuery that would sacrifive
+> the TF/IDF scoring factors for speed and garunteed execution on any pattern
+> in any index regardless of size. (Does that mean it will solve my scoring
+> issue and i will get scoring info)
+>
+
+I'm pretty sure that you don't get scoring here. ConstantScoreQuery is
+named that way on purpose <G>.
+
+
+>
+>  Also it suggests "SpanNearQuery on a wildcard". I am kinda cofused which
+> is the approach that should be actually used. Please suggest. At the same
+> time i am studing more abt it. Thanks a lot for ur help on this.
+>
+
+I think I was looking at this for a method of highlighting, but span queries
+won't fix up wildcard queries.
+
+handling arbitrary wildcard queries, that is queries with, say, only
+one or two leading letters is an area of Lucene that requires that
+one really dig into the guts of querying and do some custom work.
+We've had quite reasonable results by imposing the restriction that
+wildcard queries MUST have three leading characters. That is,
+a*, ab* are illegal, but abc* is legal.
+
+What I'd suggest is to start by imposing that restriction, bumping the
+maxbooleanclauses number and just let Lucene do its tricks.
+Perhaps catching the TooManyClauses exception and informing
+the user with some message like "query to general" or some such.
+Then, if the product manager says that is unacceptable let them
+know what the cost is and go from there. You'll get push-back that
+"of course we must allow one character wildcards", but in my
+experience that's often just a knee-jerk reaction and not as
+much of a requirement as people think. Your situation may vary....
+
+Yet another possibility, depending upon the size and space
+requirements is to play interesting games with your index, for
+instance for any word index special one and two letter tokens,
+e.g. abcde gets a$, ab$ and abcde all indexed. Then you
+pre-process your query and turn a* into a$, ab* into ab$
+and just use these terms (you have to take some car
+that your query analyzer doesn't strip these out). Now, you've
+turned arbitrary wildcards into your three-letter-prefix rule
+or simple term queries, preserving relevance etc. You have
+to take some care to index your special tokens with 0 increments
+so phrase and span queries work, but that's not very hard
+especially since Lucene In Action demonstrates the
+SynonymAnalyzer which does the same thing.
+
+But note the implicit restriction here that you really
+don't search for ab*cd*e* with this scheme, but
+neither does Google.
+
+Whew! enough for Saturday morning <G>....
+
+Best
+Erick
+
+
+>
+>  Best Regards,
+>  Ruchika
+>
+> Erick Erickson <erickerickson@gmail.com> wrote:
+>  John's answer is spot-on. There's a wealth of information in the user
+> group
+> archives that you should be able to search on discussing ways of providing
+> the functionality. One thread titled "I just don't get wildcards at all"
+> is one where the folks who know generously helped me out.
+>
+> Once you find out how to search for that you'll know you're in the right
+> place.
+> Here's the searchable archive.....
+>
+>
+> http://www.gossamer-threads.com/lists/engine?do=search;search_forum=forum_2;;list=lucene
+>
+> Make sure you select the "java user" from the top drop-down labeled
+> "Search".
+>
+> Best
+> Erick
+>
+> On Nov 30, 2007 2:07 PM, John Byrne wrote:
+>
+> > Hi,
+> >
+> > Your problem is that when you do a wildacrd search, Lucene expands the
+> > wildacrd term into all possible terms. So, searching for "stat*"
+> > produces a list of terms like "state", "states", "stating" etc. (It only
+> > uses terms that actually occur in your index, however). These terms are
+> > all added as OR clauses of a boolean query.
+> >
+> > The thing is, be defult, there is a limit of 1024 caluses for a boolean
+> > query. If yuor wildacrd term expands into more than this, (which happens
+> > very easily), you get that exception you described. You can solve the
+> > issues by setting the maximum clause count yourself, using
+> >
+> > BooleanQuery.setMaxClauseCount(int maxClauseCount)
+> >
+> > See
+> >
+> >
+> http://lucene.zones.apache.org:8080/hudson/job/Lucene-Nightly/javadoc/core/index.html
+> > for mroe info.
+> >
+> > Bear in mind that putting a wildcard near the start of the term results
+> > in a large number of boolean clauses, which increases memory usage. This
+> > is the reason for the default limit. This limit will also affect fuzzy
+> > queries, because they are expanded in the same way.
+> >
+> > Regards,
+> > JB
+> >
+> > Ruchi Thakur wrote:
+> > >
+> > > Hi there.
+> > > I am a new Lucene user and I have been searching the group archives
+> but
+> > couldn't solve the problem. I have just joined a project that uses
+> Lucene.
+> > > We use the StandardAnalyzer for indexing our documents and our query
+> is
+> > as
+> > > follows when we issue a search string of t* for example:
+> > > +t* +cont_type:pa
+> > >
+> > > We get an Exception when we issue some of our wildcard text searches
+> > we get following Exception
+> > > org.apache.lucene.search.BooleanQuery$TooManyClauses Exception : Max
+> > clause if 1024
+> > >
+> > > Please suggest.
+> > >
+> > > Regards,
+> > > Ruchi
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+> > >
+> > > ---------------------------------
+> > > Never miss a thing. Make Yahoo your homepage.
+> > >
+> > >
+> ------------------------------------------------------------------------
+> > >
+> > > No virus found in this incoming message.
+> > > Checked by AVG Free Edition.
+> > > Version: 7.5.503 / Virus Database: 269.16.11/1161 - Release Date:
+> > 30/11/2007 12:12
+> > >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+>
+> ---------------------------------
+> Be a better pen pal. Text or chat with friends inside Yahoo! Mail. See
+> how.
+>
+

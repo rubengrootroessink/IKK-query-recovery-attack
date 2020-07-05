@@ -1,0 +1,230 @@
+FROM: Amin Mohammed-Coleman <ami...@gmail.com>
+SUBJECT: Re: Filtering question/advice
+DATE: 24 Sep 2009
+
+Hi
+Sorry for not getting back to you.  Been swamped with stuff and work and
+home.  Just managed to check my lucene emails!
+
+You are right i made some silly mistakes with the testcase and have updated
+accordingly.  The test is still failing but the properties are set
+correctly:
+
+public class UnderwriterReferenceTest {
+    private Directory directory;
+    private Analyzer analyzer;
+    private IndexSearcher indexSearcher;
+    private IndexWriter indexWriter;
+    private Document layerDocumentA;
+
+
+    @Before
+    public void setUp() throws Exception {
+        directory = new RAMDirectory();
+        analyzer = new StandardAnalyzer();
+        indexWriter = new IndexWriter(directory, analyzer,
+IndexWriter.MaxFieldLength.UNLIMITED);
+
+    }
+
+   @Before
+   public void setUpDocumentsForIndexing() throws Exception {
+
+       Field uw1 = new Field("uw-refernce", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+       Field uw2 = new Field("uw-refernce", "bye", Field.Store.NO,
+Field.Index.ANALYZED);
+
+
+       Field uw1UWA = new Field("uw-uwa", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+       Field uw2UWB = new Field("uw-uwb", "bye", Field.Store.NO,
+Field.Index.ANALYZED);
+
+
+       layerDocumentA = new Document();
+       layerDocumentA.add(uw1);
+       layerDocumentA.add(uw2);
+       layerDocumentA.add(uw1UWA);
+       layerDocumentA.add(uw2UWB);
+   }
+
+
+    @Test
+    public void
+testUWBCannotSeeResultIfUWReferenceIsSearchThatDoesNotBelongToUWB() throws
+Exception {
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+        filter.setUwId("uwb");
+        filter.setTermValue("hello");
+
+        QueryParser queryParser = new QueryParser("uw-refernce", analyzer);
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(0, topDocs.totalHits);
+    }
+
+
+    @Test
+    public void
+testUWACanSeeResultIfUWReferenceIsSearchThatDoesBelongToUWA() throws
+Exception {
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+        filter.setUwId("uwa");
+        filter.setTermValue("hello");
+
+        QueryParser queryParser = new QueryParser("uw-refernce", analyzer);
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(1, topDocs.totalHits);
+    }
+
+    @Test
+    public void testUWBCanSeeResultIfSearchTermMatchesOnSomethingElse()
+throws Exception {
+
+        Field data = new Field("data", "hello", Field.Store.NO,
+Field.Index.ANALYZED);
+        layerDocumentA.add(data);
+        indexWriter.addDocument(layerDocumentA);
+        indexWriter.commit();
+        indexWriter.close();
+
+        indexSearcher = new IndexSearcher(directory);
+
+
+
+        UnderwriterReferenceFilter filter = new
+UnderwriterReferenceFilter();
+        filter.setTermValue("hello");
+        filter.setUwId("uwb");
+
+        MultiFieldQueryParser queryParser = new MultiFieldQueryParser(new
+String[]{"uw-refernce", "data"}, analyzer);
+        queryParser.enable_tracing();
+        Query q = queryParser.parse("hello");
+        long start = System.currentTimeMillis();
+
+
+
+        TopDocs topDocs = indexSearcher.search(q, filter, 100);
+        long end = System.currentTimeMillis();
+        System.out.println("Total time taken to search = " + (end - start) +
+" milli seconds");
+        System.out.println("Total results returned = " + topDocs.totalHits);
+        assertNotNull(topDocs);
+        assertEquals(1, topDocs.totalHits);
+
+    }
+
+   private class UnderwriterReferenceFilter extends Filter {
+
+    private String uwId;
+    private String termValue;
+
+    public void setTermValue(String termValue) {
+       this.termValue = termValue;
+    }
+
+    public void setUwId(String uwId) {
+        this.uwId = uwId;
+    }
+
+    @Override
+    public DocIdSet getDocIdSet(org.apache.lucene.index.IndexReader reader)
+throws java.io.IOException  {
+        if (uwId == null || "".equals(uwId)) {
+            throw new IllegalArgumentException("uwidnot set for filtering");
+        }
+
+        OpenBitSet bitSet = new OpenBitSet( reader.maxDoc());
+        Term term = new Term("uw-"+uwId, termValue);
+        TermDocs termDocs = reader.termDocs( term );
+        while ( termDocs.next() ) {
+            bitSet.set( termDocs.doc() );
+        }
+
+        return bitSet;
+
+    }
+   }
+
+}
+
+
+I did the test using the grouping mechanism that you mentioned which worked
+however I just wanted to know whether the same can be achieved with filters.
+
+
+Thanks again!
+
+Amin
+
+On Thu, Sep 17, 2009 at 11:59 PM, Chris Hostetter
+<hossman_lucene@fucit.org>wrote:
+
+>
+> FWWI: a test case with multiple asserts is more useful if you clarify
+> where it failes ... ie: show us the failure message, or put a comment on
+> athe line of the assert that fails.
+>
+> i didn't run your testcase, but skimming it a few things jumpt out at me
+> that might explain whatever problem you are seeing...
+>
+> :        Field uw1 = new Field("uw-refernce", "hello", Field.Store.NO,
+> : Field.Index.ANALYZED);
+> :        Field uw2 = new Field("uw-refernce", "bye", Field.Store.NO,
+> : Field.Index.ANALYZED);
+>                 ...
+> :        layerDocumentA = new Document();
+> :        layerDocumentA.add(uw1);
+> :        layerDocumentA.add(uw1);
+>
+> ...did you really mean to add uw1 twice? or did you mean to add uw2 as
+> well (it's never used)...
+>
+> :     public void testUWBCanSeeResultIfSearchTermMatchesOnSomethingElse()
+> : throws Exception {
+>                ...
+> :         UnderwriterReferenceFilter filter = new
+> : UnderwriterReferenceFilter();
+>
+> ...you never set any properties on this Filter before you use it. reading
+> it's implementation, that should cause an IllegalArgumentException.
+>
+>
+> -Hoss
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

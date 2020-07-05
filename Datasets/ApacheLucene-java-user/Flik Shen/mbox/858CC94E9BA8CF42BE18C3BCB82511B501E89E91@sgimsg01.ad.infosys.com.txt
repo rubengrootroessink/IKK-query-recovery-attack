@@ -1,0 +1,316 @@
+FROM: "Flik Shen" <Flik_S...@infosys.com>
+SUBJECT: RE: An interesting thing
+DATE: 12 Jun 2006
+
+1. I use buffered indexing and ram indexing to index same 3000
+documents. So I think they have same total sizes.
+2. I store them in ram directory firstly no matter ram or buffered. I
+think it should have same performances. Then I take further step to hold
+index into file system directory.
+So why do we consume less time when we take more actions based on same
+previous action?
+
+-----Original Message-----
+From: yueyu lin [mailto:popeyelin@gmail.com] 
+Sent: Monday, June 12, 2006 10:38 AM
+To: java-user@lucene.apache.org
+Subject: Re: An interesting thing
+
+1.  Buffered index is using ram. They are small and samll enough to be
+easy
+for OS to allocate several(or only one) pages to store them.
+2. RAMDirectory will have to apply huge blocks of ram from OS. Sometimes
+OS
+cannot allocate so many ram efficiently. So some of pages are moved to
+disk
+and a ram-disk mapping is constructed. When using those kinds of pages,
+OS
+has to first remove some using pages in memory and then load some pages
+from
+disk into ram. That's a great cost.
+
+For any program, applying huge memory is always slow than applying small
+memory.
+
+On 6/12/06, Flik Shen <Flik_Shen@infosys.com> wrote:
+>
+> One thing could not be explained clearly.
+> That is why "RAM" ALWAYS take more time than buffered indexing.
+> On other hand the buffered indexing is to use "RAM" as a buffer.
+> Is there some difference between these two "RAM"?
+> To use "RAM" as a buffer I take additional step to convert buffered
+> index to FS index eventually. How could it save time?
+>
+> Following is the class declaration:
+> ================= Class FSversusRAMDirectoryTest Begin
+=================
+> package study.lucene.chapter2;
+>
+> import java.io.IOException;
+> import java.util.ArrayList;
+> import java.util.Collection;
+> import java.util.Iterator;
+>
+> import junit.framework.TestCase;
+>
+> import org.apache.lucene.analysis.SimpleAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.FSDirectory;
+> import org.apache.lucene.store.RAMDirectory;
+>
+> public class FSversusRAMDirectoryTest extends TestCase {
+>
+>     private Directory fsDir;
+>
+>     private Directory ramDir;
+>
+>     private Directory fsBufDir;
+>
+>     private Collection docs = loadDocuments(3000, 5);
+>
+>     protected void setUp() throws Exception {
+>
+>         String fsIndexDir = System.getProperty("java.io.tmpdir",
+"tmp")
+>                           + System.getProperty("file.separator")
+>                           + "fs-index";
+>         String fsBufIndexDir = System.getProperty("java.io.tmpdir",
+> "tmp")
+>                                   +
+System.getProperty("file.separator")
+>                                   + "fs-buffered-index";
+>         // Create Directory whose content is held in RAM
+>         ramDir = new RAMDirectory();
+>
+>         // Create Directory whose content is stored on disk
+>         fsDir = FSDirectory.getDirectory(fsIndexDir, true);
+>
+>         // Create Directory whose content is stored on disk
+>         fsBufDir = FSDirectory.getDirectory(fsBufIndexDir, true);
+>     }
+>
+>     public void testTiming() throws IOException {
+>
+>         // RAMDirectory is faster than FSDirectory
+>         long ramTiming = timeIndexWriter(ramDir);
+>         long fsTiming = timeIndexWriter(fsDir);
+>         assertTrue(fsTiming > ramTiming);
+>
+>         long bfsTiming = timeBufIndexWriter(fsBufDir);
+>
+>         System.out.println("RAMDirectory Time: " + (ramTiming) + "
+ms");
+>         System.out.println("FSDirectory Time : " + (fsTiming) + "
+ms");
+>         System.out.println("BufferedDirectory Time : " + (bfsTiming) +
+"
+> ms");
+>     }
+>
+>     private long timeBufIndexWriter(Directory dir) throws IOException
+{
+>
+>         long start = System.currentTimeMillis();
+>         addBufDocuments(dir);
+>
+>         long stop = System.currentTimeMillis();
+>         return (stop - start);
+>     }
+>
+>     private void addBufDocuments(Directory dir) throws IOException {
+>
+>         Directory[] tempDirs = {new RAMDirectory()};
+>         addDocuments(tempDirs[0]);
+>
+>         IndexWriter writer = new IndexWriter(dir, new
+SimpleAnalyzer(),
+> true);
+>         writer.addIndexes(tempDirs);
+>
+>         writer.optimize();
+>         writer.close();
+>     }
+>
+>     private long timeIndexWriter(Directory dir) throws IOException {
+>         long start = System.currentTimeMillis();
+>         addDocuments(dir);
+>         long stop = System.currentTimeMillis();
+>         return (stop - start);
+>     }
+>
+>     private void addDocuments(Directory dir) throws IOException {
+>         IndexWriter writer = new IndexWriter(dir, new
+SimpleAnalyzer(),
+> true);
+>
+> /*
+>         // change to adjust performance of indexing with FSDirectory
+>         // Parameters that affect performance of FSDirectory
+>         writer.setMergeFactor(writer.getMergeFactor());
+>         writer.setMaxMergeDocs(writer.getMaxMergeDocs());
+>         writer.setMaxBufferedDocs(writer.getMaxBufferedDocs());
+> */
+>
+>         for (Iterator iter = docs.iterator(); iter.hasNext();) {
+>
+>             Document doc = new Document();
+>             String word = (String) iter.next();
+>             doc.add(new Field("keyword", word, Field.Store.YES,
+>                     Field.Index.UN_TOKENIZED));
+>             doc.add(new Field("unindexed", word, Field.Store.YES,
+>                     Field.Index.NO));
+>             doc.add(new Field("unstored", word, Field.Store.NO,
+>                     Field.Index.NO_NORMS));
+>             doc.add(new Field("text", word, Field.Store.YES,
+>                     Field.Index.TOKENIZED));
+>             writer.addDocument(doc);
+>         }
+>         writer.optimize();
+>         writer.close();
+>     }
+>
+>     private Collection loadDocuments(int numDocs, int wordsPerDoc) {
+>         Collection docs = new ArrayList(numDocs);
+>         for (int i = 0; i < numDocs; i++) {
+>             StringBuffer doc = new StringBuffer(wordsPerDoc);
+>             for (int j = 0; j < wordsPerDoc; j++) {
+>                 doc.append("Bibamus ");
+>             }
+>             docs.add(doc.toString());
+>         }
+>         return docs;
+>     }
+> }
+> =================  Class FSversusRAMDirectoryTest End
+=================
+> -----Original Message-----
+> From: yueyu lin [mailto:popeyelin@gmail.com]
+> Sent: Sunday, June 11, 2006 7:31 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: An interesting thing
+>
+> In some OS, the ram is not only "RAM". The virtual ram uses the disk.
+> That's
+> very slow.
+> In some windows platform, you will find half of some application's ram
+> is
+> virtual ram.
+> That's some why windows is slow in some fields.
+>
+> On 6/11/06, Flik Shen <Flik_Shen@infosys.com> wrote:
+> >
+> >  Hi,
+> >
+> >
+> >
+> > I am freshman to Lucene and I am reading the book "Lucene In
+Action".
+> >
+> > Just as that we know, there are two kinds of directory to hold
+index,
+> one
+> > is File System and the other is RAM.
+> >
+> > There is a sample to compare performances of these two kind
+> directories
+> > and there is also a piece of code about "Batch indexing by using
+> > RAMDirectory as a buffer".
+> >
+> > When I follow some samples, I found an interesting thing about
+> indexing
+> > performance.
+> >
+> >
+> >
+> > I combine these two pieces of codes and time each kind directory
+> indexing.
+> > (Please refer the attachment for details processes)
+> >
+> > I load 3000 docs and 5 words per doc. I use File System Directory
+and
+> RAM
+> > Directory to indexing these docs directly. The time of these two are
+> 10737ms
+> > and 1575ms.
+> >
+> > Then I use a RAM directory as a buffer for indexing and use method
+> > "addIndexes" of a new Index writer which finally holds index in a
+File
+> > System directory.
+> >
+> > The time it consumed is 1348ms.
+> >
+> > How could this be?
+> >
+> > I think the time that buffered indexing consumes should base on the
+> time
+> > of RAM indexing.
+> >
+> > I wonder why a buffered indexing even has a good performance than a
+> ram
+> > indexing.
+> >
+> > So interesting!
+> >
+> >
+> >
+> > Best regards,
+> >
+> > Flik Shen
+> >  **************** CAUTION - Disclaimer *****************
+> > This e-mail contains PRIVILEGED AND CONFIDENTIAL INFORMATION
+intended
+> > solely for the use of the addressee(s). If you are not the intended
+> > recipient, please notify the sender by e-mail and delete the
+original
+> > message. Further, you are not to copy, disclose, or distribute this
+> e-mail
+> > or its contents to any other person and any such actions are
+unlawful.
+> This
+> > e-mail may contain viruses. Infosys has taken every reasonable
+> precaution to
+> > minimize this risk, but is not liable for any damage you may sustain
+> as a
+> > result of any virus in this e-mail. You should carry out your own
+> virus
+> > checks before opening the e-mail or attachment. Infosys reserves the
+> right
+> > to monitor and review the content of all messages sent to or from
+this
+> > e-mail address. Messages sent to or from this e-mail address may be
+> stored
+> > on the Infosys e-mail system.
+> > ***INFOSYS******** End of Disclaimer ********INFOSYS***
+> >
+> >
+---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+> --
+> --
+> Yueyu Lin
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+--
+Yueyu Lin
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

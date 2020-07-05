@@ -1,0 +1,103 @@
+FROM: Glen Newton <glen.new...@gmail.com>
+SUBJECT: Re: Best practices for searcher memory usage?
+DATE: 15 Jul 2010
+
+There are a number of strategies, on the Java or OS side of things:
+- Use huge pages[1]. Esp on 64 bit and lots of ram. For long running,
+large memory (and GC busy) applications, this has achieved significant
+improvements. Like 300% on EJBs. See [2],[3],[4]. For a great article
+introducing and benchmarking huge tables, both in C and Java, see [5]
+ To see if huge pages might help you, do
+  > cat /proc/meminfo
+ And check on the "PageTables:        26480 kB"
+ If the PageTables is, say, more than 1-2GBs, you should consider
+using huge pages.
+- assuming multicore: there are times (very application dependent)
+when having your application running on all cores turns out not to
+produce the best performance. Take one core out making it available to
+look after system things (I/O, etc) sometimes will improve
+performance. Use numactl[6] to bind your application to n-1 cores,
+leaving one out.
+- - numactl also allows you to restrict memory allocation to 1-n
+cores, which also may be useful depending on your application
+- The Java vm from Sun-Oracle has a number of options[7]
+  - -XX:+AggressiveOpts [You should have this one on always...]
+  - -XX:+StringCache
+  - -XX:+UseFastAccessorMethods
+
+  - -XX:+UseBiasedLocking  [My experience has this helping some
+applications, hindering others...]
+  - -XX:ParallelGCThreads= [Usually this is #cores; try reducing this to n/2]
+  - -Xss128k
+  - -Xmn [Make this large, like of your 40% of heap -Xmx If you do
+this use -XX:+UseParallelGC See [8]
+You can also play with the many GC parameters. This is pretty arcane,
+but can give you good returns.
+
+And of course, I/O is important: data on multiple disks with multiple
+controllers; RAID; filesystem tuning ; turn off atime; readahead
+buffer (change from 128k to 8MB on Linux: see [9]) OS tuning. See [9]
+for a useful filesystem comparison (for Postgres).
+
+-glen
+http://zzzoot.blogspot.com/
+
+[1]http://zzzoot.blogspot.com/2009/02/java-mysql-increased-performance-with.html
+[2]http://andrigoss.blogspot.com/2008/02/jvm-performance-tuning.html
+[3]http://kirkwylie.blogspot.com/2008/11/linux-fork-performance-redux-large.html
+[4]http://orainternals.files.wordpress.com/2008/10/high_cpu_usage_hugepages.pdf
+[5]http://lwn.net/Articles/374424/
+[6]http://www.phpman.info/index.php/man/numactl/8
+[7]http://java.sun.com/javase/technologies/hotspot/vmoptions.jsp#PerformanceTuning
+[8]http://java.sun.com/performance/reference/whitepapers/tuning.html#section4.2.5
+[9]http://assets.en.oreilly.com/1/event/27/Linux%20Filesystem%20Performance%20for%20Databases%20Presentation.pdf
+
+On 15 July 2010 04:28, Christopher Condit <condit@sdsc.edu> wrote:
+> Hi Toke-
+>> > * 20 million documents [...]
+>> > * 140GB total index size
+>> > * Optimized into a single segment
+>>
+>> I take it that you do not have frequent updates? Have you tried to see if you
+>> can get by with more segments without significant slowdown?
+>
+> Correct - in fact there are no updates and no deletions. We index everything offline
+when necessary and just swap the new index in...
+> By more segments do you mean not call optimize() at index time?
+>
+>> > The application will run with 10G of -Xmx but any less and it bails out.
+>> > It seems happier if we feed it 12GB. The searches are starting to bog
+>> > down a bit (5-10 seconds for some queries)...
+>>
+>> 10G sounds like a lot for that index. Two common memory-eaters are sorting
+>> by field value and faceting. Could you describe what you're doing in that
+>> regard?
+>
+> No faceting and no sorting (other than score) for this index...
+>
+>> Similarly, the 5-10 seconds for some queries seems very slow. Could you give
+>> some examples on the queries that causes problems together with some
+>> examples of fast queries and how long they take to execute?
+>
+> Typically just TermQueries or BooleanQueries: (Chip OR Nacho OR Foo) AND (Salsa OR Sauce)
+AND (This OR That)
+> The latter is most typical.
+>
+> With a single keyword it will execute in < 1 second. In a case where there are 10
+clauses it becomes much slower (which I understand, just looking for ways to speed it up)...
+>
+> Thanks,
+> -Chris
+>
+
+
+
+-- 
+
+-
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

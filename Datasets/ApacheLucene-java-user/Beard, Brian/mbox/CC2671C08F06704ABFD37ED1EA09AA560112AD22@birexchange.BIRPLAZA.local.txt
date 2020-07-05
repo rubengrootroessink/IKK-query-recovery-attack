@@ -1,0 +1,219 @@
+FROM: "Beard, Brian" <Brian.Be...@mybir.com>
+SUBJECT: RE: Wanting batch update to avoid high disk usage
+DATE: 24 Aug 2010
+
+At any given time, you need to have at least twice as much disk space
+available as the total index size, for the use case you mention, but
+also in the case of optimization. It is possible for an optimize to
+double the index size right before the commit.
+
+You could try to dynamically call expungeDeletes by monitoring disk
+space usage. As long as it doesn't happen on a per-batch basis it may be
+enough to take care of the problem.
+
+-----Original Message-----
+From: Justin [mailto:crynax@yahoo.com] 
+Sent: Tuesday, August 24, 2010 9:41 AM
+To: java-user@lucene.apache.org
+Subject: Re: Wanting batch update to avoid high disk usage
+
+> reclamation may take longer ... for segments ... less activity
+
+At the present time, I'm concerned about adding a field to every
+document in an 
+existing index. The activity is delete followed by add many times. So if
+my disk 
+capacity is 32GB and my index size is 20GB, there may be plenty of space
+for an 
+additional field but not enough to double the size of the index with all
+the 
+deleted documents sitting around. The pseudo-code in my first post was
+an 
+attempt to reclaim space as documents are updated, but that's not
+practical when 
+entire segment files are rewritten every time. So it looks like our only
+option 
+is to bail out when there's not enough space to duplicate the existing
+index.
+
+
+
+
+----- Original Message ----
+From: "Beard, Brian" <Brian.Beard@mybir.com>
+To: java-user@lucene.apache.org
+Sent: Tue, August 24, 2010 8:19:52 AM
+Subject: RE: Wanting batch update to avoid high disk usage
+
+We had a situation where our index size was inflated to roughly double.
+It took about a couple of months, but the size eventually dropped back
+down, so it does seem to eventually get rid of the deleted documents.
+
+With that said, in the future expungeDeletes will get called once a day
+to better manage the size.
+
+If you always optimize down to 1 segment, this problem won't occur. We
+had this setting at 5 segments, so that may be why the document
+deletions took a while longer. 
+
+I'm not 100% sure, but this also seems dependent on how large the
+segments are and what the maxMergeMb limit is. This reclamation may take
+longer to happen for segments that essentially have less activity
+associated them - they are already large and never get merged due to the
+number of optimization segments is greater than 1, and they also are
+already at the maxMergeMb limit and never get merged through the normal
+indexing process.
+
+-----Original Message-----
+From: Anshum [mailto:anshumg@gmail.com] 
+Sent: Tuesday, August 24, 2010 12:11 AM
+To: java-user@lucene.apache.org
+Subject: Re: Wanting batch update to avoid high disk usage
+
+Hi Justin,
+Lucene does not reclaim space, each update translates to a deletion
+followed
+by an addition of a new document. Ideally you could let the index size
+bloat
+and then expungeDeletes or optimize at the end, unless you want to clean
+up
+and reclaim the disc space for some reason. Optimize/expungeDeletes() is
+when lucene would reclaim deleted document ids and document space.
+Though
+remember that both these functions are highly I/O intensive and time
+consuming at times. Just see if reclaiming space midway is something so
+essential.
+
+Moreover, a commit would not impact your issue of reclaiming lost disc
+space.
+
+--
+Anshum Gupta
+http://ai-cafe.blogspot.com
+
+
+On Tue, Aug 24, 2010 at 9:22 AM, Justin <crynax@yahoo.com> wrote:
+
+> My actual code did not call expungeDeletes every time through the
+loop;
+> however,
+> calling expungeDeletes or optimize after the loop means that the index
+has
+> doubled in size with all the deleted documents still sitting around.
+Or is
+> it
+> true that Lucene will try to reclaim disk space? I assume a commit
+would be
+> required at some point.
+>
+>
+>
+>
+> ----- Original Message ----
+> From: Anshum <anshumg@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Mon, August 23, 2010 10:18:36 PM
+> Subject: Re: Wanting batch update to avoid high disk usage
+>
+> Don't bother calling expunge deletes so often, makes no sense.
+Instead,
+> call
+> it once at the end, though, you are calling the optimize method in the
+end
+> anyways so should take care of itself. there shouldn't be any
+difference
+> (but degradation in performance) on adding a call to expungedeletes().
+>
+> --
+> Anshum Gupta
+> http://ai-cafe.blogspot.com
+>
+>
+> On Tue, Aug 24, 2010 at 4:38 AM, Justin <crynax@yahoo.com> wrote:
+>
+> > In an attempt to avoid doubling disk usage when adding new fields to
+all
+> > existing documents, I added a call to IndexWriter::expungeDeletes.
+Then
+> my
+> > colleague pointed out that Lucene will rewrite the potentially large
+> > segment
+> > files each time that method is called.
+> >
+> >
+> >  reader = writer.getReader();
+> >  for (int i=0; i<n; i++) {
+> >    Term idTerm = new Term("id", i);
+> >    TermDocs termDocs = reader.termDocs(idTerm);
+> >    if (termDocs != null && termDocs.next()) {
+> >      Document doc = reader.document(termDocs.doc());
+> >      doc.add(myfield, value);
+> >      writer.updateDocument(idTerm, doc);
+> >      //writer.expungeDeletes(true); // BAD: rewrites segment files
+each
+> > time
+> >    }
+> >  }
+> >  reader.close();
+> >  writer.commit();
+> >  writer.optimize(true);
+> >  writer.close();
+> >
+> >
+> > The following Lucene FAQ response suggests that disk space from
+deleted
+> > documents will be reclaimed. Is this true and is the savings
+worthwhile
+> to
+> > update an existing index (followed by optimizing out the deleted
+> documents)
+> > instead of simply creating a new index?
+> >
+> >
+> >
+>
+http://wiki.apache.org/lucene-java/LuceneFAQ#If_I_decide_not_to_optimize
+_the_index.2C_when_will_the_deleted_documents_actually_get_deleted.3F
+> >F
+> >
+> >
+> > Thanks for your help,
+> > Justin
+> >
+> >
+> >
+> >
+> >
+---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

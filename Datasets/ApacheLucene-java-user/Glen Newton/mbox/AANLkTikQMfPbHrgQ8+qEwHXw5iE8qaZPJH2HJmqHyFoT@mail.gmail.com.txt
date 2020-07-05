@@ -1,0 +1,198 @@
+FROM: Glen Newton <glen.new...@gmail.com>
+SUBJECT: Re: Dataimport performance
+DATE: 16 Dec 2010
+
+Hi,
+
+LuSqlv2 beta comes out in the next few weeks, and is designed to
+address this issue (among others).
+
+LuSql original (http://lab.cisti-icist.nrc-cnrc.gc.ca/cistilabswiki/index.php/LuSql
+now moved to: https://code.google.com/p/lusql/) is a JDBC-->Lucene
+high performance loader.
+
+You may have seen my posts on this list suggesting LuSql as high
+performance alternative to DIH, for a subset of use cases.
+
+LuSqlV2 has evolved into a full extract-transform-load (ETL) high
+performance engine, focusing on many of the issues of interest to the
+Lucene/SOLR community.
+It has a pipelined, pluggable, multithreaded architecture.
+It is basically: pluggable source --> 0 or more pluggable filters -->
+pluggable sink
+
+Source plugins implemented:
+- JDBC, Lucene, SOLR (SolrJ), BDB, CSV, RMI, Java Serialization
+Sink plugins implemented:
+- JDBC, Lucene, SOLR (SolrJ), BDB, XML, RMI, Java Serialization, Tee,
+NullSink [I am working on a memcached Sink]
+A number of different filters implemented (i.e. get PDF file from
+filesystem based on SQL field and convert & get test, etc) including:
+BDBJoinFIlter, JDBCJoinFilter
+
+--
+
+This particular problem is one of the unit tests I have: given a
+simple database of:
+1- table Name
+2- table City
+3- table nameCityJoin
+4- table Job
+5- table nameJobJoin
+
+run a JDBC-->BDB LuSql instance each for of City+nameCityJoin and
+Job+nameJobJoin; then run a JDBC-->SolrJ on table Name, adding 2
+BDBJoinFIlters, each which take the BDB generated earlier and do the
+join (you just tell the filters which field from the JDBC-generated to
+use against the BDB key).
+
+So your use case use a larger example of this.
+
+Also of interest:
+- Java RMI (Remote Method Invocation): both an RMISink(Server) and
+RMISource(Client) are implemented. This means you can set up N
+machines which are doing something, and have one or more clients (on
+their own machines) that are pulling this data and doing something
+with it. For example, JDBC-->PDFToTextFilter-->RMI (converting PDF
+files to text based on the contents of a SQL database, with text files
+in the file system): basically doing some heavy lifting, and then
+start up an RMI-->SolrJ (or Lucene) which is a client to the N PDF
+converting machines, doing only the Lucene/SOLR indexing. The client
+does a pull when it needs more data. You can have N servers x M
+clients! Oh, string fields length > 1024 are automatically gzipped by
+the RMI Sink(Server), to reduce network (at the cost of cpu:
+selectable). I am looking into RMI alternatives, like Thrift, ProtoBuf
+for my next Source/Sinks to implement. Another example is the reverse
+use case: when the indexing is more expensive getting the data.
+Example: One JDBC-->RMISink(Server) instance, N
+RMISource(Client)-->Lucene instances; this allows multiple Lucenes to
+be fed from a single JDBC source, across machines.
+
+- TeeSink: the Tee sink hides N sinks, so you can split the pipeline
+into multiple Sinks. I've used it to send the same content to Lucene
+as well as BDB in one fell swoop. Can you say index and content store
+in one step?
+
+I am working on cleaning up the code, writing docs (I made the mistake
+of making great docs for LusqlV1, so I have work to do...!), and
+making a couple more tests.
+
+I will announce the beta on this and the Lucene list.
+
+If you have any questions, please contact me.
+
+Thanks,
+Glen Newton
+http://zzzoot.blogspot.com
+
+--> Old LuSql benchmarks:
+http://zzzoot.blogspot.com/2008/11/lucene-231-vs-24-benchmarks-using-lusql.html
+
+On Thu, Dec 16, 2010 at 12:04 PM, Dyer, James <James.Dyer@ingrambook.com> wrote:
+> We have ~50 long-running SQL queries that need to be joined and denormalized.  Not all
+of the queries are to the same db, and some data comes from fixed-width data feeds.  Our
+current search engine (that we are converting to SOLR) has a fast disk-caching mechanism that
+lets you cache all of these data sources and then it will join them locally prior to indexing.
+>
+> I'm in the process of developing something similar for DIH that uses the Berkley db to
+do the same thing.  Its good enough that I can do nightly full re-indexes of all our data
+while developing the front-end, but it is still very rough.  Possibly I would like to get
+this refined enough to eventually submit as a jira ticket / patch as it seems this is a somewhat
+common problem that needs solving.
+>
+> Even with our current search engine, the join & denormalize step is always the longest-running
+part of the process.  However, I have it running fairly fast by partitioning the data by
+a modulus of the primary key and then running several jobs in parallel.  The trick is not
+to get I/O bound.  Things run fast if you can set it up to maximize CPU.
+>
+> James Dyer
+> E-Commerce Systems
+> Ingram Content Group
+> (615) 213-4311
+>
+>
+> -----Original Message-----
+> From: Ephraim Ofir [mailto:EphraimO@icq.com]
+> Sent: Thursday, December 16, 2010 3:04 AM
+> To: solr-user@lucene.apache.org
+> Subject: RE: Dataimport performance
+>
+> Check out http://mail-archives.apache.org/mod_mbox/lucene-solr-user/201008.mbox/%3C9F8B39CB3B7C6D4594293EA29CCF438B01702F22@ICQ-MAIL.icq.il.office.aol.com%3E
+> This approach of not using sub entities really improved our load time.
+>
+> Ephraim Ofir
+>
+> -----Original Message-----
+> From: Robert Gründler [mailto:robert@dubture.com]
+> Sent: Wednesday, December 15, 2010 4:49 PM
+> To: solr-user@lucene.apache.org
+> Subject: Re: Dataimport performance
+>
+> i've benchmarked the import already with 500k records, one time without the artists subquery,
+and one time without the join in the main query:
+>
+>
+> Without subquery: 500k in 3 min 30 sec
+>
+> Without join and without subquery: 500k in 2 min 30.
+>
+> With subquery and with left join:   320k in 6 Min 30
+>
+>
+> so the joins / subqueries are definitely a bottleneck.
+>
+> How exactly did you implement the custom data import?
+>
+> In our case, we need to de-normalize the relations of the sql data for the index,
+> so i fear i can't really get rid of the join / subquery.
+>
+>
+> -robert
+>
+>
+>
+>
+>
+> On Dec 15, 2010, at 15:43 , Tim Heckman wrote:
+>
+>> 2010/12/15 Robert Gründler <robert@dubture.com>:
+>>> The data-config.xml looks like this (only 1 entity):
+>>>
+>>>      <entity name="track" query="select t.id as id, t.title as title, l.title
+as label from track t left join label l on (l.id = t.label_id) where t.deleted = 0" transformer="TemplateTransformer">
+>>>        <field column="title" name="title_t" />
+>>>        <field column="label" name="label_t" />
+>>>        <field column="id" name="sf_meta_id" />
+>>>        <field column="metaclass" template="Track" name="sf_meta_class"/>
+>>>        <field column="metaid" template="${track.id}" name="sf_meta_id"/>
+>>>        <field column="uniqueid" template="Track_${track.id}" name="sf_unique_id"/>
+>>>
+>>>        <entity name="artists" query="select a.name as artist from artist
+a left join track_artist ta on (ta.artist_id = a.id) where ta.track_id=${track.id}">
+>>>          <field column="artist" name="artists_t" />
+>>>        </entity>
+>>>
+>>>      </entity>
+>>
+>> So there's one track entity with an artist sub-entity. My (admittedly
+>> rather limited) experience has been that sub-entities, where you have
+>> to run a separate query for every row in the parent entity, really
+>> slow down data import. For my own purposes, I wrote a custom data
+>> import using SolrJ to improve the performance (from 3 hours to 10
+>> minutes).
+>>
+>> Just as a test, how long does it take if you comment out the artists entity?
+>
+>
+
+
+
+-- 
+
+-
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

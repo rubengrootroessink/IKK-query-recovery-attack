@@ -1,0 +1,327 @@
+FROM: "Wermus Fernando" <fernando.wer...@xlnet.net.ar>
+SUBJECT: RE: MultiFieldQueryParser seems broken...  Fix attached.
+DATE: 8 Sep 2004
+
+Bill,
+	I don't receive any .java. Could you send it again?
+
+Thanks.
+
+-----Mensaje original-----
+De: Bill Janssen [mailto:janssen@parc.com] 
+Enviado el: Martes, 07 de Septiembre de 2004 10:06 p.m.
+Para: Lucene Users List
+CC: Ali Rouhi
+Asunto: MultiFieldQueryParser seems broken... Fix attached.
+
+Hi!
+
+I'm using Lucene for an application which has lots of fields/document,
+in which the users can specify in their config files what fields they
+wish to be included by default in a search.  I'd been happily using
+MultiFieldQueryParser to do the searches, but the darn users started
+demanding more Google-like searches; that is, they want the search
+terms to be implicitly AND-ed instead of implicitly OR-ed.  No
+problem, thinks I, I'll just set the "operator".
+
+Only to find this has no effect on MultiFieldQueryParser.
+
+Once I looked at the code, I find that MultiFieldQueryParser combines
+the clauses at the wrong level -- it combines them at the outermost
+level instead of the innermost level.  This means that if you have two
+fields, "author" and "title", and the search string "cutting lucene",
+you'll get the final query
+
+   (title:cutting title:lucene) (author:cutting author:lucene)
+
+If the search operator is "OR", this isn't a problem.  But if it is,
+you have two problems.  The first is that MultiFieldQueryParser seems
+to ignore the operator entirely.  But even if it didn't, the second
+problem is that the query formed would be
+
+   +(title:cutting title:lucene) +(author:cutting author:lucene)
+
+That is, if the word "Lucene" was in both the author field and the
+title field, the match would fit.  This clearly isn't what the
+searcher intended.
+
+You can re-write MultiFieldQueryParser, as I've done in the example
+code which I append here.  This little program allows you to run
+either my parser (-DSearchTest.QueryParser=new) or the old parser
+(-DSearchTest.QueryParser=old).  It allows you to use either OR
+(-DSearchTest.QueryDefaultOperator=or) or AND
+(-DSearchTest.QueryDefaultOperator=and) as the operator.  And it
+allows you to pick your favorite set of default search terms
+(-DSearchTest.QueryDefaultFields=author:title:body, for example).  It
+takes one argument, a query string, and outputs the re-written query
+after running it through the query parser.  So to evaluate the above
+query:
+
+% java -classpath /import/lucene/lucene-1.4.1.jar:. \
+       -DSearchTest.QueryDefaultFields="title:author" \
+       -DSearchTest.QueryDefaultOperator=AND \
+       -DSearchTest.QueryParser=old \
+       SearchTest "cutting lucene"
+query is (title:cutting title:lucene) (author:cutting author:lucene)
+%
+
+The class NewMultiFieldQueryParser does the combination at the inner
+level, using an override of "addClause", instead of the outer level.
+Note that it can't cover all cases (notably PhrasePrefixQuery, because
+that class has no access methods which allow one to introspect over
+it, and SpanQueries, because I don't understand them well enough :-).
+I post it here in advance of filing a formal bug report for early
+feedback.  But it will show up in a bug report in the near future.
+
+Running the above query with the new parser gives:
+
+% java -classpath /import/lucene/lucene-1.4.1.jar:. \
+       -DSearchTest.QueryDefaultFields="title:author" \
+       -DSearchTest.QueryDefaultOperator=AND \
+       -DSearchTest.QueryParser=new \
+       SearchTest "cutting lucene"
+query is +(title:cutting author:cutting) +(title:lucene author:lucene)
+%
+
+which I claim is what the user is expecting.
+
+In addition, the new class uses an API more similar to QueryParser, so
+that the user has less to learn when using it.  The code in it could
+probably just be folded into QueryParser, in fact.
+
+Bill
+
+
+the code for SearchTest:
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.search.Searcher;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.WildcardQuery;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.RangeQuery;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.queryParser.MultiFieldQueryParser;
+import org.apache.lucene.queryParser.FastCharStream;
+import org.apache.lucene.queryParser.TokenMgrError;
+import org.apache.lucene.queryParser.ParseException;
+
+import java.io.File;
+import java.io.StringReader;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.StringTokenizer;
+
+class SearchTest {
+
+    static class NewMultiFieldQueryParser extends QueryParser {
+
+        static private final String DEFAULT_FIELD = "%%";
+
+        private String[] fields = null;
+
+        public NewMultiFieldQueryParser (String[] f, Analyzer a) {
+            super(DEFAULT_FIELD, a);
+            fields = f;
+        }
+
+        protected void addClause(java.util.Vector clauses, int conj, int
+mods, Query q) {
+
+            /*
+              System.err.println("addClause:  new query is " +
+q.toString());
+              if (clauses.size() > 0) {
+              System.err.println("            existing clauses are:");
+              for (int i = 0;  i < clauses.size();  i++)
+              System.err.println("                " +
+clauses.get(i).toString());
+              }
+            */
+
+            if ((q instanceof TermQuery) &&
+(((TermQuery)q).getTerm().field() == DEFAULT_FIELD)) {
+                String text = ((TermQuery)q).getTerm().text();
+                BooleanQuery q2 = new BooleanQuery();
+                for (int i = 0;  i < fields.length;  i++) {
+                    q2.add(new TermQuery(new Term(fields[i], text)),
+false, false);
+                }
+                q = q2;
+            }
+
+            else if ((q instanceof WildcardQuery) &&
+(((WildcardQuery)q).getTerm().field() == DEFAULT_FIELD)) {
+                String text = ((WildcardQuery)q).getTerm().text();
+                BooleanQuery q2 = new BooleanQuery();
+                for (int i = 0;  i < fields.length;  i++) {
+                    q2.add(new WildcardQuery(new Term(fields[i], text)),
+false, false);
+                }
+                q = q2;
+            }
+
+            else if ((q instanceof FuzzyQuery) &&
+(((FuzzyQuery)q).getTerm().field() == DEFAULT_FIELD)) {
+                String text = ((FuzzyQuery)q).getTerm().text();
+                BooleanQuery q2 = new BooleanQuery();
+                for (int i = 0;  i < fields.length;  i++) {
+                    q2.add(new FuzzyQuery(new Term(fields[i], text)),
+false, false);
+                }
+                q = q2;
+            }
+
+            else if ((q instanceof PrefixQuery) &&
+(((PrefixQuery)q).getPrefix().field() == DEFAULT_FIELD)) {
+                String text = ((PrefixQuery)q).getPrefix().text();
+                BooleanQuery q2 = new BooleanQuery();
+                for (int i = 0;  i < fields.length;  i++) {
+                    q2.add(new PrefixQuery(new Term(fields[i], text)),
+false, false);
+                }
+                q = q2;
+            }
+
+            else if ((q instanceof RangeQuery) &&
+(((RangeQuery)q).getField() == DEFAULT_FIELD)) {
+                BooleanQuery q2 = new BooleanQuery();
+                for (int i = 0;  i < fields.length;  i++) {
+                    RangeQuery q3 = new RangeQuery(new Term(fields[i],
+((RangeQuery)q).getLowerTerm().text()),
+                                                   new Term(fields[i],
+((RangeQuery)q).getUpperTerm().text()),
+ 
+((RangeQuery)q).isInclusive());
+                    q2.add(q3, false, false);
+                }
+                q = q2;
+            }
+
+            else if ((q instanceof PhraseQuery) &&
+(((PhraseQuery)q).getTerms()[0].field() == DEFAULT_FIELD)) {
+                BooleanQuery q2 = new BooleanQuery();
+                Term[] terms = ((PhraseQuery)q).getTerms();
+                for (int i = 0;  i < fields.length;  i++) {
+                    PhraseQuery q3 = new PhraseQuery();
+                    for (int j = 0;  j < terms.length;  j++) {
+                        q3.add(new Term(fields[i], terms[j].text()));
+                    }
+                    q2.add(q3, false, false);
+                }
+                q = q2;
+            }
+
+            super.addClause(clauses, conj, mods, q);
+        }
+    }
+
+    private static void search (String querystring) {
+
+        StringBuffer query_buffer = new StringBuffer();
+        String[] query_default_fields = new String[] { "title",
+"authors", "contents" };
+        int search_operator = QueryParser.DEFAULT_OPERATOR_AND;
+        String query_parser = "new";
+        Query query = null;
+
+        try {
+            StandardAnalyzer analyzer = new StandardAnalyzer();
+
+            String z =
+System.getProperties().getProperty("SearchTest.QueryDefaultFields");
+            if (z != null) {
+                query_default_fields = z.split(":");
+            }
+
+            z =
+System.getProperties().getProperty("SearchTest.QueryDefaultOperator");
+            if (z != null) {
+                if (z.equalsIgnoreCase("or"))
+                    search_operator = QueryParser.DEFAULT_OPERATOR_OR;
+                else if (z.equalsIgnoreCase("and"))
+                    search_operator = QueryParser.DEFAULT_OPERATOR_AND;
+            }
+
+            z =
+System.getProperties().getProperty("SearchTest.QueryParser");
+            if (z != null) {
+                if (z.equalsIgnoreCase("new"))
+                    query_parser = "new";
+                else if (z.equalsIgnoreCase("old"))
+                    query_parser = "old";
+            }
+
+            // form the query
+            query_buffer.append(querystring);
+            
+            // run the query
+            if (query_parser.equals("new")) {
+                NewMultiFieldQueryParser p = new
+NewMultiFieldQueryParser(query_default_fields, analyzer);
+                p.setOperator(search_operator);
+                query = p.parse(query_buffer.toString());
+            } else {
+                MultiFieldQueryParser p = new
+MultiFieldQueryParser(query_default_fields[0], analyzer);
+                p.setOperator(search_operator);
+                query = p.parse(query_buffer.toString(),
+query_default_fields, analyzer);
+            }
+            System.err.println("query is " + query.toString());
+                
+        } catch (ParseException e) {
+            System.out.println("* Invalid search expression '" +
+query_buffer.toString() + "' specified");
+            System.err.println(" caught a " + e.getClass() +
+                               "\n with message: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("* Lucene search engine raised " +
+e.getClass() + " with message " + e.getMessage());
+            System.err.println(" 'search' caught a " + e.getClass() +
+                               "\n with message: " + e.getMessage());
+            e.printStackTrace(System.err);
+        }
+    }
+
+    private static void usage () {
+        // print usage message to stderr
+        System.err.println("Usage:  SearchTest 'QUERY'");
+    }
+
+    public static void main(String[] args) {
+
+        if (args.length != 1) {
+            usage();
+            return;
+        }
+
+        search (args[0]);
+
+    }
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

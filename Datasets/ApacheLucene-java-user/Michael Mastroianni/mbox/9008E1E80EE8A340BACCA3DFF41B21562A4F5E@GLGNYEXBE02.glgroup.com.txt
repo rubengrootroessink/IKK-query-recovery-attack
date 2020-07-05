@@ -1,0 +1,330 @@
+FROM: Michael Mastroianni <MMastroia...@glgroup.com>
+SUBJECT: RE: kamikaze
+DATE: 29 Apr 2009
+
+Thanks for the response (and the library, of course :)). I figured out
+the order thing by looking at your tests (I should have done that
+first). It might be a good idea to have a ctor that takes a sorted array
+of ints, since it looks like in situations where you are, for  instance,
+loading a docset from a hitcollector, you have to store things that way
+anyway.
+
+I have another question about the boolean docsets. If I have an
+AndDocIdSet with a bunch of OrDocIdSets inside it, and any of those
+contain an empty basic DocSet, the iterator on the AndDocIdSet will blow
+up on calls to next(). I'm not sure whether this is by design or a bug,
+but it might be a good thing to put in the javadoc. I can reproduce this
+behavior with the following junit test. Is this something you are aware
+of?
+
+regards,
+Michael
+
+
+
+	public void testPartialEmptyAnd() throws IOException
+	{
+		try
+		{
+			DocSet ds1 = new P4DDocIdSet();
+			DocSet ds2 = new P4DDocIdSet();
+			ds2.addDoc(42);
+			ds2.addDoc(43);
+			ds2.addDoc(44);
+			ArrayList<DocIdSet> docs = new
+ArrayList<DocIdSet>();
+			docs.add(ds1);
+			docs.add(ds2);
+			OrDocIdSet orlist1 = new OrDocIdSet(docs);
+			DocSet ds3 = new P4DDocIdSet();
+			DocSet ds4 = new P4DDocIdSet();
+			ds4.addDoc(42);
+			ds4.addDoc(43);
+			ds4.addDoc(44);
+			ArrayList<DocIdSet> docs2 = new
+ArrayList<DocIdSet>();
+			docs2.add(ds3);
+			docs2.add(ds4);
+			OrDocIdSet orlist2 = new OrDocIdSet(docs2);
+			ArrayList<DocIdSet> docs3 = new
+ArrayList<DocIdSet>();
+			docs3.add(orlist1);
+			docs3.add(orlist2);
+			AndDocIdSet andlist = new AndDocIdSet(docs3);
+			
+			DocIdSetIterator iter = andlist.iterator();
+			@SuppressWarnings("unused")
+			int docId = -1;
+			while(iter.next())
+			{
+				docId = iter.doc();
+			}			
+		}
+		catch(Exception e)
+		{
+			System.out.println(e.getMessage());
+			return;
+		}
+		assertTrue(false);
+	}
+
+-----Original Message-----
+From: molz [mailto:anmol.bhasin@gmail.com] 
+Sent: Tuesday, April 28, 2009 9:00 PM
+To: java-user@lucene.apache.org
+Subject: RE: kamikaze
+
+
+Hi Micheal,
+
+Thanks for trying out Kamikaze for starters. So I guess there are a few
+issues here
+
+1. getDocSetInstance(int min, max, count,DocSetFactory.FOCUS) assumes
+that
+count < max. I guess thats an API check we should add anyways to improve
+usability. That is not to say that it will not work if count > max but
+we
+have not done the due diligence on that one.
+
+2. The way you are inserting the elements is not quite right. The addDoc
+method assumes you insert the elements in a sorted fashion. Calling
+doc.addDoc(rand.nextInt(maxDoc) does not quite ensure you are loading
+the
+docSet in a sorted fashion. This is specially useful in BitSet and P4D
+set
+cases as P4D encodes only delta values between conscutive integers.
+
+3. I would recommend using FOCUS.OPTIMAL for best performance/space
+tradeoff, albeit SPACE should work too, if you find any issues with that
+let
+us know, we will be glad to fix it.
+
+4. Finally, I believe you want to just get a plain vanilla docSet from
+one
+of the OR/AND sets. This would be cool to do, however the idea with
+Boolean
+Sets are that they are never really materialized, they are iterated over
+on
+the fly. I believe we could do an enhancement to construct the docSet on
+the
+fly while iterating the Boolean DocSet but as of now there is no
+established
+way of doing that.
+
+Hope I covered all your concerns. I rewrote and run your test case like
+this
+
+public class KamikazeTest extends TestCase
+{
+    public void testGrowingP4()
+    {
+        DocSet doc =
+            DocSetFactory.getDocSetInstance(0, 35000000, 200000,
+DocSetFactory.FOCUS.SPACE);
+        Random rand = new Random(System.currentTimeMillis());
+       // int maxDoc = 3500000;
+        //doc.addDoc(0);
+        
+        int i = 0;
+        try
+        {
+            while(i < 500000)
+            {
+                int nextDoc = i;
+                doc.addDoc(nextDoc);
+                i+=rand.nextInt(50);
+            }              
+        }
+        catch(Exception e)
+        {
+            e.printStackTrace();
+            return;
+        }
+        assertTrue(true);
+       
+    }
+    
+   
+} 
+
+Thanks,
+Anmol
+
+Software Engineer
+Anmol Bhasin
+www.linkedin.com
+
+
+
+Michael Mastroianni wrote:
+> 
+> Hi--
+> 
+> I just got kamikaze somewhat integrated into a project of mine. I'm
+> having problems growing the DocIdSets, though. Up to the point where
+the
+> first regrow happens, everything is fine. Once the regrow happens, I
+get
+> an ArrayOutOfBoundsException. The following unit test will exhibit
+this
+> behavior. If I change the third param of getDocSetInstance to be
+> something lower, I get a p4Doc, if I leave it as is, I get an
+OpenBitSet
+> doc, in either case, I get the same crash. Do I need to initialize the
+> docs in some way other than just creating them?
+> 
+> regards,
+> Michael
+> 
+> import org.apache.lucene.search.DocIdSet;
+> import org.apache.lucene.util.OpenBitSet;
+> 
+> 
+> import com.kamikaze.docidset.api.DocSet;
+> import com.kamikaze.docidset.impl.AndDocIdSet;
+> import com.kamikaze.docidset.impl.OrDocIdSet;
+> import com.kamikaze.docidset.utils.DocSetFactory;
+> 
+> import junit.framework.TestCase;
+> 
+> 
+> public class KamikazeTest extends TestCase
+> {
+>     public void testGrowingP4()
+>     {
+>         DocSet doc =
+>             DocSetFactory.getDocSetInstance(0, 350000, 3000000,
+> DocSetFactory.FOCUS.SPACE);
+>         Random rand = new Random(System.currentTimeMillis());
+>         int maxDoc = 350000;
+>         doc.addDoc(rand.nextInt(maxDoc));
+>         int i = 0;
+>         try
+>         {
+>             while(i < 256)
+>             {
+>                 int nextDoc = rand.nextInt(maxDoc);
+>                 doc.addDoc(nextDoc);
+>                 ++i;
+>             }               
+>         }
+>         catch(Exception e)
+>         {
+>             return;
+>         }
+>         assertTrue(false);
+>     }
+> }
+> 
+> -----Original Message-----
+> From: John Wang [mailto:john.wang@gmail.com] 
+> Sent: Friday, April 24, 2009 7:50 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: kamikaze
+> 
+> Hi Michael:
+>     We are using it internally here at LinkedIn for both our search
+> engine
+> as well as our social graph engine. And we have a team developing
+> actively
+> on it. Let us know how we can help you.
+> 
+> -John
+> 
+> On Fri, Apr 24, 2009 at 1:56 PM, Michael Mastroianni <
+> MMastroianni@glgroup.com> wrote:
+> 
+>> Hi--
+>>
+>>
+>>
+>> Has anyone here used kamikaze much? I'm interested in using it in
+>> situations where I'll have several docidsets of >2M, plus several in
+> the
+>> 10s of thousands.
+>>
+>>
+>>
+>> On prototype basis, I got something running nicely using OpenBitSet,
+> but
+>> I can't use that much memory for my real application.
+>>
+>>
+>>
+>> regards,
+>>
+>> Michael Mastroianni
+>>
+>>
+>>
+>> This e-mail message, and any attachments, is intended only for the
+use
+> of
+>> the individual or entity identified in the alias address of this
+> message and
+>> may contain information that is confidential, privileged and subject
+> to
+>> legal restrictions and penalties regarding its unauthorized
+disclosure
+> and
+>> use. Any unauthorized review, copying, disclosure, use or
+distribution
+> is
+>> strictly prohibited. If you have received this e-mail message in
+> error,
+>> please notify the sender immediately by reply e-mail and delete this
+>> message, and any attachments, from your system. Thank you.
+>>
+>>
+> 
+> This e-mail message, and any attachments, is intended only for the use
+of
+> the individual or entity identified in the alias address of this
+message
+> and may contain information that is confidential, privileged and
+subject
+> to legal restrictions and penalties regarding its unauthorized
+disclosure
+> and use. Any unauthorized review, copying, disclosure, use or
+distribution
+> is strictly prohibited. If you have received this e-mail message in
+error,
+> please notify the sender immediately by reply e-mail and delete this
+> message, and any attachments, from your system. Thank you.
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context:
+http://www.nabble.com/kamikaze-tp23224760p23288825.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+This e-mail message, and any attachments, is intended only for the use of the individual or
+entity identified in the alias address of this message and may contain information that is
+confidential, privileged and subject to legal restrictions and penalties regarding its unauthorized
+disclosure and use. Any unauthorized review, copying, disclosure, use or distribution is strictly
+prohibited. If you have received this e-mail message in error, please notify the sender immediately
+by reply e-mail and delete this message, and any attachments, from your system. Thank you.
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

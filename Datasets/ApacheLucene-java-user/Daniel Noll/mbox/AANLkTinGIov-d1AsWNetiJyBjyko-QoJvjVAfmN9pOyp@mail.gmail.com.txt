@@ -1,0 +1,56 @@
+FROM: Daniel Noll <dan...@nuix.com>
+SUBJECT: Filter.getDocIdSet() returning null, and what this means for	CachingWrapperFilter
+DATE: 26 May 2010
+
+Hi all.
+
+We are seeing an exception like this:
+
+java.lang.NullPointerException
+    at org.apache.lucene.search.CachingWrapperFilter.docIdSetToCache(CachingWrapperFilter.java:84)
+    at org.apache.lucene.search.CachingWrapperFilter.getDocIdSet(CachingWrapperFilter.java:112)
+    at com.nuix.storage.search.LazyConstantScoreQuery$LazyFilterWrapper.getDocIdSet(SourceFile:91)
+    at org.apache.lucene.search.ConstantScoreQuery$ConstantScorer.<init>(ConstantScoreQuery.java:116)
+    at org.apache.lucene.search.ConstantScoreQuery$ConstantWeight.scorer(ConstantScoreQuery.java:81)
+    at org.apache.lucene.search.BooleanQuery$BooleanWeight.scorer(BooleanQuery.java:297)
+    at org.apache.lucene.search.BooleanQuery$BooleanWeight.scorer(BooleanQuery.java:297)
+    at org.apache.lucene.search.QueryWrapperFilter$2.iterator(QueryWrapperFilter.java:75)
+
+The class of our own is just an intermediary which delays creating the
+Filter object...
+
+        @Override
+        public DocIdSet getDocIdSet(IndexReader reader) throws IOException {
+            if (delegate == null) {
+                delegate = factory.createFilter();
+            }
+            return delegate.getDocIdSet(reader);
+        }
+
+Tracing through the code in CachingWrapperFilter, I can see that this
+NPE would occur if getDocIdSet() were to return null.
+
+The Javadoc on Filter says that null will be returned if no documents
+will be accepted by the filter, but it doesn't seem that Lucene itself
+is handling null return values correctly, so which is correct?  The
+code or the Javadoc?  Supposing that null really is OK, does this
+cause any problems with how CachingWrapperFilter is implementing the
+caching?  I notice it's calling get() and then comparing against null
+so it wouldn't appear that it can distinguish "the entry isn't in the
+cache" from "the entry is in the cache but it's null".
+
+Daniel
+
+
+
+-- 
+Daniel Noll                            Forensic and eDiscovery Software
+Senior Developer                              The world's most advanced
+Nuix                                                email data analysis
+http://nuix.com/                                and eDiscovery software
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

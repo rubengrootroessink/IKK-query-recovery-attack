@@ -1,0 +1,181 @@
+FROM: Magnus Johansson <mag...@technohuman.com>
+SUBJECT: Re: Similar Document Search
+DATE: 19 Aug 2003
+
+Ok, here it is. It's part of a JSP that prints out all keywords in a 
+document.
+
+/magnus
+
+
+<%@ page import="org.apache.lucene.index.IndexReader,
+                 org.apache.lucene.document.Document,
+                 com.technohuman.search.language.SwedishAnalyzer,
+                 java.io.StringReader,
+                 org.apache.lucene.analysis.TokenStream,
+                 org.apache.lucene.analysis.Token,
+                 org.apache.lucene.index.Term,
+                 org.apache.lucene.index.TermEnum,
+                 java.util.*"%>
+<%!
+    class Entry implements Comparable {
+        public double score;
+        public String termText;
+
+        public Entry(double score, String termText) {
+            this.score = score;
+            this.termText = termText;
+        }
+
+        public int compareTo(Object o) {
+            Entry e = (Entry) o;
+            if (e.score < score) return -1;
+            else return 1;
+        }
+    }
+%>
+<%
+    IndexReader reader = 
+IndexReader.open(application.getRealPath("/WEB-INF/index"));
+    Document d = 
+reader.document(Integer.parseInt(request.getParameter("docId")));
+
+    Map m = new HashMap();
+
+    // Count all terms in the description field of the given document
+    String description = d.getField("Parser.DESCRIPTION").stringValue();
+    final java.io.Reader r = new StringReader(description);
+    final TokenStream in = new SwedishAnalyzer().tokenStream(r);
+
+    for (; ;) {
+        final Token token = in.next();
+
+        if (token == null) {
+            break;
+        }
+
+        if (m.containsKey(token.termText())) {
+            int a = ((Integer)m.get(token.termText())).intValue();
+            m.put(token.termText(), new Integer(a + 1));
+        } else {
+            m.put(token.termText(), new Integer(1));
+        }
+    }
+
+
+    ArrayList tm = new ArrayList();
+
+    // Calculate inverse document frequency * term frequency
+    Iterator it = m.keySet().iterator();
+    while (it.hasNext()) {
+        String termText = (String) it.next();
+        TermEnum te = reader.terms(new Term("Parser.DESCRIPTION", 
+termText));
+
+        double idf = Math.log(reader.numDocs() / (te.docFreq() + 1)) + 1;
+        double tf = Math.sqrt(((Integer)m.get(termText)).intValue());
+
+        tm.add(new Entry(idf * tf, termText));
+    }
+
+
+    Collections.sort(tm);
+
+    // Print the keywords and the score for each keyword
+    Iterator it2 = tm.iterator();
+    while (it2.hasNext()) {
+        Entry e = (Entry) it2.next();
+        out.println(e.score + " " + e.termText + "<br />");
+    }
+
+    reader.close();
+%>
+
+Rociel Buico wrote:
+
+>hello magnus,
+> 
+>can i ask your sample script?
+> 
+>--buics
+> 
+>Hi Peter
+>
+>If the original document is available. You could extract keywords from 
+>the document
+>at query time. That is when someone asks for documents similar to 
+>document a. You
+>re-analyze document a and in combination with statistics from the Lucene 
+>index you extract
+>keywords from document a that can then be used as a query for findining 
+>similar documents.
+>
+>I've got some sample code if anyone is interested.
+>
+>/magnus
+>
+>
+>Peter Becker wrote:
+>
+>  
+>
+>>Hi Terry,
+>>
+>>we have been thinking about the same problem and in the end we decided 
+>>that most likely the only good solution to this is to keep a 
+>>non-inverted index, i.e. a map from the documents to the terms. Then 
+>>you can query the most terms for the documents and query other 
+>>documents matching parts of this (where you get the usual question of 
+>>what is actually interesting: high frequency, low frequency or the mid 
+>>range).
+>>
+>>Indexing would probably be quite expensive since Lucene doesn't seem 
+>>to support changes in the index, and the index for the terms would 
+>>change all the time. We haven't implemented it yet, but it shouldn't 
+>>be hard to code. I just wouldn't expect good performance when indexing 
+>>large collections.
+>>
+>>Peter
+>>
+>>
+>>Terry Steichen wrote:
+>>
+>>    
+>>
+>>>Is it possible without extensive additional coding to use Lucene to 
+>>>conduct a search based on a document rather than a query? (One use 
+>>>of this would be to refine a search by selecting one of the hits 
+>>>returned from the initial query and subsequently retrieving other 
+>>>documents "like" the selected one.)
+>>>
+>>>Regards,
+>>>
+>>>Terry
+>>>
+>>>
+>>>
+>>>      
+>>>
+>>
+>>---------------------------------------------------------------------
+>>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+>>    
+>>
+>
+>
+>
+>---------------------------------------------------------------------
+>To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>
+>
+>---------------------------------
+>Do you Yahoo!?
+>The New Yahoo! Search - Faster. Easier. Bingo.
+>  
+>
+
+
+

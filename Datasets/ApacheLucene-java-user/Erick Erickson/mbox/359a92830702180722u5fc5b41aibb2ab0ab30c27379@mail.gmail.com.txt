@@ -1,0 +1,185 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Question about basic indexing performance improvements
+DATE: 18 Feb 2007
+
+Mike:
+
+It's Sunday morning and I felt like typing for a while, but the long rant
+can be summarized as follows...
+
+1> be sure you know where you're spending your time before you implement a
+complex solution to the problem. I've been surprised many times that the
+actual problem was nowhere near where I thought it was. Added complexity for
+speed sometimes (maybe even often) creates more problems than it solves. You
+can do this with some simple timings and/or a profiler. Simple timings
+should take no more than a couple of hours to generate and will allow you to
+proceed with confidence.
+
+2> Keep whatever solution you implement as simple as possible.  At every
+step in a complex solution, you'll introduce costs. Maintenance costs, time
+costs, dissatisfied customer costs. Especially be sure that you don't get
+caught up in making your solution as good as it can be. The most wonderful,
+elegant solutions imaginable usually get thrown out pretty soon anyway,
+since the problem changes. Good enough to last until they are thrown out is
+the most efficient in terms of time spent.... Of course, your professor is
+only spending your time <G>....
+
+3> Define the goal. Really ask yourself what is "good enough" and shoot for
+that. In this case, the first question I'd ask is "why are 1,000,000
+documents necessary?" If you can convince your professor that 100,000
+documents is enough for demonstration purposes, your problem is already
+solved and you can generate your indexes in 3 hours.
+
+If you're interested in the background, see below...
+
+Best
+Erick
+
+
+**********long rant starts here************
+
+But before jumping to the multi-threaded solution, I'd *strongly* advise
+that you put verify what's taking all the time. I can't tell you how many
+times over the last 25 years I've been wrong about where the inefficiencies
+were. I once (in C++) cut the execution time by 75% by something like the
+following....
+
+while (condition) {
+    string str = anotherstring + fragment;
+    anotherstring = str;
+}
+
+to
+
+String anotherstring = new String(10000);
+while (condition) {
+     anotherstring += str;
+}
+
+
+or something like that (look, it's been 10 years, OK<G>). The point is that
+I never would have found that line of code without a profiler, and all the
+other optimizations I could have made wouldn't have improved performance by
+even 1/3 that amount. At best, I would have changed the code unintentionally
+and removed the aforementioned ugly code by accident. Yes, it's stupid code.
+And yes, I wrote the original code in a moment of inattention. You will do
+things equally stupid, trust me <G>..... But are you sure such silliness
+isn't happening to your program? If you're sure, how? Look at some code you
+wrote 6 months ago and tell me it's all good <G>.....
+
+So, unless you are absolutely sure where the time is being spent, do a few
+experiments. You can do the first pass in, maybe, 2 hours... You can start
+with just a few timers in your code. For instance, total the time you spend
+reading the files. The time spent parsing the XML. The time you spend
+actually adding the files to the index. Just use simple timers like
+System.currentTimeMilliseconds().
+
+For instance, let's say your code is organized as follows, and you change
+the for loop to just index 100 documents, and the run takes 100 seconds.
+
+for each file
+   read the file from disk
+   parse the xml
+   add the fields to a Lucene document
+   index the document
+
+Start with something crude and just time each major step. If your intuition
+is correct and all the time is being spent in the index step, you're done.
+If it's in the last two steps, you're also done and need to jump to think
+about multiple thread perhaps. But what if it's in the xml parsing step? You
+might be waaay better off using a more efficient parser (and differing
+implementations vary WIDELY on how fast they are).
+
+The seductive thing about, say, introducing multi-threading to a solution is
+that it'll work. By definition. Throwing 10 threads at this problem will
+index things in 3 hours and you can say "See, I solved the problem". It's
+possible that no, you did not. What you really did was make the problem
+waaaaay more complex (and create endless hassles for yourself in the future)
+without really solving the root issue.
+
+Look, it's Sunday morning and I'm avoiding some tasks I need to do, so
+pardon the long post. But I'm on a roll <G>. If you've followed this list,
+you'll see that this is a recurring theme of mine. The reason is that I've
+seen way too many situations where the total cost of a complex solution is
+never thought of by the programmers. Let's say you create a 10 thread
+solution. Let's further assert that you run each thread on a different
+machine. You've now added lots of extra steps to generating your index. And
+I'll absolutely guarantee that you (or someone) will spend time debugging
+the process of merging all the indexes. Not to mention the times one process
+doesn't complete before you try to merge the indexes. Or the time you forgot
+to start the third machine, combined the resulting indexes and had anomalous
+results that you had to spend 2 days figuring out. Or the time..... And it's
+a most uncomfortable thing to have to say "I don't know what was wrong, but
+recreating the index fixed it"....
+
+And, finally (thank God, he says), be clear on what's "good enough"
+performance. You say it takes 30 hours to create the index. Is 12 hours
+acceptable? If you could get a single-threaded operation down to 12 hours,
+the simplicity may be enough to make up for the fact that you can't generate
+an index before tomorrow. You can always generate test indexes of just a few
+documents for debugging purposes. There's always a tendency to say "but if I
+could get it down to 4 hours, I could generate an index twice a day". But
+this is probably irrelevant. To debug programs and test results, you must be
+able to generate an index in 10 minutes at the outside.  Anything longer is
+unacceptable since you'll spend all your time waiting. 15 seconds is even
+better. That implies that you need a way to limit the number of documents
+you index for development purposes and then, when you're satisfied, kick off
+the rebuild of the entire index.
+
+My point is that in my experience, it's unlikely that you'll be building
+more than one complete index a day anyway. And kicking the build of the
+evening before and using it the next morning may be good enough. And a lot
+less prone to error if you can keep the index generation simple.
+
+Anyway, it's off to do some work around the house. Oh, wait. I can read the
+Sunday paper first.....
+
+Best
+Erick
+
+
+On 2/17/07, Mike O'Leary <tm-oleary@comcast.net> wrote:
+>
+> I am taking a class in which the professor has assigned a project to take
+> a
+> question answering application that was submitted by a team of students to
+> one of the TREC contests last year and turn it into a teaching tool. One
+> thing he wants to have done is add the capability for students to create a
+> variety of indexes with different settings in order to observe the ways in
+> which selecting a different index can cause the results to vary. The
+> application searches over a specified set of just over a million
+> XML-formatted documents that doesn't change, so there are no requirements
+> at
+> this point for adding and deleting documents. Because the team that
+> created
+> the application last year only needed to index it once (after they figured
+> out what parameters they wanted), they didn't need to care very much that
+> it
+> took around 30 hours to index the documents one by one using a single
+> threaded indexing program.
+>
+>
+>
+> Now we want to be able to index that same set of documents in much less
+> time. I am new to Lucene, so I am just going by what I have found so far
+> in
+> the Lucene in Action book and on the internet. The section in the book on
+> indexing concurrency says that you can share an IndexWriter object among
+> several threads and that the calls from these threads will be properly
+> synchronized. Will this in itself improve indexing performance very much?
+> It
+> seems like the synchronization that is needed for keeping the index from
+> being corrupted would limit how much you gain from using several threads.
+> In
+> any case, my overall question is, given an indexing task of this kind,
+> where
+> you don't have to worry about additions, deletions and updates of the
+> documents being indexed, just indexing the whole document database as a
+> batch each time a user wants to index it in a different way, what would be
+> the fastest way to do it using the various Lucene indexing tools and
+> features? Thanks.
+>
+> Mike O'Leary
+>
+>
+

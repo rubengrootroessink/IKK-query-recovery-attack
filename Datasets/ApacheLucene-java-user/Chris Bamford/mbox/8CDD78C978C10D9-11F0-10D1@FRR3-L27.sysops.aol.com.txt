@@ -1,0 +1,57 @@
+FROM: Chris Bamford <chris.bamf...@talktalk.net>
+SUBJECT: Speed up payload loading?
+DATE: 3 May 2011
+
+Hi,
+
+I have been experimenting with using a int payload as a unique identifier, one per Document.
+ I have successfully loaded them in using the TermPositions API with something like:
+
+    public static void loadPayloadIntArray(IndexReader reader, Term term, int[] intArray,
+int from, int to) throws Exception {
+        TermPositions tp = null;
+        byte[] dataBuffer = new byte[4];
+        int intVal = -1;
+
+        //System.out.println("loadPayloadIntArray(" + from + " -> " + to + ")");
+        try {
+            tp = reader.termPositions(term);
+            tp.skipTo(from);
+            do {
+                tp.nextPosition();
+                tp.getPayload(dataBuffer, 0);
+                intVal = PayloadHelper.decodeInt(dataBuffer, 0);
+                intArray[from] = intVal;
+            } while (++from <= to && tp.next());
+        }
+        finally {
+            if (tp != null) {
+                tp.close();
+            }
+        }
+    }
+
+ 
+This works fine, it even allows me to use several threads in parallel to each load a part
+of the array, thus reducing the time taken.
+However, performance is not as great as I would like - with indexes of ~4m docs it can take
+over 3 seconds.  (These are cold start times, no reader cacheing and OS read caches completely
+flushed).   Increasing the number of loader threads (calling the method shown) doesn't help
+much, which makes me suspect there is some synchronized stuff going on inside TermPositions.
+
+So ... onto my question(s):
+
+1) Because this approach is still faster than using FieldCache, my belief is that payloads
+are stored sequentially in the index - is this true?
+2) If so, is there some raw, lower level I/O I can call which will allow me to load much bigger
+chunks of payload rather than a single int at a time?  
+
+Thanks for any help in this area.
+
+Chris
+
+
+ 
+
+
+

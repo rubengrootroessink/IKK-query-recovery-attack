@@ -1,0 +1,149 @@
+FROM: David Spencer <dave-lucene-u...@tropo.com>
+SUBJECT: SegmentReader - Re: FieldSortedHitQueue.Comparators -- Re: force gc idiom - Re: OutOfMemory example
+DATE: 13 Sep 2004
+
+
+Another clue, the SegmentReaders are piling up too, which may be why the 
+  Comparator map is increasing in size, because SegmentReaders are the 
+keys to Comparator...though again, I don't know enough about the Lucene 
+internals to know what refs to SegmentReaders are valid which which ones 
+may be causing this leak.
+
+
+David Spencer wrote:
+
+> David Spencer wrote:
+> 
+>> Just noticed something else suspicious.
+>> FieldSortedHitQueue has a field called Comparators and it seems like 
+>> things are never removed from it....
+> 
+> 
+> Replying to my own post....this could be the problem.
+> If I put in a print statement here in FieldSortedHitQueue, recompile, 
+> and run w/ the new jar then I see Comparators.size() go up after every 
+> iteration thru ReopenTest's loop and the size() never goes down...
+> 
+>  static Object store (IndexReader reader, String field, int type, Object 
+> factory, Object value) {
+>     FieldCacheImpl.Entry entry = (factory != null)
+>       ? new FieldCacheImpl.Entry (field, factory)
+>       : new FieldCacheImpl.Entry (field, type);
+>     synchronized (Comparators) {
+>       HashMap readerCache = (HashMap)Comparators.get(reader);
+>       if (readerCache == null) {
+>         readerCache = new HashMap();
+>         Comparators.put(reader,readerCache);
+>         System.out.println( "*\t* NOW: "+ Comparators.size());
+>       }
+>       return readerCache.put (entry, value);
+>     }
+>   }
+> 
+>>
+>>
+>> Jiří Kuhn wrote:
+>>
+>>> This doesn't work either!
+>>>
+>>> Lets concentrate on the first version of my code. I believe that the 
+>>> code should run endlesly (I have said it before: in version 1.4 final 
+>>> it does).
+>>>
+>>> Jiri.
+>>>
+>>> -----Original Message-----
+>>> From: David Spencer [mailto:dave-lucene-user@tropo.com]
+>>> Sent: Monday, September 13, 2004 5:34 PM
+>>> To: Lucene Users List
+>>> Subject: force gc idiom - Re: OutOfMemory example
+>>>
+>>>
+>>> Jiří Kuhn wrote:
+>>>
+>>>
+>>>> Thanks for the bug's id, it seems like my problem and I have a 
+>>>> stand-alone code with main().
+>>>>
+>>>> What about slow garbage collector? This looks for me as wrong 
+>>>> suggestion.
+>>>
+>>>
+>>>
+>>>
+>>>
+>>> I've seen this written up before (javaworld?) as a way to probably 
+>>> "force" GC instead of just a System.gc() call. I think the 2nd gc() 
+>>> call is supposed to clean up junk from the runFinalization() call...
+>>>
+>>> System.gc();
+>>> Thread.sleep( 100);
+>>> System.runFinalization();
+>>> Thread.sleep( 100);
+>>> System.gc();
+>>>
+>>>
+>>>> Let change the code once again:
+>>>>
+>>>> ...
+>>>>    public static void main(String[] args) throws IOException, 
+>>>> InterruptedException
+>>>>    {
+>>>>        Directory directory = create_index();
+>>>>
+>>>>        for (int i = 1; i < 100; i++) {
+>>>>            System.err.println("loop " + i + ", index version: " + 
+>>>> IndexReader.getCurrentVersion(directory));
+>>>>            search_index(directory);
+>>>>            add_to_index(directory, i);
+>>>>            System.gc();
+>>>>            Thread.sleep(1000);// whatever value you want
+>>>>        }
+>>>>    }
+>>>> ...
+>>>>
+>>>> and in the 4th iteration java.lang.OutOfMemoryError appears again.
+>>>>
+>>>> Jiri.
+>>>>
+>>>>
+>>>> -----Original Message-----
+>>>> From: John Moylan [mailto:johnm@rte.ie]
+>>>> Sent: Monday, September 13, 2004 4:53 PM
+>>>> To: Lucene Users List
+>>>> Subject: Re: OutOfMemory example
+>>>>
+>>>>
+>>>> http://issues.apache.org/bugzilla/show_bug.cgi?id=30628
+>>>>
+>>>> you can close the index, but the Garbage Collector still needs to 
+>>>> reclaim the memory and it may be taking longer than your loop to do so.
+>>>>
+>>>> John
+>>>>
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+>> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+>>
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

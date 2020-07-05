@@ -1,0 +1,193 @@
+FROM: Wojtek212 <wojtekg...@gmail.com>
+SUBJECT: FileNotFoundException during indexing
+DATE: 1 Aug 2008
+
+
+Hi,
+I'm sometimes receiving FileNotFoundExceptions during indexing.
+
+java.io.FileNotFoundException: /tmp/content/3615.0-3618.0/_3p.fnm (No such
+file or directory)
+	at
+com.test.vcssearch.DefaultServiceIndexer$2.run(DefaultServiceIndexer.java:245)
+	at java.lang.Thread.run(Thread.java:595)
+Caused by: com.test.search.IndexingException: java.io.FileNotFoundException:
+/tmp/content/3615.0-3618.0/_3p.fnm (No such file or directory)
+	at
+com.test.search.impl.lucene.IndexManager.removeDocuments(IndexManager.java:293)
+	at
+com.test.search.impl.lucene.IndexManager.removeDocuments(IndexManager.java:199)
+	at com.test.search.impl.lucene.IndexManager.reindex(IndexManager.java:250)
+	at com.testsearch.impl.lucene.IndexManager.reindex(IndexManager.java:301)
+	at
+com.test.vcssearch.DefaultServiceIndexer$2.run(DefaultServiceIndexer.java:239)
+	... 1 more
+Caused by: java.io.FileNotFoundException: /tmp/content/3615.0-3618.0/_3p.fnm
+(No such file or directory)
+	at java.io.RandomAccessFile.open(Native Method)
+	at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+	at
+org.apache.lucene.store.FSIndexInput$Descriptor.<init>(FSDirectory.java:497)
+	at org.apache.lucene.store.FSIndexInput.<init>(FSDirectory.java:522)
+	at org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:434)
+	at
+org.apache.lucene.index.CompoundFileWriter.copyFile(CompoundFileWriter.java:204)
+	at
+org.apache.lucene.index.CompoundFileWriter.close(CompoundFileWriter.java:169)
+	at
+org.apache.lucene.index.SegmentMerger.createCompoundFile(SegmentMerger.java:153)
+	at org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:1601)
+	at org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:900)
+	at
+com.test.search.impl.lucene.IndexManager.removeDocuments(IndexManager.java:282)
+
+I have a class with few methods of reindexing, adding and deleting.
+Everything is synchronized. Here is the example:
+
+public class IndexManager {
+
+   private final Object lock = new Object();
+
+   private final Analyzer analyzer;
+
+   private final FileProxy index;
+
+   IndexManager(FileProxy index,
+                      boolean create) throws IndexingException {
+       this.analyzer = new TestAnalyzer();
+       this.index = index;
+       if (!create && !index.exists()) {
+           create = true;
+       }
+
+       IndexWriter writer = null;
+       try {
+           // this checks the directory is unlocked
+           writer = createIndexWriter(create);
+       } catch (IOException e) {
+           throw new IndexingException(e);
+       } finally {
+           if (writer != null) {
+               try {
+                   writer.close();
+               } catch (IOException e) {
+                   LOGGER.error("Cannot close index writer", e);
+               }
+           }
+       }
+   }
+
+   public void reindex(Document[] documents) throws IndexingException {
+       synchronized (lock) {
+           removeDocuments(documents);
+           String[] ids = new String[documents.length];
+           for (int i = 0; i < documents.length; i++) {
+               ids[i] = documents[i].getDocumentID();
+           }
+           addDocuments(documents);
+       }
+   }
+
+   private IndexWriter createIndexWriter() throws IOException {
+       return createIndexWriter(false);
+   }
+
+   private IndexWriter createIndexWriter(boolean create) throws IOException
+{
+
+       Directory directory = FileProxyDirectory.getDirectory(index, create);
+       if (IndexReader.isLocked(directory)) {
+           IndexReader.unlock(directory);
+       }
+       return new IndexWriter(directory,analyzer,create);
+   }
+
+   public void addDocuments(Document[] documents)
+           throws IndexingException {
+       synchronized (lock) {
+           IndexWriter indexWriter = null;
+           try {
+               try {
+                   indexWriter =  createIndexWriter();
+                   for (int i = 0; i < documents.length; i++) {
+                       // add a document ID for future management
+                       if (documents[i].getDocumentID() == null) {
+                           String msg = EXCEPTION_LOCALIZER.format(
+                                   "document-id-not-set");
+                           LOGGER.error(msg);
+                           throw new IndexingException(msg);
+                       }
+                       LuceneDocument luceneDoc = (LuceneDocument)
+documents[i];
+                      
+indexWriter.addDocument(luceneDoc.getBackingDocument());
+                   }
+               } finally {
+                   if (indexWriter != null) {
+                       try {
+                           indexWriter.close();
+                       } catch (IOException e) {
+                           LOGGER.error("Cannot close index writer", e);
+                       }
+                   }
+               }
+           } catch (IOException e) {
+               throw new IndexingException(e);
+           }
+       }
+   }
+
+   public boolean[] removeDocuments(String[] documentIDs) throws
+IndexingException {
+       boolean[] results = new boolean[documentIDs.length];
+
+       // Batching the removal of a group of documents is more efficient due
+       // to the requirement of closing the reader
+       synchronized (lock) {
+           try {
+               IndexWriter indexWriter = null;
+               try {
+                   indexWriter = createIndexWriter();
+                   for (int i = 0; i < documentIDs.length; i++) {
+                       Term term = new Term(SearchConstants.DOCUMENT_ID,
+                               documentIDs[i]);
+
+                       indexWriter.deleteDocuments(term);
+                       results[i] = true;
+                   }
+                   indexWriter.optimize();
+               } finally {
+                   if (indexWriter != null) {
+                       try {
+                           indexWriter.close();
+                       } catch (IOException e) {
+                           LOGGER.error("Cannot close index writer", e);
+                       }
+                   }
+               }
+           } catch (IOException e) {
+               throw new IndexingException(e);
+           }
+       }
+       return results;
+   }
+
+}
+
+This class is used by many threads. Some of them can add
+documents, some can delete and reindex. After any operation IndexWriter is
+closed.
+I'm using lucene 2.1.0 but even after upgrade to 2.3.2 there is still the
+exception.
+I don't use searching during indexing but the exception occurs. Does anybody
+have idea what can be a reason?
+-- 
+View this message in context: http://www.nabble.com/FileNotFoundException-during-indexing-tp18766343p18766343.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

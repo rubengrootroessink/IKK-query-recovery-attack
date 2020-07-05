@@ -1,0 +1,139 @@
+FROM: "Daniel Pfeifer" <Daniel.Pfei...@tradedoubler.com>
+SUBJECT: RE: JVM Crash in Lucene
+DATE: 8 Feb 2006
+
+I resolved this issue for the time-being by adding following parameter
+to the command:
+
+-XX:CompileCommand=exclude,org/apache/lucene/index/IndexReader$1,doBody
+
+/Daniel
+
+-----Original Message-----
+From: Daniel Pfeifer [mailto:Daniel.Pfeifer@tradedoubler.com] 
+Sent: den 8 februari 2006 08:05
+To: java-user@lucene.apache.org
+Subject: Re: JVM Crash in Lucene
+
+Got the same problem. Running 1.5.0_05 on Solaris 10. I've seen that
+this issue has been reported on Sun's forum but no answer yet.
+
+Another interesting thing which I noticed. We previously used the
+RAMDirectory and we never got JVM-crashes when using RAMDirectory.
+However, once we started using FSDirectory the JVM started to crash.
+
+I tested adding -Xcomp parameter and the JVM has not crashed yet. But
+then again, the SearchService hasn't been up long enough to be sure that
+it solved the problem.
+
+/Daniel
+
+> You also might try -Xbatch or -Xcomp to see if that fixes it (or
+> reproduces it faster).
+>
+> Here's a great list of JVM options:
+> http://blogs.sun.com/roller/resources/watt/jvm-options-list.html
+>
+> -Yonik
+>
+> On 12/11/05, Yonik Seeley <yseeley@gmail.com> wrote:
+> > Sounds like it's a hotspot bug.
+> > AFAIK, hotspot doesn't just compile a method once... it can do
+> > optimization over time.
+> >
+> > To work around it, have you tried pre previous version: 1.5_05?
+> > It's possible it's a fairly new bug.  We've been running with that
+> > version and Lucene 1.4.3 without problems (on Opteron, RHEL4).
+> >
+> > You could also try the latest Lucene 1.9 to see if that changes
+enough
+> > to avoid the bug.
+> >
+> > -Yonik
+> >
+> > On 12/11/05, Dan Gould <dlg@cs.brown.edu> wrote:
+> > > First, thank you Chris, Yonik, and Dan for your ideas as to what
+might be
+> > > causing this problem.
+> > >
+> > > I tried moving things around so that the IndexReader is still open
+when it
+> > > calls
+TermFreqVector.getTerms()/TermFreqVector.getTermFrequencies().  It
+> > > didn't seem to make any difference.
+> > >
+> > > I also tried running Java with the flags:
+> > > -Xmx2048m -XX:MaxPermSize=200m
+> > > (the box has 4GB of RAM) and it still crashes.  It's hard to tell,
+but the
+> > > program does seem to run for a lot longer (maybe 10 hours), but
+that could
+> > > just be randomness in my tests.
+> > >
+> > > The JVM always seems to crash with
+> > >
+> > >   Current CompileTask:
+> > >   opto:1836
+> > >   org.apache.lucene.index.IndexReader$1.doBody()Ljava/lang/Object;
+> > >   (99 bytes)
+> > >
+> > > which in the Lucene source is:
+> > >
+> > >    private static IndexReader open(final Directory directory,
+final boolean
+> > > closeDirectory) throws IOException {
+> > >      synchronized (directory) {                   // in- &
+inter-process
+> > > sync
+> > >        return (IndexReader)new Lock.With(
+> > >            directory.makeLock(IndexWriter.COMMIT_LOCK_NAME),
+> > >            IndexWriter.COMMIT_LOCK_TIMEOUT) {
+> > >            public Object doBody() throws IOException {
+> > >              SegmentInfos infos = new SegmentInfos();
+> > >              infos.read(directory);
+> > >              if (infos.size() == 1) {             // index is
+optimized
+> > >                return SegmentReader.get(infos, infos.info(0),
+> > > closeDirectory);
+> > >              }
+> > >              IndexReader[] readers = new
+IndexReader[infos.size()];
+> > >              for (int i = 0; i < infos.size(); i++)
+> > >                readers[i] = SegmentReader.get(infos.info(i));
+> > >              return new MultiReader(directory, infos,
+closeDirectory,
+> > > readers);
+> > >
+> > >            }
+> > >          }.run();
+> > >      }
+> > >    }
+> > >
+> > > that's definitely a non-trivial bit of code, but I can't imagine
+that
+> > > there's a problem that I'm seeing that no one else else.
+Moreover, that
+> > > code gets run hundreds or even thousands of times before it
+crashes, so I
+> > > don't image it's being HotSpot-compiled for the first time.
+> > >
+> > > I'm running the 1.4.3 release and the 1.5.0_06-b05 JVM on Centos
+Linux on
+> > > an Opteron.
+> > >
+> > > Any further guesses?
+> > >
+> > > Thank you all very much,
+> > > Dan
+> >
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,219 @@
+FROM: "Killeen, Tom" <tom.kill...@thomson.com>
+SUBJECT: Multi-Threading
+DATE: 21 Aug 2003
+
+Hello, 
+I'm having some trouble trying to figure out how I can Multi-thread a
+search.  I have 10 separate indices (on the same box) and so I have an array
+of IndexSearcher's - then I pass the array to a MultiSeacher (see below for
+the code).  From what I have read, this does a sequential search through all
+of the indices.  What I'm hoping to do, is have a thread for each
+IndexSearcher and have them all search concurrently.  
+
+Couple of questions - 1) Does anyone have any sample code that will achieve
+this?
+			    2) How will Lucene handle the results with
+multiple threads? For example, if I have 10 threads and
+threads 2 and 3 have finished, but the rest are still searching.
+
+thanks, 
+Tom
+
+class SearchFiles
+{
+    public static void main(String[] args)
+    {
+        try
+        {
+            IndexSearcher[] idx = new IndexSearcher[10];
+            idx[0] = new IndexSearcher("index1");
+            idx[1] = new IndexSearcher("index2");
+            idx[2] = new IndexSearcher("index3");
+            idx[3] = new IndexSearcher("index4");
+            idx[4] = new IndexSearcher("index5");
+            idx[5] = new IndexSearcher("index6");
+            idx[6] = new IndexSearcher("index7");
+            idx[7] = new IndexSearcher("index8");
+            idx[8] = new IndexSearcher("index9");
+            idx[9] = new IndexSearcher("index10");
+	
+	      MultiSearcher ms = new MultiSearcher(idx);
+
+            Analyzer analyzer = new StandardAnalyzer();
+
+            BufferedReader in = new BufferedReader(new
+InputStreamReader(System.in));
+            while (true)
+            {
+                System.out.print("Query: ");
+                String line = in.readLine();
+
+                if (line.length() == -1)
+                    break;
+
+                Query query = QueryParser.parse(line, "name", analyzer);
+                System.out.println("Searching for: " +
+query.toString("name"));
+
+
+                Hits hits = ms.search(query);
+                System.out.println(hits.length() + " total matching
+documents");
+
+                final int HITS_PER_PAGE = 10;
+                for (int start = 0; start < hits.length(); start +=
+HITS_PER_PAGE)
+                {
+                    int end = Math.min(hits.length(), start +
+HITS_PER_PAGE);
+                    for (int i = start; i < end; i++)
+                    {
+                        Document doc = hits.doc(i);
+                        String name = doc.get("name");
+                        String uuid = doc.get("CaseUuid");
+                        String title = doc.get("LongTitle");
+                        String cite = doc.get("CitationString");
+
+                        System.out.println(uuid);
+                        System.out.println(title);
+                        System.out.println(cite);
+
+                    }
+
+                    if (hits.length() > end)
+                    {
+                        System.out.print("more (y/n) ? ");
+                        line = in.readLine();
+                        if (line.length() == 0 || line.charAt(0) == 'n')
+                            break;
+                    }
+                }
+            }
+            //searcher.close();
+            ms.close();
+
+        }
+        catch (Exception e)
+        {
+            System.out.println(" caught a " + e.getClass() +
+                    "\n with message: " + e.getMessage());
+        }
+    }
+}
+-----Original Message-----
+From: Nader Henein [mailto:nader.henein@bayt.net]
+Sent: Tuesday, August 19, 2003 11:59 AM
+To: lucene-user@jakarta.apache.org
+Subject: Re: Multi-Threading
+
+
+Why do you have concurency problems? are you trying to
+have each user initiate the indexing himself? because
+that will create issues, how about you put all the new
+files you want to index in a directory and then have a
+schedule procedure on the webserver run the lucene
+indexer on that directory, our application hasn't had
+any concurrency problems at all, because we index based
+on a pull system, rather than the user puching
+documents to the indexer.
+
+I hope I understood your problem correctly, so that the
+answer is useful
+
+Nader
+
+On Tue, 19 Aug 2003 12:55:09 +0200, Damien Lust wrote:
+
+> 
+> Hello,
+> 
+> I developed an Client-Server application on the web,
+> with a search  
+> module using Lucene. In the same application, the
+users
+> can index new  
+> text.
+> 
+> So, multiple sessions can acces to the Index and
+> concurrences problems  
+> can be possible.
+> 
+> I used Threads in Java. Is it the best solutions?
+> 
+> I call :
+> 
+> IndexFiles indexFiles = new IndexFiles();
+> indexFiles.run();
+> 
+> Here you are an extract of my code.
+> 
+> Thanks.
+> 
+> public class IndexFiles extends Thread{
+>      public IndexFiles(){
+>      }
+> 
+>      public void run(){
+>               
+>
+SynchronizedIndexWriter.insertDocument(currentIndexDocument(),"tmp/ 
+> IndexPath",new MainAnalyser());
+>      }
+> 
+> }
+> 
+> 
+> 
+> public class SynchronizedIndexWriter {
+> 
+>      static synchronized  void
+> insertDocument(IndexDocument  
+> document,String indexLocValue,Analyzer analyzerValue){
+>          File f=new File(indexLocValue);
+>          if (f.exists())  
+>
+addDocumentToIndex(document,indexLocValue,analyzerValue,false);
+>          else  
+>
+addDocumentToIndex(document,indexLocValue,analyzerValue,true);
+>      }
+> 
+> 
+>      static  synchronized void
+> addDocumentToIndex(IndexDocument  
+> document,String indexLocValue,Analyzer
+> analyzerValue,boolean  
+> createNewIndex){
+>          try{
+>              IndexWriter indexWriter = new  
+>
+IndexWriter(indexLocValue,analyzerValue,createNewIndex);
+>             
+> indexWriter.addDocument(document.getDocument());
+>              indexWriter.optimize();
+>              indexWriter.close();
+>          }
+>          catch(IOException io){
+> 	    // If IndexWrite don't know write on index
+because
+> it's locked,  
+> recall of the function
+>                => It's not very safe
+>               
+>
+addDocumentToIndex(document,indexLocValue,analyzerValue,createNewIndex);
+>          }
+>          catch(Exception e){
+> 
+>          }
+> 
+>      }
+> }
+
+The information contained above is proprietary to BAYT.COM
+and confidential.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+

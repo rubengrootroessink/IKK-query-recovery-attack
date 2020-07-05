@@ -1,0 +1,78 @@
+FROM: "Israel Tsadok" <itsa...@gmail.com>
+SUBJECT: Re: Any way to ignore repeated terms in TF calculation?
+DATE: 15 Jan 2009
+
+Hi Umesh,
+
+>   I am trying to put the problem more concisely.
+> 1. Fields where term frequency is very very relevant. E.g.
+>   Body:
+>   Example:
+>        if TF of badger in Body of doc 1  >   TF of badger in Body of doc 2
+>   doc 1 scores higher.
+>
+> 2. Fields where term frequency is irrevalent
+>   Page_Title:
+>   Example:
+>        TF of badger in PageTitle doesn't affect the score.
+>
+
+This is not quite what I was talking about. I was talking about documents
+with a single field. I want the text "Badgers are mammals. Badgers are cute"
+to score higher than the text "Badger Badger" for the term query
+"text:badger".
+Ideally, what I want is to add another factor to the scoring at index time,
+a "sparsity factor" which should cancel out the term frequency as the
+average distance between terms nears 1.
+i.e. if the score formula is:
+
+score(q,d) = coord(q,d) x queryNorm(q) x sigma(t in q) of ( tf(t in d) x
+idf(t)^2 x t.getBoost() x norm(t,d) )
+
+I want to make it:
+
+score(q,d) = coord(q,d) x queryNorm(q) x sigma(t in q) of ( tf(t in d) x
+idf(t)^2 x t.getBoost() x norm(t,d) x sparsity(t in d) )
+where
+sparsity(t in d) = 1 / (1 + ( tf(t in d) - 1) / (1 + e ^ (avg_d(t in d) -
+7)))
+where
+avg_d(t in d) = average distance between terms t in document d
+
+Sorry about the weird math, I just mean (as I said above) that the sparsity
+factor should cancel out the tf completely if avg_d<=1 and become 1 as avg_d
+gets larger.
+
+I looked at Similarity.computeNorm(), which may make it possible for me to
+add this inside the normalization value, but I'm not sure if that's really
+possible, plus the method is not available yet in 2.4.
+
+Having unloaded all that off my chest, I have to say that I really like your
+proposal, and it might solve 90% of my problems without resorting to my
+overreaching redesign of Lucene core...
+
+
+If that is the case:
+> then one solution is
+> 1. Build the query programmatically.
+> 2. Form Normal Queries on FieldType 1 ( e.g. Body)
+> 3. Form ConstantScore variation of queries on FieldType 2 (e.g. Page_Title,
+> ConstantScoreTermQuery)
+>
+> There is no need to change anything at index time.
+>
+
+OK, so I really like this. The only problem is that it's not going to be
+easy to build the query programmatically, since currently I'm using
+QueryParser with a little help from MultiFieldQueryParser and
+PerFieldAnalyzerWrapper.
+
+I think that the best course of action would be to subclass
+MultiFieldQueryParser so that for Body fields it will behave normally, but
+for Page_Title fields it will emit a ConstantScoreQuery wrapping the
+original field query.
+
+Can you think of an easier way to do this?
+Thanks,
+Israel
+

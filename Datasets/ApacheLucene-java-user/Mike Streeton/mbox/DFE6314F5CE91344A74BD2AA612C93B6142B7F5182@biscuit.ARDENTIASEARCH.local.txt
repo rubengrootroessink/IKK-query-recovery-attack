@@ -1,0 +1,185 @@
+FROM: Mike Streeton <mike.stree...@ardentiasearch.com>
+SUBJECT: RE: TermDocs.skipTo error
+DATE: 9 Nov 2007
+
+I have tried this again using Lucene 2.1 and as Erick found it works okay, I have tried it
+on jdk 1.6 u1 and u3 both work, but both fail when using lucene 2.2
+
+Mike
+
+-----Original Message-----
+From: Mike Streeton [mailto:mike.streeton@ardentiasearch.com]
+Sent: 09 November 2007 16:05
+To: java-user@lucene.apache.org
+Subject: RE: TermDocs.skipTo error
+
+Erick,
+   Sorry the numbers are just printed out for debugging when it is building the index. I will
+try it with lucene 2.1 and see what happens
+
+Thanks
+
+Mike
+
+-----Original Message-----
+From: Erick Erickson [mailto:erickerickson@gmail.com]
+Sent: 09 November 2007 15:59
+To: java-user@lucene.apache.org
+Subject: Re: TermDocs.skipTo error
+
+FWIW, running Lucene 2.1, Java 1.5 all I get is some numbers being printed
+out
+0
+10000
+20000
+.
+.
+.
+90,000
+
+
+and ran through the above 4 times or so....
+
+Erick
+
+On Nov 9, 2007 5:51 AM, Mike Streeton <mike.streeton@ardentiasearch.com>
+wrote:
+
+> I have posted before about a problem with TermDocs.skipTo () but never
+> managed to reproduce it. I have now got it to fail using the following
+> program, please can someone try it and see if they get the stack trace:
+>
+> Exception in thread "main" java.lang.ArrayIndexOutOfBoundsException: Array
+> index out of range: 101306
+>      at org.apache.lucene.util.BitVector.get(BitVector.java:72)
+>      at org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java
+> :118)
+>      at org.apache.lucene.index.SegmentTermDocs.skipTo(
+> SegmentTermDocs.java:176)
+>      at org.apache.lucene.index.MultiTermDocs.skipTo(MultiReader.java:413)
+>      at Test4.test(Test4.java:88)
+>      at main(Test4.java:69)
+>
+> The program creates a test index, if you run it a second time it will not
+> create the index. Change the directory name on line 33.
+>
+> Many Thanks
+>
+> Mike
+>
+> Ps I am using Lucene 2.2 and java 1.6 u1
+>
+>
+>
+> import java.io.IOException;
+> import java.util.Random;
+>
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.document.Field.Index;
+> import org.apache.lucene.document.Field.Store;
+> import org.apache.lucene.index.CorruptIndexException;
+> import org.apache.lucene.index.IndexReader;
+> import org.apache.lucene.index.IndexWriter;
+> import org.apache.lucene.index.MultiReader;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.index.TermDocs;
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.FSDirectory;
+> import org.apache.lucene.store.LockObtainFailedException;
+>
+> public class Test4 {
+>
+>      /**
+>       * @param args
+>       * @throws IOException
+>       * @throws LockObtainFailedException
+>       * @throws CorruptIndexException
+>       */
+>      public static void main(String[] args) throws Exception {
+>            Random rand = new Random(0);
+>            Directory[] dirs = new Directory[10];
+>            for (int i = 0; i < dirs.length; i++) {
+>                  dirs[i] = FSDirectory.getDirectory
+> ("c:\\temp\\lucenetest\\"
+>                              + Integer.toString(i));
+>                  if (!IndexReader.indexExists(dirs[i])) {
+>                        IndexWriter writer = new IndexWriter(dirs[i],
+>                                    new StandardAnalyzer(), true);
+>                        for (int j = 0; j < 100000; j++) {
+>                              Document doc = new Document();
+>                              doc.add(new Field("i", Integer.toString(
+> rand.nextInt(100)),
+>                                          Store.YES, Index.UN_TOKENIZED));
+>                              doc.add(new Field("j",
+>                                          Integer.toString(rand.nextInt(1000)),
+> Store.YES,
+>                                          Index.UN_TOKENIZED));
+>                              writer.addDocument(doc);
+>                              if (j % 10000 == 0) {
+>                                    System.out.println(j);
+>                              }
+>                        }
+>                        writer.optimize();
+>                        writer.close();
+>                        writer = null;
+>                  }
+>                  IndexReader reader = IndexReader.open(dirs[i]);
+>                  for (int j = 0; j < 1000; j++) {
+>                        reader.deleteDocument(rand.nextInt(reader.maxDoc
+> ()));
+>                  }
+>                  reader.close();
+>            }
+>            IndexReader[] readers = new IndexReader[dirs.length];
+>            for (int i = 0; i < dirs.length; i++) {
+>                  readers[i] = IndexReader.open(dirs[i]);
+>            }
+>            IndexReader reader = new MultiReader(readers);
+>            TermDocs docs = reader.termDocs();
+>            for (int i = 0; i < 100; i++) {
+>                  for (int j = 0; j < 1000; j++) {
+>                        try {
+>                              test(docs, Integer.toString(i),
+> Integer.toString(j));
+>                        } catch (Exception e) {
+>                              System.err.println("Failed at i="+i+" j="+j);
+>                              throw e;
+>                        }
+>                  }
+>            }
+>            docs.close();
+>            reader.close();
+>      }
+>
+>      private static void test(TermDocs docs, String i, String j)
+>                  throws IOException {
+>            docs.seek(new Term("i", i));
+>            while (docs.next());
+>            docs.seek(new Term("j", j));
+>            while (docs.next());
+>            docs.seek(new Term("i", i));
+>            if (docs.next()) {
+>                  while (docs.skipTo(docs.doc()+1000));
+>            }
+>            docs.seek(new Term("j", j));
+>            if (docs.next()) {
+>                  while (docs.skipTo(docs.doc()+1000));
+>            }
+>      }
+>
+> }
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,130 @@
+FROM: Yajun <yliu...@gmail.com>
+SUBJECT: Re: FileNotFoundException in ConcurrentMergeScheduler
+DATE: 6 Jul 2008
+
+
+I saw the same problem for a while. here is how I used lucene index:
+
+1) I don't use compound file.
+
+2) I have a single process and a single thread to update index as index
+updater. The index is really small, the mergefactor is 10.
+After index is updated, the same thread copies the index to a tmp directory,
+validate the index in the tmp directory by:
+ 
+IndexReader reader = IndexReader.open(tmp_directory);
+reader.close();
+
+then rename the tmp directory to a snapshot_timestamp;
+
+3) the snapshot_timestamp is rsyn to search nodes which DO NOT update index.
+
+4) We automatically stop and start index updater and search nodes every
+midnight. (don't ask me why)
+
+5) We use Linux version 2.6.9-67.0.1.ELsmp
+(brewbuilder@ls20-bc1-14.build.redhat.com) (gcc version 3.4.6 20060404 (Red
+Hat 3.4.6-9)) #1 SMP Fri Nov 30 11:57:43 EST 2007
+
+6) We use solr 1.2 and the lucene is 2.1.( I don't think this problem has
+anything to do with solr.)
+
+Here is what I observed:
+
+1) Not always, sometimes when index updater is started during our automatic
+recycle, we got
+
+ava.io.FileNotFoundException: /var/tmp/index/_gw.fnm (No such file or
+directory)
+	at java.io.RandomAccessFile.open(Native Method)
+	at java.io.RandomAccessFile.<init>(RandomAccessFile.java:212)
+	at
+org.apache.lucene.store.FSDirectory$FSIndexInput$Descriptor.<init>(FSDirectory.java:501)
+	at
+org.apache.lucene.store.FSDirectory$FSIndexInput.<init>(FSDirectory.java:526)
+	at org.apache.lucene.store.FSDirectory.openInput(FSDirectory.java:440)
+	at org.apache.lucene.index.FieldInfos.<init>(FieldInfos.java:57)
+	at org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java:176)
+	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java:157)
+	at org.apache.lucene.index.SegmentReader.get(SegmentReader.java:130)
+	at org.apache.lucene.index.IndexReader$1.doBody(IndexReader.java:205)
+	at
+org.apache.lucene.index.SegmentInfos$FindSegmentsFile.run(SegmentInfos.java:610)
+	at org.apache.lucene.index.IndexReader.open(IndexReader.java:184)
+	at org.apache.lucene.index.IndexReader.open(IndexReader.java:157)
+
+Note each time, the missing file is different. When this happen, the program
+automatically tried to reopen the most recent THREE snapshots and we got the
+same exception for each snapshot. Remember, each of the snapshot was
+validated before it was copied.
+
+2) The similar things happened on the search node: the same index which was
+opened OK during last night nodes recycle could not be opened due to the
+same exception. The search node does not update index.
+
+3) In my case, the index was "validated" before, and it became invalidate in
+a later time. It seems it happened only when we restart the application.
+When the exception happen, the file did not exist in the index. 
+
+--Yajun
+
+
+
+markrmiller wrote:
+> 
+> Mark Miller wrote:
+>> Paul J. Lucas wrote:
+>>> Sorry for the radio silence.  I changed my code around so that a 
+>>> single IndexReader and IndexSearcher are shared.  Since doing that, 
+>>> I've not seen the problem.  That being the case, I didn't pursue the 
+>>> issue.
+>>>
+>>> I still think there's a bug because the code I had previously, IMHO, 
+>>> should have worked just fine.
+>>>
+>>> - Paul
+>>>
+>> Hey Paul, when I told you that you should be sharing 
+>> IndexSearcher/Reader's across threads and I thought it was wrong not 
+>> to, I made the obviously wrong assumption that you either had lots of 
+>> clients or were not in control of the number of searches that could 
+>> could come in at once (a webpp on the internet type thing).
+>>
+>> In your simple case, you are certainly right and it should have worked 
+>> just fine. I was concerned you were generating an unknown number of 
+>> Readers for every search (which we now know is not an issue). Please 
+>> disregard all notions that I may have introduced in regards to this 
+>> being wrong. It is only  in the case of many clients/searches 
+>> simultaneously that I would consider what I said to be accurate: and 
+>> even then not everyone is sure to agree with me.
+>>
+>> Again, I apologize for leading you a bit off track. You did double 
+>> check your Writer handling though? I still don't think anyone has seen 
+>> your error without using two Writer's simultaneously.
+>>
+>> - Mark
+> P.S.
+> 
+> Dont switch back to not sharing! Even your one client must enjoy not 
+> having to wait for that new Searcher to load up on every search :) 
+> Especially if you have any sort caches.
+> 
+> - Mark
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/FileNotFoundException-in-ConcurrentMergeScheduler-tp17548777p18304948.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

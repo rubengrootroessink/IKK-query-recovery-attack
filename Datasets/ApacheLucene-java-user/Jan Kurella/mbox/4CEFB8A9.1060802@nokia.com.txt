@@ -1,0 +1,81 @@
+FROM: Jan Kurella <jan.kure...@nokia.com>
+SUBJECT: DisMaxQuery calculating too high sumOfSquaredWeights?
+DATE: 26 Nov 2010
+
+Hi there,
+
+I was composing a Query like the Solr.DisMaxQueryHandler would do on my 
+own as I needed a different Tokenizing strategy for non whitespace 
+separated languages and more. The concept I took from
+http://www.lucidimagination.com/blog/2010/05/23/whats-a-dismax/
+
+Assume now the following:
+Documents having two fields "title" and "tag". User input can match any 
+field but must be found almost fully
+Document <title:blue star> <tag:have fun>
+
+Query: "blue star fun"
+
+And my Query from my query parser looks like the following:
+
+BooleanQuery (
+     DisjunctionMaxQuery (
+         SpanTermQuery(title:blue),
+         SpanTermQuery(tag:blue)
+     ),
+     DisjunctionMaxQuery (
+         SpanTermQuery(title:star),
+         SpanTermQuery(tag:star)
+     ),
+     DisjunctionMaxQuery (
+         SpanTermQuery(title:fun),
+         SpanTermQuery(tag:fun)
+     ),
+     minShouldMatch = 2
+)
+
+Obviously this is a "full match", meaning all three terms are found, and 
+from subjective user perspective this should not be a big difference in 
+the score to a pure OR-query "blue star fun" with all tokens in the same 
+field. But surprisingly the score from the DMQuery is extremly low!
+
+Looking into it it turns out, that the querynorm multiplied into each 
+queryWeight of each SpanTermQuery is very small (0.16). It is calculated 
+by the BooleanQuery by getting the sum of sumOfSquaredWeights() of each 
+DMQuery. And here is the problem. The idf of the STQuery (or a 
+TermQuery) used to elaborate the weight is very high for a Term not 
+present (that is on purpose) Unfortunately the DMQuery takes the highest 
+idf (assuming tie=0.0) from all clauses.
+
+By concept for the whole dismax query the chance that there will be a 
+Term not found in a concrete DMQuery is near 100%, especially if you 
+search across many fields. Thus, the idf of a DMQuery is almost always 
+equal to a Termquery which term will not be found. But For scoring only 
+the clause of the DMQuery that hit will be taken into account. This 
+leads to too small scores!
+
+What I think would be the correct idf for a DMQuery with pure 
+TermQueries would be rather something like
+
+if any term matches
+     take the highest (plus tiestuff) idf from these clauses,
+else
+     take the highest idf
+
+Unfortunately, when calculating sumOfSquaredWeights(), the idf is 
+already calculated in a general correct way and I do not see a way to to 
+know in DisjunctionMaxQuery.DisjunctionMaxWeight.sumOfSquaredWeights() 
+whether a returned currentWeight.sumOfSquaredWeights() comes from a 
+TermQuery which only term has a df of 0?
+
+How to solve this problem to get a "better" sumOfSquaredWeights() from 
+DisMaxQuery? The current value does not reflect the intention of this query.
+
+Jan
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,233 @@
+FROM: James Pine <general_n...@yahoo.com>
+SUBJECT: RE: Managing a large archival (and constantly changing) database
+DATE: 7 Jul 2006
+
+--- "Rob Staveley (Tom)" <rstaveley@seseit.com> wrote:
+
+> Doug says:
+> 
+> > 1. On the index master, periodically checkpoint
+> the index. Every minute or
+> so the IndexWriter is closed and a 'cp -lr index
+> index.DATE' command is
+> executed from Java, where DATE is the current date
+> and time. This
+> efficiently makes a copy of the index when its in a
+> consistent state by
+> constructing a tree of hard links. If Lucene
+> re-writes any files (e.g., the
+> segments file) a new inode is created and the copy
+> is unchanged. 
+> 
+> How can that be so? When the segments file is
+> re-written it will surely
+> clobber the copy rather than creating a new INODE,
+> because it has the same
+> name... wouldn't it?
+>
+> 
+> What makes it different from (say)...
+> 
+> 	mkdir x
+> 	echo original > x/x.txt
+> 	cp -lr x x.copy
+> 	echo update > x/x.txt
+> 	diff x/x.txt x.copy/x.txt
+> 
+> ...where x.copy/x.txt has "update" rather than
+> "original" (certainly on
+> Linux).
+
+I agree in your example, both x/x.txt and x.copy/x.txt
+will contain "update"; however if the lucene internals
+do this:
+
+ 	mkdir x
+ 	echo original > x/x.txt
+ 	cp -lr x x.copy
+-->     rm x/x.txt
+ 	echo update > x/x.txt
+ 	diff x/x.txt x.copy/x.txt
+
+Then x/x.txt will have a different inode from
+x.copy/x.txt and their contents will be differ right?
+
+JAMES
+> 
+> -----Original Message-----
+> From: James Pine [mailto:general_nogi@yahoo.com] 
+> Sent: 06 July 2006 20:09
+> To: java-user@lucene.apache.org
+> Subject: RE: Managing a large archival (and
+> constantly changing) database
+> 
+> Hey,
+> 
+> I found this thread to be very useful when deciding
+> upon an indexing
+> strategy. 
+> 
+>
+http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg12700.html
+> 
+> The system I work on has 3 million or so documents
+> and it was (until a
+> non-lucene performance issue came up) setup to
+> add/delete new documents
+> every 15 minutes in a similar manner as described in
+> the thread. We were
+> adding/deleting a few thousand documents every 15
+> minutes, during peak
+> traffic. We have a dedicated indexing machine and
+> distribute portions of our
+> index across multiple machines, but you could still
+> follow the pattern all
+> on one box, just with separate processes/threads. 
+> 
+> Even though lucene allows certain types of index
+> operations to happen
+> concurrently with search activity, IMHO, if you can
+> decouple the indexing
+> process from the searching process your system as a
+> whole will be more
+> flexible and scalable with only a little extra
+> maintenance overhead.
+> 
+> JAMES
+> 
+> --- Larry Ogrodnek <Lawrence@theladders.com> wrote:
+> 
+> > We have a similar setup, although probably only
+> 1/5th the number of 
+> > documents and updates.  I'd suggest just making
+> periodic index 
+> > backups.
+> > 
+> > I've been storing my index as follows:
+> > 
+> > <workdir>/<index-name>/data/ (lucene index
+> > directory)
+> > <workdir>/<index-name>/backups/
+> > 
+> > The "data" is what's passed into
+> > IndexWriter/IndexReader.  Additionally, I
+> create/update a .last_update 
+> > file, which just contains the timestamp of when
+> the last update was 
+> > started, so when the app starts up it only needs
+> to retrieve updates 
+> > from the db since then.
+> > 
+> > Periodically the app copies the contents of data
+> into a new directory 
+> > in backups named by the date/time, e.g.
+> > backups/2007-07-04.110051.  If
+> > needed, I can delete data and replace the contents
+> with the latest 
+> > backup, and the app will only retrieve records
+> updated since the 
+> > backup was made (using the backup's
+> .last_update)...
+> > 
+> > I'd recommend making the complete index creation
+> from scratch a normal 
+> > operation as much as possible (but you're right,
+> for that number of 
+> > documents it will take awhile).  It's been really
+> helpful here when 
+> > doing additional deploys for testing, or deciding
+> we want to index 
+> > things differently, etc...
+> > 
+> > -larry
+> > 
+> > 
+> > -----Original Message-----
+> > From: Scott Smith
+> [mailto:ssmith@mainstreamdata.com]
+> > 
+> > Sent: Thursday, July 06, 2006 1:48 PM
+> > To: lucene-user@jakarta.apache.org
+> > Subject: Managing a large archival (and constantly
+> > changing) database
+> > 
+> > I've been asked to do a project which provides
+> full-text search for a 
+> > large database of articles.  The expectation is
+> that most of the 
+> > articles are fairly small (<2k bytes).  There will
+> be an initial 
+> > population of around 400,000 articles.  There will
+> then be 
+> > approximately 2000 new articles added each day
+> (they need to be added 
+> > in "real time"
+> > (within a few minutes of arrival), but will be
+> spread out during the 
+> > day).  So, roughly another 700,000 articles each
+> year.
+> > 
+> >  
+> > 
+> > I've read enough to believe that having a lucene
+> database of several 
+> > million articles is doable.  And, adding 2000
+> articles per day 
+> > wouldn't seem to be that many.  My concern is the
+> real-time nature of 
+> > the application.  I'm a bit nervous (perhaps
+> without
+> > justification) at
+> > simply growing one monolithic lucene database. 
+> > Should there be a crash,
+> > the database will be unusable and I'll have to
+> rebuild from scratch 
+> > (which, based on my experience, would be hours of
+> time).
+> > 
+> >  
+> > 
+> > Some of my thoughts were:
+> > 
+> > 1)     having monthly databases and using
+> > MultiSearcher to search across
+> > them.  That way my exposure for a corrupted
+> database is limited to 
+> > this month's database.  This would also seem to
+> give me somewhat 
+> > better control--meaning a) if the search was
+> generating lots of hits, 
+> > I could display the results a month at a time and
+> not bury them with 
+> > output.  It would also spread their search CPU out
+> better and not 
+> > prevent other individuals from doing a search.  If
+> there were very few 
+> > results, I could sleep between each month's search
+> and again, not lock 
+> > everyone else out from searches.
+> > 
+> > 2)     Have a "this month's" searchable and an
+> > "everything else"
+> > searchable.  At the beginning of each month, I
+> would consolidate the 
+> > previous month's database into the "everything
+> else"
+> > searchable.  This
+> > would give more consistent results for relevancy
+> ranked searches.  
+> > But, it means that a bad search could return lots
+> of 
+=== message truncated ===
+
+
+__________________________________________________
+Do You Yahoo!?
+Tired of spam?  Yahoo! Mail has the best spam protection around 
+http://mail.yahoo.com 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

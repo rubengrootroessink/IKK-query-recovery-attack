@@ -1,0 +1,67 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Using TermDocs.seek vs. IndexReader.termDocs()
+DATE: 17 Jan 2010
+
+On Sun, Jan 17, 2010 at 5:01 AM, Shai Erera <serera@gmail.com> wrote:
+
+> I remember a while ago a discussion around the efficiency of TermDocs.seek
+> and how it is inefficient and it's better to call IndexReader.termDocs
+> instead (actually someone was proposing to remove seek entirely from the
+> interface because of that). I've looked at FieldCacheImpl's
+> ByteCache.createValue and noticed it calls termDocs.seek.
+
+Actually, I think the discussion was about TermEnum.skipTo, which is
+in fact now removed as of 3.0, not TermDocs.seek.  I think
+TermDocs.seek is OK to call.
+
+> So is it 'safe' to call seek again? Has the implementation improved? I
+> checked SegmentTermDocs change history but didn't see anything related, nor
+> in FieldCacheImpl. I'm iterating a TermEnum and need to get the documents
+> associated with each term. Basically, more or so what FieldCacheImpl does.
+> So I thought to use the same methodology (I used to call reader.termDocs on
+> every term before I saw FieldCacheImpl's implementation). Since TermEnum
+> moves forward, I hope that termDocs.seek will move forward as well, and I
+> only do it within the same field.
+
+I think TermDocs.seek has no forward only "constraint", meaning,
+whatever term you give it (whether it's before or after where it
+currently is), it will go to.
+
+> BTW, if there is a better way to do what I'm trying to (such as a better
+> API), I'd appreciate if you can give me a hint.
+
+Just to give a preview of the current flex API... you'd do it roughly
+like this (this is what FieldCacheImpl on flex branch does):
+
+  // represents all terms in the field
+  Terms terms = reader.fields().terms(field);
+
+  // assuming you want to skip the deleted docs...
+  Bits skipDocs = reader.getDeletedDocs();
+
+  if (terms != null) {
+    // field exists
+    TermsEnum termsEnum = terms.iterator();
+    while(true) {
+      final BytesRef term = termsEnum.next();
+      if (term == null) {
+        break;
+      }
+      DocsEnum docs = termsEnum.docs(skipDocs);
+      while(true) {
+        final int docID = docs.nextDoc();
+        if (docID == DocsEnum.NO_MORE_DOCS) {
+          break;
+        }
+        // do something with docID
+      }
+    }
+  }
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,52 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: IndexWriter.optimize() need to much time.
+DATE: 5 Oct 2005
+
+Eric Louvard wrote:
+> my problem is that IndexWriter.optimize() take 20 minutes. OK it is not 
+> a lot of time, but I can't allow me to block the system such a long time 
+> :-(.
+
+If you're worried about blocking, queue changes to the index and have a 
+separate thread which processes the queue, adding and deleting 
+documents.  If your index changes frequently then don't bother 
+optimizing, rather simply use mergeFactor=2 to minimize the number of 
+segments searched and a large minMergeDocs (~1000).  Optimizing is good 
+for indexes which change only seldom.  Large mergeFactors are good for 
+batch indexing, when optimization will be performed at the end, but 
+create too many segments for efficient search.
+
+So, best practices for fast indexing and search:
+
+Increase minMergeDocs to proportional to the number of documents you can 
+store in the Java heap.  1000 is usually safe with a 100Mb heap and 
+typical document lengths.
+
+When batch-building, use mergeFactor=50, and optimize index at the end.
+
+With rapidly changing index, use mergeFactor=2 to minimize the number of 
+segments.  Do not optimize.  Queue index updates and process queue in a 
+separate thread.  Queue processing should look something like:
+   loop:
+     - open IndexReader;
+     - process all queued document deletions;
+     - close IndexReader;
+     - open IndexWriter;
+     - set mergeFactor=2;
+     - process all queued document additions;
+     - close IndexWriter;
+     - publish new IndexSearcher
+     - sleep one minute
+
+Such a system will be able to handle thousands of changes per minute, 
+publishing a new index nearly every minute in most cases.  Ocassionally 
+it will take longer, as large segments are merged.
+
+Doug
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

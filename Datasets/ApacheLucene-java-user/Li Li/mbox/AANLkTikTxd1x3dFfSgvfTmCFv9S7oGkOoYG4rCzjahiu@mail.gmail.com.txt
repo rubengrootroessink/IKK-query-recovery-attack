@@ -1,0 +1,83 @@
+FROM: Li Li <fancye...@gmail.com>
+SUBJECT: how to get term position of a document?
+DATE: 7 Jun 2010
+
+I want to override TermScorer.score()  method to take  position info
+into scoring. e.g. any occurence whose position is less than 100 will
+get a boost
+The original score method:
+
+  public float score() {
+    assert doc != -1;
+    int f = freqs[pointer];
+    float raw =                                   // compute tf(f)*weight
+      f < SCORE_CACHE_SIZE                        // check cache
+      ? scoreCache[f]                             // cache hit
+      : getSimilarity().tf(f)*weightValue;        // cache miss
+
+    return norms == null ? raw : raw * SIM_NORM_DECODER[norms[doc] &
+0xFF]; // normalize for field
+  }
+
+I want to modify it to:
+
+  public float score() {
+    assert doc != -1;
+    int f = freqs[pointer];
+    float raw =                                   // compute tf(f)*weight
+      f < SCORE_CACHE_SIZE                        // check cache
+      ? scoreCache[f]                             // cache hit
+      : getSimilarity().tf(f)*weightValue;        // cache miss
+
+    //modified
+    int[] termPositions=getPositionOfDoc(doc);
+    float positionBoost=1.0;
+    for(int pos:termPositions){
+        positionBoost*=getPositionScore(pos);
+    }
+    raw*=positionBoost;
+    //end
+
+    return norms == null ? raw : raw * SIM_NORM_DECODER[norms[doc] &
+0xFF]; // normalize for field
+  }
+
+So I need to get position info of a term given a doc id by       int[]
+getPositionOfDoc(doc);
+I read some codes of SpanQuery
+
+TermPositions positions;
+
+while(positions.next()){//enum all docs containing the term
+      doc = positions.doc();
+      freq = positions.freq();  //current doc's tf
+      for(int i=0;i<freq;i++){
+           position = positions.nextPosition();  // get all the
+position information of current doc
+      }
+}
+
+But to get the doc's position info, I have to sequentially call
+positions.next() like this
+int[] getPositionOfDoc(doc){
+    while(positions.next()){
+           currentDoc = positions.doc();
+           if(currentDoc==doc){// find it
+                      freq = positions.freq();  //current doc's tf
+                      for(int i=0;i<freq;i++){
+                          //collect info
+                      }
+                      return result;
+           }
+    }
+}
+
+is there any method like random access to the position of doc? as far
+as I know, lucene's invert index is implemented by skip list which
+support log(n) search
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

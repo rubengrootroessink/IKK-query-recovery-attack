@@ -1,0 +1,517 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: RE: Index Path in WAR
+DATE: 24 May 2003
+
+This is nice, but it doesn't compile, for it doesn't implement
+Directory's abstract touchFile method.
+
+Otis
+
+--- Leslie Hughes <Leslie.Hughes@watercorporation.com.au> wrote:
+> 
+> Curiouser and curiouser.....
+> 
+> 
+> 
+> 
+> 
+> import java.io.BufferedInputStream;
+> 
+> import java.io.File;
+> import java.io.IOException;
+> import java.util.Iterator;
+> import java.util.Set;
+> 
+> import javax.servlet.ServletContext;
+> import javax.servlet.ServletContextEvent;
+> import javax.servlet.ServletContextListener;
+> 
+> import org.apache.lucene.store.Directory;
+> import org.apache.lucene.store.FSDirectory;
+> import org.apache.lucene.store.InputStream;
+> import org.apache.lucene.store.Lock;
+> import org.apache.lucene.store.OutputStream;
+> import org.apache.lucene.store.RAMDirectory;
+> 
+> 
+> /*
+> *  A delegating Directory that wraps either a RAMDirectory or
+> *  FSDirectory and allows an index to be distributed in a WAR.
+> *
+> *  An index is stored in the WAR under /WEB-INF (eg /WEB-INF/myindex)
+> *  and deployed into RAM or FS depending upon the context params
+> below.
+> *
+> *  By registering this class in the web.xml
+> *  we will receive ServletContextEvents on web app initialisation.
+> *  The same could be achieved in an old skool style startup-servlet.
+> *
+> *  Add lines like
+> <web-app>
+> 
+>   <description>MySearchApp</description>
+> 
+>   <context-param>
+> 	<param-name>org.apache.lucene.index</param-name>
+> 	<param-value>myindex</param-value>
+>   </context-param>
+> 
+>   <context-param>
+> 	<param-name>org.apache.lucene.index.UseRAMDirectory</param-name>
+> 	<param-value>false</param-value>
+>   </context-param>
+> 
+>   <listener>
+> 	<listener-class>WARDirectory</listener-class>
+>   </listener>
+> 
+> </web-app>
+> 
+> 
+> *
+> *  Once initialised, the directory can be accessed via the
+> *  org.apache.lucene.store.WARDirectory attribute. Eg in a jsp do
+> *
+> *  Directory dir =
+>
+(Directory)application.getAttribute("org.apache.lucene.store.WARDirectory");
+> *  Searcher searcher = new IndexSearcher(dir);
+> *  etc etc
+> *
+> *  Limitations:  Only tested in Tomcat > 4.1 (Servlet 2.4?)
+> *
+> *  ToDo: Change RAM/FSDirectory selection to allow passing of a
+> classname
+> (eg org.foo.Mydirectory)
+> *        Needs changes for lucene > 1.2 ??
+> 
+> * @author <a href="mailto:lesliehughes100@yahoo.com">Les Hughes</a>
+> */
+> 
+> 
+> public class WARDirectory extends Directory implements
+> ServletContextListener {
+> 
+>     protected Directory directory;
+>     protected ServletContext context;
+>     protected Set list;
+>     protected boolean useRam = false;
+>     String index;
+> 
+>     //Shame this method does not allow us to throw an
+> exception.....Erm
+> bogus use of RuntimeException...
+> 
+>     public void contextInitialized(ServletContextEvent sce) {
+>         context = sce.getServletContext();
+> 
+>         if((index =
+> context.getInitParameter("org.apache.lucene.index")) ==
+> null) {
+>          String msg = "Lucene 'org.apache.lucene.index' context-param
+> missing in web.xml";
+>          context.log(msg);
+>          throw new RuntimeException(msg);
+>         }
+> 
+>         useRam =
+>
+Boolean.valueOf(context.getInitParameter("org.apache.lucene.index.UseRAMDire
+> ctory")).booleanValue();
+> 
+>         context.log("Searching for index "+index);
+>         list = context.getResourcePaths("/WEB-INF/"+index);
+>         if(list == null || list.isEmpty()) {
+>              String msg = "Index /WEB-INF/"+index+" appears to be
+> missing or
+> empty.";
+>              context.log(msg);
+>              throw new RuntimeException(msg);
+>         }
+> 
+> 		//Now copy index from WAR into Directory
+>         try {
+> 
+>             if(useRam) {
+>                 context.log("Creating a new RAMDirectory");
+>                 directory = new RAMDirectory();
+>             } else {
+>                 File temp =
+> (File)context.getAttribute("javax.servlet.context.tempdir"); 
+> //Sevlet Spec
+> P30
+>                 String dirPath = temp.getPath() + "/"+ index;
+>                 context.log("Creating a new FSDirectory at
+> "+dirPath);
+>                 directory = FSDirectory.getDirectory(dirPath, true);
+>             }
+> 
+>             //Add files from WAR to Dir...
+>             java.io.InputStream in;
+>             OutputStream out;
+> 
+>             int numBytes;
+>             byte[] buffer = new byte[4096]; //4k buffer
+>             String inresname, outresname;
+>             Iterator iter = list.iterator();
+> 
+>             while(iter.hasNext()) {
+>                 inresname = (String)iter.next();
+>                 outresname =
+> inresname.substring(inresname.lastIndexOf('/')+1);
+>                 context.log("Reading "+inresname+" will create
+> "+index+"/"+outresname);
+>                 in = new
+> BufferedInputStream(context.getResourceAsStream(inresname));
+> 
+>                 out =  directory.createFile(outresname);
+> 
+>                 numBytes = 0;
+>                 while( (numBytes = in.read(buffer, 0 ,
+> buffer.length)) !=
+> -1) {
+>                     out.writeBytes(buffer, numBytes);
+>                 }
+> 
+>                 out.close();
+>                 in.close();
+>             }
+> 
+>             //All done?
+> 
+>         }catch(IOException ioe) {
+>             //We fail fast if there was an exception on creating the
+> Directory.
+>             //Perhaps later we can re-try with an FSDirectory if it
+> was an
+> outof memory issue?
+> 
+>             context.log("Problem creating WARDirectory
+> "+ioe.getMessage());
+>             ioe.printStackTrace();
+>             throw new RuntimeException("Problem creating WARDirectory
+> "+ioe.getMessage());
+>         }
+> 
+> 		//Finally put dir ref somewhere we can use it...
+>         context.setAttribute("org.apache.lucene.store.WARDirectory",
+> this);
+>         context.log("WARDirectory done initialising.");
+>     }
+> 
+> 
+> 
+>
+////////////////////////////////////////////////////////////////////////////
+> /
+> //    Implement Directory's Interface.
+>
+////////////////////////////////////////////////////////////////////////////
+> /
+> 
+>     /* Called on app shutdown */
+>     public void contextDestroyed(ServletContextEvent sce){}
+> 
+>     /** Returns an array of strings, one for each file in the
+> directory. */
+>     public String[] list() throws IOException, SecurityException{
+>         return directory.list();
+>     }
+> 
+>     /** Returns true if a file with the given name exists. */
+>     public boolean fileExists(String name) throws IOException,
+> SecurityException{
+>         return directory.fileExists(name);
+>     }
+> 
+>     /** Returns the time the named file was last modified. */
+>     public long fileModified(String name) throws IOException,
+> SecurityException{
+>         return directory.fileModified(name);
+>     }
+> 
+>     /** Returns the length of a file in the directory. */
+>     public long fileLength(String name) throws IOException,
+> SecurityException{
+>         return directory.fileLength(name);
+>     }
+> 
+>     /** Returns a stream reading an existing file. */
+>     public InputStream openFile(String name) throws IOException,
+> SecurityException{
+>         return directory.openFile(name);
+>     }
+> 
+>     /** Closes the store. */
+>     public void close() throws IOException, SecurityException {
+>        directory.close();
+> 	}
+> 
+>     /** Removes an existing file in the directory. */
+>     public void deleteFile(String name) throws IOException,
+> SecurityException  {
+>         directory.deleteFile(name);
+> 	}
+> 
+>     /** Renames an existing file in the directory.
+>         If a file already exists with the new name, then it is
+> replaced.
+>         This replacement should be atomic. */
+>     public void renameFile(String from, String to) throws
+> IOException,
+> SecurityException {
+>         directory.renameFile(from, to);
+> 	}
+> 
+>     /** Creates a new, empty file in the directory with the given
+> name.
+>         Returns a stream writing this file. */
+>     public OutputStream createFile(String name) throws IOException,
+> SecurityException {
+>         return directory.createFile(name);
+> 	}
+> 
+>     /** Construct a {@link Lock}.
+>     * @param name the name of the lock file
+>     */
+>     public Lock makeLock(String name) {
+>         return directory.makeLock(name);
+> 	}
+> }
+> 
+> 
+> 
+> > -----Original Message-----
+> > From:	Terry Steichen [SMTP:terry@net-frame.com]
+> > Sent:	Wednesday, May 07, 2003 8:33 PM
+> > To:	Lucene Users List
+> > Subject:	Re: Index Path in WAR
+> > 
+> > Leslie,
+> > 
+> > Sorry but, at least for my e-mail, the attachment got stripped off.
+>  Could
+> > you send a copy embedded in the message itself?
+> > 
+> > TIA,
+> > 
+> > Terry Steichen
+> > 
+> > ----- Original Message -----
+> > From: "Leslie Hughes" <Leslie.Hughes@watercorporation.com.au>
+> > To: "'Lucene Users List'" <lucene-user@jakarta.apache.org>
+> > Sent: Tuesday, May 06, 2003 9:43 PM
+> > Subject: RE: Index Path in WAR
+> > 
+> > 
+> > >
+> > > Here it is. Enjoy....
+> > >
+> > >
+> > >  <<WARDirectory.java>>
+> > >
+> > > > -----Original Message-----
+> > > > From: Kevin Moran [SMTP:gridplan@yahoo.com]
+> > > > Sent: Monday, May 05, 2003 10:51 AM
+> > > > To: Lucene Users List
+> > > > Subject: RE: Index Path in WAR
+> > > >
+> > > > Hi Les,
+> > > >     I haven't run any metrics on the JarDirectory
+> > > > approach.  But, at least in my application, searches
+> > > > are surprisingly fast as long as the Jar is
+> > > > uncompressed.  If it's compressed, searches are
+> > > > noticeably slower.  When I wrote that class I didn't
+> > > > think I'd have concurrency issues because my users are
+> > > > only ever searching, and not updating, the Jar.  But
+> > > > maybe I'm missing something obvious.  If so, please
+> > > > let me know.
+> > > >     In any case, if you get a chance, I would like to
+> > > > see your WARDirectory class.  That's an interesting
+> > > > approach that I hadn't considered.
+> > > >
+> > > > TIA,
+> > > > -kevin
+> > > >
+> > > > --- Leslie Hughes
+> > > > <Leslie.Hughes@watercorporation.com.au> wrote:
+> > > > >
+> > > > > Hi,
+> > > > >
+> > > > > I've written a simple WARDirectory which delegates
+> > > > > to either a RAMDir or
+> > > > > FSDir. The WARDir is initialised by a listener
+> > > > > (servlet 2.3/4? spec) and
+> > > > > either copies the index to the servlet temp
+> > > > > directory or to RAM depending
+> > > > > upon a setting in the web.xml file.
+> > > > >
+> > > > > I dont have the source with me but if you want, I'll
+> > > > > bring it into work
+> > > > > tomorrow.
+> > > > >
+> > > > > I did think about going the jardir route but had
+> > > > > performance concerns about
+> > > > > lucene accessing a single jarfile.
+> > > > >
+> > > > > Bye
+> > > > >
+> > > > > Les
+> > > > >
+> > > > >
+> > > > >
+> > > > > > -----Original Message-----
+> > > > > > From: Kevin Moran [SMTP:gridplan@yahoo.com]
+> > > > > > Sent: Monday, May 05, 2003 8:38 AM
+> > > > > > To: Lucene Users List
+> > > > > > Subject: Re: Index Path in WAR
+> > > > > >
+> > > > > > Hi Jason,
+> > > > > >     This may not be the best solution and may
+> > > > > differ
+> > > > > > from your situation if your index is read/write
+> > > > > (mine
+> > > > > > isn't).  But hey, it works for me.  How I got
+> > > > > around
+> > > > > > the problem was first to Jar up the index.  I
+> > > > > Jarred
+> > > > > > it up uncompressed for speed.  I then subclassed
+> > > > > > Directory.  I called it JarDirectory.  I made
+> > > > > > JarDirectory's constructor use
+> > > > > > ClassLoader.getResource() to find the Jar and then
+> > > > > > create a java.util.jar.JarFile from it.  The
+> > > > > methods I
+> > > > > > overrode in Directory (e.g., list(), fileExists(),
+> > > > > > etc.) use the JarFile as appropriate.  After I
+> > > > > > debugged that class all I had to do was create an
+> > > > > > instance of JarDirectory and pass it to
+> > > > > > IndexSearcher's constructor.  My searches then
+> > > > > went
+> > > > > > against the Jar file.  As long as the Jar is in
+> > > > > the
+> > > > > > classpath -- which you can bundle with your web
+> > > > > app
+> > > > > > and set a classpath to in your manifest file -- it
+> > > > > > works.  That allows you to bundle the index with
+> > > > > the
+> > > > > > web app and avoid hard-coding a path to it.
+> > > > > >
+> > > > > > HTH,
+> > > > > > -kevin
+> > > > > >
+> > > > > > P.S. Unfortunately, I can't provide the source to
+> > > > > > JarDirectory as it is not mine to give.  But it
+> > > > > didn't
+> > > > > > take long to write and was less than 400 lines
+> > > > > long.
+> > > > > > Maybe someone else on the mailing list can point
+> > > > > you
+> > > > > > to a better concrete example.
+> > > > > >
+> > > > > > --- Jason.Cox@trw.com wrote:
+> > > > > > > List,
+> > > > > > >
+> > > > > > > I'm having problems using an absolute path to
+> > > > > the
+> > > > > > > index directory when my web application is
+> > > > > deployed
+> > > > > > > in a WAR file.  The absolute path changes
+> > > > > depending
+> > > > > > > on the server.  Is there a way to either
+> > > > > dynamically
+> > > > > > > determine an absolute path to the index
+> > > > > directory or
+> > > > > > > to use relative pathing?
+> > > > > > >
+> > > > > > > Thanks in advance,
+> > > > > > >
+> > > > > > > Jason
+> > > > > > >
+> > > > > > >
+> > > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > > > > To unsubscribe, e-mail:
+> > > > > > > lucene-user-unsubscribe@jakarta.apache.org
+> > > > > > > For additional commands, e-mail:
+> > > > > > > lucene-user-help@jakarta.apache.org
+> > > > > > >
+> > > > > >
+> > > > > >
+> > > > > > __________________________________
+> > > > > > Do you Yahoo!?
+> > > > > > The New Yahoo! Search - Faster. Easier. Bingo.
+> > > > > > http://search.yahoo.com
+> > > > > >
+> > > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > > > To unsubscribe, e-mail:
+> > > > > lucene-user-unsubscribe@jakarta.apache.org
+> > > > > > For additional commands, e-mail:
+> > > > > lucene-user-help@jakarta.apache.org
+> > > > >
+> > > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > > To unsubscribe, e-mail:
+> > > > > lucene-user-unsubscribe@jakarta.apache.org
+> > > > > For additional commands, e-mail:
+> > > > > lucene-user-help@jakarta.apache.org
+> > > > >
+> > > >
+> > > >
+> > > > __________________________________
+> > > > Do you Yahoo!?
+> > > > The New Yahoo! Search - Faster. Easier. Bingo.
+> > > > http://search.yahoo.com
+> > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail:
+> lucene-user-unsubscribe@jakarta.apache.org
+> > > > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> > >
+> > >
+> > 
+> > 
+> >
+>
+--------------------------------------------------------------------------
+> > --
+> > ----
+> > 
+> > 
+> > >
+> ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail:
+> lucene-user-unsubscribe@jakarta.apache.org
+> > > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> > 
+> > 
+> >
+> ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail:
+> lucene-user-help@jakarta.apache.org
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+
+
+__________________________________
+Do you Yahoo!?
+The New Yahoo! Search - Faster. Easier. Bingo.
+http://search.yahoo.com
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

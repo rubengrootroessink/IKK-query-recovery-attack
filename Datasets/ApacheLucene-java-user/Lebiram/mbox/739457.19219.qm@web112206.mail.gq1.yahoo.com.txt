@@ -1,0 +1,183 @@
+FROM: Lebiram <lebi...@ymail.com>
+SUBJECT: Re: Optimize and Out Of Memory Errors
+DATE: 23 Dec 2008
+
+Hi All, 
+
+Thanks for the replies, 
+
+I've just managed to reproduced the error on my test machine.
+
+What we did was, generate about 100,000,000 documents with about 7 fields in it, with terms
+from 1 to 10.
+
+After the index of about 20GB, we did an optimize and it was able to make 1 big index of the
+size 17GB...
+
+Now, when we do a normal search, it just fails. 
+
+Here is the stack trace:
+
+2008-12-23 16:56:05,388 [main] INFO  LuceneTesterMain  - Max Memory:1598226432
+2008-12-23 16:56:05,388 [main] INFO  LuceneTesterMain  - Available Memory:854133192
+2008-12-23 16:56:05,388 [main] ERROR LuceneTesterMain  - Seaching failed.
+java.lang.OutOfMemoryError
+    at java.io.RandomAccessFile.readBytes(Native Method)
+    at java.io.RandomAccessFile.read(RandomAccessFile.java:315)
+    at org.apache.lucene.store.FSDirectory$FSIndexInput.readInternal(FSDirectory.java:550)
+    at org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.java:131)
+    at org.apache.lucene.index.CompoundFileReader$CSIndexInput.readInternal(CompoundFileReader.java:240)
+    at org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.java:131)
+    at org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.java:87)
+    at org.apache.lucene.index.SegmentReader.norms(SegmentReader.java:834)
+    at org.apache.lucene.index.MultiSegmentReader.norms(MultiSegmentReader.java:335)
+    at org.apache.lucene.search.TermQuery$TermWeight.scorer(TermQuery.java:69)
+    at org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:143)
+    at org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:113)
+    at org.apache.lucene.search.Searcher.search(Searcher.java:132)
+
+
+The search code is quite simple in fact. 
+
+2008-12-23 16:56:05,076 [main] INFO  LuceneTesterMain  - query.toString()=+content:test
+
+and the code to search.
+
+Filter filter = new RangeFilter("timestamp", DateTools.dateToString(start, DateTools.Resolution.SECOND),
+                                         DateTools.dateToString(end, DateTools.Resolution.SECOND),
+true, true);
+Searcher = new IndexSearcher(FSDirectory.getDirectory(IndexName));
+TopDocs hits = Searcher.search(query, filter, 1000);
+
+I really have no idea why this is breaking.
+
+Also, what are norms and 
+how do I turn off norms and where is it set? 
+
+This is code on adding documents:
+
+Document doc = new Document();
+                    doc.add(new Field("id", String.valueOf(i), Field.Store.YES, Field.Index.UN_TOKENIZED));
+
+                    doc.add(new Field("timestamp", DateTools.dateToString(new Date(), DateTools.Resolution.SECOND),
+Field.Store.YES, Field.Index.UN_TOKENIZED));
+                    doc.add(new Field("content", LuceneTesterMain.StaticString, Field.Store.NO,
+Field.Index.TOKENIZED));
+                    doc.add(new Field("field2", "sender" + i, Field.Store.NO, Field.Index.TOKENIZED));
+                    doc.add(new Field("field3", LuceneTesterMain.StaticString, Field.Store.NO,
+Field.Index.TOKENIZED));
+
+                    doc.add(new Field("field4", "group" + i, Field.Store.NO, Field.Index.TOKENIZED));
+                    doc.add(new Field("field5", "groupId" + i, Field.Store.YES, Field.Index.UN_TOKENIZED));
+
+
+                    writer.addDocument(doc);
+
+
+
+
+
+________________________________
+From: mark harwood <markharw00d@yahoo.co.uk>
+To: java-user@lucene.apache.org
+Sent: Tuesday, December 23, 2008 2:42:25 PM
+Subject: Re: Optimize and Out Of Memory Errors
+
+I've had reports of OOM exceptions during optimize on a couple of large deployments recently
+(based on Lucene 2.4.0)
+I've given the usual advice of turning off norms, providing plenty of RAM and also suggested
+setting IndexWriter.setTermIndexInterval().
+
+I don't have access to these deployment environments and have tried hard to reproduce the
+circumstances that lead to this. For the record, I've experimented with huge indexes with
+hundreds of fields, several "unique value" fields e.g. primary keys, "fixed-vocab" fields
+with limited values e.g. male/female and fields with "power-curve" distributions e.g. plain
+text.
+I've wound my index up to 22GB with several commit sessions involving deletions, full optimises
+and partial optimises along the way. Still no error.
+
+However, the errors that have been reported to me from 2 different environments with large
+indexes make me think there is still something to be uncovered here...
+
+
+
+
+----- Original Message ----
+From: Michael McCandless <lucene@mikemccandless.com>
+To: java-user@lucene.apache.org
+Cc: Utan Bisaya <lebiram@ymail.com>
+Sent: Tuesday, 23 December, 2008 14:08:26
+Subject: Re: Optimize and Out Of Memory Errors
+
+
+How many indexed fields do you have, overall, in the index?
+
+If you have a very large number of fields that are "sparse" (meaning any given document would
+only have a small subset of the fields), then norms could explain what you are seeing.
+
+Norms are not stored sparsely, so when segments get merged the "holes" get filled (occupy
+bytes on disk and in RAM) and consume more resources.  Turning off norms on sparse fields
+would resolve it, but you must rebuild the entire index since if even a single doc in the
+index has norms enabled for a given field, it "spreads".
+
+Mike
+
+Utan Bisaya wrote:
+
+> Recently, our lucene index version was upgraded to 2.3.1 and the index had to be rebuilt
+for several weeks which made the entire index a total of 20 GB or so.
+> 
+> After the the rebuild, a weekly sunday task was executed for optimization.
+> 
+> During that time, the optimization failed several times complaining about OOM errors
+but then after a couple of tries, it completes.
+> 
+> So the entire index is now 1 segment that is 20 GB.
+> 
+> The problem is that any subsequent searches on that index fails with OOM errors at Lucene's
+reading of bytes.
+> 
+> Our environment:
+> jvm Xmx1600 (This is the max we could set the box since it's windows)
+> 8G Memory available on box
+> 4G CPU (8 core) but only 12.5% is used. (Not sure if this would impact it)
+> Harddisk available is 120GB
+> 
+> mergeFactor, and other lucene config is set at default.
+> 
+> We
+> checked this 20GB using luke and it has 400,000,000 documents in it. It was able to count
+the docs however when we do the search in Luke it fails giving us OOM errors.
+> 
+> We also did the check index and the tool fails at the 20GB segment but succeeds on the
+others.
+> 
+> We've managed to rollback to a previously unoptimized index copy (about 20GB or so) and
+the searches were find now. This unoptimized index is made up of several 8GB segments and
+a few smaller segments.
+> 
+> However there is a big possibility that the optimization error could happen again...
+> 
+> Does anybody have insights on why this is happening?
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      

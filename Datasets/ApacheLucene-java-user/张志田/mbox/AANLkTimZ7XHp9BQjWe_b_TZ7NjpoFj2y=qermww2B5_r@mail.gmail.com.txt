@@ -1,0 +1,387 @@
+FROM: 张志田 <zhitian.zh...@dianping.com>
+SUBJECT: Re: Can not delete index file after close the IndexSearcher
+DATE: 13 Jan 2011
+
+Hi Mike,
+
+Sorry to make you confused. "lock" means the file handle is held by some
+other progress, the program can not delete it. There is no exception, I can
+see file.delete() method returns false. If I delete the cfs file in the OS
+manually, the warning is "File was using by another person or program"
+
+To simplify my question, I made some more code for testing. you can run it
+for reproducing, after two loops, you will see the message e.g. "Can not
+delete file: D:\index\index2\_0.cfs"
+
+
+Thank you very much
+
+
+public class SearchTest
+{
+
+    private static final int MAX_RESULT = 10000;
+
+    private String indexPath1 = "D:\\index\\index1";
+
+    private String indexPath2 = "D:\\index\\index2";
+
+    private String backupIndexpath = "D:\\index\\index3";
+
+    private String indexPath = indexPath1;
+
+    private Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_30);
+
+    private IndexSearcher searcher;
+
+    public void search()
+    {
+        while (true)
+        {
+            try
+            {
+                String keyword = "test";
+                String fieldName = "searchfield";
+
+                Directory dir = FSDirectory.open(new File(indexPath));
+
+                searcher = new IndexSearcher(dir);
+
+                QueryParser queryParse = new QueryParser(Version.LUCENE_30,
+fieldName, analyzer);
+                Query query = queryParse.parse(keyword);
+
+                TopDocs hits = searcher.search(query, MAX_RESULT);
+                int size = 5;
+                if (hits.scoreDocs.length < size)
+                {
+                    size = hits.scoreDocs.length;
+                }
+                for (int i = 0; i < size; i++)
+                {
+                    Document doc = searcher.doc(hits.scoreDocs[i].doc);
+                    String text = doc.get(fieldName);
+                    System.out.println("fieldContent is: " + text);
+                }
+
+                IndexSearcher oldSearcher = searcher;
+
+                File newFile = new File(getIndexPath());
+                for (File file : newFile.listFiles())
+                {
+                    if (!file.delete())
+                    {
+                        System.out.println("Can not delete file: " +
+file.getAbsolutePath());
+                    }
+                }
+
+                // Copy index File from another folder to this folder
+                copyDir(new File(backupIndexpath), newFile);
+
+                Directory newDir = FSDirectory.open(newFile);
+                IndexSearcher newSearcher = new IndexSearcher(newDir);
+                searcher = newSearcher;
+
+                oldSearcher.close();
+
+                System.out.println("Closed Searcher: " +
+oldSearcher.getIndexReader().directory().toString());
+
+                System.out.println("input 'Q' to quit testing...");
+                BufferedReader br = new BufferedReader(new
+InputStreamReader(System.in));
+
+                if (br.readLine().trim().equals("Q"))
+                {
+                    break;
+                }
+            }
+            catch (CorruptIndexException e)
+            {
+                e.printStackTrace();
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+            catch (ParseException e)
+            {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private String getIndexPath()
+    {
+        if (indexPath.equals(indexPath1))
+        {
+            indexPath = indexPath2;
+        }
+        else
+        {
+            indexPath = indexPath1;
+        }
+
+        return indexPath;
+    }
+
+    public static void copyDir(File sourceLocation, File targetLocation)
+throws IOException
+    {
+        String[] children = sourceLocation.list();
+        for (int i = 0; i < children.length; i++)
+        {
+            InputStream in = null;
+            OutputStream out = null;
+            try
+            {
+                in = new FileInputStream(new File(sourceLocation,
+children[i]));
+                out = new FileOutputStream(new File(targetLocation,
+children[i]));
+
+                byte[] buf = new byte[1024];
+                int len;
+                while ((len = in.read(buf)) > 0)
+                {
+                    out.write(buf, 0, len);
+                }
+            }
+            catch (FileNotFoundException e)
+            {
+                e.printStackTrace();
+            }
+            catch (IOException ioe)
+            {
+                ioe.printStackTrace();
+            }
+            finally
+            {
+                try
+                {
+                    if (in != null)
+                    {
+                        in.close();
+                    }
+                    if (out != null)
+                    {
+                        out.close();
+                    }
+                }
+                catch (IOException e)
+                {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    public static void main(String[] args)
+    {
+        SearchTest searchTest = new SearchTest();
+        searchTest.search();
+    }
+
+}
+
+在 2011年1月12日 下午11:53，Michael McCandless <lucene@mikemccandless.com>写道：
+
+> Hmmm.
+>
+> When you say "locked" what actually does that mean?  Can you post the
+> exception?
+>
+> Also, can you whittle down your example even more?   EG if calling
+> this method twice causes the problem, make a method that calls it
+> twice and hits the exception and then start simplifying from there...
+>
+> Mike
+>
+> 2011/1/12 张志田 <zhitian.zhang@dianping.com>:
+> > Mike, thanks for your feedback.
+> >
+> > I verified this in the debug mode, so I just check the folder I closed in
+> > the last loop. Actually, both two folders are locked.
+> >
+> > tried with new FSDirectory every loop, no help.
+> >
+> > Garry
+> >
+> > 2011/1/12 Michael McCandless <lucene@mikemccandless.com>
+> >
+> >> When you break out of the loop (user enters 'Q') you don't close the
+> >> current searcher.  Could that be it?
+> >>
+> >> Also you are calling FSDir.open each time but should only do it once
+> >> (though this should be "harmless").
+> >>
+> >> Mike
+> >>
+> >> On Wed, Jan 12, 2011 at 5:39 AM, 张志田 <zhitian.zhang@dianping.com>
+> wrote:
+> >> > Dear Luceners,
+> >> >
+> >> > I'm using lucene-3.0.2 in our app. There is some testing code for
+> >> switching
+> >> > index, however, when my code run a couple of times, I found the index
+> >> file
+> >> > was locked, I can not delete the old index files.
+> >> >
+> >> >
+> >> > The code looks like:
+> >> >
+> >> > public class SearchTest
+> >> > {
+> >> >
+> >> >    private static final int MAX_RESULT = 10000;
+> >> >
+> >> >    private String indexPath1 = "D:\\index\\index1";
+> >> >    private String indexPath2 = "D:\\index\\index2";
+> >> >
+> >> >    private String indexPath = indexPath1;
+> >> >
+> >> >    private Analyzer analyzer = new
+> StandardAnalyzer(Version.LUCENE_30);
+> >> >
+> >> >    private Directory dir = null;
+> >> >
+> >> >    private IndexSearcher searcher;
+> >> >
+> >> >    public void search()
+> >> >    {
+> >> >        while(true)
+> >> >        {
+> >> >            try
+> >> >            {
+> >> >                String keyword = "test";
+> >> >                String fieldName = "searchfield";
+> >> >
+> >> >                if(dir == null)
+> >> >                {
+> >> >                    dir = FSDirectory.open(new File(indexPath));
+> >> >                }
+> >> >                searcher = new IndexSearcher(dir);
+> >> >
+> >> >                QueryParser queryParse = new
+> >> QueryParser(Version.LUCENE_30,
+> >> > fieldName, analyzer);
+> >> >                Query query = queryParse.parse(keyword);
+> >> >
+> >> >                TopDocs hits = searcher.search(query, MAX_RESULT);
+> >> >                int size = 5;
+> >> >                if(hits.scoreDocs.length < size)
+> >> >                {
+> >> >                    size = hits.scoreDocs.length;
+> >> >                }
+> >> >                for (int i = 0; i < size; i++)
+> >> >                {
+> >> >                    Document doc = searcher.doc(hits.scoreDocs[i].doc);
+> >> >                    String text = doc.get(fieldName);
+> >> >                    System.out.println("fieldContent is: " + text);
+> >> >                }
+> >> >
+> >> >                IndexSearcher oldSearcher = searcher;
+> >> >                dir = FSDirectory.open(new File(getIndexPath()));
+> >> >                IndexSearcher newSearcher = new IndexSearcher(dir);
+> >> >                searcher = newSearcher;
+> >> >
+> >> >                oldSearcher.close();
+> >> >                System.out.println("Closed Searcher: " +
+> >> > oldSearcher.getIndexReader().directory().toString());
+> >> >
+> >> >                System.out.println("input 'Q' to quit testing...");
+> >> >                BufferedReader br = new BufferedReader(new
+> >> > InputStreamReader(System.in));
+> >> >
+> >> >                if(br.readLine().trim().equals("Q"))
+> >> >                {
+> >> >                    break;
+> >> >                }
+> >> >            }
+> >> >            catch (CorruptIndexException e)
+> >> >            {
+> >> >                e.printStackTrace();
+> >> >            }
+> >> >            catch (IOException e)
+> >> >            {
+> >> >                e.printStackTrace();
+> >> >            }
+> >> >            catch (ParseException e)
+> >> >            {
+> >> >                e.printStackTrace();
+> >> >            }
+> >> >        }
+> >> >    }
+> >> >
+> >> >    private String getIndexPath()
+> >> >    {
+> >> >        if(indexPath.equals(indexPath1))
+> >> >        {
+> >> >            indexPath = indexPath2;
+> >> >        }
+> >> >        else
+> >> >        {
+> >> >            indexPath = indexPath1;
+> >> >        }
+> >> >
+> >> >        return indexPath;
+> >> >    }
+> >> >
+> >> >    public static void main(String[] args)
+> >> >    {
+> >> >        SearchTest searchTest = new SearchTest();
+> >> >        searchTest.search();
+> >> >    }
+> >> >
+> >> > }
+> >> >
+> >> > Can anybody take a look at the above code snippet?
+> >> >
+> >> > I want to search on the different index file every time so I created
+> two
+> >> > different folders and switch them time to time. The index files in the
+> >> > index1/index2 maybe replaced before the search request comes.
+> >> >
+> >> > The problem I found is after I ran the above code 2 or more loops, I
+> can
+> >> not
+> >> > modify/delete the cfs/cfx file in the file system(Windows 2003),
+> although
+> >> I
+> >> > closed the searcher every time in the code. It seems that the index
+> file
+> >> is
+> >> > not released.
+> >> >
+> >> > Is the problem caused by the shared reference of searcher? or some
+> shared
+> >> > thread in the lucene?
+> >> >
+> >> > Thanks in advance!
+> >> > Garry
+> >> >
+> >>
+> >
+> >
+> >
+> > --
+> > 张志田
+> >
+> > 大众点评网 - 技术部
+> > 电话：52521070 - 1675
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+张志田
+
+大众点评网 - 技术部
+电话：52521070 - 1675
+

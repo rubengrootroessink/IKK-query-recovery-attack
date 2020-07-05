@@ -1,0 +1,144 @@
+FROM: Mindaugas Žakšauskas <min...@gmail.com>
+SUBJECT: Re: Safely closing stale IndexReaders
+DATE: 5 Oct 2010
+
+Hi,
+
+Thanks for your input Mike.
+
+As far as I understand, your suggestion is to do something like this:
+
+IndexSearcher searcher = searcherManager.get();
+try {
+  // do searching & rendering here…
+} finally {
+  searcherManager.release(searcher) ;
+}
+
+The key bit: release(searcher) here calls IndexReader.decRef() which
+in turn closes the index when necessary.
+
+This approach has the same disadvantage of object pooling I have
+mentioned in my original email. The "do searching & rendering" phase
+might be split among many classes and/or frameworks (e.g. JSPs) and
+wrapping all that in a single try/finally might be quite awkward.
+
+What I was trying to achieve was some sort of automatic resource
+management, similar to what java.lang.AutoCloseable brings with JDK 7.
+
+It seems that the only possible way to do this is using the finalizer method.
+
+m.
+
+p.s. our office does own a copy of LIA.
+
+On Tue, Oct 5, 2010 at 11:34 AM, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> Check out the SearcherManager class in Lucene in Action 2nd edition's
+> source code.  It's free for download at Manning's site
+> (http://manning.com/lucene).  NOTE: I am one of the co-authors.
+>
+> I think that class does exactly what you're seeking.  It uses
+> reference counts to ensure a reader is closed after all threads that
+> are using it have completed, and handles reopen and warming of new
+> readers.
+>
+> It also works both in near-real-time mode (you pass it an IndexWriter
+> instance) or a non-NRT mode (using IndexReader.reopen).
+>
+> However, each thread must release the reader else the reader will
+> never be closed.
+>
+> Mike
+>
+> 2010/10/5 Mindaugas Žakšauskas <mindas@gmail.com>:
+>> Hi,
+>>
+>> I am keeping a ConcurrentMap of o.a.l.index.IndexReader which I use in
+>> my system. These readers are retrieved by multiple threads and I have
+>> no knowledge when these readers are actively used and when not.
+>>
+>> When underlying index is updated, I reopen the reader and replace it in the map:
+>>
+>> IndexReader newReader = oldReader.reopen();
+>> if (newReader != oldReader) {  // reader has been changed
+>>  map.replace(key, newReader);
+>> }
+>>
+>> The problem with this is that old reader doesn't get closed which adds
+>> to open file handle footprint. I cannot close oldReader immediately
+>> after map.replace() as there might be some other threads actively
+>> using it.
+>>
+>> One of solutions would be to use object pools. Each time IndexReader
+>> is necessary, it would have to be borrowed from the pool and then
+>> given back when done. This however has a disadvantage of massive
+>> amount of scaffolding useless code and would still not guarantee that
+>> all objects are given back safely as caller might forget to return the
+>> object to the pool.
+>>
+>> Another solution is to use finalizers. This requires extending IndexReader, e.g.
+>>
+>> class SelfClosingIndexReader extends IndexReader {
+>>  private final IndexReader delegate;
+>>  public SelfClosingIndexReader(IndexReader delegate) {
+>>    this.delegate = delegate;
+>>  }
+>>
+>>  public void anyPublicMethod() {
+>>    delegate.anyPublicMethod();
+>>  }
+>>
+>>  public void anyProtectedMethod() {
+>>    delegate.anyProtectedMethod();
+>>  }
+>>
+>>  protected void finalize() throws Throwable {
+>>    try {
+>>      delegate.close();
+>>    } finally {
+>>      super.finalize();
+>>    }
+>>  }
+>> }
+>>
+>> This solution works, but is utterly ugly:
+>> - Finalizers are bad. I won't digress explaining why, just read Josh
+>> Bloch's "Effective Java second edition" Item 7;
+>> - IndexReader is an abstract class, not an interface -- this means I
+>> have to override every single public and protected method, otherwise
+>> this will fail. Moreover, it is very very slippery: if I upgrade to a
+>> newer Lucene version, I have to carefully go through every single
+>> method to ensure there are no new ones which I have to
+>> override/un-override.
+>>
+>> A better solution would be to use WeakReferences. However there is no
+>> inner purposed object (e.g. Reader) of IndexReader that could be
+>> referenced strongly and used for .close() upon polling relevant
+>> reference queue. Extending WeakReference and keeping hard reference to
+>> IndexReader inside it simply prevents whole object from being
+>> reclaimed (or there's something I don't understand about
+>> WeakReferences).
+>>
+>> I was wondering if anybody has been in a similar situation and solved
+>> this. Thanks in advance.
+>>
+>> m.
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

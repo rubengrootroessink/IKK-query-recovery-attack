@@ -1,0 +1,111 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Reading from an IndexWriter
+DATE: 3 Nov 2008
+
+One thing that others have tried is to keep a RAMindex that you
+use for your modifications. That is, an index that *only* has your
+mods, not your original index. But, and here's the key, when you
+update, you update BOTH your RAM and FS based indexes.
+
+When searching, you search BOTH indexes, giving precedence
+to anything in your RAM index. Which, since it should
+be much, much smaller than your FS-based one should re-open
+quickly.
+
+So here's the rough outline
+
+At time T, you open both your FS and RAM indexes, the RAM
+index is empty.
+
+Any modifications happen to both indexes. Note that no
+searches of your FS based index will show any of these
+modifications until you re-open your searchers
+
+Any searches look in your already-opened FS index and open
+a NEW searcher on your RAM index and searches *that*
+index as well.
+
+At time T + X, you decide to go through the pain of re-opening your
+FSbased dir, so you close both your indexes and start over.
+
+You'll have to dance fancy on a few points:
+> I'm unsure what serves your need best when updating an existing
+   document. Do you add it to your RAM-based index first and *then*
+   update it? Just add it and do a delete pass on your FS-based
+   index when you close them both down?
+> your Lucene doc IDs will be wonky, it's unclear (probably, in fact
+   unavoidable) that an updated document in your RAM index will NOT
+   have the same Lucene ID as the exact copy in your FS-based index,
+   assuming you've chosen to copy it over.
+> Relevance may be an issue. Your relevance scores in your RAM-based
+   index will be "interesting", and probably won't correlate real well to
+the
+   relevance scores in your FS-based index.
+
+I don't think any of these are insurmountable, but a lot depends upon your
+requirements..
+
+Best
+Erick
+
+P.S. this topic has been discussed in the mail archives, but I don't
+remember
+the topic. You might get lucky searching for something like "real time
+updates"
+
+On Mon, Nov 3, 2008 at 5:24 PM, Matthew DeLoria
+<matthew.deloria@gmail.com>wrote:
+
+> I had a question about more about Best Practices and reading from an
+> IndexWriter.
+>
+> Currently, we have an index which we call the master index. This index, in
+> itself, represents our data model. Many clients can access this index.
+>
+> However, we have importer and updating clients which essentially add to
+> this
+> index periodically. These tasks can have specific logic where we can grab
+> specific documents, update some of the data, and call
+> writer.updateDocument(..). We also allow the adding of documents. Each of
+> these tasks however, may depend on data we are adding to the writer at the
+> same time.
+>
+> For example, I could say writer.addDocument() and a second later I may need
+> to do a query for this very document I just added. Currently, we have a
+> temp
+> directory where all the writing is occurring. We have a searcher that
+> searches this index. Now, for this searcher to see the writes that
+> occurring
+> to this temp index, it needs to be reconstructed each time we need to do a
+> search which is very very inefficient, as this could happen very
+> frequently.
+> Consider the situation where I add a document and then need to get this
+> document immediately after. The searcher would need to be closed and the
+> reader reopened. I will also have to call a commit (or flush) on the writer
+> before doing this. Unfortunantly, we can't have our TempDirectory be a ram
+> directory exclusively because we can't guarantee how much memory each
+> client
+> will have.
+>
+> So my question is, is there a way I can read what documents are sitting in
+> the writer without having to do this painful flush/reopen? I know this is
+> not how Lucene is intended to work but in our case it would be very very
+> helpful if we could do the reading and writing from the same
+> IndexWriter/Reader so we wouldn't have to keep doing this reopen / flush
+> call.
+>
+> Second, if nothing like this is possible, is the way I am doing it above
+> the
+> best possible way - (Calling flush on the writer, calling reopen on the
+> indexreader, and reconstructing the searcher)
+>
+> I am using Lucene 2.3.2 currently.
+>
+> Thanks!
+> m
+>
+> --
+> Matthew P. DeLoria
+> matthew.deloria@gmail.com
+>
+

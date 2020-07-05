@@ -1,0 +1,75 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Performance when computing computing a filter using hundreds of diff terms.
+DATE: 6 Aug 2004
+
+Kevin,
+
+
+On Thursday 05 August 2004 23:32, Kevin A. Burton wrote:
+> I'm trying to compute a filter to match documents in our index by a set
+> of terms.
+>
+> For example some documents have a given field 'category' so I need to
+> compute a filter with mulitple categories.
+>
+> The problem is that our category list is > 200 items so it takes about
+> 80 seconds to compute.  We cache it of course but this seems WAY too slow.
+>
+> Is there anything I could do to speed it up?  Maybe run the queries
+> myself and then combine the bitsets?
+
+That would be a first step.
+
+> We're using a BooleanQuery with nested TermQueries to build up the
+> filter...
+
+I suppose that is a BooleanQuery with all terms optional?
+Depending on the number of docs in the index and the distribution of
+the categories over the classes that might lead to a lot of disk head
+movements.
+
+Recently some code was posted to compute a filter for date ranges.
+For each date (ie. Term) in the range it would walk all documents and
+set the corresponding bit in a bitset. You can use the same approach.
+See IndexReader.termDocs(Term) for starters, and preferably iterate
+over the categories (Terms) in sorted order.
+
+A BooleanQuery would do much the same thing, but it has to work
+in document order for all Term's at the same time, which can cause
+extra disk seeks between the TermDocs.
+You can avoid those disk seeks by iterating over the TermDocs yourself
+and keeping the results in the bitset.
+
+If you do this in with sorted terms, ideally the disk head would move in
+a single direction for the whole process. For maximum performance 
+you might want to avoid searching other Query's or similar TermDoc
+iterators at the same time. Also avoid retrieving documents
+while this is going on, just keep that disk head moving only where you
+want it to.
+
+For further CPU speedup you can cache the TermDocs using the
+read() method. Lucene's TermScorer does this, see 
+http://cvs.apache.org/viewcvs.cgi/jakarta-lucene/src/java/org/apache/lucene/search/TermScorer.java
+and use 'view' on the latest revision. A bigger cache size than 32 would seem
+appropriate for your case.
+
+Could you evt. report the speedup? I guess you should be able
+to bring it down to at most twenty seconds or so.
+
+After that, replication over multiple disks might help, giving each of them
+an interval of the sorted categories to search.
+
+Good luck,
+Paul
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

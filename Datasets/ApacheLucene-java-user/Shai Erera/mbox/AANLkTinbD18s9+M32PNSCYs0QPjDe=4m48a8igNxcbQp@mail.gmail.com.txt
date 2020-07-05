@@ -1,0 +1,104 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: IndexWriter.close() performance issue
+DATE: 3 Nov 2010
+
+I'd even offer, if the index is small, perhaps you can post it
+somewhere for us to download and debug trace commit()…
+
+Also, though not very scientific, you can turn on debug messages by
+setting an infoSfream and observe which print take the most to appear.
+Not very accurate but if there's one operation that takes long to
+complete, you'll see it.
+
+Shai
+
+On Wednesday, November 3, 2010, Michael McCandless
+<lucene@mikemccandless.com> wrote:
+> Can you run CheckIndex (command line tool) and post the output?
+>
+> How long does it take to open a reader on this same index, and perform
+> a simple query (eg TermQuery)?
+>
+> Mike
+>
+> On Wed, Nov 3, 2010 at 2:53 PM, Mark Kristensson
+> <mark.kristensson@smartsheet.com> wrote:
+>> I've successfully reproduced the issue in our lab with a copy from production and
+have broken the close() call into parts, as suggested, with one addition.
+>>
+>> Previously, the call was simply
+>>
+>>        ...
+>>        } finally {
+>>                // Close
+>>                if (indexWriter != null) {
+>>                        try {
+>>                                indexWriter.close();
+>>        ...
+>>
+>>
+>> Now, that is broken into the various parts, including a prepareCommit();
+>>
+>>        ...
+>>        } finally {
+>>                // Close
+>>                if (indexWriter != null) {
+>>                        try {
+>>                                indexWriter.prepareCommit();
+>>                                Logger.debug("prepareCommit() complete");
+>>                                indexWriter.commit();
+>>                                Logger.debug("commit() complete");
+>>                                indexWriter.maybeMerge();
+>>                                Logger.debug("maybeMerge() complete");
+>>                                indexWriter.waitForMerges();
+>>                                Logger.debug("waitForMerges() complete");
+>>                                indexWriter.close();
+>>        ...
+>>
+>>
+>> It turns out that the prepareCommit() is the slow call here, taking several seconds
+to complete.
+>>
+>> I've done some reading about it, but have not found anything that might be helpful
+here. The fact that it is slow every single time, even when I'm adding exactly one document
+to the index, is perplexing and leads to me to think something must be corrupt with the index.
+>>
+>> Furthermore, I tried optimizing the index to see if that would have any impact (I
+wasn't expecting much) and it did not.
+>>
+>> I'm stumped at this point and am thinking I may have to rebuild the index, though
+I would definitely prefer to avoid doing that and would like to know why this is happening.
+>>
+>> Thanks for your help,
+>> Mark
+>>
+>>
+>> On Nov 2, 2010, at 9:26 AM, Mark Kristensson wrote:
+>>
+>>>
+>>> Wonderful information on what happens during indexWriter.close(), thank you very
+much! I've got some testing to do as a result.
+>>>
+>>> We are on Lucene 3.0.0 right now.
+>>>
+>>> One other detail that I neglected to mention is that the batch size does not
+seem to have any relation to the time it takes to close on the index where we are having issues.
+We've had batches add as few as 3 documents and batches add as many as 2500 documents in the
+last hour and every single close() call for that index takes 6 to 8 seconds. While I won't
+know until I am able to individually test the different pieces of the close() operation, I'd
+be very surprised if a batch that adds just 3 new documents results in very much merge work
+being done. It seems as if there is some task happening during merge that the indexWriter
+is never able to successfully complete and so it tries to complete that task every single
+time close() is called.
+>>>
+>>> So, my working theory until I can dig deeper is that something is mildly corrupt
+with the index (though not serious enough to affect most operations on the index). Are there
+any good utilities for examining the health of an index?
+>>>
+>>> I've dabbled with the experimental checkIndex object in t
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

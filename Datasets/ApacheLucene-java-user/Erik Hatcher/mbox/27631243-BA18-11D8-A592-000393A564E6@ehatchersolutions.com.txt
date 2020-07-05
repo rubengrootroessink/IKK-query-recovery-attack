@@ -1,0 +1,97 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Proximity Searches  behavior
+DATE: 9 Jun 2004
+
+On Jun 9, 2004, at 8:53 AM, Terry Steichen wrote:
+> 1) If you set the default slop factor in QueryProcessor to something 
+> greater
+> than 1, can you also use wildcards?  (I ask that question because, to 
+> my
+> understanding, you can't combine the explicit proximity query syntax 
+> with
+> wildcards.  That is, something like "quick fox*"~3 is not legal.)
+
+Wildcard queries and phrase queries are completely different entities 
+with QueryParser.  The default slop factor has no relation to wildcard 
+queries whatsoever.
+
+"quick fox*"~3 is legal, technically.  But it analyzes "quick fox" 
+(probably into "quick" and "fox", dropping the asterisk) and then uses 
+a slop of 3.  Specifying the slop explicitly overrides the default 
+value.
+
+If you want something that does "quick fox*" where "quick" must be 
+followed by something starting with "fox", you'll have to do this 
+through the API, perhaps using the awkwardly named PhrasePrefixQuery, 
+which does support slop also.  It would be up to you to do the term 
+expansions for all terms beginning with "fox" in order to use this.
+
+> 2) Regarding the SpanQuery family, do we have any documentation on (a) 
+> what
+> led to their emergence (what problem they solve), (b) what their 
+> syntax is
+> (other than what can be discerned from the JUnit tests), and (c) 
+> examples of
+> their use?
+
+The unit tests are always my first stop :)
+
+Span queries allow you to say things like:
+
+	"foo bar" near "xyz pdq"
+
+	all docs that have "foo bar" within 10 positions in order (which you 
+cannot do with phrase query)
+
+	all docs that have "foo bar" within 10 positions but within that span 
+it may not have "baz"
+
+	all docs that have "foo" in the first 3 positions of the field
+
+None of these are possible without this new span feature.
+
+> 3) Is there a plan for adding QueryParser support for the SpanQuery 
+> family?
+
+I think QueryParser is overloaded enough.  It is pretty simple to have 
+phrase queries turned into span queries with a QueryParser subclass, 
+forcing terms to be in order:
+
+   /**
+    * Replace PhraseQuery with SpanNearQuery to force in-order
+    * phrase matching rather than reverse.
+    */
+   protected Query getFieldQuery(
+       String field, Analyzer analyzer, String queryText, int slop)
+                                            throws ParseException {
+     // let QueryParser's implementation do the analysis
+     Query orig = super.getFieldQuery(
+         field, analyzer, queryText, slop);
+
+     if (! (orig instanceof PhraseQuery)) {
+       return orig;
+     }
+
+     PhraseQuery pq = (PhraseQuery) orig;
+     Term[] terms = pq.getTerms();
+     SpanTermQuery[] clauses = new SpanTermQuery[terms.length];
+     for (int i = 0; i < terms.length; i++) {
+       clauses[i] = new SpanTermQuery(terms[i]);
+     }
+
+     SpanNearQuery query = new SpanNearQuery(
+         clauses, slop, true);
+
+     return query;
+   }
+
+I built this example for Lucene in Action recently.
+
+	Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

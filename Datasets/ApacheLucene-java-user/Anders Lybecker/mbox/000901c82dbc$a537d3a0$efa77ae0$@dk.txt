@@ -1,0 +1,188 @@
+FROM: Anders Lybecker <...@miracleas.dk>
+SUBJECT: RE: Force MultiFieldQueryParser always to use PrefixQuery
+DATE: 23 Nov 2007
+
+Hi,
+
+I thought about appending a * at the end of each word like <word>*. I did
+not like the idea and it becomes cumbersome when using the complex
+QueryParser syntax.
+
+I also investigated the option of overriding the getFieldQuery via
+inheritance, but I doubt it works at the method does more than just return a
+TermQuery. For instance it also returns PhraseQuery, MultiPhraseQuery and
+BooleanQuery.
+
+My solution to the problem is post-processing of the returned query from the
+MultiFieldQueryParser.
+
+I iterate over the query graph and replaces each TermQuery with a
+PrefixQuery.
+
+This is how I do it. Beware! It's C# code, but I'm pretty sure that you will
+be able to interpret it anyway :-)
+
+    public static class QueryModifier
+    {
+        public static Query AppendWildcard(Query q)
+        {
+            BooleanQuery boolQuery = q as BooleanQuery;
+
+            if (boolQuery != null)
+            {
+                Iterate(ref boolQuery);
+
+                return boolQuery;
+            }
+            TermQuery termQuery = q as TermQuery;
+
+            if (termQuery != null)
+                return new PrefixQuery(termQuery.GetTerm());
+
+            return q;
+        }
+
+        private static void Iterate(ref BooleanQuery boolQuery)
+        {
+            BooleanClause[] boolClauses = boolQuery.GetClauses();
+
+            BooleanClause clause;
+
+            for (int i = 0; i < boolClauses.Length; i++)
+            {
+                clause = boolClauses[i];
+
+                Query clauseQuery = clause.GetQuery();
+
+                BooleanQuery boolClauseQuery = clauseQuery as BooleanQuery;
+
+                if (boolClauseQuery != null)
+                {
+                    Iterate(ref boolClauseQuery);
+
+                    boolClauses[i] = new BooleanClause(boolClauseQuery,
+boolClauses[i].GetOccur()); ;
+                }
+
+                TermQuery termClauseQuery = clauseQuery as TermQuery;
+
+                if (termClauseQuery != null)
+                {
+                    // Change TermQuery -> PrefixQuery to wildcard search
+like <word>*
+                    PrefixQuery prefixQuery = new
+PrefixQuery(termClauseQuery.GetTerm());
+
+                    boolClauses[i] = new BooleanClause(prefixQuery,
+boolClauses[i].GetOccur());
+                }
+            }
+
+            boolQuery = new BooleanQuery(boolQuery.IsCoordDisabled());
+            foreach (BooleanClause claus in boolClauses)
+            {
+                boolQuery.Add(claus);
+            }
+        }
+    }
+
+Thanks for the suggestions.
+
+:-)
+Anders Lybecker
+
+-----Original Message-----
+From: Shai Erera [mailto:serera@gmail.com] 
+Sent: 22. november 2007 17:04
+To: java-user@lucene.apache.org
+Subject: Re: Force MultiFieldQueryParser always to use PrefixQuery
+
+Hi
+
+I wrote the following class:
+
+    public class AlwaysPrefixMultiFieldQP extends MultiFieldQueryParser {
+
+        public MyQP(String[] fields, Analyzer analyzer) {
+            super(fields, analyzer);
+        }
+
+        protected Query getFieldQuery(String field, String queryText) throws
+ParseException {
+            if (field != null) {
+                return new PrefixQuery(new Term(field, queryText));
+            }
+            return super.getFieldQuery(field, queryText);
+        }
+    }
+
+What it does is override getFieldQuery. If the field is not null, it creates
+a new PrefixQuery. Following is a sample code:
+       AlwaysPrefixMultiFieldQP m = new AlwaysPrefixMultiFieldQP(new
+String[] { "field" }, analyzer);
+       Query q = m.parse("sof was");
+       System.out.println(q);
+
+This code prints: (field:sof*) (field:was*), which is I believe what you
+need.
+
+As for splitting the query (pre processing) - this is not recommended. It
+may work great for space separated languages, however may produce poor
+results for Asian languages (for example). The way I propose above makes use
+of the Analyzer you use, thus guarantees you append a '*' to all the words
+in the query.
+
+Hope this helps.
+
+On Nov 22, 2007 3:35 PM, Erick Erickson <erickerickson@gmail.com> wrote:
+
+> The simplest way would be to pre-process the query. That
+> is, just split on words and add the '*' as appropriate.
+>
+> Erick
+>
+> On Nov 21, 2007 2:16 PM, Anders Lybecker <aly@miracleas.dk> wrote:
+>
+> > How do I force the MultiFieldQueryParser to interpret a string like
+> > "dock boat" as "dock* boat*" and therefore use PrefixQuery instead of
+> > TemQuery?
+> >
+> > The customer wants always to search with <word>* as default when
+> entering
+> > <word>
+> >
+> > :-)
+> > Anders Lybecker
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+
+
+
+-- 
+Regards,
+
+Shai Erera
+
+No virus found in this incoming message.
+Checked by AVG Free Edition. 
+Version: 7.5.503 / Virus Database: 269.16.4/1146 - Release Date: 22-11-2007
+18:55
+ 
+
+No virus found in this outgoing message.
+Checked by AVG Free Edition. 
+Version: 7.5.503 / Virus Database: 269.16.4/1146 - Release Date: 22-11-2007
+18:55
+ 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

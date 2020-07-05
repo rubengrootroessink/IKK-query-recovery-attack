@@ -1,0 +1,125 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Filtering after Query
+DATE: 18 Dec 2005
+
+On Sunday 18 December 2005 15:46, Cret Hummin wrote:
+> Hi Paul,
+> 
+> W.r.t. ConstantScoringQuery, it contains a minor bug: it doesn't the 
+> handle the case where the Filter.bits method would return null. I think 
+> the ConstantScorer should look like:
+> 
+>     public boolean next() throws IOException {
+>       doc = (bits == null) ? doc+1 : bits.nextSetBit(doc+1);
+>       return doc >= 0;
+>     }
+> 
+>    public boolean skipTo(int target) throws IOException {
+>         doc = (bits == null) ? target : bits.nextSetBit(target);  // 
+> requires JDK 1.4
+>         return doc >= 0;
+>     }
+
+There is a MatchAllDocsQuery in the svn trunk that does this.
+
+> 
+> Anyways, while the ConstantScoringQuery does offer a great new feature, 
+> it does not do what I want: when my custom filter bits method is called, 
+> I still have to create a BitSet object with size reader.maxDoc(), which 
+> value is the total number of documents in the index, and then determine 
+> for each document if it should be included or excluded. This is 
+> performance killing for me.
+
+A Filter can be computed once for a condition on an IndexReader,
+and then reused when needed.
+ 
+> I have the same problem with HitCollector: I'd need to go through /all/ 
+> documents.
+> 
+> After playing around a bit, I think I could solve this by adding 
+> TermQuery's as the last terms to a BooleanQuery, but that would mean I'd 
+> also have to store certain (security related) values in separate fields 
+> in the index. I could live with that, if I'm seeing this right: when I 
+
+You can use QueryFilter as  a Filter from the TermQuery and
+then use CachingWrapperFilter to cache it.
+
+> set the boost factor of those fields to 0, then it won't affect the 
+> scoring, right?
+
+When using an extra TermQuery, that depends on the coordination
+factor, which by default is the number of matching clauses divided
+by the total number of clauses. But with a weight of 0 this would not
+affect the scoring order of the matching documents.
+
+However, I think I would use filter in your case, and recompute the
+filter only after updating the index.
+
+When you need lots of sparse filters and memory becomes a problem
+for the BitSets there is a more space efficient filter here:
+http://issues.apache.org/jira/browse/LUCENE-328
+http://issues.apache.org/jira/browse/LUCENE-330
+
+Regards,
+Paul Elschot
+
+> 
+> 
+> 
+> Regards,
+> Cret
+> 
+> 
+> Paul Elschot wrote:
+> 
+> >On Saturday 17 December 2005 17:04, Cret Hummin wrote:
+> >  
+> >
+> >>Hi All,
+> >>
+> >>When using Searcher.search(Query, Filter), and I use my own custom 
+> >>filter, it appears I'm presented with /all/ the documents in the index, 
+> >>i.e. in the method bits(IndexReader reader) from my custom Filter, the 
+> >>value of reader.maxDoc() is always the number of documents in the index. 
+> >>The same is true when do Searcher.search(FilteredQuery(Query, Filter)).
+> >>
+> >>Is it possible to filter /after/ the query has limited the number of 
+> >>possible documents, /before/ returning a Hits collection?
+> >>    
+> >>
+> >
+> >The easiest way to do this is by adding a required clause to a 
+BooleanQuery.
+> >You might consider using a ConstantScoringQuery for this clause:
+> >http://issues.apache.org/jira/browse/LUCENE-383
+> >
+> >In case you really want to filter only the documents that match a query
+> >you'll need to implement a filtering HitCollector and use it on the
+> >lower level search API. 
+> >An easier way to implement such a filtering HitCollector could be
+> >by adding to it the search methods that return a Hits as an alternative
+> >to Filter.
+> >A disadvantage of this approach is that skipTo() cannot be used
+> >to combine the filter and the query, see also here:
+> >http://issues.apache.org/jira/browse/LUCENE-330
+> >
+> >Regards,
+> >Paul Elschot
+> >
+> >
+> >---------------------------------------------------------------------
+> >To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >  
+> >
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

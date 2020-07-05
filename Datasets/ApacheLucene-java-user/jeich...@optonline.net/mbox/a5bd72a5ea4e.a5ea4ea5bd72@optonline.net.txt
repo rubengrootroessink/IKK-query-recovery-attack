@@ -1,0 +1,169 @@
+FROM: jeich...@optonline.net
+SUBJECT: Re: Lucene : avoiding locking (incremental indexing)
+DATE: 15 Nov 2004
+
+It really seems like I am not the only person having this issue.
+
+So far I am seeing 2 solutions and honestly I don't love either totally.  I am thinking that
+without changes to Lucene itself, the best "general" way to implement this might be to have
+a queue of changes and have Lucene work off this queue in a single thread using a time-settable
+batch method.   This is similar to what you are using below, but I don't like that you forcibly
+unlock Lucene if it shows itself locked.   Using the Queue approach, only that one thread
+could be accessing Lucene for writes/deletes anyway so there should be no "unknown" locking.
+
+I can imagine this being a very good addition to Lucene - creating a high level interface
+to Lucene that manages incremental updates in such a manner.  If anybody has such a general
+piece of code, please post it!!!   I would use it tonight rather then create my own.
+
+I am not sure if there is anything that can be done to Lucene itself to help with this need
+people seem to be having.  I realize the likely reasons why Lucene might need to only have
+one Index writer and the additional load that might be caused by locking off pieces of the
+database rather then the whole database.  I think I need to look in the developer archives.
+
+JohnE
+
+
+
+----- Original Message -----
+From: Luke Shannon <lshannon@hypermedia.com>
+Date: Monday, November 15, 2004 5:14 pm
+Subject: Re: Lucene : avoiding locking (incremental indexing)
+
+> Hi Luke;
+> 
+> I have a similar system (except people don't need to see results
+> immediatly). The approach I took is a little different.
+> 
+> I made my Indexer a thread with the indexing operations occuring 
+> the in run
+> method. When the IndexWriter is to be created or the IndexReader 
+> needs to
+> execute a delete I called the following method:
+> 
+> private void manageIndexLock() {
+>  try {
+>   //check if the index is locked and deal with it if it is
+>   if (index.exists() && IndexReader.isLocked(indexFileLocation)) {
+>    System.out.println("INDEXING INFO: There is more than one 
+> process trying
+> to write to the index folder. Will wait for index to become 
+> available.");    //perform this loop until the lock if released or 
+> 3 mins
+>    // has expired
+>    int indexChecks = 0;
+>    while (IndexReader.isLocked(indexFileLocation)
+>      && indexChecks < 6) {
+>     //increment the number of times we check the index
+>     // files
+>     indexChecks++;
+>     try {
+>      //sleep for 30 seconds
+>      Thread.sleep(30000L);
+>     } catch (InterruptedException e2) {
+>      System.out.println("INDEX ERROR: There was a problem waiting 
+> for the
+> lock to release. "
+>          + e2.getMessage());
+>     }
+>    }//closes the while loop for checking on the index
+>    // directory
+>    //if we are still locked we need to do something about it
+>    if (IndexReader.isLocked(indexFileLocation)) {
+>     System.out.println("INDEXING INFO: Index Locked After 3 
+> minute of
+> waiting. Forcefully releasing lock.");
+>     IndexReader.unlock(FSDirectory.getDirectory(index, false));
+>     System.out.println("INDEXING INFO: Index lock released");
+>    }//close the if that actually releases the lock
+>   }//close the if ensure the file exists
+>  }//closes the try for all the above operations
+>  catch (IOException e1) {
+>   System.out.println("INDEX ERROR: There was a problem waiting 
+> for the lock
+> to release. "
+>       + e1.getMessage());
+>  }
+> }//close the manageIndexLock method
+> 
+> Do you think this is a bad approach?
+> 
+> Luke
+> 
+> ----- Original Message ----- 
+> From: "Luke Francl" <luke.francl@stellent.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Monday, November 15, 2004 5:01 PM
+> Subject: Re: Lucene : avoiding locking (incremental indexing)
+> 
+> 
+> > This is how I implemented incremental indexing. If anyone sees 
+> anything> wrong, please let me know.
+> >
+> > Our motivation is similar to John Eichel's. We have a digital asset
+> > management system and when users update, delete or create a new 
+> asset,> they need to see their results immediately.
+> >
+> > The most important thing to know about incremental indexing that
+> > multiple threads cannot share the same IndexWriter, and only one
+> > IndexWriter can be open on an index at a time.
+> >
+> > Therefore, what I did was control access to the IndexWriter 
+> through a
+> > singleton wrapper class that synchronizes access to the 
+> IndexWriter and
+> > IndexReader (for deletes). After finishing writing to the index, you
+> > must close the IndexWriter to flush the changes to the index.
+> >
+> > If you do this you will be fine.
+> >
+> > However, opening and closing the index takes time so we had to 
+> look for
+> > some ways to speed up the indexing.
+> >
+> > The most obvious thing is that you should do as much work as 
+> possible> outside of the synchronized block. For example, in my 
+> application, the
+> > creation of Lucene Document objects is not synchronized. Only 
+> the part
+> > of the code that is between your IndexWriter.open() and
+> > IndexWriter.close() needs to be synchronized.
+> >
+> > The other easy thing I did to improve performance was batch 
+> changes in a
+> > transaction together for indexing. If a user changes 50 assets, that
+> > will all be indexed using one Lucene IndexWriter.
+> >
+> > So far, we haven't had to explore further performance 
+> enhancements, but
+> > if we do the next thing I will do is create a thread that 
+> gathers assets
+> > that need to be indexed and performs a batch job every five 
+> minutes or
+> > so.
+> >
+> > Hope this is helpful,
+> > Luke
+> >
+> >
+> > -----------------------------------------------------------------
+> ----
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> 
+> 
+> -------------------------------------------------------------------
+> --
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

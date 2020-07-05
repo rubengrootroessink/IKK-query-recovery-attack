@@ -1,0 +1,93 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Search on tokenized field
+DATE: 18 Jan 2009
+
+Probably the easiest way to do this would be to index all
+the terms in the same field with a large increment gap between.
+See Analyzer.getPositionIncrementGap (you'll have to create
+your own analyzer here, probably just subclassing one of the
+existing ones).
+
+Once things are indexed that way, then you can do, say, SpanQueries
+or even proximity queries (i.e. "yellow sell"~5).
+
+This sounds a bit like gibberish, but bear with me. Let's say you have
+overridden an analyzer and return an increment gap of 100. Now say you
+index as follows (pseudo code).
+
+Document doc = new Document()
+doc.add(new Field("field", "house", ...))
+doc.add(new Field("field", "yellow ball", ...))
+doc.add(new Field("field'', "yellow sell", ...))
+doc.add(new Field("field", "ball star", ...))
+doc.add(new Field("field", "home xyz", ...))
+IndexerWriter.addDocument(doc)
+
+
+Now, here are (roughly), your term positions
+house - 1
+yellow - 102
+ball - 103
+yellow - 204
+sell - 205
+ball - 306
+star - 307
+home - 408
+xyz - 409
+
+The bump comes because each time you call doc.add, if it's already been
+called before on that document, a call is made to getPositionIncrementGap
+and the return value is added to the offset of the first token.
+
+Now if you choose a large enough increment gap and make your proximity
+searchers
+require that all the terms are within *less* than that gap, you should be
+fine.
+
+Best
+Erick
+
+P.S. Both messages came through, so I have no idea why you got your message,
+you might check your local server.
+
+On Sat, Jan 17, 2009 at 2:35 PM, Haroldo Nascimento <
+haroldo_lucene@hotmail.com> wrote:
+
+>
+> Hi,
+>
+> I have a problem to do searches in fields tokenized.
+> Initially I had associated with an advertisement 10 terms and for each term
+> corresponded to one field in my index and the query had operations OR for
+> the 10 fields.
+>  Now, the advertisements have more than 2,000 terms and the current
+> solution (to create 2,000 fields) not works.
+>  I think in create only field, that contens all terms tokenized with ";"
+> for example. How I can do search in a field that contains tokenized fields
+> or exists another solution for this problem?
+>
+>  Example:
+>  advertise_id = "00001"
+>  terms[2000]:
+> 1- "home work"
+> 2- "house"
+> 3- "yellow green ball sell"
+> 4-  "star sports"
+> 5- "tennis ball new"
+> ...
+> 2000- "xyz"
+>   My unique field contains: "home work; house; yellow green ball sell; star
+> sports; tennis ball new; ... ; xyz;"
+>  If my query is:
+>  query= "house" -> result = 1
+>  query= "yellow ball" -> result = 1
+>  query= "yellow sell" -> result = 1
+>  query= "ball star" -> result = 0 (no has result)
+>  query= "home xyz" -> result = 0 (no has result)
+>
+>  Haroldo
+>
+> _________________________________________________________________
+> Mais do que emails! Confira tudo o que Windows Live™ pode oferecer.
+> http://www.microsoft.com/windows/windowslive/
+

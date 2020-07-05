@@ -1,0 +1,428 @@
+FROM: "vivek sar" <vivex...@gmail.com>
+SUBJECT: Re: DefaultIndexAccessor
+DATE: 29 Feb 2008
+
+Thanks Mark. I'll wait for your enhancements in IndexAccessor on the
+new methods.
+
+I use mergeFactor = 100. I've read about the merge factor and it's
+hard to balance both the read/write optimization. What's the number do
+you use?
+
+Thanks again.
+-vivek
+
+On Thu, Feb 28, 2008 at 7:14 PM, Mark Miller <markrmiller@gmail.com> wrote:
+>
+>
+>  vivek sar wrote:
+>  > Mark,
+>  >
+>  >  Just for my clarification,
+>  >
+>  > 1) Would you have indexStop and indexStart methods? If that's the case
+>  > then I don't have to call close() at all. These new methods would
+>  > serve as just cleaning up the caches and not closing the thread pool.
+>  >
+>  Yes. This is the approach I agree with. I am putting up new code that
+>  allows the close(), open() calls anyway though. There is nothing keeping
+>  it from working and it used to work so its a good idea to make it work
+>  again. It is also a quick fix for you.
+>
+>
+>  https://issues.apache.org/jira/browse/LUCENE-1026
+>
+>  I will be adding the new stop start calls quickly, but I don't want to
+>  rush it out.
+>
+> > I would prefer not to call close() and init() again if possible.
+>  >
+>  > The reason we have to do partition is because our index size grows
+>  > over 50G a week and then optimization takes hours. I'd a thread going
+>  > on this topic in the mailing list,
+>  > http://www.gossamer-threads.com/lists/lucene/java-user/57366?search_string=partition;#57366.
+>  >
+>  Gotchya. A comment I have on that is that you might try keeping the
+>  mergefactor really low as well. This will keep searches faster, make
+>  optimization much faster (its amortized), and not slow down writes that
+>  much in my experience (since IndexAccessor drops the writes off (spawns
+>  new thread) anyway, slightly longer writes shouldnt be a big deal at
+>  all. I'd try out even as low as 2 or 3. I run some fairly large
+>  interactive indexes and the writes, even when blocking until the write
+>  is done, are pretty darn responsive.
+>
+>  - Mark
+>
+>
+> > Thanks,
+>  > -vivek
+>  >
+>  >
+>  >
+>  >
+>  >
+>  > On Thu, Feb 28, 2008 at 5:01 PM, Mark Miller <markrmiller@gmail.com> wrote:
+>  >
+>  >> I added the Thread Pool recently, so things did probably work before
+>  >>  that. I am certainly willing to put the Thread Pool init in the open
+>  >>  call instead of the constructor.
+>  >>
+>  >>  As for the best method to use, I was thinking of something along the
+>  >>  same lines as what you suggest.
+>  >>
+>  >>  One of the decisions will be how to handle shutting down method calls on
+>  >>  the Accessor. Throw an Exception or block?
+>  >>
+>  >>  In any case, I will put up code that makes the above change and your
+>  >>  code should work as it did. I'll be sure to add this to the test cases.
+>  >>
+>  >>
+>  >>  Just as a personal interest question, what has led you to setup your
+>  >>  index this way? Adding partitions as it grows that is.
+>  >>
+>  >>
+>  >>
+>  >>  - Mark
+>  >>
+>  >>  vivek sar wrote:
+>  >>  > Mark,
+>  >>  >
+>  >>  >     Yes, I think that's what precisely is happening. I call
+>  >>  > accessor.close, which shuts down all the ExecutorService. I was
+>  >>  > assuming the accessor.open would re-open it (I think that's how it
+>  >>  > worked in older version of your IndexAccessor).
+>  >>  >
+>  >>  > Basically, I need a way to stop (or close) all the IndexSearchers for
+>  >>  > a specific IndexAccessor and do not allow them to re-open until I flag
+>  >>  > the indexAccessor that it's safe to give out new index searchers. So
+I
+>  >>  > am able to optimize the index, rename it and move it to somewhere else
+>  >>  > during partitioning. Right now without closing the searchers I can not
+>  >>  > rename the index as it wouldn't allow me to if some other thread has
+a
+>  >>  > file handle to that index.
+>  >>  >
+>  >>  > I don't know if there is a way to get an exclusive writer thread to an
+>  >>  > index using IndexAccessor. I would think a better way for me would be
+>  >>  > to,
+>  >>  >
+>  >>  >     1) Call a method on IndexAccessor, let's say stopIndex() - This
+>  >>  > would clear all the caches (stop all the open searchers, readers and
+>  >>  > writers) and flag the index accessor so no other reader or writer
+>  >>  > thread can be taken from this index accessor
+>  >>  >     2) I use my own (not using IndexAccessor) IndexWriter to do
+>  >>  > optimization on the index that needs to be partitioned and release it
+>  >>  >     3) Once done with partition, I call another method on
+>  >>  > IndexAccessor, let's say startIndex()   -> This will simply flag so
+>  >>  > now the IndexAccessor would allow to get searchers, readers and
+>  >>  > writers. The start would have to reopen all the searchers and readers.
+>  >>  >
+>  >>  > Not sure if this is a good design for what I am trying to do. This
+>  >>  > would require two new methods on IndexAccessor - stopIndex() and
+>  >>  > startIndex(). Any thoughts?
+>  >>  >
+>  >>  > Thanks,
+>  >>  > -vivek
+>  >>  >
+>  >>  >
+>  >>  > On Thu, Feb 28, 2008 at 3:55 PM, Mark Miller <markrmiller@gmail.com>
+wrote:
+>  >>  >
+>  >>  >> Hey vivek,
+>  >>  >>
+>  >>  >>  Sorry you ran into this. I believe the problem is that I had just
+not
+>  >>  >>  foreseen the use case of closing and then reopening the Accessor.
+The
+>  >>  >>  only time I ever close the Accessors is when I am shutting down
+the JVM.
+>  >>  >>
+>  >>  >>  What do you do about all of the IndexAccessor requests while it
+is in a
+>  >>  >>  closed state? Could their be a better way of accomplishing this
+without
+>  >>  >>  closing the Accessor? Would a new method that just stalled everything
+be
+>  >>  >>  better? Then you wouldn't have to recreate any resources possibly?
+>  >>  >>
+>  >>  >>  In any case, the problem is that after the Executor gets shutdown
+it is
+>  >>  >>  not reopened in the open method. I can certainly change this, but
+I need
+>  >>  >>  to look for any other issues as well. I will add an open after a
+>  >>  >>  shutdown test to investigate. I am going to think about the issue
+>  >>  >>  further and I will get back to you soon.
+>  >>  >>
+>  >>  >>  Thanks for all of the details.
+>  >>  >>
+>  >>  >>  - Mark
+>  >>  >>
+>  >>  >>
+>  >>  >>
+>  >>  >>  vivek sar wrote:
+>  >>  >>  > Mark,
+>  >>  >>  >
+>  >>  >>  >  Some more information,
+>  >>  >>  >
+>  >>  >>  >       1) I run indexwriter every 5 mins
+>  >>  >>  >       2) After every cycle I check if I need to partition (based
+on
+>  >>  >>  > the index size)
+>  >>  >>  >       3) In the partition interface,
+>  >>  >>  >             a)  I first call close on the index accessor (so
+all the
+>  >>  >>  > searchers can close before I move that index)
+>  >>  >>  >                           accessor =
+>  >>  >>  > IndexAccessorFactory.getInstance().getAccessor(dir.getFile());
+>  >>  >>  >                           accessor.close();
+>  >>  >>  >             b) Then I re-open the index accessor,
+>  >>  >>  >                            accessor = indexFactory.getAccessor(dir.getFile());
+>  >>  >>  >                            accessor.open();
+>  >>  >>  >             c) I optimized the my indexes using the Index Writer
+(that
+>  >>  >>  > I get from the accessor).
+>  >>  >>  >                            masterWriter = this.indexAccessor.getWriter(false);
+>  >>  >>  >                            masterWriter.optimize(optimizeSegment);
+>  >>  >>  >             d) Once the optimization is done I release the
+masterWriter,
+>  >>  >>  >                             this.indexAccessor.release(masterWriter);
+>  >>  >>  >
+>  >>  >>  >          Now here is where I get the "RejectedExecutionException".
+>  >>  >>  > Reading up little more on this exception,
+>  >>  >>  > http://pveentjer.wordpress.com/2008/02/06/are-you-dealing-with-the-rejectedexecutionexception/,
+>  >>  >>  > I see this might be happening because something got stuck during
+the
+>  >>  >>  > close cycle, so the ExecutorSerivce is not accepting any new
+tasks.
+>  >>  >>  > I'm not sure how would this happen.
+>  >>  >>  >
+>  >>  >>  > The critical problem is once I get this exception, every release
+call
+>  >>  >>  > throws the same exception (looks like shutdown never gets done).
+>  >>  >>  > Because of this my readers are never refreshed and I can not
+read any
+>  >>  >>  > new indexes.
+>  >>  >>  >
+>  >>  >>  > May be I've to check whether the accessor is completely closed
+before
+>  >>  >>  > re-opening?  Could you in your release check whether the pool
+>  >>  >>  > (ExecutorService) is in shutdown state? Any thing else I can
+check?
+>  >>  >>  >
+>  >>  >>  > Thanks,
+>  >>  >>  > -vivek
+>  >>  >>  >
+>  >>  >>  > On Thu, Feb 28, 2008 at 1:26 PM, vivek sar <vivextra@gmail.com>
+wrote:
+>  >>  >>  >
+>  >>  >>  >> Mark,
+>  >>  >>  >>
+>  >>  >>  >>   We deployed our indexer (using defaultIndexAccessor)
+on one of the
+>  >>  >>  >>  production site and getting this error,
+>  >>  >>  >>
+>  >>  >>  >>  Caused by: java.util.concurrent.RejectedExecutionException
+>  >>  >>  >>         at java.util.concurrent.ThreadPoolExecutor$AbortPolicy.rejectedExecution(Unknown
+>  >>  >>  >>  Source)
+>  >>  >>  >>         at java.util.concurrent.ThreadPoolExecutor.reject(Unknown
+Source)
+>  >>  >>  >>         at java.util.concurrent.ThreadPoolExecutor.execute(Unknown
+Source)
+>  >>  >>  >>         at org.apache.lucene.indexaccessor.DefaultIndexAccessor.release(DefaultIndexAccessor.java:514)
+>  >>  >>  >>
+>  >>  >>  >>
+>  >>  >>  >>  This is happening repeatedly every time the indexer runs.
+>  >>  >>  >>
+>  >>  >>  >>  This is running your latest IndexAccessor-021508 code.
+ Any ideas
+>  >>  >>  >>  (it's kind of urgent for us)?
+>  >>  >>  >>
+>  >>  >>  >>  Thanks,
+>  >>  >>  >>  -vivek
+>  >>  >>  >>
+>  >>  >>  >>
+>  >>  >>  >>
+>  >>  >>  >>
+>  >>  >>  >>  On Fri, Feb 15, 2008 at 6:50 PM, vivek sar <vivextra@gmail.com>
+wrote:
+>  >>  >>  >>  > Mark,
+>  >>  >>  >>  >
+>  >>  >>  >>  >  Thanks for the quick fix. Actually, it is possible
+that there might
+>  >>  >>  >>  >  had been simultaneous queries using the MultiSearcher.
+I assumed it
+>  >>  >>  >>  >  was thread-safe, thus was re-using the same instance.
+I'll update my
+>  >>  >>  >>  >  application code as well.
+>  >>  >>  >>  >
+>  >>  >>  >>  >  Thanks,
+>  >>  >>  >>  >  -vivek
+>  >>  >>  >>  >
+>  >>  >>  >>  >
+>  >>  >>  >>  >
+>  >>  >>  >>  >  On Feb 15, 2008 5:56 PM, Mark Miller <markrmiller@gmail.com>
+wrote:
+>  >>  >>  >>  >  > Here is the fix: https://issues.apache.org/jira/browse/LUCENE-1026
+>  >>  >>  >>  >  >
+>  >>  >>  >>  >  >
+>  >>  >>  >>  >  > vivek sar wrote:
+>  >>  >>  >>  >  > > Mark,
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > >    There seems to be some issue with DefaultMultiIndexAccessor.java.
+I
+>  >>  >>  >>  >  > > got following NPE exception,
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > >      2008-02-13 07:10:28,021 ERROR [http-7501-Processor6]
+ReportServiceImpl -
+>  >>  >>  >>  >  > > java.lang.NullPointerException
+>  >>  >>  >>  >  > >         at org.apache.lucene.indexaccessor.DefaultMultiIndexAccessor.release(DefaultMultiIndexAccessor.java:89)
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > Looks like the IndexAccessor for one of
+the Searcher in the
+>  >>  >>  >>  >  > > MultiSearcher returned null. Not sure
+how is that possible, any ideas
+>  >>  >>  >>  >  > > how is that possible?
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > In my case it caused a critical error
+as the writer thread was stuck
+>  >>  >>  >>  >  > > forever (we found out after couple of
+days) because of this,
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > "PS thread 9" prio=1 tid=0x00002aac70eb95d0
+nid=0x6ba in Object.wait()
+>  >>  >>  >>  >  > > [0x0000000047533000..0x0000000047533b80]
+>  >>  >>  >>  >  > >         at java.lang.Object.wait(Native
+Method)
+>  >>  >>  >>  >  > >         - waiting on <0x00002aab3e5c7700>
+(a
+>  >>  >>  >>  >  > > org.apache.lucene.indexaccessor.DefaultIndexAccessor)
+>  >>  >>  >>  >  > >         at java.lang.Object.wait(Unknown
+Source)
+>  >>  >>  >>  >  > >         at org.apache.lucene.indexaccessor.DefaultIndexAccessor.waitForReadersAndCloseCached(DefaultIndexAccessor.java:593)
+>  >>  >>  >>  >  > >         at org.apache.lucene.indexaccessor.DefaultIndexAccessor.release(DefaultIndexAccessor.java:510)
+>  >>  >>  >>  >  > >         - locked <0x00002aab3e5c7700>
+(a
+>  >>  >>  >>  >  > > org.apache.lucene.indexaccessor.DefaultIndexAccessor)
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > The only way to recover was to re-start
+the application.
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > I use both MultiSearcher and IndexSearcher
+in my application, I've
+>  >>  >>  >>  >  > > looked at your code but not able to pinpoint
+how can it go wrong? Of
+>  >>  >>  >>  >  > > course, you do have to check for null
+in the
+>  >>  >>  >>  >  > > MultiIndexAccessor.release, but how could
+you get null index accessor
+>  >>  >>  >>  >  > > at first place?
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > I do call IndexAccessor.close during partitioning
+of indexes, but the
+>  >>  >>  >>  >  > > close should wait for all Searchers to
+close before doing anything.
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > Do you have any updates to your code since
+02/04/2008?
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > Thanks,
+>  >>  >>  >>  >  > > -vivek
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > On Feb 6, 2008 8:37 AM, Jay <yu@ai.sri.com>
+wrote:
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > >> Thanks for your clarifications, Mark!
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >> Jay
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >> Mark Miller wrote:
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >>>> 5. Although currently IndexSearcher.close()
+does almost nothing except
+>  >>  >>  >>  >  > >>>> to close the internal index
+reader, it might be a safer to close
+>  >>  >>  >>  >  > >>>> searcher itself as well in
+closeCachedSearcher(), just in case, the
+>  >>  >>  >>  >  > >>>> searcher may have other resources
+to release in the future version of
+>  >>  >>  >>  >  > >>>> Lucene.
+>  >>  >>  >>  >  > >>>>
+>  >>  >>  >>  >  > >>> Didn't catch that "as well". You
+are right, great idea Jay, thanks.
+>  >>  >>  >>  >  > >>>
+>  >>  >>  >>  >  > >>> ---------------------------------------------------------------------
+>  >>  >>  >>  >  > >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  >>  >  > >>> For additional commands, e-mail:
+java-user-help@lucene.apache.org
+>  >>  >>  >>  >  > >>>
+>  >>  >>  >>  >  > >> ---------------------------------------------------------------------
+>  >>  >>  >>  >  > >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  >>  >  > >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >>
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > > ---------------------------------------------------------------------
+>  >>  >>  >>  >  > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  >>  >  > > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  > >
+>  >>  >>  >>  >  >
+>  >>  >>  >>  >  > ---------------------------------------------------------------------
+>  >>  >>  >>  >  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  >>  >  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >>  >>  >  >
+>  >>  >>  >>  >  >
+>  >>  >>  >>  >
+>  >>  >>  >>
+>  >>  >>  >>
+>  >>  >>  >
+>  >>  >>  > ---------------------------------------------------------------------
+>  >>  >>  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >>  >
+>  >>  >>  >
+>  >>  >>  >
+>  >>  >>
+>  >>  >>  ---------------------------------------------------------------------
+>  >>  >>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  >>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >>
+>  >>  >>
+>  >>  >>
+>  >>  >
+>  >>  > ---------------------------------------------------------------------
+>  >>  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>  >
+>  >>  >
+>  >>  >
+>  >>
+>  >>  ---------------------------------------------------------------------
+>  >>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >>
+>  >>
+>  >>
+>  >
+>  > ---------------------------------------------------------------------
+>  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >
+>  >
+>  >
+>
+>  ---------------------------------------------------------------------
+>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

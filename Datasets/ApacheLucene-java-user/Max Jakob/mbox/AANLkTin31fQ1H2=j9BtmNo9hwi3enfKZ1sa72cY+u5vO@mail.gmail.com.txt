@@ -1,0 +1,76 @@
+FROM: Max Jakob <max.ja...@fu-berlin.de>
+SUBJECT: Consider only documents of a category for IDF
+DATE: 18 Oct 2010
+
+Hi,
+
+I would like to change the IDF value of the Lucene similarity
+computation to "inverse document frequency inside category". Not the
+complete collection should be considered, but only the documents that
+have a certain category. The categories are stored as separate fields.
+
+The implementation below works, but it is kind of slow. I was
+wondering if there is a more efficient way than to read the DocIdSet
+from the index for each term.
+
+Thanks in advance for any pointers you might have!
+Regards,
+Max
+
+public class InCategorySimilarity extends DefaultSimilarity {
+
+   public InCategorySimilarity() {}
+
+   // These objects have to be here so that they are visible across
+multiple executions of idfExplain
+   OpenBitSet categoryIdSet;
+   long catDocs = 1;
+
+   @Override
+   public Explanation.IDFExplanation idfExplain(final Term term,
+final Searcher searcher) throws IOException {
+       return new Explanation.IDFExplanation() {
+           long termCategoryFreq = 0;
+           boolean isCategoryField = term.field().equals("CATEGORY");
+
+           private long termCategoryFreq() {
+               try {
+                   IndexReader reader = ((IndexSearcher)
+searcher).getIndexReader();
+                   TermsFilter filter = new TermsFilter();
+                   filter.addTerm(term);
+                   OpenBitSet docSet = (OpenBitSet) filter.getDocIdSet(reader);
+
+                   if (isCategoryField) {
+                       categoryIdSet = docSet;
+                       catDocs = categoryIdSet.cardinality();
+                   } else {
+                       docSet.and(categoryIdSet);
+                   }
+                  termCategoryFreq = docSet.cardinality();
+               } catch (IOException e) {
+                   //handle
+               }
+               return termCategoryFreq;
+           }
+
+           public float invCatFreq(long termCategoryFreq, long catDocs) {
+               return termCategoryFreq==0 ? 0 : (float) (Math.log(new
+Float(catDocs) / new Float(termCategoryFreq)) + 1.0);
+           }
+
+           @Override
+           public float getIdf() {
+               termCategoryFreq = termCategoryFreq();
+               float invCatFreq = invCatFreq(termCategoryFreq, catDocs);
+               return invCatFreq;
+           }
+       };
+   }
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

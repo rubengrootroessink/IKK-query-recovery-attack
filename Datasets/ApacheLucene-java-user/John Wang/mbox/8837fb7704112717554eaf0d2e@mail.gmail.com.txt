@@ -1,0 +1,431 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: URGENT: Help indexing large document set
+DATE: 28 Nov 2004
+
+Hi Chuck:
+
+     Thanks for your help and the info.
+
+     By some experimentation, I found when calling
+FSWriter.addIndex(ramDirectory), it is actually performing a merge
+with the existing index. So doing 2000 batches of 500, when the index
+grows after each batch, the time to do the merge increases.
+
+     I guess in this implementation, doing it this way is not optimal.
+
+Thanks
+
+-John
+
+
+On Sat, 27 Nov 2004 13:14:31 -0800, Chuck Williams <chuck@manawiz.com> wrote:
+> Hi John,
+> 
+> I don't use a RamDirectory and so don't have the answer for you.  There
+> have been a number of messages about RamDirectory performance on
+> lucene-user, including some reported benchmarks.  Some people have
+> reported a significant benefit from RamDirectory's, but most others have
+> seen little or no benefit.  I'm not sure which factors indicate the
+> nature or magnitude of impact.   You sent the message below just to me
+> -- you might want to post a question on lucene-user.
+> 
+> I've included a couple messages below on the subject that I saved.
+> 
+> Chuck
+> 
+> Included messages:
+> 
+> -----Original Message-----
+> From: Jonathan Hager [mailto:jhager@gmail.com]
+> Sent: Wednesday, November 24, 2004 2:27 PM
+> To: Lucene Users List
+> Subject: Re: Index in RAM - is it realy worthy?
+> 
+> When comparing RAMDirectory and FSDirectory it is important to mention
+> what OS you are using.  When using linux it will cache the most recent
+> disk access in memory.  Here is a good article that describes its
+> strategy: http://forums.gentoo.org/viewtopic.php?t=175419
+> 
+> The 2% difference you are seeing is the memory copy.  With other OSes
+> you may see a speed up when using the RAMDirectory, because not all
+> OSes contain a disk cache in memory and must access the disk to read
+> the index.
+> 
+> Another consideration is there is currently a 2GB limitation with the
+> size of the RAMDirectory.  Indexes over 2GB causes a overflow in the
+> int used to create the buffer.  [see int len = (int) is.length(); in
+> RamDirectory]
+> 
+> I ended up using RAM directory for a very different reason.  The index
+> is 1 to 2MB and is rebuilt every few hours.  It takes 3 to 4 minutes
+> to query the database and rebuild the index.  But the search should be
+> available 100% of the time.  Since the index is so small I do the
+> following:
+> 
+> on server startup:
+> - look for semaphore, if it is there delete the index
+> - if there is no index, build it to FSdirectory
+> - load the index from FSDirectory into RAMDirectory
+> 
+> on reindex:
+> - create semaphore
+> - rebuild index to FSDirectory
+> - delete semaphore
+> - load index from FSDirecttory into RAMDirectory
+> 
+> to search:
+> - search the RAMDirectory
+> 
+> RAMDirectory could be replaced by a regular FSDirectory, but it seemed
+> silly to copy the index from disk to disk, when it ultimately needs to
+> be in memory.
+> 
+> FSDirectory could be replaced by a RAMDirectory, but this means that
+> it would take the server 3 to 4 minutes longer to startup every time.
+> By persisting the index, this time would only be necessary if indexing
+> was interrupted.
+> 
+> Jonathan
+> 
+> On Mon, 22 Nov 2004 12:39:07 -0800, Kevin A. Burton
+> <burton@newsmonster.org> wrote:
+> > Otis Gospodnetic wrote:
+> >
+> > >For the Lucene book I wrote some test cases that compare FSDirectory
+> > >and RAMDirectory.  What I found was that with certain settings
+> > >FSDirectory was almost as fast as RAMDirectory.  Personally, I would
+> > >push FSDirectory and hope that the OS and the Filesystem do their
+> share
+> > >of work and caching for me before looking for ways to optimize my
+> code.
+> > >
+> > >
+> > Yes... I performed the same benchmark and in my situation RAMDirectory
+> > for searches was about 2% slower.
+> >
+> > I'm willing to bet that it has to do with the fact that its a
+> Hashtable
+> > and not a HashMap (which isn't synchronized).
+> >
+> > Also adding a constructor for the term size could make loading a
+> > RAMDirectory faster since you could prevent rehash.
+> >
+> > If you're on a modern machine your filesystme cache will end up
+> > buffering your disk anyway which I'm sure was happening in my
+> situation.
+> >
+> > Kevin
+> >
+> > --
+> >
+> > Use Rojo (RSS/Atom aggregator).  Visit http://rojo.com. Ask me for an
+> > invite!  Also see irc.freenode.net #rojo if you want to chat.
+> >
+> > Rojo is Hiring! - http://www.rojonetworks.com/JobsAtRojo.html
+> >
+> > If you're interested in RSS, Weblogs, Social Networking, etc... then
+> you
+> > should work for Rojo!  If you recommend someone and we hire them
+> you'll
+> > get a free iPod!
+> >
+> > Kevin A. Burton, Location - San Francisco, CA
+> >        AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+> > GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> 
+> 
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> -----Original Message-----
+> From: John Wang [mailto:john.wang@gmail.com]
+> Sent: Monday, November 22, 2004 12:35 PM
+> To: Lucene Users List
+> Subject: Re: Index in RAM - is it realy worthy?
+> 
+> In my test, I have 12900 documents. Each document is small, a few
+> discreet fields (KeyWord type) and 1 Text field containing only 1
+> sentence.
+> 
+> with both mergeFactor and maxMergeDocs being 1000
+> 
+> using RamDirectory, the indexing job took about 9.2 seconds
+> 
+> not using RamDirectory, the indexing job took about 122 seconds.
+> 
+> I am not calling optimize.
+> 
+> This is on windows Xp running java 1.5.
+> 
+> Is there something very wrong or different in my setup to cause such a
+> big different?
+> 
+> Thanks
+> 
+> -John
+> 
+> On Mon, 22 Nov 2004 09:23:40 -0800 (PST), Otis Gospodnetic
+> <otis_gospodnetic@yahoo.com> wrote:
+> > For the Lucene book I wrote some test cases that compare FSDirectory
+> > and RAMDirectory.  What I found was that with certain settings
+> > FSDirectory was almost as fast as RAMDirectory.  Personally, I would
+> > push FSDirectory and hope that the OS and the Filesystem do their
+> share
+> > of work and caching for me before looking for ways to optimize my
+> code.
+> >
+> > Otis
+> >
+> >
+> >
+> > --- iouli.golovatyi@group.novartis.com wrote:
+> >
+> > >
+> > > I did following test:
+> > > I created  the RAM folder on my Red Hat box and copied   c. 1Gb of
+> > > indexes
+> > > there.
+> > > I expected the queries to run much quicker.
+> > > In reality it was even sometimes slower(sic!)
+> > >
+> > > Lucene has it's own RAM disk functionality. If I implement it, would
+> > > it
+> > > bring any benefits?
+> > >
+> > > Thanks in advance
+> > > J.
+> >
+> > ---------------------------------------------------------------------
+> 
+> 
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>  > -----Original Message-----
+>  > From: John Wang [mailto:john.wang@gmail.com]
+>  > Sent: Saturday, November 27, 2004 11:50 AM
+>  > To: Chuck Williams
+>  > Subject: Re: URGENT: Help indexing large document set
+>  >
+>  > I found the reason for the degredation. It is because I was writing
+> to
+>  > a RamDirectory and then adding to a FSWriter. I guess it makes sense
+>  > since the addIndex call would slow down as the index grows.
+>  >
+>  > I guess it is not a good idea to use RamDirectory if there are many
+>  > small batches. Are there some performace numbers that would tell me
+>  > when to/not to use a RamDirectory?
+>  >
+>  > thanks
+>  >
+>  > -John
+>  >
+>  >
+>  > On Wed, 24 Nov 2004 15:23:49 -0800, John Wang <john.wang@gmail.com>
+>  > wrote:
+>  > > Hi Chuck:
+>  > >
+>  > >      The reason I am not using localReader.delete(term) is because
+> I
+>  > > have some logic to check whether to delete the term based on a
+> flag.
+>  > >
+>  > >      I am testing with the keys to be sorted.
+>  > >
+>  > >      I am not doing anything weird, just committing a batch of 500
+>  > > documents to the index of 2000 batches. I don't what why it is
+> having
+>  > > this linear slow down...
+>  > >
+>  > >
+>  > >
+>  > > Thanks
+>  > >
+>  > > -John
+>  > >
+>  > > On Wed, 24 Nov 2004 12:32:52 -0800, Chuck Williams
+> <chuck@manawiz.com>
+>  > wrote:
+>  > > > Does keyIter return the keys in sorted order?  This should
+> reduce
+>  > seeks,
+>  > > > especially if the keys are dense.
+>  > > >
+>  > > > Also, you should be able to localReader.delete(term) instead of
+>  > > > iterating over the docs (of which I presume there is only one
+> doc
+>  > since
+>  > > > keys are unique).  This won't improve performance as
+>  > > > IndexReader.delete(Term) does exactly what your code does, but
+> it
+>  > will
+>  > > > be cleaner.
+>  > > >
+>  > > > A linear slowdown with number of docs doesn't make sense, so
+>  > something
+>  > > > else must be wrong.  I'm not sure what the default buffer size
+> is
+>  > (it
+>  > > > appears it used to be 128 but is dynamic now I think).  You
+> might
+>  > find
+>  > > > the slowdown stops after a certain point, especially if you
+> increase
+>  > > > your batch size.
+>  > > >
+>  > > >
+>  > > >
+>  > > > Chuck
+>  > > >
+>  > > >  > -----Original Message-----
+>  > > >  > From: John Wang [mailto:john.wang@gmail.com]
+>  > > >  > Sent: Wednesday, November 24, 2004 12:21 PM
+>  > > >  > To: Lucene Users List
+>  > > >  > Subject: Re: URGENT: Help indexing large document set
+>  > > >  >
+>  > > >  > Thanks Paul!
+>  > > >  >
+>  > > >  > Using your suggestion, I have changed the update check code
+> to
+>  > use
+>  > > >  > only the indexReader:
+>  > > >  >
+>  > > >  > try {
+>  > > >  >               localReader = IndexReader.open(path);
+>  > > >  >
+>  > > >  >               while (keyIter.hasNext()) {
+>  > > >  >                 key = (String) keyIter.next();
+>  > > >  >                 term = new Term("key", key);
+>  > > >  >                 TermDocs tDocs = localReader.termDocs(term);
+>  > > >  >                 if (tDocs != null) {
+>  > > >  >                   try {
+>  > > >  >                     while (tDocs.next()) {
+>  > > >  >                       localReader.delete(tDocs.doc());
+>  > > >  >                     }
+>  > > >  >                   } finally {
+>  > > >  >                     tDocs.close();
+>  > > >  >                   }
+>  > > >  >                 }
+>  > > >  >               }
+>  > > >  >             } finally {
+>  > > >  >
+>  > > >  >               if (localReader != null) {
+>  > > >  >                 localReader.close();
+>  > > >  >               }
+>  > > >  >
+>  > > >  >             }
+>  > > >  >
+>  > > >  >
+>  > > >  > Unfortunately it didn't seem to make any dramatic difference.
+>  > > >  >
+>  > > >  > I also see the CPU is only 30-50% busy, so I am guessing it's
+>  > > > spending
+>  > > >  > a lot of time in IO. Anyway of making the CPU work harder?
+>  > > >  >
+>  > > >  > Is batch size of 500 too small for 1 million documents?
+>  > > >  >
+>  > > >  > Currently I am seeing a linear speed degredation of 0.3
+>  > milliseconds
+>  > > >  > per document.
+>  > > >  >
+>  > > >  > Thanks
+>  > > >  >
+>  > > >  > -John
+>  > > >  >
+>  > > >  >
+>  > > >  > On Wed, 24 Nov 2004 09:05:39 +0100, Paul Elschot
+>  > > >  > <paul.elschot@xs4all.nl> wrote:
+>  > > >  > > On Wednesday 24 November 2004 00:37, John Wang wrote:
+>  > > >  > >
+>  > > >  > >
+>  > > >  > > > Hi:
+>  > > >  > > >
+>  > > >  > > >    I am trying to index 1M documents, with batches of
+500
+>  > > > documents.
+>  > > >  > > >
+>  > > >  > > >    Each document has an unique text key, which is added
+> as a
+>  > > >  > > > Field.KeyWord(name,value).
+>  > > >  > > >
+>  > > >  > > >    For each batch of 500, I need to make sure I am not
+> adding
+>  > a
+>  > > >  > > > document with a key that is already in the current index.
+>  > > >  > > >
+>  > > >  > > >   To do this, I am calling IndexSearcher.docFreq for
+each
+>  > > > document
+>  > > >  > and
+>  > > >  > > > delete the document currently in the index with the same
+> key:
+>  > > >  > > >
+>  > > >  > > >        while (keyIter.hasNext()) {
+>  > > >  > > >             String objectID = (String) keyIter.next();
+>  > > >  > > >             term = new Term("key", objectID);
+>  > > >  > > >             int count = localSearcher.docFreq(term);
+>  > > >  > >
+>  > > >  > > To speed this up a bit make sure that the iterator gives
+>  > > >  > > the terms in sorted order. I'd use an index reader instead
+>  > > >  > > of a searcher, but that will probably not make a
+> difference.
+>  > > >  > >
+>  > > >  > > Adding the documents can be done with multiple threads.
+>  > > >  > > Last time I checked that, there was a moderate speed up
+>  > > >  > > using three threads instead of one on a single CPU machine.
+>  > > >  > > Tuning the values of minMergeDocs and maxMergeDocs
+>  > > >  > > may also help to increase performance of adding documents.
+>  > > >  > >
+>  > > >  > > Regards,
+>  > > >  > > Paul Elschot
+>  > > >  > >
+>  > > >  > >
+>  > > >
+> --------------------------------------------------------------------
+>  > -
+>  > > >  > >
+>  > > >  > >
+>  > > >  > > To unsubscribe, e-mail: lucene-user-
+>  > unsubscribe@jakarta.apache.org
+>  > > >  > > For additional commands, e-mail:
+>  > > > lucene-user-help@jakarta.apache.org
+>  > > >  > >
+>  > > >  > >
+>  > > >  >
+>  > > >  >
+>  > > >
+> --------------------------------------------------------------------
+>  > -
+>  > > >
+>  > > >
+>  > > >  > To unsubscribe, e-mail: lucene-user-
+>  > unsubscribe@jakarta.apache.org
+>  > > >  > For additional commands, e-mail: lucene-user-
+>  > help@jakarta.apache.org
+>  > > >
+>  > > >
+>  > >
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

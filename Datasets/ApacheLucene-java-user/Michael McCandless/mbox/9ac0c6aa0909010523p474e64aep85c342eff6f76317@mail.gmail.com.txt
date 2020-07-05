@@ -1,0 +1,198 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Lucene gobbling file descriptors
+DATE: 1 Sep 2009
+
+setUseCompoundFile is an IndexWriter method.  It already defaults to
+"true", so you probably are already using compound file format.  If
+you look in your index directory and see only *.cfs (plus segments_N
+and segments.gen) then you are using compound file format.
+
+Mike
+
+On Tue, Sep 1, 2009 at 8:20 AM, Chris Bamford<Chris.Bamford@scalix.com> wrote:
+> Hi Mike,
+>
+> Thanks for the suggestions, very useful.  I would like to adopt a combination of setUseCompoundFile
+on the IndexReader and perform an open/close per search.
+> As a start, I just tried to set compound file format on the IndexSearcher's underlying
+IndexReader, but it is not available as a method.  This is for a Lucene 2.0 branch of the
+code...  Did it come in after 2.0 or am I doing something wrong here?  This is what I am
+attempting to do:
+>
+>        currentSearcher = new DelayCloseIndexSearcher(directory);
+>        if (currentSearcher != null) {
+>            currentSearcher.getIndexReader().setUseCompoundFile(true);
+>        }
+>
+> However, the setUseCompoundFile() is not available  :-(
+>
+> Thanks again,
+>
+> - Chris
+>
+> Chris Bamford
+> Senior Development Engineer
+> Scalix
+> chris.bamford@scalix.com
+> Tel: +44 (0)1344 381814
+> www.scalix.com
+>
+>
+>
+> ----- Original Message -----
+> From: Michael McCandless <lucene@mikemccandless.com>
+> Sent: Tue, 1/9/2009 12:03pm
+> To: java-user@lucene.apache.org
+> Subject: Re: Lucene gobbling file descriptors
+>
+> In this approach it's expected you'll run out of file descriptors,
+> when "enough" users attempt to search at the same time.
+>
+> You can reduce the number of file descriptors required per IndexReader
+> by 1) using compound file format (it's the default for IndexWriter),
+> and 2) optimizing the index before opening it (though, since you have
+> updates trickling in, that could get costly).  Yet, if enough users
+> try to search, you'll run out of descriptors.
+>
+> If performance is OK, I think you should in fact open IndexReader, do
+> search, close IndexReader, per request.  Or maybe reuse IndexReader
+> for the "biggest" indexes.  This reduces your "max file descriptors
+> envelope". Still, you can run of descriptors with the "perfect storm"
+> of usage.
+>
+> Also make sure you're giving the JRE the max open file descriptors
+> allowed by the OS.
+>
+> A bigger change would be to aggregate multiple users into a single
+> index, and use filtering to apply the entitlements constraints.  But
+> that's got its own set of tradeoffs... eg, scoring will be different,
+> respelling is dangerous (entitlements can "leak" through), it's less
+> "secure", etc.
+>
+> Mike
+>
+> On Tue, Sep 1, 2009 at 6:32 AM, Chris Bamford<Chris.Bamford@scalix.com> wrote:
+>> Hi Erick,
+>>
+>>>>Note that for search speed reasons, you really, really want to share your
+>>>>readers and NOT open/close for every request.
+>> I have often wondered about this - I hope you can help me understand it better in
+the context of our app, which is an email client:
+>>
+>> When one of our users receives email we index and store it so he (and only he) can
+search on it.  This means a separate index per user.  On large customer sites this can mean
+hundreds/thousands of indexes.  Sharing readers seems counter-intuitive, unless I am missing
+something.  What we do instead is that once a user performs a search, we keep his IndexReader
+open in case he searches again.  At present, we have no expiry on this mechanism, so they
+stay open indefinitely.  I'm a bit hazy on the underlying details but we have observed that
+the number of open fds jumps by around 10 each time a new user performs a search.  What would
+be a good strategy for managing this in your opinon?  Does it really make sense to keep the
+IndexReader open?  Would performance suffer that much if we did an open/close for each search?
+ Or would it perhaps be better to close open readers after a period of inactivity?
+>>
+>> Thanks for any wisdom / thoughts/ ideas.
+>>
+>> - Chris
+>>
+>>
+>>
+>> ----- Original Message -----
+>> From: Erick Erickson <erickerickson@gmail.com>
+>> Sent: Thu, 27/8/2009 4:49pm
+>> To: java-user@lucene.apache.org
+>> Subject: Re: Lucene gobbling file descriptors
+>>
+>> Note that for search speed reasons, you really, really want to share your
+>> readers and NOT open/close for every request.
+>> FWIW
+>> Erick
+>>
+>> On Thu, Aug 27, 2009 at 9:10 AM, Chris Bamford <Chris.Bamford@scalix.com>wrote:
+>>
+>>> I'm glad its not normal.  That means we can fix it!  I will conduct a
+>>> review of IndexReader/Searcher open/close ops.
+>>>
+>>> Thanks!
+>>>
+>>> Chris
+>>>
+>>> ----- Original Message -----
+>>> From: Michael McCandless <lucene@mikemccandless.com>
+>>> Sent: Wed, 26/8/2009 2:26pm
+>>> To: java-user@lucene.apache.org
+>>> Subject: Re: Lucene gobbling file descriptors
+>>>
+>>> This is not normal.  As long as you are certain you close every
+>>> IndexReader/Searcher that you opened, the number of file descriptors
+>>> should stay "contained".
+>>>
+>>> Though: how many files are there in your index directory?
+>>>
+>>> Mike
+>>>
+>>> On Wed, Aug 26, 2009 at 9:18 AM, Chris Bamford<Chris.Bamford@scalix.com>
+>>> wrote:
+>>> > Hi there,
+>>> >
+>>> > I wonder if someone can help?  We have a successful Lucene app deployed
+>>> on Tomcat which works well.  As far as we can tell, our developers have
+>>> observed all the guidelines in the Lucene FAQ, but on some of our
+>>> installations, Tomcat eventually runs out of file descriptors and needs a
+>>> restart to clear it.  We know Lucene is the culprit because use lsof -p
+>>> <java PID> and the vast majority (usually tens of thousands) of files
+>>> reported are Lucene index files.
+>>> >
+>>> > I am hoping to get some tips on how this can be avoided.  Is it simply
+>>> the case that as time goes by, more and more descriptors are left open and
+>>> no matter how high ulimit is set, you will run out?  Or is there a policy of
+>>> recycling that we are failing to utilise properly?
+>>> >
+>>> > I am happy to provide more information, just don't know what at this
+>>> point!  Please ask....
+>>> >
+>>> > Thanks in advance
+>>> >
+>>> > - Chris
+>>> >
+>>> > Chris Bamford
+>>> > Senior Development Engineer
+>>> > Scalix
+>>> > chris.bamford@scalix.com
+>>> > Tel: +44 (0)1344 381814
+>>> > www.scalix.com
+>>> >
+>>> >
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

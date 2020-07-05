@@ -1,0 +1,77 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Does highlighter highlight phrases only?
+DATE: 1 Jul 2005
+
+
+On Jun 30, 2005, at 4:35 PM, markharw00d wrote:
+
+> Hi Erik,
+> Yes I was thinking that code could form the basis of a new  
+> highlighter.
+>
+> I've just attached a QuerySpansExtractor to the bugzilla entry for  
+> the new highlighter. This class produces Spans from queries other  
+> than SpanXxxxQueries eg phrase, term and booleans.
+> I'm thinking you can throw the text to be highligted  as a single  
+> doc into a MemIndex , extracts the spans using the  
+> QuerySpansExtractor and the  MemIndex's reader (need to expose a  
+> getReader method on this - I'm working on it), then use some new  
+> highlighting logic on the Spans.
+>
+> Sound reasonable?
+
+I think so.
+
+One minor issue... a SpanNearQuery is not entirely equal to a  
+PhraseQuery when there is slop involved.  You have this:
+
+     SpanNearQuery sp = new SpanNearQuery(clauses,query.getSlop 
+(),false);
+
+Here's a test from Lucene in Action that demonstrates:
+
+public void testSpanNearQuery() throws Exception {
+   SpanQuery[] quick_brown_dog =
+       new SpanQuery[]{quick, brown, dog};
+   SpanNearQuery snq =
+       new SpanNearQuery(quick_brown_dog, 0, true);
+   assertNoMatches(snq);
+   snq = new SpanNearQuery(quick_brown_dog, 4, true);
+   assertNoMatches(snq);
+   snq = new SpanNearQuery(quick_brown_dog, 5, true);
+   assertOnlyBrownFox(snq);
+
+   // interesting - even a sloppy phrase query would require
+   // more slop to match
+   snq = new SpanNearQuery(new SpanQuery[]{lazy, fox}, 3, false);
+   assertOnlyBrownFox(snq);
+
+   PhraseQuery pq = new PhraseQuery();
+   pq.add(new Term("f", "lazy"));
+   pq.add(new Term("f", "fox"));
+   pq.setSlop(4);
+   assertNoMatches(pq);
+
+   pq.setSlop(5);
+   assertOnlyBrownFox(pq);
+}
+
+So to be entirely accurate, an offset will be needed to get  
+SpanNearQuery to match PhraseQuery, though I have a feeling (I'm not  
+thinking through the details at the moment) that there is an edge  
+case or two that is not compatible.  A PhraseQuery with slop of 1,  
+for example - can a SpanNearQuery be set up to match that exactly?  I  
+don't think so... a PhraseQuery with slop of 1 cannot match in  
+reverse order, only in order with an optional hole between terms.
+
+But, I like the idea of highlighting spans by converting other query  
+types to get the Spans.
+
+     Erik
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,60 @@
+FROM: Lucas Nazário dos Santos <nazario.lu...@gmail.com>
+SUBJECT: Re: Problem doing backup using the SnapshotDeletionPolicy class
+DATE: 14 Aug 2009
+
+    public static class IndexBackup {
+    private SnapshotDeletionPolicy snapshotDeletionPolicy;
+    private File backupFolder;
+    private IndexCommit indexCommit;
+
+    public IndexBackup(final SnapshotDeletionPolicy snapshotDeletionPolicy,
+        final File backupFolder) {
+        this.snapshotDeletionPolicy = snapshotDeletionPolicy;
+        this.backupFolder = backupFolder;
+    }
+
+    public boolean willBackupFromNowOn() {
+        try {
+        this.indexCommit = (IndexCommit) this.snapshotDeletionPolicy
+            .snapshot();
+        return indexCommit != null;
+        } catch (final Exception e) {
+        return false;
+        }
+    }
+
+    public boolean backup() throws IOException {
+        if (this.indexCommit == null)
+        return false;
+        try {
+        final File indexFolder = ((FSDirectory) this.indexCommit
+            .getDirectory()).getFile();
+        final String[] filesToBackup = indexFolder
+            .list(new FilterFilesToBackup(
+                IndexBackup.this.indexCommit.getFileNames()));
+        for (String fileToBackup : filesToBackup) {
+            FileUtils.copyFileToDirectory(new File(indexFolder,
+                fileToBackup), this.backupFolder, true);
+        }
+        return true;
+        } finally {
+        this.snapshotDeletionPolicy.release();
+        }
+    }
+
+    private class FilterFilesToBackup implements FilenameFilter {
+        private Collection filesToNotBackup;
+
+        private FilterFilesToBackup(final Collection filesToNotBackup) {
+        this.filesToNotBackup = filesToNotBackup;
+        }
+
+        public boolean accept(final File dir, final String name) {
+        if (name.equals("segments.gen") || name.equals("write.lock"))
+            return false;
+        else
+            return !this.filesToNotBackup.contains(name);
+        }
+    }
+    }
+

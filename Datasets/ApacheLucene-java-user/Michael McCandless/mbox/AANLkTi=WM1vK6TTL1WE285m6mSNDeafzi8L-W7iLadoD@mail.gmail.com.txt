@@ -1,0 +1,97 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: termIndexInterval, CheckIndex, size of tis file and Lucene index compression
+DATE: 21 Mar 2011
+
+Your math is right -- looks like it really is ~9 bytes per term
+(assuming no bugs in CheckIndex!).
+
+How long did this CheckIndex take to run...?
+
+On the file format, one correction: if the docFreq is < skipInterval
+(default 16) then there is no skip data and we don't write the
+SkipDelta.
+
+The vast majority of your terms will have docFreq < 16, so for these
+terms it's 6 bytes minimum (6 vInt/vLongs), then the character data
+(in UTF8 bytes) for the suffix.  Terms w/ skip data would be 7 bytes
+minimum, for the vInt/vLongs.
+
+So I think really does mean "on average" your adjacent terms only
+differ by 3 byte suffix, which is interesting.  You could make a small
+test, which enums all terms, and prints ones whose new suffix (vs
+prior terms) is <= 3 bytes, to gain some insight.
+
+I'd really love to see your index, indexed on trunk ;)  The terms
+index is much smaller than in 3.x!
+
+Mike
+
+http://blog.mikemccandless.com
+
+On Mon, Mar 21, 2011 at 1:15 PM, Burton-West, Tom <tburtonw@umich.edu> wrote:
+> I'm trying to get a feel for the impact of changing the termIndexInterval from the default
+of 128 to 1024 (8 * 128).  This reduces the size of the tii file by 1/8th but in the worst
+case requires doing a linear scan of 1024 terms instead of 128 in memory.   I'm not so concerned
+about the performance impact of the in-memory scan, but I was trying to get an idea about
+how this affects disk I/O. i.e. assuming a term is not in the tii file, we need to  load
+1024 terms from the tis file instead of 128.
+>
+> I looked at the output of a CheckIndex on one of our very large segments to get the number
+of terms in the segment (see below) and got about 2.7 billion terms. (We have lots of dirty
+OCR from 400 languages) .  The tis file is about  24.7 GB. I divided the size of the tis
+file for that segment in bytes by the number of terms to get the average number of bytes/term:
+>
+> (24.7 * (10^9) bytes ) / (2.7 * (10^9) terms) = 9 bytes/term.
+>
+> This is the average size of a term entry in the tis file (assuming CheckIndex and ls
+outputs are correct).
+> This seems too small.   Looking at the Lucene File formats doc (excerpt below), if we
+assume that everything other than the Suffix of the term takes a VInt that only occupies 1
+byte, we have 6 bytes for that data, which leaves only 3 bytes for the String that holds the
+Suffix.
+>
+> What am I missing here?
+>
+> Tom Burton-West
+>
+>
+> -------------------------------------------------------------------------------------------------------
+>
+> From the Lucene File formats doc:
+>
+> TermInfo --> <Term, DocFreq, FreqDelta, ProxDelta, SkipDelta>
+> Term --> <PrefixLength, Suffix, FieldNum>
+> Suffix --> String
+> PrefixLength, DocFreq, FreqDelta, ProxDelta, SkipDelta
+> --> VInt
+>
+> 1 of 2: name=_2cj docCount=708,639
+>    compound=false
+>    hasProx=true
+>    numFiles=9
+>    size (MB)=393,395.313
+>    diagnostics = {optimize=true, mergeFactor=9, os.version=2.6.18-238.1.1.el5, os=Linux,
+mergeDocStores=true, lu
+> cene.version=3.1-SNAPSHOT 1036094 - 2010-11-19 16:01:10, source=merge, os.arch=amd64,
+java.version=1.6.0_20, java
+> .vendor=Sun Microsystems Inc.}
+>    has deletions [delFileName=_2cj_2.del]
+>    test: open reader.........OK [24 deleted docs]
+>    test: fields..............OK [55 fields]
+>    test: field norms.........OK [17 fields]
+>    test: terms, freq, prox...OK [2,723,440,775 terms; 35740903735 terms/docs pairs;
+154861967859 tokens]
+>    test: stored fields.......OK [11040443 total field count; avg 15.58 fields per doc]
+>    test: term vectors........OK [0 total vector count; avg 0 term/freq vector fields
+per doc]
+>
+> [xxx@shotz-1 index]$ ls -l _2cj.tis
+> -rw-rw-r-- 1 tomcat dlps 24,775,378,328 Mar 12 17:16 _2cj.tis
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

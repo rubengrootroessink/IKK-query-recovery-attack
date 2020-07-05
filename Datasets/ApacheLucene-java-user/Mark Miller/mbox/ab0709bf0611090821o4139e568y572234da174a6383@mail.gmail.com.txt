@@ -1,0 +1,66 @@
+FROM: "Mark Miller" <markrmil...@gmail.com>
+SUBJECT: Multi Query MultiSearcher
+DATE: 9 Nov 2006
+
+Okay, so no help with the JGuruMultisearcher...How about something more
+specific:
+
+It seems easy enough to just copy The JGuruMS method of keeping a an array
+of Weight's around and feeding a different one to
+each subsearcher...I am worried about the following method though...I am
+guessing that this method has to do with generating correct
+scores across Indexes and I am worried that creating a more than one weight
+using this method and then passing a different one to each subsearcher
+will not generate the correct scores (or something). This whole Weight thing
+does not appear to have been around when the JGuruMultisearcher was written.
+Any tips, info, insight?
+
+Thanks, Mark
+
+
+  /**
+   * Create weight in multiple index scenario.
+   *
+   * Distributed query processing is done in the following steps:
+   * 1. rewrite query
+   * 2. extract necessary terms
+   * 3. collect dfs for these terms from the Searchables
+   * 4. create query weight using aggregate dfs.
+   * 5. distribute that weight to Searchables
+   * 6. merge results
+   *
+   * Steps 1-4 are done here, 5+6 in the search() methods
+   *
+   * @return rewritten queries
+   */
+  protected Weight createWeight(Query original) throws IOException {
+    // step 1
+    Query rewrittenQuery = rewrite(original);
+
+    // step 2
+    Set terms = new HashSet();
+    rewrittenQuery.extractTerms(terms);
+
+    // step3
+    Term[] allTermsArray = new Term[terms.size()];
+    terms.toArray(allTermsArray);
+    int[] aggregatedDfs = new int[terms.size()];
+    for (int i = 0; i < searchables.length; i++) {
+      int[] dfs = searchables[i].docFreqs(allTermsArray);
+      for(int j=0; j<aggregatedDfs.length; j++){
+        aggregatedDfs[j] += dfs[j];
+      }
+    }
+
+    HashMap dfMap = new HashMap();
+    for(int i=0; i<allTermsArray.length; i++) {
+      dfMap.put(allTermsArray[i], new Integer(aggregatedDfs[i]));
+    }
+
+    // step4
+    int numDocs = maxDoc();
+    CachedDfSource cacheSim = new CachedDfSource(dfMap, numDocs);
+
+    return rewrittenQuery.weight(cacheSim);
+  }
+

@@ -1,0 +1,133 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Memory problem
+DATE: 1 Feb 2006
+
+
+it seems like there are a few common things that bite people over and over
+again that you should check first and foremost...
+
+
+1) don't use more searchers/readers then you need.
+
+Every time you open an IndexSearcher/IndexReader resources are used which
+take up memory.  for an application pointed at a static index, you only
+ever need one IndexReader/IndexSearcher that can be shared among multiple
+threads issuing queries.  if your index is being incrimentally updated,
+you should never need more then two searcher/reader pairs open at a time
+-- one in use, and one that you open/warm up when you detect changes.
+swap it in for the "in use" instance when ready, and close the old "in
+use" instance as soon as all clients that were using it are done.
+
+2) close your resources when you are finished with them.
+
+The most common waste of memory i've seen is people who don't close
+instances of IndexSearcher or IndexReader when they are done with them.
+it's not enough to rely on them going out of scope and being garbage
+collected, you have to explictly close them to ensure that things like the
+CachingWrappingFilter and the FieldCache aren't caching large amounts of
+data for an IndexReader that can never be used again.
+
+A big part of this is making sure you know when your IndexSearcher is
+going to close your IndexReader for you -- read the javadocs carefully.
+
+3) don't sort on more fields then you can afford.
+
+Every time you sort on a field, a FieldCache array is constructed for that
+field.  If you need to save some ram, and you currently let your clients
+sort on 30 different fields, try limiting their sort options -- those
+arrays can take up a lot of space.
+
+4) RangeQuery, PrefixQuery and WildCardQuery cost RAM
+
+if you use RangeQuery, PrefixQuery and WildCardQuery be prepared for them
+to eat up a lot of ram doing query expansion -- especially if you increase
+BooleanQuery.maxClauseCount to prevent TooManyClauses exceptions.  the
+trade off you make by doing that is that now a prefix query like "f:a*"
+will expand into a boolean query containing every term in the field f that
+starts with an "a" ... if you've got a lot of terms, that can be a very
+big query, and it can take up a lot of RAM.
+
+Consider using ConstantScoreRangeQuery, etc.. instead.
+
+5) don't use field norms if you don't need them.
+
+This is only an option if you are using 1.9, and it's only a big issue if
+you have many indexed fields.  FieledNorms take up one byte per doc per
+indexed field -- even if a doc doens't have a value for that field, it
+still gets a norm for that field.  There are options when indexing to
+prevent norms from being calculated, which can save a lot of space.
+
+
+
+
+: Date: Wed, 1 Feb 2006 10:21:55 -0000
+: From: Leon Chaddock <leonchaddock@macranet.co.uk>
+: Reply-To: java-user@lucene.apache.org
+: To: java-user@lucene.apache.org
+: Subject: Memory problem
+:
+: Hi All,
+:
+: We have a lucene index of over 10 000 000 docs at this time.
+: When we try and run a search we get
+: java.lang.OutOfMemoryError: Java heap space
+:
+: We have tried setting the xmx settings to 1gb but to no avail (the box has
+: 4gb of memory available) . IS there any guidance on handling memory or has
+: anyone had similar problems before that could help?
+:
+: Many thanks
+:
+: Leon
+:
+: ----- Original Message -----
+: From: "Pradeep Sharma" <pradeep@danicorp.com>
+: To: <java-user@lucene.apache.org>
+: Sent: Wednesday, February 01, 2006 2:03 AM
+: Subject: Greetings and my first question - Is it a good practise to store
+: application configuration in Lucene
+:
+:
+:
+:
+: I have just joined this user group, but I probably will be asking questions
+: / contributing for a while now as I am starting to work on a product which
+: will use Lucene exclusively.
+:
+: Still in the designing phase, and I see that we need to manage several user
+: / application specific configurations and I am exploring the idea of storing
+: the configuration information also in the Index, may be create a separate
+: index just for the configuration, because each module of the application
+: will have access to Lucene classes.
+:
+: I know technically this can be done, but are there any best practises which
+: discourage this?
+:
+: Thanks in advance.
+: -Pradeep
+:
+:
+:
+: --------------------------------------------------------------------------------
+:
+:
+: No virus found in this incoming message.
+: Checked by AVG Free Edition.
+: Version: 7.1.375 / Virus Database: 267.14.25/246 - Release Date: 30/01/2006
+:
+:
+: ---------------------------------------------------------------------
+: To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+: For additional commands, e-mail: java-user-help@lucene.apache.org
+:
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

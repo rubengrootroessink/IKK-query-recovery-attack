@@ -1,0 +1,81 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Help with Lucene Indexer crash recovery
+DATE: 6 Oct 2007
+
+"vivek sar" <vivextra@gmail.com> wrote:
+> Sorry, I'm using Lucene 2.2. We are using Lucene to index our database
+> (Oracle) into documents for full-text search feature. Here is the
+> process of indexing,
+> 
+> 1) Have two IndexWriters which run in two different threads and write
+> to two different directories (temporary indexes). They both read from
+> the same queue (db resultset queue) and then right to the index. Close
+> the indexwriters once done.
+> 2) Once the IndexWriters are done we start the MasterIndex, which is
+> another IndexWriter. This merges the indexes in those two temporary
+> indexes.
+> 3) Once the writer.addIndexes is done I call writer.optimize() and
+> then writer.close().
+> 4) Our IndexSearcher reads only from the MasterIndex
+
+This process sounds fine, though as Karl pointed out you could
+let the reader before you start the optimize.  You could also consider
+skipping the optimize entirely, unless the search latency is in fact
+too high (or throughput too low) without it.
+ 
+> Once in a while we kill the running application using "kill -9". I
+> think if the IndexWriter is in process of merging and we kill it we
+> run into this problem. It has already happened few times in last one
+> week. I do clean up the lock if there is a write.lock at the startup
+> of the system. I can not recreate the index as it may take hours to
+> re-index.
+
+As Hoss pointed out, "kill -9" really should be a means of last
+resort.
+
+That said, it should never in fact cause index corruption, as far as I
+know.  Lucene is "semi-transactional": at any & all moments you should
+be able to destroy the JVM and the index will be unharmed. I would
+really like to get to the bottom of why this is not the case here.
+
+So you've noticed that if kill -9 is sent while the addIndexes is
+happening then that can lead to this corruption?  If possible, could
+you use IndexWriter.setInfoStream(...) during at least that step to
+get verbose details about what the writer is doing, and then capture
+that output & post it the next time you get this error to happen?
+That would go a long ways to getting to the root cause here.
+
+Which OS and file system are you using?  Are all these steps happening
+on a single machine & JVM?
+
+> I don't have any shutdown hook right now, but I'm thinking of adding
+> one for graceful index closing.  We use following merge parameters,
+> 
+> mergeFactor=100
+> maxMergeDocs=99999
+> maxBufferedDocs=1000
+
+Seems OK.
+
+> I can try out your tool, is it something that can be integrated into
+> the application itself? So, basically I'm looking to catch the
+> "FileNotFoundException" and take some action to recover from it.
+
+Well, once the tool has been tested and shown to be bug-free then you
+could in theory use this as a live recovery inside the application.
+But for starters I would run it from the command line without the
+-check.  Be very careful: this is totally new code and it could make
+your situation even worse, if it has any bugs.  And remember when the
+tool works, it will have removed a whole segment from your index which
+means possibly a great many documents are now gone.
+
+Also, it would be far better to get to the root cause & fix it,
+instead of having to use this tool perpetually.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

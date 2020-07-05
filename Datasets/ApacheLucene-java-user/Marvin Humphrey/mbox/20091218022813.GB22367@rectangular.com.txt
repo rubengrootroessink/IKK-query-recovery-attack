@@ -1,0 +1,67 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: External sort
+DATE: 18 Dec 2009
+
+On Thu, Dec 17, 2009 at 09:33:11AM -0800, Marvin Humphrey wrote:
+> On Thu, Dec 17, 2009 at 05:03:11PM +0100, Toke Eskildsen wrote:
+> 
+> > A third alternative would be to count the number of unique datetime-values
+> > and make a compressed representation, but that would make the creation of
+> > the order-array more complex.
+> 
+> This is what we're doing in Lucy/KinoSearch, though we prepare the ordinal
+> arrays at index time and mmap them at search time.
+> 
+> The provisional implementation has a problem, though.  We use a hash set to
+> perform uniquing, but when there are a lot of unique values, the memory
+> requirements of the SortWriter go very high.
+> 
+> Assume that we're sorting string data rather than date time values (so the
+> memory occupied by all those unique values is significant).  What algorithms
+> would you consider for performing the uniquing?
+
+I have received private replies which have helped to shape the following design:
+
+Instead of storing an object in memory for each unique value, we'll serialize
+values to a file and store 64-bit file pointer offsets.  The memory cost as we
+add documents will be...
+
+   sizeof(int64_t) * number_of_documents_in_segment * number_of_sortable_fields
+
+When it comes time to finish the segment, we'll loop through the fields one at
+a time.  On each loop, we'll create a sorted array of document numbers using
+the values we find at the file pointers.  There will be an awful lot of file
+seeking and deserialization costs during the sort to achieve the comparisons,
+but that's the price we pay for a scalable and general algorithm.
+
+There will be only one file in which we store all serialized values for all
+fields.  We'd probably get better locality with one file per field, but we
+have to be conservative about file descriptors.
+
+As an optimization for fields with low cardinality, we'll keep a 32-element
+LRU[1] for each field in which we cache unique values.  That way, we won't
+spend a whole lot of IO e.g. writing "yes" and "no" over and over.
+
+Once we have the sorted array of document numbers, we can use it to create the
+compressed ords array and the final stack of unique values.  To perform the
+final uniquing, we'll have to compare each doc's value to the last and
+determine whether the value has actually changed.  That means yet more seeking
+and deserialization costs we don't have with the pure hash set uniquing we use
+now -- but it can't be helped since we will often have multiple copies of the
+same value serialized at different places within the temp values file.
+
+Thoughts, improvements?  Hopefully this gives the original poster some ideas
+about how you might go about sorting externally within Lucene as well...
+
+Marvin Humphrey
+
+[1] For now it will actually be a faked up LRU: a hash table that we empty
+every time it grows to 32 elements.  If and when we get around to writing a
+real LRU class for Lucy, we'll use that instead.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,60 @@
+FROM: Ben VandenBos <...@avvo.com>
+SUBJECT: boosting on a sint results in high cpu spikes and ultimately hangs solr
+DATE: 8 Feb 2011
+
+Hi,
+
+We've been using solr for several years now with great success.  Recently, we modified a boost
+query to reference a dynamic sint field defined as follows:
+
+    <dynamicField name="*_i"  type="sint" indexed="true" stored="false" omitNorms="true"/>
+
+We index a handful of these fields per document.  Their field names are of the form:
+
+    _<id>_specialty_percent_i
+
+Examples:
+
+    _56_specialty_percent_i
+    _71_specialty_percent_i
+
+There are roughly 240 different ids.  No document has more than 20 of these fields, most of
+1-4.  Many have none.  We have about ~3 million documents.
+
+We added the following clause to our boost query:
+
+    _<id>_specialty_percent_i^10.0
+
+We insert the appropriate id into the boost clause at query time.
+
+Our average response time from solr prior to this change was around 12-20 ms.  Immediately
+after, it went up a bit to 16-32ms.  Unfortunate, but acceptable.  Then in the following minutes,
+the response time begins to fluctuate heavily, spiking to 100ms and then back down to 20,
+then to 150ms and back down.  After 30-60 mins, the response time spikes to 15K ms which effectively
+kills the instance and it never recovers until our monitoring restarts solr.
+
+Initially we were giving the JVM 6gigs of memory.  As a test, we bumped it up to 10.  That
+delayed the effect, but it still happened.  It took about 2-3 hours to tank.  Here's the commandline:
+
+  /usr/bin/java \
+  -Djetty.home=/srv/solr \
+  -Dsolr.solr.home=/srv/solr/solr \
+  -Xms6144m -Xmx6144m \
+  -jar /srv/solr/start.jar \
+
+I've isolated this issue to the boost query, even if it's the only clause in the boost query,
+it still happens.  Without it, everything runs great.  I cannot reproduce the problem using
+any other field.
+
+We boost on other *_i fields with no problems.
+
+We're running solr 1.4.1.  All queries are going against slaves.  Here's our cache config:
+
+    <filterCache class="solr.LRUCache" size="1000" initialSize="1000" autowarmCount="1000"/>
+
+Any advice or ideas would be greatly appreciated.
+
+thanks!
+
+ben
+

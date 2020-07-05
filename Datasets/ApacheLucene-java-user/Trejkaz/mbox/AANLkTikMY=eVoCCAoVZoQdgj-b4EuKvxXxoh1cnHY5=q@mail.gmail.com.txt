@@ -1,0 +1,70 @@
+FROM: Trejkaz <trej...@trypticon.org>
+SUBJECT: a faster way to addDocument and get the ID just added?
+DATE: 29 Mar 2011
+
+Hi all.
+
+I'm trying to parallelise writing documents into an index.  Let's set
+aside the fact that 3.1 is much better at this than 3.0.x... but I'm
+using 3.0.3.
+
+One of the things I need to know is the doc ID of each document added
+so that we can add them into auxiliary database tables which are keyed
+by it.  If multiple threads are using the same writer, I can still do
+this as follows:
+
+    IndexWriter writer;
+    boolean parallel;
+
+    // ...
+
+    private int addDocument(String guid, ...) {
+        Document doc = new Document();
+        doc.add(new Field("guid", guid, Store.YES, Index.ANALYZED));
+        // eliding other fields
+        writer.addDocument(doc);
+
+        if (parallel) {
+            IndexReader realTimeReader = writer.getReader();
+            try {
+                TermDocs termDocs = realTimeReader.termDocs();
+                try {
+                    termDocs.seek(new Term("guid", guid));
+                    if (termDocs.next()) {
+                        return termDocs.doc();
+                    } else {
+                        throw new IllegalStateException(String.format(
+                            "We added item with GUID %s but it wasn't
+found immediately afterwards", guid));
+                    }
+                } finally {
+                    termDocs.close();
+                }
+            } finally {
+                realTimeReader.close();
+            }
+        } else {
+            return writer.maxDoc();
+        }
+    }
+
+Benchmarking this for a single thread, there is a difference in cost
+between doing it using a search and doing it by calling maxDoc(), as
+you might expect:
+
+    Time for parallel-safe version: 147.561s
+    Time for unsafe version: 62.603s
+
+Is there a way to achieve this result with less overhead?
+
+(Note: for reasons of performance, we cannot use a field to store an
+ID to use for database tables, as this is several orders of magnitude
+slower when you need to build a filter based on a database query.)
+
+TX
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,339 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: FW: Indexer Threads Getting Into BLOCKED State While Optimization Taking Place On Large Indexes Of Size > 2GB
+DATE: 20 Jul 2011
+
+Hmm can you double-check your Lucene version?  SerialMergeScheduler
+wasn't added until 2.3, so you are at least at that version.
+
+It looks like you are using SerialMergeScheduler, which, by design,
+can only do one merge at a time (this is why you see the threads
+BLOCKED).  You can try switching to ConcurrentMergeScheduler, which
+allows merges to run simultaneously in different threads, but, it's
+possible this will swamp the IO system and not be an overall win.
+
+That said, regardless of the merge scheduler, optimizing a biggish
+index will take time... and really you shouldn't do it very often or
+at all, unless you know the index won't be changing for a long time.
+
+Mike McCandless
+
+http://blog.mikemccandless.com
+
+On Wed, Jul 20, 2011 at 12:01 AM, Gudi, Ravi Sankar
+<ravisankarg.ravisankarg@hp.com> wrote:
+>
+>
+>
+>
+> Hi Sir/Madam,
+>
+>
+>
+> Below is the question which I posted in this site and as per Mike response,
+> I am sending out an email for having your suggestions.
+>
+>
+>
+>
+>
+> Anonymous said...
+>
+> Hi Mike,
+>
+> This is Ravi,We are using Lucene-2.0 in our email archiving product for
+> indexing/searching the documents.
+>
+> We have been facing a critical problem which affecting the production on
+> customer sites, the problem is while optimization taking place on larger
+> indices of size > 2 GB, the indexer threads getting into blocked state,
+> since index writer opened for optimization purpose is never getting released
+> back for ongoing indexing. Here i am giving you thread dump of blocked
+> indexer threads and optimizer thread.
+>
+> I appreciate your help and suggestion in this regard.
+>
+> July 19, 2011 12:50 PM
+>
+>
+>
+> Mike McCandless said...
+>
+> Hi Ravi,
+>
+>
+>
+> Can you bring this question to Lucene's user's list? (ie, send an email to
+> java-user@lucene.apache.org).
+>
+> July 19, 2011 2:23 PM
+>
+>
+>
+> Anonymous said...
+>
+> Definitely Mike, I will be sending out an email with full details and thread
+> dumps which i have.
+>
+>
+>
+>
+>
+> Index Sizes:
+>
+>
+>
+> All the indices size is more than 1 GB, as per my observations in logs,
+> while optimization taking place on below indices, Index closeWriter
+> operation taking much time, its in between 1 minute to 2 minutes as part
+>
+> Of basic optimization step, at the same time Indexer threads going into
+> blocked state, since the Indexer threads will not get an access on the same
+> index on which Optimizer threads working, which leads to a race condition.
+> So, that it slowing down indexing process, on the other hand it will lead to
+> store rate issues.
+>
+>
+>
+> I also looked at QCCR2B5573, which is exactly similar to this new case,
+> thread dumps are similar, NPI has commented 5573 case as an
+> enhancement/design change issue.
+>
+>
+>
+>                 - locked <0x00002aaabc869700> (a
+> org.apache.lucene.index.SerialMergeScheduler)
+>
+>
+>
+> [root@sc-s2-204-1.ariel.com ~]# du --si /index/*
+>
+> 392M    /index/TP_0000000000000000481
+>
+> 1.2G    /index/TP_0000000000000000482
+>
+> 1.2G    /index/TP_0000000000000000483
+>
+> 1.2G    /index/TP_0000000000000000484
+>
+> 1.2G    /index/TP_0000000000000000485
+>
+> 1.1G    /index/TP_0000000000000000486
+>
+> 1.2G    /index/TP_0000000000000000487
+>
+> 1.2G    /index/TP_0000000000000000488
+>
+> 1.2G    /index/TP_0000000000000000489
+>
+> 1.1G    /index/TP_0000000000000000490
+>
+> 1.2G    /index/TP_0000000000000000491
+>
+> 1.3G    /index/TP_0000000000000000492
+>
+> 1.2G    /index/TP_0000000000000000493
+>
+> 1.2G    /index/TP_0000000000000000494
+>
+> 1.1G    /index/TP_0000000000000000495
+>
+> 1.2G    /index/TP_0000000000000000496
+>
+> 1.1G    /index/TP_0000000000000000497
+>
+> 2.2G    /index/TP_0000000000000000498
+>
+> 1.3G    /index/TP_0000000000000000499
+>
+> 1.3G    /index/TP_0000000000000000500
+>
+> 1.2G    /index/TP_0000000000000000501
+>
+> 1.2G    /index/TP_0000000000000000502
+>
+> 1.2G    /index/TP_0000000000000000503
+>
+> 1.1G    /index/TP_0000000000000000504
+>
+> 381M    /index/TP_0000000000000000505
+>
+> [root@sc-s2-204-1.ariel.com ~]#
+>
+>
+>
+>
+>
+>
+>
+>
+>
+> "Indexer_1" daemon prio=10 tid=0x000000005e09ec00 nid=0x2527 waiting for
+> monitor entry [0x000000004743a000..0x000000004743ab10]
+>
+>    java.lang.Thread.State: BLOCKED (on object monitor)
+>
+>         at
+> org.apache.lucene.index.SerialMergeScheduler.merge(SerialMergeScheduler.java:33)
+>
+>         - waiting to lock <0x00002aaabc869700> (a
+> org.apache.lucene.index.SerialMergeScheduler)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2133)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2128)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2124)
+>
+>         at org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:2822)
+>
+>         at org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:2807)
+>
+>         at
+> com.hp.platform.store.indexmanager.Index.closeWriter(Index.java:968)
+>
+>         at
+> com.hp.platform.store.indexer.IndexerThread.closeIndexes(IndexerThread.java:304)
+>
+>         at
+> com.hp.platform.store.indexer.IndexerThread.run(IndexerThread.java:232)
+>
+>         at
+> com.hp.platform.core.utils.threads.ThreadPool$Pooled_thread.run(ThreadPool.java:188)
+>
+>
+>
+> "Indexer_0" daemon prio=10 tid=0x000000005fd52c00 nid=0x2526 waiting for
+> monitor entry [0x0000000047339000..0x0000000047339c90]
+>
+>    java.lang.Thread.State: BLOCKED (on object monitor)
+>
+>         at
+> org.apache.lucene.index.SerialMergeScheduler.merge(SerialMergeScheduler.java:33)
+>
+>         - waiting to lock <0x00002aaabc869700> (a
+> org.apache.lucene.index.SerialMergeScheduler)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2133)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2128)
+>
+>         at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2124)
+>
+>         at org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:2822)
+>
+>         at org.apache.lucene.index.IndexWriter.flush(IndexWriter.java:2807)
+>
+>         at
+> com.hp.platform.store.indexmanager.Index.closeWriter(Index.java:968)
+>
+>         at
+> com.hp.platform.store.indexer.IndexerThread.closeIndexes(IndexerThread.java:304)
+>
+>         at
+> com.hp.platform.store.indexer.IndexerThread.run(IndexerThread.java:232)
+>
+>         at
+> com.hp.platform.core.utils.threads.ThreadPool$Pooled_thread.run(ThreadPool.java:188)
+>
+>
+>
+> "OptimizerThread" daemon prio=10 tid=0x000000005e6f1800 nid=0x2525 runnable
+> [0x0000000047238000..0x0000000047238c10]
+>
+>    java.lang.Thread.State: RUNNABLE
+>
+>                 at java.io.RandomAccessFile.readBytes(Native Method)
+>
+>                 at java.io.RandomAccessFile.read(RandomAccessFile.java:322)
+>
+>                 at
+> org.apache.lucene.store.FSDirectory$FSIndexInput.readInternal(FSDirectory.java:554)
+>
+>                 - locked <0x00002aaabc86a998> (a
+> org.apache.lucene.store.FSDirectory$FSIndexInput$Descriptor)
+>
+>                 at
+> org.apache.lucene.store.BufferedIndexInput.refill(BufferedIndexInput.java:152)
+>
+>                 at
+> org.apache.lucene.store.BufferedIndexInput.readByte(BufferedIndexInput.java:38)
+>
+>                 at
+> org.apache.lucene.store.IndexInput.readVInt(IndexInput.java:80)
+>
+>                 at
+> org.apache.lucene.index.SegmentTermPositions.readDeltaPosition(SegmentTermPositions.java:81)
+>
+>                 at
+> org.apache.lucene.index.SegmentTermPositions.nextPosition(SegmentTermPositions.java:76)
+>
+>                 at
+> org.apache.lucene.index.SegmentMerger.appendPostings(SegmentMerger.java:567)
+>
+>                 at
+> org.apache.lucene.index.SegmentMerger.mergeTermInfo(SegmentMerger.java:494)
+>
+>                 at
+> org.apache.lucene.index.SegmentMerger.mergeTermInfos(SegmentMerger.java:463)
+>
+>                 at
+> org.apache.lucene.index.SegmentMerger.mergeTerms(SegmentMerger.java:423)
+>
+>                 at
+> org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:142)
+>
+>                 at
+> org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:3571)
+>
+>                 at
+> org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:3266)
+>
+>                 at
+> org.apache.lucene.index.SerialMergeScheduler.merge(SerialMergeScheduler.java:36)
+>
+>                 - locked <0x00002aaabc869700> (a
+> org.apache.lucene.index.SerialMergeScheduler)
+>
+>                 at
+> org.apache.lucene.index.IndexWriter.maybeMerge(IndexWriter.java:2133)
+>
+>                 at
+> org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:2065)
+>
+>                 at
+> org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:2013)
+>
+>                 at
+> com.hp.platform.store.indexmanager.Index.runBasicOptimization(Index.java:674)
+>
+>                 at
+> com.hp.platform.store.indexmanager.OptimizerThread.optimize(OptimizerThread.java:152)
+>
+>                 at
+> com.hp.platform.store.indexmanager.OptimizerThread.run(OptimizerThread.java:56)
+>
+>                 at
+> com.hp.platform.core.utils.threads.ThreadPool$Pooled_thread.run(ThreadPool.java:188)
+>
+>
+>
+> Regards
+>
+> Ravi
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

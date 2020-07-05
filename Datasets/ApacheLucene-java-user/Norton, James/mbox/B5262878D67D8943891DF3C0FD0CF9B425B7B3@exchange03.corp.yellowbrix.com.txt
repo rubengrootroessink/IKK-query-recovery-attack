@@ -1,0 +1,103 @@
+FROM: "Norton, James" <jnor...@yellowbrix.com>
+SUBJECT: QueryParser Behavior and Token.setPositionIncrement
+DATE: 26 Apr 2004
+
+> I am attempting to use Token.setPositionIncrement() to provide alternate forms of tokens
+and I have encountered strange
+> behavior with QueryParser.  It seems to be constructing phrase queries with the alternate
+tokens.  I don't know why the
+> query would be parsed as a phrase.
+> 
+> For example, consider an Analyzer that adds lowercase tokens to the token stream as alternate
+forms (position increment = 0).
+> Parsing the query "Bush" (quotes added for emphasis and not part of query) results in
+a query of text:"Bush bush" ("text" is
+> the default field).  Whereas parsing the query "bush" results in the query text:bush.
+ Notice the lack of quotes in the second
+> case, which has no alternate form appended because the token is already lowercase.  Is
+this a bug or is there some 
+> explanation of which I am not aware?
+> 
+> The following two classes provide test code verifying this behaviour.
+> 
+> 
+> 
+> /**
+>  * A test analyzer employing a TestLowerCaseFilter to demonstrate problems with
+>  * QueryParser when dealing with multiple tokens at the same position.
+>  */
+> public class TestAnalyzer extends Analyzer {
+> 	/**
+> 	 * Constructs a {@link StandardTokenizer} filtered by a {@link
+> 	 * StandardFilter} and a {@link TestLowerCaseFilter}.
+> 	 */
+> 	public final TokenStream tokenStream(String fieldName, Reader reader) {
+> 		TokenStream result = new StandardTokenizer(reader);
+> 		result = new StandardFilter(result);
+> 		result = new TestLowerCaseFilter(result, Locale.getDefault());
+> 		return result;
+> 	}
+> 	
+> 	public static void main(String[] args) {
+> 		TestAnalyzer analyzer = new TestAnalyzer();
+> 		try {
+> 			Query lowerCaseQuery = QueryParser.parse("bush", "text", analyzer);
+> 			Query upperCaseQuery = QueryParser.parse("Bush", "text", analyzer);
+> 			
+> 			System.out.println("lower case: " + lowerCaseQuery.toString());
+> 			System.out.println("upper case: " + upperCaseQuery.toString());
+> 		} catch (ParseException e) {
+> 			// TODO Auto-generated catch block
+> 			e.printStackTrace();
+> 		}
+> 		
+> 	}
+> }
+> 
+> /**
+>  *
+>  * A {@link Filter} that adds alternate forms (lower case) for upper case 
+>  * tokens to a {@link TokenStream}.
+>  */
+> public class TestLowerCaseFilter extends TokenFilter {
+> 	private Locale locale;
+> 	private Token alternateToken;
+> 
+> 	public TestLowerCaseFilter(TokenStream stream, Locale locale) {
+> 		super(stream);
+> 		this.locale = locale;
+> 		this.alternateToken = null;
+> 	}
+> 
+> 	/* (non-Javadoc)
+> 	 * @see org.apache.lucene.analysis.TokenStream#next()
+> 	 */
+> 	public Token next() throws IOException {
+> 	
+> 		Token rval = null;
+> 		if (alternateToken != null) {
+> 			rval = alternateToken;
+> 			alternateToken = null;
+> 		} else {
+> 			Token nextToken = input.next();
+> 			if (nextToken == null) {
+> 				return null;
+> 			}
+> 			String text = nextToken.termText();
+> 			String lc = text.toLowerCase(locale);
+> 			rval = nextToken;
+> 			if (!lc.equals(text)) {
+> 
+> 				alternateToken =
+> 					new Token(
+> 						lc,
+> 						nextToken.startOffset(),
+> 						nextToken.endOffset());
+> 				alternateToken.setPositionIncrement(0);
+> 			}
+> 		}
+> 		return rval;
+> 	}
+> 
+> }  
+

@@ -1,0 +1,268 @@
+FROM: <Bill.Che...@sungard.com>
+SUBJECT: RE: Can you create a Field that is a copy of another Field?
+DATE: 27 Jun 2008
+
+Erick,
+
+Thanks for the response.  I'm very sure the TokenStream is expensive.  Not always but in some
+case, yes, it can take a long time to complete.  However, I do like your approach.  I'm going
+to try a different approach suggested by another poster first, but this is very interesting.
+
+Thank you!
+--
+Bill Chesky * Sr. Software Developer * SunGard * FAME Energy * 1194 Oak Valley Drive * Ann
+Arbor, MI 48103
+Tel 734-332-4405 * Fax 734-332-4440 * bill.chesky@sungard.com
+ www.sungard.com/energy 
+
+
+-----Original Message-----
+From: Erick Erickson [mailto:erickerickson@gmail.com] 
+Sent: Friday, June 27, 2008 1:37 PM
+To: java-user@lucene.apache.org
+Subject: Re: Can you create a Field that is a copy of another Field?
+
+How sure are you that the TokenStream is that expensive? But
+assuming you are AND that the values for these properties
+aren't that big, the simple-minded approach that comes to my
+simple mind is to just iterate through the stream yourself, assemble
+a string from the returned tokens and pass the string to the two add
+calls.
+
+This might be worth it if your tokenizer is going to the DB or something....
+
+Best
+Erick
+
+
+On Fri, Jun 27, 2008 at 10:56 AM, <Bill.Chesky@sungard.com> wrote:
+
+> Grant,
+>
+> Thanks for the reply.  What we're trying to do is kind of esoteric and hard
+> to explain without going into a lot of gory details so I was trying to keep
+> it simple.  But I'll try to summarize.
+>
+> We're trying to index entities in a relational database.  One of the
+> entities we're trying to index is something called a Property.  Think of a
+> Property kind of like the java.util.Properties class, i.e. a name/value
+> pair. So some examples of Properties might be:
+>
+> State=California
+> City=Sacremento
+> ZipCode=94203
+> StreetName=South Main
+> StreetNumber=1234
+> Name=Joe Smith
+>
+> Etc., etc.
+>
+> (Note: this isn't the type of data we're storing... just trying to keep it
+> simple.)
+>
+> Imagine that the above list represents the the set of Properties that
+> specify the address for a single person, Joe Smith.  Each Property in the
+> set will be indexed by the values on the right-hand side of all the other
+> name/value pairs in the set, i.e.: California, Sacremento, 94203, South,
+> Main, 1234, Joe and Smith.
+>
+> There are two types of queries that we want to do.
+> 1) retrieve every Property matching the specified search terms, regardless
+> of its left-hand side.  For this we want to create a field in EVERY Document
+> called "keywords" and index it by the right-hand side values as described
+> above.
+> 2) retrieve every Property with a given left-hand side that matches the
+> specified search terms.  For example, find all the 'City' Properties that
+> match the term 'South'.  For this we want to create a field with the name of
+> the left-hand side (e.g. State, City, ZipCode, etc.) but only in those
+> Documents that correspond to a Property with that left-hand side.  Again
+> this field will be indexed by the right-hand side values as described above.
+>
+> So a couple of examples from the above list might look something like:
+>
+> Document: State=California
+>  Field: 'keywords' indexed by 'California', 'Sacremento', '94203', etc.
+>  Field: 'State' indexed by 'California', 'Sacremento', '94203', etc.
+>
+> Document: City=Sacremento
+>  Field: 'keywords' indexed by 'California', 'Sacremento', '94203', etc.
+>  Field: 'City' indexed by 'California', 'Sacremento', '94203', etc.
+>
+> Now if I'm interested in all the Properties that match the word "South", I
+> search the index on the "keywords" field for the term "South".  This will
+> return both documents above.
+>
+> But if I'm only interested in any 'City' Properties that match the term
+> 'South' I search the index on the "City" field for the term "South".  This
+> will only return the 'City=Sacremento' document above because it's the only
+> Document of the two that even has a 'City' field in it.
+>
+> But in any case, the 'State' field and the 'City' field are indexed exactly
+> the same way as the 'keywords' field.  Which is why I was wondering if there
+> was a way to just create these fields as copies of the 'keywords' field.
+>
+> Here is a code sample where I'm creating the index.  We're using Hibernate
+> search to search the indexes, thus the "id" and "_hibernate_class" fields.
+>
+> Query q = em.createQuery("select p from Property p");
+>
+> List<Property> properties = q.getResultList();
+>
+> for (Property p : properties)
+> {
+>    // Indexing property.
+>    Document doc = new Document();
+>    doc.add(new Field("id",
+>                       Integer.toString(p.getId()),
+>                       Field.Store.YES,
+>                       Field.Index.UN_TOKENIZED));
+>    doc.add(new Field("_hibernate_class",
+>                      Property.class.getCanonicalName(),
+>                      Field.Store.YES,
+>                      Field.Index.UN_TOKENIZED));
+>    TokenStream tokenStream = new PropertyTokenStream(p);
+>    doc.add(new Field("keywords", tokenStream));
+>    propertyIndexWriter.addDocument(doc);
+>    tokenStream.close();
+>    // Here is where I would like to add the second field that is a copy
+>    // of the "keywords" field just created above.  Note: the call
+>    // p.getCharacteristic().getName() is getting the name of the
+>    // left-hand side of the Property as described above.
+>    TokenStream tokenStream = new PropertyTokenStream(p);
+>    doc.add(new Field(p.getCharacteristic().getName(), tokenStream));
+>    propertyIndexWriter.addDocument(doc);
+>    tokenStream.close();
+> }
+>
+> Hope that clears it up.
+>
+> BTW, in case this seems like a strange way to index things, I will also add
+> that we are doing it this way in order to impose a heirarchical structure on
+> Properties.  So my example above should really look like this:
+>
+> State=California
+>    City=Sacremento
+>        ZipCode=94203
+>            StreetName=South Main
+>                StreetNumber=1234
+>                    Name=Joe Smith
+>
+> Use your imagination to visualize what the tree might look like with
+> millions of peoples' addresses.  Now imagine trying to tokenize the Document
+> corresponding to "State=California".  Each path thru the tree from root
+> (State) to leaf (Name) represents a set of Properties that is used to index
+> the "keywords" field in the "State=California" document.  In other words it
+> takes a long time to index.  This is why I'm looking for a way to just copy
+> one field to another.
+>
+> There is a lot more to our design to facilitate this hierarchical structure
+> but this is probably more than you wanted to know. :)
+>
+> thanks in advance,
+> --
+> Bill Chesky * Sr. Software Developer * SunGard * FAME Energy * 1194 Oak
+> Valley Drive * Ann Arbor, MI 48103
+> Tel 734-332-4405 * Fax 734-332-4440 * bill.chesky@sungard.com
+>  www.sungard.com/energy
+>
+>
+> -----Original Message-----
+> From: Grant Ingersoll [mailto:gsingers@apache.org]
+> Sent: Friday, June 27, 2008 7:26 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: Can you create a Field that is a copy of another Field?
+>
+>
+> On Jun 27, 2008, at 12:01 AM, <Bill.Chesky@sungard.com> <
+> Bill.Chesky@sungard.com
+>  > wrote:
+>
+> > Hello Lucene Gurus,
+> >
+> >
+> >
+> > I'm new to Lucene so sorry if this question basic or naïve.
+> >
+> >
+> >
+> > I have a Document to which I want to add a Field named, say, "foo"
+> > that is tokenized, indexed and unstored.  I am using the
+> > "Field(String name, TokenStream tokenStream)" constructor to create
+> > it.  The TokenStream may take a fairly long time to return all its
+> > tokens.
+> >
+>
+> Can you share some code here?  What's the reasoning behind using it
+> (not saying it's wrong, just wondering what led you to it)?  Are you
+> just loading it up from a file, string or something or do you have
+> another reason?
+>
+>
+> >
+> >
+> > Now for querying reasons I want to add another Field named, say,
+> > "bar", that is tokenized and indexed in exactly the same way as
+> > "foo".  I could just pass it the same TokenStream that I used to
+> > create "foo" but since it takes so long to return all its tokens, I
+> > was wondering if there is a way to say, create "bar" as a copy of
+> > "foo".  I looked thru the javadoc but didn't see anything.
+> >
+> >
+>
+> By exactly the same, do you really mean exactly the same?  What's the
+> point of that?  What are the "querying reasons"?
+>
+> You may want to look at the TeeTokenFilter and the SinkTokenizer, but
+> I guess I'd like to know more about what's going on before fully
+> recommending anything.
+>
+>
+> >
+> > Is this possible in Lucene or do I just have to bite the bullet
+> > build the new Field using the same TokenStream again?
+> >
+> > --
+> > Bill Chesky * Sr. Software Developer * SunGard * FAME Energy * 1194
+> > Oak Valley Drive * Ann Arbor, MI 48103
+> > Tel 734-332-4405 * Fax 734-332-4440 * bill.chesky@sungard.com <mailto:
+> bill.chesky@sungard.com
+> > >
+> > www.sungard.com/energy <blocked::http://www.sungard.com/energy>
+> >
+> >
+> >
+>
+> --------------------------
+> Grant Ingersoll
+> http://www.lucidimagination.com
+>
+> Lucene Helpful Hints:
+> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+> http://wiki.apache.org/lucene-java/LuceneFAQ
+>
+>
+>
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

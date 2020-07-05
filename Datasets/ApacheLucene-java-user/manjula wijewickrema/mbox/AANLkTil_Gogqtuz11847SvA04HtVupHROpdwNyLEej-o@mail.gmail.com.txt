@@ -1,0 +1,234 @@
+FROM: manjula wijewickrema <manjul...@gmail.com>
+SUBJECT: Re: scoring and index size
+DATE: 9 Jul 2010
+
+Uwe, thanx for your comments. Following is the code I used in this case.
+Could you pls. let me know where I have to insert UNLIMITED field length?
+and how?
+Tanx again!
+Manjula
+
+code--
+
+*
+
+public* *class* LuceneDemo {
+
+*public* *static* *final* String *FILES_TO_INDEX_DIRECTORY* = "filesToIndex"
+;
+
+*public* *static* *final* String *INDEX_DIRECTORY* = "indexDirectory";
+
+*public* *static* *final* String *FIELD_PATH* = "path";
+
+*public* *static* *final* String *FIELD_CONTENTS* = "contents";
+
+*public* *static* *void* main(String[] args) *throws* Exception {
+
+*createIndex*();
+
+//searchIndex("rice AND milk");
+
+*searchIndex*("metaphysics");
+
+//searchIndex("banana");
+
+//searchIndex("foo");
+
+ }
+
+*public* *static* *void* createIndex() *throws* CorruptIndexException,
+LockObtainFailedException, IOException {
+
+ SnowballAnalyzer analyzer = *new* SnowballAnalyzer( "English",
+StopAnalyzer.ENGLISH_STOP_WORDS);
+
+*boolean* recreateIndexIfExists = *true*;
+
+IndexWriter indexWriter = *new* IndexWriter(*INDEX_DIRECTORY*, analyzer,
+recreateIndexIfExists);
+
+File dir = *new* File(*FILES_TO_INDEX_DIRECTORY*);
+
+File[] files = dir.listFiles();
+
+*for* (File file : files) {
+
+Document document = *new* Document();
+
+//contents#setOmitNorms(true);
+
+String path = file.getCanonicalPath();
+
+document.add(*new* Field(*FIELD_PATH*, path, Field.Store.*YES*, Field.Index.
+UN_TOKENIZED,Field.TermVector.*YES*));
+
+Reader reader = *new* FileReader(file);
+
+document.add(*new* Field(*FIELD_CONTENTS*, reader));
+
+indexWriter.addDocument(document);
+
+ }
+
+indexWriter.optimize();
+
+indexWriter.close();
+
+}
+
+*public* *static* *void* searchIndex(String searchString)
+*throws*IOException, ParseException {
+
+System.*out*.println("Searching for '" + searchString + "'");
+
+Directory directory = FSDirectory.getDirectory(*INDEX_DIRECTORY*);
+
+IndexReader indexReader = IndexReader.open(directory);
+
+IndexSearcher indexSearcher = *new* IndexSearcher(indexReader);
+
+ SnowballAnalyzer analyzer = *new* SnowballAnalyzer( "English",
+StopAnalyzer.ENGLISH_STOP_WORDS);
+
+QueryParser queryParser = *new* QueryParser(*FIELD_CONTENTS*, analyzer);
+
+Query query = queryParser.parse(searchString);
+
+Hits hits = indexSearcher.search(query);
+
+System.*out*.println("Number of hits: " + hits.length());
+
+TopDocs results = indexSearcher.search(query,10);
+
+ScoreDoc[] hits1 = results.scoreDocs;
+
+*for* (ScoreDoc hit : hits1) {
+
+Document doc = indexSearcher.doc(hit.doc);
+
+//System.out.printf("%5.3f %s\n",hit.score,doc.get(FIELD_CONTENTS));
+
+System.*out*.println(hit.score);
+
+//Searcher.explain("rice",0);
+
+//System.out.println(indexSearcher.explain(query, 0));
+
+}
+
+System.*out*.println(indexSearcher.explain(query, 0));
+
+//System.out.println(indexSearcher.explain(query, 1));
+
+//System.out.println(indexSearcher.explain(query, 2));
+
+//System.out.println(indexSearcher.explain(query, 3));
+
+Iterator<Hit> it = hits.iterator();
+
+*while* (it.hasNext()) {
+
+Hit hit = it.next();
+
+Document document = hit.getDocument();
+
+String path = document.get(*FIELD_PATH*);
+
+System.*out*.println("Hit: " + path);
+
+}
+
+}
+
+}
+
+
+
+
+
+
+On Fri, Jul 9, 2010 at 1:06 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+
+> Maybe you have MaxFieldLength.LIMITED instead of UNLIMITED? Then the number
+> of terms per document is limited.
+>
+> The calculation precision is limited by the float norm encoding, but also
+> if
+> your analyzer removed stop words, so the norm is not what you exspect?
+>
+> -----
+> Uwe Schindler
+> H.-H.-Meier-Allee 63, D-28213 Bremen
+> http://www.thetaphi.de
+> eMail: uwe@thetaphi.de
+>
+>
+> > -----Original Message-----
+> > From: manjula wijewickrema [mailto:manjula53@gmail.com]
+> > Sent: Friday, July 09, 2010 9:21 AM
+> > To: java-user@lucene.apache.org
+> > Subject: scoring and index size
+> >
+> > Hi,
+> >
+> > I run a single programme to see the way of scoring by Lucene for single
+> > indexed document. The explain() method gave me the following results.
+> > *******************
+> >
+> > Searching for 'metaphysics'
+> >
+> > Number of hits: 1
+> >
+> > 0.030706111
+> >
+> > 0.030706111 = (MATCH) fieldWeight(contents:metaphys in 0), product of:
+> >
+> > 10.246951 = tf(termFreq(contents:metaphys)=105)
+> >
+> > 0.30685282 = idf(docFreq=1, maxDocs=1)
+> >
+> > 0.009765625 = fieldNorm(field=contents, doc=0)
+> >
+> > *****************
+> >
+> > But I encountered the following problems;
+> >
+> > 1) In this case, I did not change or done anything to Boost values. So
+> that
+> > should fieldNorm = 1/sqrt(terms in field)? (because I noticed that in
+> Lucene
+> > email archive,  default boost values=1)
+> >
+> > 2) But, even if I manually calculate the value for fieldNorm (as
+> =1/sqrt(terms
+> > in field)), it doesn't match (approximately it matches) with the value
+> with
+> > given by the system for fieldNorm. Can this be due to encode/decode
+> > precision loss of norm?
+> >
+> > 3) In my indexed document, my indexed document was consisted with total
+> > number of 19078 words including 125 times of word 'metaphysics' (i.e my
+> > query. I input single term query) . But as you can see in the above
+> output,
+> > system gives only 105 counts for word 'metaphysics'. But once I reduce
+> some
+> > part of my index document and count the number of 'metaphysics' words
+> > and checked with the system results. I noticed that with reduction of
+> text
+> > from index document, system counts it correctly. Why this kind of
+> > behaviour? Is there any limitation for the indexed documents?
+> >
+> > If somebody can pls. help me to solve these problems.
+> >
+> > Thanks!
+> >
+> > Manjula.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,93 @@
+FROM: Ryan McKinley <ryan...@gmail.com>
+SUBJECT: BitSet Filter ArrayIndexOutOfBoundsException?
+DATE: 15 Apr 2009
+
+I am working on a Filter that uses an RTree to test for inclusion.   
+This Filter works great *most* of the time -- if the index is  
+optimized, it works all of the time.  I feel like I am missing  
+something basic, but not sure what it could be.
+
+Each time the reader opens (and the index has changed), I build an  
+RTree from stored fields.  The RTree holds the lucene document ID and  
+is later used in a Filter/Query.  This is how I build the RTree:
+
+   FieldSelector selector = new MapFieldSelector( new String[]  
+{ "extent" } );
+   DocIterator iter = docs.iterator();
+   while( iter.hasNext() ) {
+     int id = iter.nextDoc();
+     Document doc = searcher.doc( id, selector );
+     Fieldable ff = doc.getFieldable( "extent" );
+     if( ff != null && !reader.isDeleted( id ) ) {
+       ... add the id to the RTree ...
+     }
+   }
+
+In the Filter, I run query my RTree and add results to a BitSet
+
+   public DocIdSet getDocIdSet(IndexReader reader) throws IOException
+   {
+     final BitSet bits = new BitSet();
+
+     // ... query the RTree adding matching ids to the BitSet...
+       bits.set( id );
+
+     return new DocIdBitSet( bitset );
+   }
+
+When things go wrong, I get an error like this:
+
+java.lang.ArrayIndexOutOfBoundsException: 67
+      at org.apache.lucene.util.OpenBitSet.fastSet(OpenBitSet.java:242)
+      at  
+org 
+.apache.solr.search.DocSetHitCollector.collect(DocSetHitCollector.java: 
+63)
+      at org.apache.lucene.search.IndexSearcher 
+$MultiReaderCollectorWrapper.collect(IndexSearcher.java:313)
+      at org.apache.lucene.search.Scorer.score(Scorer.java:58)
+      at  
+org.apache.lucene.search.IndexSearcher.doSearch(IndexSearcher.java:262)
+      at  
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:250)
+      at org.apache.lucene.search.Searcher.search(Searcher.java:126)
+      at  
+org 
+.apache 
+.solr.search.SolrIndexSearcher.getDocSetNC(SolrIndexSearcher.java:691)
+      at  
+org 
+.apache.solr.search.SolrIndexSearcher.getDocSet(SolrIndexSearcher.java: 
+597)
+      at  
+org 
+.apache.solr.search.SolrIndexSearcher.getDocSet(SolrIndexSearcher.java: 
+633)
+      at  
+org 
+.apache 
+.solr 
+.search.SolrIndexSearcher.getDocListAndSetNC(SolrIndexSearcher.java: 
+1154)
+      at  
+org 
+.apache 
+.solr.search.SolrIndexSearcher.getDocListC(SolrIndexSearcher.java:924)
+      at  
+org.apache.solr.search.SolrIndexSearcher.search(SolrIndexSearcher.java: 
+345)
+      at  
+org 
+.apache 
+.solr.handler.component.QueryComponent.process(QueryComponent.java:171)
+
+I'm guessing it is referencing a deleted document or something like  
+that, but I figured the:
+  && !reader.isDeleted( id ) clause would take care of that.
+
+Any pointers would be great!
+
+Thanks
+Ryan
+
+

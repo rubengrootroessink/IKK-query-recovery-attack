@@ -1,0 +1,73 @@
+FROM: "Angel Faus" <an...@vlex.com>
+SUBJECT: FieldCache performance
+DATE: 8 Apr 2008
+
+Hi,
+
+I have a puzzling question about FieldCache; we use FieldCache to
+speed up faceted search [just like solr does] and also to avoid
+creating Document instances when listing results. It works great, but
+for one field where performance is awful: on the order of 15-30
+seconds for one index, and can grow to hundreds of seconds when using
+MultiReader.
+
+There are two things that surprise me:
+
+  1. -  calling FieldCache.DEFAULT.getInts takes a lot longer on a
+certain field ("vid") than on all the others.
+ 2. - when querying different indexes, the time is not proportional to
+the number of documents, or to the number of distinct values of this
+field
+
+The code involved is quite simple:
+
+        cache_fuente =
+org.apache.lucene.search.FieldCache.DEFAULT.getInts(reader, "fuente");
+        cache_vid =
+org.apache.lucene.search.FieldCache.DEFAULT.getInts(reader, "vid");
+
+So, for example, when querying our index INDEX-2 (1,634,330 documents)
+computing cache_fuente takes 0.10 seconds, computing cache_vid takes
+6.60 sec. The difference is a 67x factor.
+
+Both fields are integers, "vid" is larger but not that much [on
+average 7.9 digits vs 3.5 digits for "fuente"] and both are stored as
+non-tokenized fields [Keywords].
+
+It turns out that INDEX-2 is the best case: when querying INDEX-6
+[963,863 documents] the time it takes to compute cache_vid jumps to
+16.85 seconds. Other indices take 30,49 seconds, 7,32 seconds, 45.12
+seconds, etc.
+
+This variation between indices is not related to the number of
+documents nor to the number of distinct values ["vid" is always a
+unique field]. I can provide detalied data if it's useful.
+
+And now to the second puzzling point, when querying a MultiReader of
+INDEX-2 & INDEX-6 together, the time to compute "cache_vid" jumps to
+61.9 seconds. So, it is not additive (remember that separately this
+indices take 16.86 + 6.60 = 23.45 seconds)
+
+I've read the source code searching for a clue but with no success. I
+would really appreciate if anyone could help me understand what drives
+FieldCache performance.
+
+"top" shows that all this time it takes to build cache_vid is spent
+using CPU cycles, so I thought it could be parsing-related, but
+switching to FieldCache.DEFAULT.getStrings does not help at all.
+
+Finally: we are using lucene-core-2.1.0 for querying, and the search
+is served through a servlet in a tomcat process. The index is created
+using lucene-1.4.3; i don't know if the difference in versions can
+matter.
+
+Thanks in advance for any help,
+
+
+Angel
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

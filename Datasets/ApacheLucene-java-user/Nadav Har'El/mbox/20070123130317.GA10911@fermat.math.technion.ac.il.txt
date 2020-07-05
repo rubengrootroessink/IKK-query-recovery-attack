@@ -1,0 +1,94 @@
+FROM: "Nadav Har'El" <...@math.technion.ac.il>
+SUBJECT: Re: Websphere and Dark Matter
+DATE: 23 Jan 2007
+
+On Mon, Jan 22, 2007, John Haxby wrote about "Re: Websphere and Dark Matter":
+> Nadav Har'El wrote:
+> Are you implying that the process memory shrinks, that memory is 
+> returned to the kernel? I didn't read the page you referenced that way.
+> I know that if I allocate memory by memory mapping anonymous regions 
+> with Linux/Unix I can give it back, but is that the technique that JVMs use?
+
+Indeed - I've seen this actually happen in Windows (I didn't check on Linux).
+Once more than 70% of the heap is free (which is the default setting on Sun's
+JVM 1.4) the heap is shrunk and the memory use of the process (according to
+Windows "Task Manager") is actually reduced.
+
+You could easily verify whether this happens on Linux as well. Just write
+a trivial program that allocates a large, say, 100 MB, object, sleeps for
+a few seconds (or runs "ps"), and then "forgets" about this object and runs
+System.gc() (perhaps a few times), and then runs ps again and see that the
+process shrunk. You might want to use the "-verbose:gc" JVM option to see
+some debugging messages about what the GC's do, and how large Java thinks its
+heap is. I did not check this myself, so if you have any conclusions, please
+report it back to this list - I think it's interesting for many people here.
+
+Anyway, theoretically, Java should have no problem to shrink its memory use
+because of the fact that it can (and does) move objects around, so memory
+fragmentation is not a problem like it is in many other languages. This is
+also possible technically to do in Linux (there are several ways to do this,
+including anonymous maps). If Java was Open-Source, I could find out how they
+did it (if at all), but last time I checked, it wasn't (I heard this is
+changing, though).
+
+> It's not generally a problem though. Provided you have a compacting 
+> garbage collector (and the Sun Java GC is one) then the unused memory 
+> will just get paged out. It may be a different story on windows and it's 
+> certainly a different story on an embedded platform, but releasing 
+> memory to the kernel under Linux is not generally necessary or desirable.
+
+Believe it or not, this is exactly what every GC expert told me when I
+asked this question (how can I force the JVM to reduce its memory use when
+it doesn't need all of it): "don't worry about it". This is "conventional
+wisdom" second only to "never run System.gc()". But this answer ("virtual
+memory means you don't care about the process not shrinking") ignores two
+very important issues (not just on embedded platforms, like you suggested):
+
+1. If the JVM heap itself doesn't shrink (it's not just that the memory isn't
+   returned to the system), Java will continue to fill the entire huge heap,
+   allowing itself to gather more garbage before a GC is necessary. Since Java
+   goes over all this memory filling it with garbage all the time, none of
+   this memory can ever be paged out and "forgotten".
+
+   For example, with the default setting (of 70%), it is possible that you
+   need just 100 MB of memory, but the JVM will keep a 300 MB heap, and
+   continuously go over the entire 200 MB free heap filling it with soon-to-
+   become garbage objects.
+
+2. The thinking behind your statement (which, like I said, was shared by most
+   GC experts I asked) is usually rooted on the idea that the machine is
+   running one huge JVM. If that is the case, then indeed, nobody cares if
+   when the JVM's memory needs fluctuates, whether the heep stays large,
+   whether it gets swapped to disk, or the JVM gets smaller.
+   But think about a machine running dozens of separate JVMs: this was *NOT*
+   the intention of the designers of Java, but it is what happens in reality
+   on modern desktops (and sometimes servers): you run several independent
+   programs written in Java. In this case, if every one of these programs
+   takes up the maximum size that it ever needed, even if this waste is just
+   in the swap space, we can be in trouble. Swap space is "cheap", but not
+   cheap enough that you don't mind that each Java program you run takes up
+   hundreds of megabytes of it more than it actually needs.
+
+The use-case that led me to these insights was a desktop search program
+written in Java. This program had large peak memory needs (when parsing
+large files, and when building the index), at the order of 150 MB. But then,
+the JVM did not shrink, and continued to waste 150 MB of memory on each
+desktop. This was unacceptable, even if (like you said), when you don't
+perform a search the entire 150 MB gets swapped out. It was unacceptable for
+several reasons: First, this is not the only program running on the machine,
+so what if each one wasted 150 MB of swap space? Second, when you do use
+the search, the entire 150 MB heap gets used and swapped in, and worse -
+swaps out 150 MB of other useful memory (slowing your work in other
+applications).
+
+-- 
+Nadav Har'El                        |      Tuesday, Jan 23 2007, 4 Shevat 5767
+IBM Haifa Research Lab              |-----------------------------------------
+                                    |"Do you want to restart Windows now or
+http://nadav.harel.org.il           |wait for the next crash?"
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

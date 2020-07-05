@@ -1,0 +1,56 @@
+FROM: "Nadav Har'El" <...@math.technion.ac.il>
+SUBJECT: Re: Websphere and Dark Matter
+DATE: 17 Jan 2007
+
+On Tue, Jan 16, 2007, Rollo du Pre wrote about "Re: Websphere and Dark Matter":
+> I was hoping it would, yes. Does websphere not release memory back to 
+> the OS when it not longer needs it? I'm concerned that if the memory 
+> spiked for some reason (indexing a large document) then that would 
+> hamper the rest of the OS because it'd hold on to far more memory than 
+> is needed.
+
+This is a well known, may I say infamous, Java issue. Java could, in theory,
+easily shrink its heap as soon as it needs less memory, because in Java's GC
+model, memory can be moved around so fragmentation is not a problem. But
+unfortunately, the JVM's heap rarely does shrink by default: once the JVM's
+heap grows, it rarely ever shrinks back.
+
+It turns out that in Sun's JVM (at least in the 1.4 version which I tried),
+you can actually control and improve the shrinking behavior. There's an option
+"-XX:MaxHeapFreeRatio=" (see [1]) which basically means how much of the Heap
+should be free before it is physically shrunk. Another option
+"-XX:MinHeapFreeRatio=" specifies how much of the heap to leave free after
+the shrinking.
+
+The default values are 70 and 40 respectively, which means that the JVM only
+shrinks its memory use after 70% (!!!) of the heap is free, and it only shrinks
+to the point that 40% of the heap is still free. A few numbers to put this
+waste into perspective: If your JVM's heap grew to 300 MB, and now only
+requires 100 MB, it will NOT shrink (because only 66% is free). If later
+you need just 90 MB, the heap will finally shrink, but only to 150 MB (so
+that 40% still remains free).
+
+One important thing you should note if you decide to lower these percentages,
+is that much of the JVM's excellent GC performance relies on its "generation"
+approach and the availability of a lot of free heap (so that by the time the
+heap is exausted, most of the new stuff in it is already garbage). So to
+keep performance - not just minimal memory use - you might want to tune other
+GC parameters as well. A good combination I once used is this:
+
+	-XX:NewRatio=2 -XX:MinHeapFreeRatio=20 -XX:MaxHeapFreeRatio=30
+
+But your milage may vary.
+
+[1] http://java.sun.com/javase/technologies/hotspot/vmoptions.jsp
+
+-- 
+Nadav Har'El                        |    Wednesday, Jan 17 2007, 27 Tevet 5767
+IBM Haifa Research Lab              |-----------------------------------------
+                                    |Unix is user friendly - it's just picky
+http://nadav.harel.org.il           |about its friends.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

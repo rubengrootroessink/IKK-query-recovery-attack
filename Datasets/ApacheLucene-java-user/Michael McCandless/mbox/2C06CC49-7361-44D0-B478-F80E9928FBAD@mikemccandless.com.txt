@@ -1,0 +1,336 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: A model for predicting indexing memory costs?
+DATE: 10 Mar 2009
+
+
+Mark,
+
+Could you get a heap dump (eg with YourKit) of what's using up all the  
+memory when you hit OOM?
+
+Also, can you turn on infoStream and post the output leading up to the  
+OOM?
+
+When you say "write session", are you closing & opening a new  
+IndexWriter each time?  Or, just calling .commit() and then re-using  
+the same writer?
+
+It seems likely this has something to do with merging, though from  
+your listing I count 14 segments which shouldn't have been doing any  
+merging at mergeFactor=20, so that's confusing.
+
+Mike
+
+mark harwood wrote:
+
+>
+>>> But... how come setting IW's RAM buffer doesn't prevent the OOMs?
+>
+> I've been setting the IndexWriter RAM buffer to 300 meg and giving  
+> the JVM 1gig.
+>
+> Last run I gave the JVM 3 gig, with writer settings of  RAM  
+> buffer=300 meg, merge factor=20, term interval=8192,  
+> usecompound=false. All fields are ANALYZED_NO_NORMS.
+> Lucene version is a 2.9 build,  JVM is Sun 64bit 1.6.0_07.
+>
+> This graphic shows timings for 100 consecutive write sessions, each  
+> adding 30,000 documents, committing and then closing :
+>     http://tinyurl.com/anzcjw
+> You can see the periodic merge costs and then a big spike towards  
+> the end before it crashed.
+>
+> The crash details are here after adding ~3 million documents in 98  
+> write sessions:
+>
+> This batch index session added 3000 of 30000 docs : 10% complete
+> Exception in thread "Thread-280" java.lang.OutOfMemoryError: GC  
+> overhead limit exceeded
+>    at java.util.Arrays.copyOf(Unknown Source)
+>    at java.lang.String..<init>(Unknown Source)
+>    at  
+> org 
+> .apache 
+> .lucene.search.trie.TrieUtils.longToPrefixCoded(TrieUtils.java:148)
+>    at  
+> org.apache.lucene.search.trie.TrieUtils.trieCodeLong(TrieUtils.java: 
+> 302)
+>    at test.LongTrieAnalyzer 
+> $LongTrieTokenStream.next(LongTrieAnalyzer.java:49)
+>    at  
+> org 
+> .apache 
+> .lucene 
+> .index.DocInverterPerField.processFields(DocInverterPerField.java:159)
+>    at  
+> org 
+> .apache 
+> .lucene 
+> .index 
+> .DocFieldConsumersPerField 
+> .processFields(DocFieldConsumersPerField.java:36)
+>    at  
+> org 
+> .apache 
+> .lucene 
+> .index 
+> .DocFieldProcessorPerThread 
+> .processDocument(DocFieldProcessorPerThread.java:234)
+>    at  
+> org 
+> .apache 
+> .lucene.index.DocumentsWriter.updateDocument(DocumentsWriter.java:762)
+>    at  
+> org 
+> .apache 
+> .lucene.index.DocumentsWriter.addDocument(DocumentsWriter.java:740)
+>    at  
+> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:2039)
+>    at  
+> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:2013)
+>    at test.IndexMarksFile$IndexingThread.run(IndexMarksFile.java:319)
+> Exception in thread "Thread-281" java.lang.OutOfMemoryError: GC  
+> overhead limit exceeded
+>    at org.apache.commons.csv.CharBuffer.toString(CharBuffer.java:177)
+>    at org.apache.commons.csv.CSVParser.getLine(CSVParser.java:242)
+>    at test.IndexMarksFile.getLuceneDocument(IndexMarksFile.java:272)
+>    at test.IndexMarksFile$IndexingThread.run(IndexMarksFile.java:314)
+> Committing
+> Closing
+> Exception in thread "main" java.lang.IllegalStateException: this  
+> writer hit an OutOfMemoryError; cannot commit
+>    at  
+> org.apache.lucene.index.IndexWriter.prepareCommit(IndexWriter.java: 
+> 3569)
+>    at org.apache.lucene.index.IndexWriter.commit(IndexWriter.java: 
+> 3660)
+>    at org.apache.lucene.index.IndexWriter.commit(IndexWriter.java: 
+> 3634)
+>    at test.IndexMarksFile.run(IndexMarksFile.java:176)
+>    at test.IndexMarksFile.main(IndexMarksFile.java:101)
+>    at test.MultiIndexAndRun.main(MultiIndexAndRun.java:49)
+>
+>
+> For each write session I have a single writer, and 2 indexing  
+> threads adding documents through this writer. There are no updates/ 
+> deletes - only adds. When both indexing threads complete the primary  
+> thread commits and closes the writer.
+> I then open a searcher run some search benchmarks, close the  
+> searcher and start another write session.
+> The documents have ~12 fields and are all the same size so I don't  
+> think this OOM is down to rogue data. Each field has 100 near-unique  
+> tokens.
+>
+> The files on disk after the crash are as follows:
+> 1930004059 Mar  9 13:32 _106.fdt
+>    2731084 Mar  9 13:32 _106.fdx
+>        175 Mar  9 13:30 _106.fnm
+> 1190042394 Mar  9 13:39 _106.frq
+>  814748995 Mar  9 13:39 _106.prx
+>   16512596 Mar  9 13:39 _106.tii
+> 1151364311 Mar  9 13:39 _106.tis
+> 1949444533 Mar  9 14:53 _139.fdt
+>    2758580 Mar  9 14:53 _139.fdx
+>        175 Mar  9 14:51 _139.fnm
+> 1202044423 Mar  9 15:00 _139.frq
+>  822954002 Mar  9 15:00 _139.prx
+>   16629104 Mar  9 15:00 _139.tii
+> 1159392207 Mar  9 15:00 _139.tis
+> 1930102055 Mar  9 16:15 _16c.fdt
+>    2731084 Mar  9 16:15 _16c.fdx
+>        175 Mar  9 16:13 _16c.fnm
+> 1190090014 Mar  9 16:22 _16c.frq
+>  814763781 Mar  9 16:22 _16c.prx
+>   16514967 Mar  9 16:22 _16c.tii
+> 1151524173 Mar  9 16:22 _16c.tis
+> 1928053697 Mar  9 17:52 _19e.fdt
+>    2728260 Mar  9 17:52 _19e.fdx
+>        175 Mar  9 17:46 _19e.fnm
+> 1188837093 Mar  9 18:08 _19e.frq
+>  813915820 Mar  9 18:08 _19e.prx
+>   16501902 Mar  9 18:08 _19e.tii
+> 1150623773 Mar  9 18:08 _19e.tis
+> 1951474247 Mar  9 20:22 _1cj.fdt
+>    2761396 Mar  9 20:22 _1cj.fdx
+>        175 Mar  9 20:18 _1cj.fnm
+> 1203285781 Mar  9 20:39 _1cj.frq
+>  823797656 Mar  9 20:39 _1cj.prx
+>   16639997 Mar  9 20:39 _1cj.tii
+> 1160143978 Mar  9 20:39 _1cj.tis
+> 1929978366 Mar 10 01:02 _1fm.fdt
+>    2731060 Mar 10 01:02 _1fm.fdx
+>        175 Mar 10 00:43 _1fm.fnm
+> 1190031780 Mar 10 02:36 _1fm.frq
+>  814741146 Mar 10 02:36 _1fm.prx
+>   16513189 Mar 10 02:36 _1fm.tii
+> 1151399139 Mar 10 02:36 _1fm.tis
+>  189073186 Mar 10 01:51 _1ft.fdt
+>     267556 Mar 10 01:51 _1ft.fdx
+>        175 Mar 10 01:50 _1ft.fnm
+>  110750150 Mar 10 02:04 _1ft.frq
+>   79818488 Mar 10 02:04 _1ft.prx
+>    2326691 Mar 10 02:04 _1ft.tii
+>  165932844 Mar 10 02:04 _1ft.tis
+>  212500024 Mar 10 03:16 _1g5.fdt
+>     300684 Mar 10 03:16 _1g5.fdx
+>        175 Mar 10 03:16 _1g5.fnm
+>  125179984 Mar 10 03:28 _1g5.frq
+>   89703062 Mar 10 03:28 _1g5.prx
+>    2594360 Mar 10 03:28 _1g5.tii
+>  184495760 Mar 10 03:28 _1g5.tis
+>   64323505 Mar 10 04:09 _1gc.fdt
+>      91020 Mar 10 04:09 _1gc.fdx
+>  105283820 Mar 10 04:48 _1gf.fdt
+>     148988 Mar 10 04:48 _1gf.fdx
+>        175 Mar 10 04:09 _1gf.fnm
+>       1491 Mar 10 04:09 _1gf.frq
+>          4 Mar 10 04:09 _1gf.nrm
+>       2388 Mar 10 04:09 _1gf.prx
+>        254 Mar 10 04:09 _1gf.tii
+>      15761 Mar 10 04:09 _1gf.tis
+>  191035191 Mar 10 04:09 _1gg.fdt
+>     270332 Mar 10 04:09 _1gg.fdx
+>        175 Mar 10 04:09 _1gg.fnm
+>  111958741 Mar 10 04:24 _1gg.frq
+>   80645411 Mar 10 04:24 _1gg.prx
+>    2349153 Mar 10 04:24 _1gg.tii
+>  167494232 Mar 10 04:24 _1gg.tis
+>        175 Mar 10 04:20 _1gh.fnm
+>   10223275 Mar 10 04:20 _1gh.frq
+>          4 Mar 10 04:20 _1gh.nrm
+>    9056546 Mar 10 04:20 _1gh.prx
+>     329012 Mar 10 04:20 _1gh.tii
+>   23846511 Mar 10 04:20 _1gh.tis
+>        175 Mar 10 04:28 _1gi.fnm
+>   10221888 Mar 10 04:28 _1gi.frq
+>          4 Mar 10 04:28 _1gi.nrm
+>    9054280 Mar 10 04:28 _1gi.prx
+>     328980 Mar 10 04:28 _1gi.tii
+>   23843209 Mar 10 04:28 _1gi.tis
+>        175 Mar 10 04:35 _1gj.fnm
+>   10222776 Mar 10 04:35 _1gj.frq
+>          4 Mar 10 04:35 _1gj.nrm
+>    9054943 Mar 10 04:35 _1gj.prx
+>     329060 Mar 10 04:35 _1gj.tii
+>   23849395 Mar 10 04:35 _1gj.tis
+>        175 Mar 10 04:42 _1gk.fnm
+>   10220381 Mar 10 04:42 _1gk.frq
+>          4 Mar 10 04:42 _1gk.nrm
+>    9052810 Mar 10 04:42 _1gk.prx
+>     329029 Mar 10 04:42 _1gk.tii
+>   23845373 Mar 10 04:42 _1gk.tis
+>        175 Mar 10 04:48 _1gl.fnm
+>    9274170 Mar 10 04:48 _1gl.frq
+>          4 Mar 10 04:48 _1gl.nrm
+>    8226681 Mar 10 04:48 _1gl.prx
+>     303327 Mar 10 04:48 _1gl.tii
+>   21996826 Mar 10 04:48 _1gl.tis
+>   22418126 Mar 10 04:58 _1gm.fdt
+>      31732 Mar 10 04:58 _1gm.fdx
+>        175 Mar 10 04:57 _1gm.fnm
+>   10216672 Mar 10 04:57 _1gm.frq
+>          4 Mar 10 04:57 _1gm.nrm
+>    9049487 Mar 10 04:57 _1gm.prx
+>     328813 Mar 10 04:57 _1gm.tii
+>   23829627 Mar 10 04:57 _1gm.tis
+>        175 Mar 10 04:58 _1gn.fnm
+>     392014 Mar 10 04:58 _1gn.frq
+>          4 Mar 10 04:58 _1gn.nrm
+>     415225 Mar 10 04:58 _1gn.prx
+>      24695 Mar 10 04:58 _1gn.tii
+>    1816750 Mar 10 04:58 _1gn.tis
+>        683 Mar 10 04:58 segments_7t
+>         20 Mar 10 04:58 segments.gen
+> 1935727800 Mar  9 11:17 _u1.fdt
+>    2739180 Mar  9 11:17 _u1.fdx
+>        175 Mar  9 11:15 _u1.fnm
+> 1193583522 Mar  9 11:25 _u1.frq
+>  817164507 Mar  9 11:25 _u1.prx
+>   16547464 Mar  9 11:25 _u1..tii
+> 1153764013 Mar  9 11:25 _u1.tis
+> 1949493315 Mar  9 12:21 _x3.fdt
+>    2758580 Mar  9 12:21 _x3.fdx
+>        175 Mar  9 12:18 _x3.fnm
+> 1202068425 Mar  9 12:29 _x3.frq
+>  822963200 Mar  9 12:29 _x3.prx
+>   16629485 Mar  9 12:29 _x3.tii
+> 1159419149 Mar  9 12:29 _x3.tis
+>
+>
+> Any ideas? I'm out of settings to tweak here.
+>
+> Cheers,
+> Mark
+>
+>
+>
+>
+> ----- Original Message ----
+> From: Michael McCandless <lucene@mikemccandless.com>
+> To: java-user@lucene.apache.org
+> Sent: Tuesday, 10 March, 2009 0:01:30
+> Subject: Re: A model for predicting indexing memory costs?
+>
+>
+> mark harwood wrote:
+>
+>>
+>> I've been building a large index (hundreds of millions) with mainly  
+>> structured data which consists of several fields with mostly unique  
+>> values.
+>> I've been hitting out of memory issues when doing periodic commits/ 
+>> closes which I suspect is down to the sheer number of terms.
+>>
+>> I set the IndexWriter..setTermIndexInterval to 8 times the normal  
+>> size of 128 (an intervalof 1024) which delayed the onset of the  
+>> issue but still failed.
+>
+> I think that setting won't change how much RAM is used when writing.
+>
+>> I'd like to get a little more scientific about what to set here  
+>> rather than simply experimenting with settings and hoping it  
+>> doesn't fail again.
+>>
+>> Does anyone have a decent model worked out for how much memory is  
+>> consumed at peak? I'm guessing the contributing factors are:
+>>
+>> * Numbers of fields
+>> * Numbers of unique terms per field
+>> * Numbers of segments?
+>
+> Number of net unique terms (across all fields) is a big driver, but  
+> also net number of term occurrences, and how many docs.  Lots of  
+> tiny docs take more RAM than fewer large docs, when # occurrences  
+> are equal.
+>
+> But... how come setting IW's RAM buffer doesn't prevent the OOMs?   
+> IW should simply flush when it's used that much RAM.
+>
+> I don't think number of segments is a factor.
+>
+> Though mergeFactor is, since during merging the SegmentMerger holds  
+> SegmentReaders open, and int[] maps (if there are any deletes) for  
+> each segment.  Do you have a large merge taking place when you hit  
+> the OOMs?
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

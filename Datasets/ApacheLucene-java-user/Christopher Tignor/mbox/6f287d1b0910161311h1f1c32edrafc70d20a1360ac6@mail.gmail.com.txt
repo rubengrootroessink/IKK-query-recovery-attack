@@ -1,0 +1,234 @@
+FROM: Christopher Tignor <ctig...@thinkmap.com>
+SUBJECT: Re: IndexWriter optimize() deadlock
+DATE: 16 Oct 2009
+
+After tracing through the lucene source more it seems that what is happening
+is after I call Future.cancel(true) on my parent thread, optimize() is
+called and this method launches it's own thread using a
+ConcurrentMergeScheduler$MergeThread to do the actual merging.
+
+When this Thread comes around to calling mergeInit() on my index writer - a
+synchronized method - it hangs.  For some reason it seems to no long have
+the mutex perhaps?  Trace of this thread's stall below...
+
+Daemon Thread [Lucene Merge Thread #0] (Suspended)
+    IndexWriter.mergeInit(MergePolicy$OneMerge) line: 3971
+    IndexWriter.merge(MergePolicy$OneMerge) line: 3879
+    ConcurrentMergeScheduler.doMerge(MergePolicy$OneMerge) line: 205
+    ConcurrentMergeScheduler$MergeThread.run() line: 260
+
+thanks again,
+
+C>T>
+
+
+On Fri, Oct 16, 2009 at 3:53 PM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> But if the Future.cancel call turns out to be a no-op (simply waits
+> instead of interrupting the thread), how could it be that the deadlock
+> only happens when you call it?  Weird.  Are you really sure it's not
+> actually calling Thread.interrupt?
+>
+> That stack trace looks like a normal "optimize is waiting for the
+> background merges to complete".  Is it possible your background merges
+> are hitting exceptions?  You should see them on your error console if
+> so...
+>
+> Mike
+>
+> On Fri, Oct 16, 2009 at 3:17 PM, Christopher Tignor
+> <ctignor@thinkmap.com> wrote:
+> > It doesn't look like my Future.cancel(true) is actually interrupting the
+> > thread.  It only does so "if necessary" and in this case seems to be
+> letting
+> > the Thread finish gracefully without need for interruption.
+> >
+> > The stack trace leading up to the hanging IndexWriter.optimize() method
+> is
+> > below, though not terribly useful I imagine.  Here only 5 documents are
+> > trying to be added to an index taking up only 39.2 MB on disk.  Again
+> this
+> > deadlocking only happens after I use the Future for this task to cancel
+> the
+> > task...
+> >
+> > Thread [pool-3-thread-5] (Suspended)
+> >    IndexWriter.doWait() line: 4494
+> >    IndexWriter.optimize(int, boolean) line: 2283
+> >    IndexWriter.optimize(boolean) line: 2218
+> >    IndexWriter.optimize() line: 2198
+> >    LuceneResultsPersister.commit() line: 97
+> >    PersistenceJobQueue.persistAndCommitBatch(PersistenceJobConsumer)
+> line:
+> > 105
+> >    PersistenceJobConsumer.consume() line: 46
+> >    PersistenceJobConsumer.run() line: 67
+> >    Executors$RunnableAdapter<T>.call() line: 441
+> >    FutureTask$Sync.innerRun() line: 303
+> >    FutureTask<V>.run() line: 138
+> >    ThreadPoolExecutor$Worker.runTask(Runnable) line: 886
+> >    ThreadPoolExecutor$Worker.run() line: 908
+> >    Thread.run() line: 619
+> >
+> > thanks,
+> >
+> > C>T>
+> >
+> > On Fri, Oct 16, 2009 at 1:58 PM, Michael McCandless <
+> > lucene@mikemccandless.com> wrote:
+> >
+> >> My guess is it's the invocation of Thread.interrupt (which
+> >> Future.cancel(true) calls if the task is running) that lead to the
+> >> deadlock.
+> >>
+> >> Is it possible to get the stack trace of the thrown exception when the
+> >> thread was interrupted?  Maybe indeed something in IW isn't cleaning
+> >> up its state on being interrupted.
+> >>
+> >> Mike
+> >>
+> >> On Fri, Oct 16, 2009 at 1:43 PM, Christopher Tignor
+> >> <ctignor@thinkmap.com> wrote:
+> >> > thanks for getting back.
+> >> >
+> >> > I do not lock on the IndexWriter object itself but all methods in my
+> >> > consumer class that use IndexWriter are synchronized (locking my
+> >> singleton
+> >> > consumer object itself).
+> >> > The thread is waiting at IndexWriter.doWait().  What might cuase this?
+> >> >
+> >> > thanks -
+> >> >
+> >> > C>T>
+> >> >
+> >> > On Fri, Oct 16, 2009 at 12:58 PM, Uwe Schindler <uwe@thetaphi.de>
+> wrote:
+> >> >
+> >> >> Do you use the IndexWriter as mutex in a synchronized() block? This
+> is
+> >> not
+> >> >> supported and may hang. Never lock on IndexWriter instances.
+> IndexWriter
+> >> >> itself is thread safe.
+> >> >>
+> >> >> -----
+> >> >> Uwe Schindler
+> >> >> H.-H.-Meier-Allee 63, D-28213 Bremen
+> >> >> http://www.thetaphi.de
+> >> >> eMail: uwe@thetaphi.de
+> >> >>
+> >> >> > -----Original Message-----
+> >> >> > From: Christopher Tignor [mailto:ctignor@thinkmap.com]
+> >> >> > Sent: Friday, October 16, 2009 6:50 PM
+> >> >> > To: java-user
+> >> >> > Subject: IndexWriter optimize() deadlock
+> >> >> >
+> >> >> > Hello,
+> >> >> >
+> >> >> > I am trying to track down the cause of my code hanging on calling
+> >> >> > IndexWriter.optimize() at its doWait() method.
+> >> >> > It appears, thus that it is watiing on other merges to happen
+which
+> is
+> >> a
+> >> >> > bit
+> >> >> > confusing to me:
+> >> >> >
+> >> >> > My application is a simple producer consumer model where documents
+> are
+> >> >> > added
+> >> >> > to a queue by producers and then one consumer with one indexwriter
+> >> (the
+> >> >> > only
+> >> >> > in the application) periodically calls addDocument() on a batch
+of
+> >> these
+> >> >> > jobs and then calls optimize(), commit(). and then close().  There
+> is
+> >> >> only
+> >> >> > one thread running the consumer so I am confused as to how the
+> >> >> indexwriter
+> >> >> > might be deadlocking itself.  Indeed this is the only thread active
+> >> when
+> >> >> > the
+> >> >> > deadlock occurs so it seems to be a problem of reentry.
+> >> >> >
+> >> >> > Importantly, the deadlocking occurs only when the thread is trying
+> to
+> >> >> > shutdown - that is the Thread running this lucene consumer has
+a
+> >> Future
+> >> >> > that
+> >> >> > has had its cancel(true) interrupting method called.  Is it
+> possible
+> >> that
+> >> >> > an
+> >> >> > internal Lucene lock is obtained during addDocument() and on
+> >> interruption
+> >> >> > is
+> >> >> > never released so the subsequent optimize() call hangs?  This
+> doesn't
+> >> >> > appear
+> >> >> > to be happening...
+> >> >> >
+> >> >> > Any help appreciated.
+> >> >> >
+> >> >> > thanks,
+> >> >> >
+> >> >> > C>T>
+> >> >> >
+> >> >> > what might I be missing here?
+> >> >> >
+> >> >> > --
+> >> >> > TH!NKMAP
+> >> >> >
+> >> >> > Christopher Tignor | Senior Software Architect
+> >> >> > 155 Spring Street NY, NY 10012
+> >> >> > p.212-285-8600 x385 f.212-285-8999
+> >> >>
+> >> >>
+> >> >> ---------------------------------------------------------------------
+> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >>
+> >> >>
+> >> >
+> >> >
+> >> > --
+> >> > TH!NKMAP
+> >> >
+> >> > Christopher Tignor | Senior Software Architect
+> >> > 155 Spring Street NY, NY 10012
+> >> > p.212-285-8600 x385 f.212-285-8999
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> >
+> > --
+> > TH!NKMAP
+> >
+> > Christopher Tignor | Senior Software Architect
+> > 155 Spring Street NY, NY 10012
+> > p.212-285-8600 x385 f.212-285-8999
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+TH!NKMAP
+
+Christopher Tignor | Senior Software Architect
+155 Spring Street NY, NY 10012
+p.212-285-8600 x385 f.212-285-8999
+

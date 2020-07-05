@@ -1,0 +1,115 @@
+FROM: "Ravi Rao" <r...@alterpoint.com>
+SUBJECT: Can field names contain the space character?
+DATE: 26 Jan 2004
+
+Dear lucene-user,
+
+Can field names contain the space character?  In other words can I
+index documents which include a field name containing the space
+character?
+
+Here is a program that creates an index created by adding one
+document.  This document has a (text)field named 'software version'.
+The program successfully searches the index for a document containing
+this field.  However, I'm not very happy with the solution because it
+will be cumbersome to set up general queries this way.  Is there
+a better way?
+
+Many thanks,
+-- 
+Ravi/
+
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.IndexReader;
+
+/**
+ * Can a field name contain the space character ie ' '.
+ *
+ * The output of this program is
+ * <PRE>
+ * Adding document to index....
+ * Documents in index = 1
+ * Query = '+software version:8.6 +(contents:brown contents:fox)'
+ * Number of hits = 1
+ * Value of 'software version' = 8.6
+ * </PRE>
+ *
+ * To compile:
+ * javac -classpath $LUCENE_HOME/lucene-1.2.jar SpaceInField.java
+ *
+ * and to run:
+ * java -classpath $LUCENE_HOME/lucene-1.2.jar:. SpaceInField
+ */
+public class SpaceInField
+{
+  public static void main(String[] args) throws Exception
+  {
+    IndexWriter writer = new IndexWriter("lucene-index", new StandardAnalyzer(), true);
+    Document doc = new Document();
+
+    System.out.println("Adding document to index....");
+    doc.add(Field.Text("category", "central texas"));
+    doc.add(Field.Text("contents", "The quick brown fox jumps over the lazy dog."));
+    // Field contains a space character ie ' '.
+    doc.add(Field.Text("software version", "8.6"));
+
+    writer.addDocument(doc);
+    writer.optimize();
+    writer.close();
+
+    IndexReader reader = IndexReader.open("lucene-index");
+    System.out.println("Documents in index = " + reader.numDocs());
+    reader.close();
+
+    // This works
+    // Query q = new QueryParser("software version", new StandardAnalyzer()).parse("8.6");
+
+    // and this.
+    // Query q = new TermQuery(new Term("software version", "8.6"));
+
+    // This does not,
+    // Query q = new QueryParser("contents", new StandardAnalyzer()).parse("SoftWare Version:8.6");
+
+    // neither does this
+    // Query q = new QueryParser("contents", new StandardAnalyzer()).parse("software\\ version:8.6");
+
+    // This block seems to be a general solution if we want to build
+    // arbitrary queries.  Is there a better way?
+    BooleanQuery bq = new BooleanQuery();
+    {
+      QueryParser qp = new QueryParser("contents", new StandardAnalyzer());
+      Query q;
+      q = new TermQuery(new Term("software version", "8.6"));
+      bq.add(q, true, false);
+      q = qp.parse("brown fox");
+      bq.add(q, true, false);
+      System.out.println("Query = '" + bq.toString("") + "'");
+    }
+
+    IndexSearcher searcher = new IndexSearcher("lucene-index");
+    Hits h = searcher.search(bq);
+    System.out.println("Number of hits = " + h.length());
+    if (h.length() > 0)
+      {
+        Document d = h.doc(0);
+        System.out.println("Value of 'software version' = " + d.get("software version"));
+      }
+    searcher.close();
+  }
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

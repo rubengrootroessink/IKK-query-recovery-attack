@@ -1,0 +1,133 @@
+FROM: Tobias Hill <Tobias.H...@citerus.se>
+SUBJECT: SV: OutOfMemory-problems with SortComparatorSource / ScoreDocComparator
+DATE: 8 Nov 2007
+
+Hi Tobias,
+
+I had the similar problem with lucene custom sorting about two years ago.
+
+Please take a look at these two email threads:
+http://www.gossamer-threads.com/lists/lucene/java-dev/39100
+http://www.gossamer-threads.com/lists/lucene/java-user/38016
+
+It seems like they did not make any patch for this problem since then.
+But you could do it yourself - check one of the threads above, there
+is small patch that force lucene to not cache in case of Custom
+sorting.
+
+P.S. I'm not subscribed (just checking RSS), so you could repost it to
+mailing list.
+
+Hope it helps,
+Alex
+
+
+
+________________________________________
+Från: Tobias Hill [Tobias.Hill@citerus.se]
+Skickat: den 8 november 2007 18:34
+Till: java-user@lucene.apache.org
+Ämne: OutOfMemory-problems with SortComparatorSource / ScoreDocComparator
+
+Hi,
+
+We have implemented a custom sort following the pattern in Lucene in Action.
+Unfortunately this has led to quite serious memory problems. When analyzing
+those (with a profiler) it seems that there are as many remaining instances of
+our SortComparatorSource as there have been queries against the index.
+Moreover, it seems that those are held by only one reference (per instance)
+coming from some cache:ish feature of lucene itself.
+
+Caching does not make sense for our comparator ... and if it has to be this
+way (for a reason or other) it seems reasonable that the cache dropped the
+reference if available memory is getting low so that gc could do it's thing. Right?
+
+When digging a bit deeper this also seems to be the intention, since I see
+WeakHashMap entries in the reference chain. This leaves me puzzled. Why
+are not our instances retained when there is only one incoming reference.
+Weak as it seems too.
+
+I would be very thankful if anyone could spot why this custom sorter just
+piles up in the cache. See below.
+
+Best regards,
+Tobias
+
+
+
+/**
+ * The BlendSorter can sort on any lucene field and blend its value
+ * with the document-score. The blend can be configured.
+ */
+public class BlendSorter implements SortComparatorSource {
+
+    private final static Log log = LogFactory.getLog(BlendSorter.class);
+    private FieldConverter fieldConverter;
+    private float blendFactor;
+
+    /**
+     * Constructs a BlendSorter
+     * @param fieldConverter    The converter to use wen converting the lucent field
+     * @param blendFactor       The factor to blend (0 means 0% fieldvalue and 100%
+     *                          document-score, 1 means 100% fieldvalue and 0% document-score).
+     */
+    public BlendSorter(FieldConverter fieldConverter, float blendFactor) {
+        this.fieldConverter = fieldConverter;
+        this.blendFactor = blendFactor;
+    }
+
+    public ScoreDocComparator newComparator(final IndexReader indexReader, final String field)
+throws IOException {
+        return new ScoreDocComparator() {
+            Map<Integer, Float> values = new HashMap<Integer, Float>();
+
+            public int compare(ScoreDoc scoreDoc1, ScoreDoc scoreDoc2) {
+                try {
+                    Float v1 = getValue(scoreDoc1, indexReader, field);
+                    Float v2 = getValue(scoreDoc2, indexReader, field);
+                    return v2.compareTo(v1);
+
+                } catch (IOException e) {
+                    log.error("Cannot read doc", e);
+                }
+                return 0;
+            }
+
+            public Comparable sortValue(ScoreDoc scoreDoc) {
+                return values.get(scoreDoc.doc);
+            }
+
+            public int sortType() {
+                return SortField.FLOAT;
+            }
+
+
+            // lazily get values, and store them in our value-map
+            private Float getValue(ScoreDoc scoreDoc, IndexReader indexReader, String field)
+throws IOException {
+                Float value = values.get(scoreDoc.doc);
+                if (value != null) return value;
+                final Document doc = indexReader.document(scoreDoc.doc);
+                float fieldValue = fieldConverter.get(doc.get(field));
+                float queryValue = scoreDoc.score;
+                value = blendFactor * fieldValue + (1 - blendFactor) * queryValue;
+                values.put(scoreDoc.doc, value);
+                return value;
+            }
+        };
+    }
+
+}
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

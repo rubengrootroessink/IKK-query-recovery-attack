@@ -1,0 +1,641 @@
+FROM: "Spencer, Dave" <d...@lumos.com>
+SUBJECT: the code - RE: Indexing synonyms
+DATE: 12 Nov 2002
+
+Good idea - I tool the liberty of writing code
+that reads in the prolog file and produces a lucene
+index with the synonyms (every document has one
+field named 'word' for the target word, and some
+number of fields named 'syn' for each synonym).
+
+This forms an index that can be used as input to 
+a query expander.
+
+I've stored the code here with a bit more info:
+
+http://www.tropo.com/techno/java/lucene/wordnet.html
+
+And the source code follows - just one easy file with
+some comments.
+
+========================================================================
+====
+
+package com.tropo.wordnet;
+
+import java.io.*;
+import java.util.*;
+
+import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.standard.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.document.*;
+
+/**
+ * Convert the prolog file wn_s.pl from the wordnet prolog download
+ * into a Lucene index suitable for looking up synonyms.
+ * The index is named 'syn_index' and has fields named "word"
+ * and "syn".
+ * 
+ * The source word (such as 'big') can be looked up in the
+ * "word" field, and if present there will be fields named "syn"
+ * for every synonym.
+ *
+ * <p>
+ *
+ * While the wordnet file distinguishes groups of synonyms with
+ * related meanings we don't do that here.
+ *
+ * <p>
+ * By default, with no args, we expect the prolog
+ * file to be at 'c:/proj/wordnet/prolog/wn_s.pl' and will
+ * write to an index named 'syn_index' in the current dir.
+ * See constants at the bottom of this file to change these.
+ */
+public final class Syns2Index
+{
+	/**
+	 * Take optional arg of prolog file name.
+	 */
+	public static void main(  String[] a)
+		throws Throwable
+	{
+		String fn = PROLOG;
+		if ( a.length == 1)
+			fn = a[ 0];
+		o.println( "Opening " + fn);
+		final FileInputStream fis = new FileInputStream( fn);
+		final DataInputStream dis = new DataInputStream( fis);
+		String line;
+
+		// maps a word to all the "groups" it's in
+		final Map word2Nums = new HashMap();
+		// maps a group to all the words in it
+		final Map num2Words = new HashMap();
+		int ndecent =0; // number of rejected words
+
+		// status output
+		int mod = 1;
+		int row = 1;		
+		// parse prolog file
+		while ( ( line = dis.readLine()) != null)
+		{
+			String oline = line;
+
+			// occasional progress
+			if ( (++row) % mod == 0)
+			{
+				mod *= 2;
+				o.println( "" + row + " " +line + " " +
+word2Nums.size() + " "+ num2Words.size() + " ndecent=" +ndecent);
+			}
+
+			// syntax check
+			if ( ! line.startsWith( "s("))
+			{
+				err.println( "OUCH: "+ line);
+				System.exit( 1);
+			}
+
+			// parse line
+			line = line.substring( 2);
+			int comma = line.indexOf( ',');
+			String num = line.substring( 0, comma);
+			int q1 = line.indexOf( '\'');
+			line = line.substring( q1+1);
+			int q2 = line.indexOf( '\'');
+			String word = line.substring( 0,
+q2).toLowerCase();
+
+			// make sure is a normal word
+			if ( ! isDecent( word))
+			{
+				ndecent++;
+				continue; // don't store words w/ spaces
+			}
+
+			// 1/2: word2Nums map
+			// append to entry or add new one
+			List lis =(List) word2Nums.get( word);
+			if ( lis == null)
+			{
+				lis = new LinkedList();
+				lis.add( num);
+				word2Nums.put( word, lis);
+			}
+			else
+				lis.add( num);
+
+			// 2/2: num2Words map 
+			lis = (List) num2Words.get( num);
+			if ( lis == null)
+			{
+				lis =new LinkedList();
+				lis.add( word);
+				num2Words.put( num, lis); 
+			}
+			else
+				lis.add( word);
+		}
+
+		// form the index
+		index( word2Nums, num2Words);
+	}
+
+	/**
+	 * Check to see if a word is alphabetic.
+	 */
+	private static boolean isDecent( String s)
+	{
+		int len = s.length();
+		for ( int i = 0; i < len; i++)
+			if ( ! Character.isLetter( s.charAt( i)))
+				return false;
+		return true;
+	}
+
+	/**
+	 * Form a lucene index based on the 2 maps.
+	 */
+	private static void index( Map word2Nums, Map num2Words)
+		throws Throwable
+	{
+		int row = 0;
+		int mod = 1;
+
+		IndexWriter writer = new IndexWriter( INDEX, ana, true);
+		Iterator i1 = word2Nums.keySet().iterator();
+		while ( i1.hasNext()) // for each word
+		{
+			String g = (String) i1.next();
+			Document doc = new Document();
+
+			int n = index( word2Nums, num2Words, g, doc);
+			if ( n > 0)
+			{
+				doc.add( Field.Keyword( "word", g));
+				if ( (++row % mod) == 0)
+				{
+					o.println( "row=" +row + " doc=
+" + doc);
+					mod *= 2;
+				}
+				writer.addDocument( doc);
+			} // else degenerate
+		}
+		writer.optimize();
+		writer.close();		
+	}
+	
+	/**
+	 * Given the 2 maps fill a document for 1 word.
+	 */
+	private static int index( Map word2Nums, Map num2Words, String
+g, Document doc)
+		throws Throwable
+	{
+		List keys = (List) word2Nums.get( g); // get list of
+key#'s
+		Iterator i2 = keys.iterator();
+
+		Set already = new TreeSet(); // keep them sorted
+
+		// pass 1: fill up 'already' with all words
+		while ( i2.hasNext()) // for each key#
+		{
+			already.addAll( (List) num2Words.get(
+i2.next())); // get list of words
+		}
+		int num = 0;		
+		//StringBuffer res = new StringBuffer();
+		already.remove( g); // of course a word is it's own syn
+		Iterator it = already.iterator();
+		while ( it.hasNext())
+		{
+			String cur = (String) it.next();
+			if ( ! isDecent( cur)) continue; // don't store
+things like 'pit bull' -> 'american pit bull'
+			num++;
+			doc.add( Field.UnIndexed( "syn" , cur));
+		}
+		return num;
+	}
+
+	private static Analyzer ana = new StandardAnalyzer();
+	private static final PrintStream o = System.out;
+	private static final PrintStream err = System.err;
+	private static final String PROLOG =
+"c:/proj/wordnet/prolog/wn_s.pl";
+	private static final String INDEX = "syn_index"; 
+}
+	
+
+
+
+
+-----Original Message-----
+From: Alex Murzaku [mailto:lists@lissus.com]
+Sent: Monday, November 11, 2002 12:32 PM
+To: 'Lucene Users List'
+Subject: RE: Indexing synonyms
+
+
+I wouldn't bother downloading the WordNet - if planning to use only the
+synonyms, get the Prolog file wn_s.pl where words follow the structure:
+s(100005303,1,'person',n,1,7229).
+s(100005303,2,'individual',n,1,51).
+s(100005303,3,'someone',n,1,17).
+s(100005303,4,'somebody',n,1,0).
+s(100005303,5,'mortal',n,1,2).
+s(100005303,6,'human',n,1,7).
+s(100005303,7,'soul',n,2,6).
+s(100011413,1,'animal',n,1,67).
+s(100011413,2,'animate_being',n,1,0).
+s(100011413,3,'beast',n,1,4).
+s(100011413,4,'brute',n,2,0).
+s(100011413,5,'creature',n,1,16).
+s(100011413,6,'fauna',n,2,0).
+All words with the same key are members of the same synset group (or
+synonyms).
+
+-----Original Message-----
+From: Aaron Galea [mailto:agale@nextgen.net.mt] 
+Sent: Monday, November 11, 2002 3:17 PM
+To: Lucene Users List
+Subject: Re: Indexing synonyms
+
+
+Hi guys,
+
+Wordnet for English is available for public and can be downloaded from
+http://www.cogsci.princeton.edu/~wn/ . If you want to use Java, Wordnet
+for java exists at http://sourceforge.net/projects/jwordnet but you
+still need to use the dictionary database from the former site.
+
+Storing synonyms in the index will definitely increase the number of
+matches and it is not that sophisticated but I need a quick but
+functional solution with the hope that a likely match between a user
+question and a stored group of questions is returned at the top of the
+list. Surely you can't depend on this and a question reformulation
+algorithm is needed to filter through them. For example the question
+reformulation algorithm must identify that a user question like : "What
+tourist attractions are there in Reims?" and a stored question like
+"What could I see in Reims?" are asking the same thing. But yes you are
+right this is not a good solution to expand terms in the index but I am
+pressured on time. If you want something more sophisticated is to expand
+terms depending on the word sense but this requires the expensive
+process of building a word sense disambiguation. This will solve the
+problem mentioned by Joshua " like 'minute' (time period) and 'minute'
+(very small)". However this is no easy task and time consuming!!!
+Perhaps in my case doing a query expansion is the best idea and will
+solve all the hassle but I am still thinking which way to go.
+
+Regarding the question how things will be stored in the index it is as
+you say Otis:
+Document1:
+   word: word1
+         word1synonym1
+         word1synonym2
+         word1synonym3
+But not sure whether I understood your question.
+
+regards
+Aaron
+
+
+
+----- Original Message -----
+From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+Sent: Monday, November 11, 2002 8:22 PM
+Subject: RE: Indexing synonyms
+
+
+> I always thought that WordNet was not accessible to general public. 
+> Wrong?
+>
+> Also, I'm curious - what would you use for storing synonyms? Are you 
+> considering using a 'static', read-only Lucene index maybe? An index 
+> that makes use of setPosition(0) calls to store synonyms like this, 
+> for instance:
+>
+> Document1:
+>   word: word1
+>         word1synonym1
+>         word1synonym2
+>         word1synonym3
+>
+> ...
+>
+> DocumentN:
+>   word: wordN
+>       wordNsynonym1
+>       wordNsynonym2
+>       wordNsynonym3
+>
+>
+> Unless I am missing something, and if a synonym database is available,
+
+> this would be pretty easy to implement, no?
+>
+> Otis
+>
+>
+>
+>
+>
+> --- "Spencer, Dave" <dave@lumos.com> wrote:
+> > Re "reducing the set of question/answer pair to
+> > consider" below - I would expect that using synonyms either in the 
+> > index or in the reformed query would (annoyingly) increase the 
+> > number of potential matches or is there something I'm missing.
+> >
+> > Interesting that this topic just came up as I wanted to experiment 
+> > w/ the same thing. My first stab at an public domain synonym list, 
+> > the "moby" list, didn't seem to have synonyms however. I believe 
+> > another poster mentioned WordNet so I'll try that.
+> >
+> > I'd really like it if it was possibly to automatically determine 
+> > synonyms - maybe something similar to Latent Semantic Analysis - but
+
+> > such things seem kinda hard to code up...
+> >
+> >
+> > -----Original Message-----
+> > From: Aaron Galea [mailto:agale@nextgen.net.mt]
+> > Sent: Sunday, November 10, 2002 4:18 PM
+> > To: Lucene Users List; lists@lissus.com
+> > Subject: Re: Indexing synonyms
+> >
+> >
+> > Thanks for all your replies,
+> >
+> > Well I will start of with an idea of what I am trying to achieve. I 
+> > am building a question answer system and one of its modules is an 
+> > FAQ Module.
+> > Since the QA system is concerned with education, users can
+> > concentrate
+> > their
+> > question on a particular subject reducing the set of question/answer
+> > pair to
+> > consider. Since there is this hierarchical indexing the index files
+> > are
+> > not
+> > that big so I can store synonyms for each word in a question in the
+> > index.
+> > Query expansion will solve the problem and eliminating the need to
+> > store
+> > synonyms in the index but this will slow things as there is no depth
+> > limit
+> > to consider for term expansion. It is not my intension to build
+> > something
+> > similar to the FAQFinder system but I want to further reduce the
+> > subset
+> > of
+> > questions to consider on which a question reformulation algorithm
+> > would
+> > be
+> > applied. Therefore the idea is get an faq file dealing with one
+> > education
+> > subject, index all of its questions and expand each term in the
+> > question.
+> > Using lucene I will retrieve the questions that are likely to be
+> > similar
+> > to
+> > a user question, select say the top 5 and apply a query
+reformulation
+> > algorithm. If this succeeds fine and I return the answer to user,
+> > otherwise
+> > submit the question to an answer extraction module. The most
+> > important
+> > thing
+> > is speed so putting term expansion in the index hopefully should
+> > improve
+> > things. Obviously problems arise with this method as there is no
+word
+> > sense
+> > disambiguation but the query reformulation algorithm will solve
+this.
+> > However it is slow so I must reduce the number of questions it is
+> > applied
+> > on. It is a tradeoff!!!
+> >
+> > Well I managed to solve this by overriding the next() method and 
+> > when it gets to an EOS I start returning the new expanded terms that
+
+> > I accumulated
+> > in a list.
+> >
+> > Thanks everyone for your reply!!!!
+> >
+> > Aaron
+> >
+> > NB : And yep I am a Malteser Otis ! :)
+> >
+> >
+> > ----- Original Message -----
+> > From: "Alex Murzaku" <lists@lissus.com>
+> > To: "'Lucene Users List'" <lucene-user@jakarta.apache.org>
+> > Sent: Monday, November 11, 2002 12:17 AM
+> > Subject: RE: Indexing synonyms
+> >
+> >
+> > > You could also do something with org.apache.lucene.analyzer.Token
+> > which
+> > > includes the following self-explanatory note:
+> > >
+> > >   /** Set the position increment.  This determines the position of
+> > this
+> > > token
+> > >    * relative to the previous Token in a {@link TokenStream}, used
+> > in
+> > > phrase
+> > >    * searching.
+> > >    *
+> > >    * <p>The default value is one.
+> > >    *
+> > >    * <p>Some common uses for this are:<ul>
+> > >    *
+> > >    * <li>Set it to zero to put multiple terms in the same 
+> > > position. This is
+> > >    * useful if, e.g., a word has multiple stems.  Searches for
+> > phrases
+> > >    * including either stem will match.  In this case, all but the
+> > first
+> > > stem's
+> > >    * increment should be set to zero: the increment of the first 
+> > > instance
+> > >    * should be one.  Repeating a token with an increment of zero
+> > can
+> > > also be
+> > >    * used to boost the scores of matches on that token.
+> > >    *
+> > >    * <li>Set it to values greater than one to inhibit exact phrase
+
+> > > matches.
+> > >    * If, for example, one does not want phrases to match across
+> > removed
+> > > stop
+> > >    * words, then one could build a stop word filter that removes
+> > stop
+> > > words and
+> > >    * also sets the increment to the number of stop words removed
+> > before
+> > > each
+> > >    * non-stop word.  Then exact phrase queries will only match 
+> > > when
+> > the
+> > > terms
+> > >    * occur with no intervening stop words.
+> > >    *
+> > >    * </ul>
+> > >    * @see TermPositions
+> > >    */
+> > >   public void setPositionIncrement(int positionIncrement) {
+> > >     if (positionIncrement < 0)
+> > >       throw new IllegalArgumentException
+> > >         ("Increment must be positive: " + positionIncrement);
+> > >     this.positionIncrement = positionIncrement;
+> > >   }
+> > >
+> > >
+> > > --
+> > > Alex Murzaku
+> > > ___________________________________________
+> > >  alex(at)lissus.com  http://www.lissus.com
+> > >
+> > > -----Original Message-----
+> > > From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> > > Sent: Sunday, November 10, 2002 1:30 PM
+> > > To: Lucene Users List
+> > > Subject: Re: Indexing synonyms
+> > >
+> > >
+> > > .mt?  Malta?  That's rare! :)
+> > >
+> > > A person called Clemens Marschner just submitted diffs for query 
+> > > rewriting to lucene-dev list 1-2 weeks ago.  The diffs are not in
+> > CVS
+> > > yet, and they are a bit old now becase the code they were made
+> > against
+> > > has changed since they were made. You could either try applying
+> > them
+> > > yourself, of waiting until they get applied and then you could get
+> > a
+> > > nightly build.
+> > >
+> > > Otis
+> > >
+> > > --- Aaron Galea <agale@nextgen.net.mt> wrote:
+> > > > Hi everyone,
+> > > >
+> > > > I need to create a filter that extends a tokenfilter whose
+> > purpose
+> > is
+> > > > to generate some synonyms for words in the document using
+> > Wordnet.
+> > > > Well searching for synonyms using wordnet is not that 
+> > > > problematic
+> > but
+> > > > I need to add the synonym words to Lucene tokenstream before 
+> > > > they
+> > are
+> > > > passed for indexing. However TokenStream class does not support
+> > any
+> > > > add method. Did anyone ever needed to do this? Can someone
+> > suggest
+> > an
+> > > > alternative of how to add some synonym words to the index?
+> > > >
+> > > > Thanks
+> > > > Aaron
+> > > >
+> > >
+> > >
+> > > __________________________________________________
+> > > Do you Yahoo!?
+> > > U2 on LAUNCH - Exclusive greatest hits videos
+> > http://launch.yahoo.com/u2
+> > >
+> > > --
+> > > To unsubscribe, e-mail: 
+> > > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > > For additional commands, e-mail: 
+> > > <mailto:lucene-user-help@jakarta.apache.org>
+> > >
+> > >
+> > > --
+> > > To unsubscribe, e-mail:
+> > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > > For additional commands, e-mail:
+> > <mailto:lucene-user-help@jakarta.apache.org>
+> > >
+> > > ---
+> > > [This E-mail was scanned for spam and viruses by NextGen.net.]
+> > >
+> > >
+> > >
+> >
+> >
+> > ---
+> > [This E-mail was scanned for spam and viruses by NextGen.net.]
+> >
+> >
+> > --
+> > To unsubscribe, e-mail: 
+> > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > For additional commands, e-mail: 
+> > <mailto:lucene-user-help@jakarta.apache.org>
+> >
+> >
+> >
+> > --
+> > To unsubscribe, e-mail: 
+> > <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> > For additional commands, e-mail: 
+> > <mailto:lucene-user-help@jakarta.apache.org>
+> >
+>
+>
+> __________________________________________________
+> Do you Yahoo!?
+> U2 on LAUNCH - Exclusive greatest hits videos 
+> http://launch.yahoo.com/u2
+>
+> --
+> To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+> For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+>
+> ---
+> [This E-mail was scanned for spam and viruses by NextGen.net.]
+>
+>
+>
+
+
+---
+[This E-mail was scanned for spam and viruses by NextGen.net.]
+
+
+--
+To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+
+
+--
+To unsubscribe, e-mail:
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

@@ -1,0 +1,145 @@
+FROM: Piotr Pezik <piotr.pe...@gmail.com>
+SUBJECT: Re: Concurrent Issue
+DATE: 8 Apr 2011
+
+Thanks for the tips. 
+
+Does the LIA SearcherManager provide/manage access to the IndexReader as well? 
+
+In other words, is it as easy as: 
+
+searcher.getIndexReader()
+
+?
+
+I need some of the the Reader methods in addition to the Searcher ones.
+
+Piotr
+
+On 8 Apr 2011, at 12:21, Michael McCandless wrote:
+
+> Actually, you shouldn't need a separate ReadWriteLock.
+> 
+> SearcherManager (from LIA2's source code, freely downloadable from
+> http://www.manning.com/hatcher3, with Apache License 2.0) handles the
+> reference counting (so a reader is never closed while any search from
+> other threads are stil in flight), and also handles reopening and
+> warming in the background.
+> 
+> You pass it either an IndexWriter (in which case it pulls
+> near-real-time readers), or a Directory (in which case it opens a
+> "normal" IndexReader and then uses reopen).
+> 
+> All the app has to do is tell SearcherManager when to reopen.
+> 
+> Mike
+> 
+> http://blog.mikemccandless.com
+> 
+> On Thu, Apr 7, 2011 at 2:08 AM, findbestopensource
+> <findbestopensource@gmail.com> wrote:
+>> You are trying to access the reader which is already closed by some other
+>> thread.
+>> 
+>> 1. Keep a reference count for the reader you create.
+>> 2. Have a common function through which all functions will retrieve Reader
+>> objects
+>> 3. Once the index got changed, create a new reader, do warmup
+>> 4. When the new reader is ready then the common function should return this
+>> for furture request and old reader should go in passive mode.
+>> 5. The old reader should be closed when the reference count is zero.
+>> 
+>> Regards
+>> Aditya
+>> www.findbestopensource.com
+>> 
+>> 
+>> On Wed, Apr 6, 2011 at 7:20 PM, Piotr Pezik <piotr.pezik@gmail.com> wrote:
+>> 
+>>> Only to second this explanation.
+>>> 
+>>> I got the same exception in a web application with a single IndexReader,
+>>> accessed by many threads.
+>>> 
+>>> The index gets updated every half hour or so, so I closed the old
+>>> IndexReader and opened a new one every now and then.
+>>> 
+>>> Even though the method for obtaining the IndexReader was synchronized, with
+>>> tens of thousands of queries a day,
+>>> I started getting the AlreadyClosed exception when one thread triggered the
+>>> closure of the IndexReader which another thread was still using.
+>>> 
+>>> 
+>>> 
+>>> Piotr
+>>> 
+>>> 
+>>> On 5 Apr 2011, at 15:46, Ian Lea wrote:
+>>> 
+>>>> You don't say exactly how you are dealing with the concurrent access
+>>>> (one shared Reader/Searcher? Each user with own Reader/Searcher?
+>>>> Something else?) but the underlying problem is that the reader has
+>>>> been closed while something else is still using it.  This can easily
+>>>> happen in a multi-threaded setup: thread A might close the reader
+>>>> while thread B is still using it.
+>>>> 
+>>>> Options include
+>>>> 
+>>>> not closing the old reader straight away when open a new one, but
+>>>> instead stash it somewhere and close it later when you can be
+>>>> confident nothing else will be using it.
+>>>> 
+>>>> using the SearcherManager class from Lucene In Action 2nd edition, or
+>>>> an equivalent.
+>>>> 
+>>>> catching the AlreadyClosed exception and restarting the search with a
+>>>> current reader
+>>>> 
+>>>> 
+>>>> --
+>>>> Ian.
+>>>> 
+>>>> 
+>>>> On Tue, Apr 5, 2011 at 12:56 PM, Yogesh Dabhi <ydabhi@asite.com> wrote:
+>>>>> Hi
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> My application is cluster in jobss application servers & lucene
+>>>>> directory was shared.
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> Concurrently 5 user access same lucene directory for searching document
+>>>>> 
+>>>>> That time I got bellow exception
+>>>>> 
+>>>>> org.apache.lucene.store.AlreadyClosedException: this IndexReader is
+>>>>> closed
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> is there a way to handle such error
+>>>>> 
+>>>>> 
+>>>>> 
+>>>>> Thanks & Regards
+>>>>> 
+>>>>> Yogesh
+>>>>> 
+>>>>> 
+>>>> 
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>> 
+>>> 
+>>> 
+>> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+

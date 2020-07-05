@@ -1,0 +1,129 @@
+FROM: "Hiller, Dean  x66079" <dean.hil...@broadridge.com>
+SUBJECT: basic example of lucene not working(must be user error, but I am just missing it)
+DATE: 19 Jun 2011
+
+I have a JUnit test case so I can demonstrate Lucene to myself.  It correctly returns a hit
+count of 2 but then when I get the docs, there is only ONE, and I can't seem to get the info
+on the 2nd hit at all.  Notice my logs print 2 and 1 if you run this example on the counts...
+
+getTotalHits = 2
+scoreDocs.length = 1 //shouldn't this return 2???
+
+So, how do I get the field info from the other doc as well.  I want to get info on all hits.
+
+package com.broadridge.papr1.test.other;
+
+import java.io.File;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopScoreDocCollector;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.Version;
+import org.joda.time.LocalDate;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
+import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class PlayWithLuceneTest {
+
+   private final static Logger log = LoggerFactory
+         .getLogger(PlayWithLuceneTest.class);
+
+   private static final String INDEX_DIR = "output/lucene-index";
+   private static final DateTimeFormatter FMT2 = DateTimeFormat
+         .forPattern("yyyyMMdd");
+
+   @Test
+   public void playWithLucene() throws Exception {
+      LocalDate date = new LocalDate();
+      indexArticle("temp", "dean", "let's do hbase", "some url", date);
+      indexArticle("xyz", "dean", "hello there", "2nd etnry",
+            date.plusDays(1));
+      indexArticle("asdf", "tom", "helloX", "3rd entry", date.plusDays(3));
+      indexArticle("qwer", "tom", "asdf", "4th entry", date.minusDays(1));
+
+      Directory dir = FSDirectory.open(new File(INDEX_DIR));
+      IndexSearcher is = new IndexSearcher(dir, true);
+      QueryParser parser = new QueryParser(Version.LUCENE_32, "hello",
+            new StandardAnalyzer(Version.LUCENE_32));
+
+      String date1 = FMT2.print(date);
+      String date2 = FMT2.print(date.plusDays(10));
+
+      String queryStr = "author:dean";// and date:[ " + date1 + " TO " + date2
+      // + " ]";
+      Query query = parser.parse(queryStr);
+
+      TopScoreDocCollector collector = TopScoreDocCollector.create(1, false);
+      is.search(query, collector);
+
+      int totalHits = collector.getTotalHits();
+      log.info("total=" + totalHits);
+
+      TopDocs topDocs = collector.topDocs();
+      ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+      Document doc = is.doc(scoreDocs[0].doc);
+
+      log.info("total docs=" + scoreDocs.length);
+
+      is.close();
+   }
+
+   public void indexArticle(String article, String author,
+         String title, String url, LocalDate dateWritten)
+         throws Exception {
+      Document document = createDocument(article, author,
+                       title, url, dateWritten);
+      indexDocument(document);
+   }
+
+   private Document createDocument(String article, String author,
+         String title, String url, LocalDate dateWritten) {
+
+      String dateTxt = FMT2.print(dateWritten);
+
+      Document document = new Document();
+      document.add(new Field("author", author, Field.Store.NO,
+            Field.Index.NOT_ANALYZED));
+      document.add(new Field("title", title, Field.Store.NO,
+            Field.Index.NOT_ANALYZED));
+      document.add(new Field("date", dateTxt, Field.Store.NO,
+            Field.Index.NOT_ANALYZED));
+
+      document.add(new Field("url", url, Field.Store.YES, Field.Index.NO));
+      return document;
+   }
+
+   private void indexDocument(Document document) throws Exception {
+      IndexWriterConfig conf = new IndexWriterConfig(Version.LUCENE_32,
+            new StandardAnalyzer(Version.LUCENE_32));
+
+      Directory dir = FSDirectory.open(new File(INDEX_DIR));
+      IndexWriter writer = new IndexWriter(dir, conf);
+
+      writer.addDocument(document);
+      writer.optimize();
+      writer.close();
+   }
+}
+
+This message and any attachments are intended only for the use of the addressee and
+may contain information that is privileged and confidential. If the reader of the 
+message is not the intended recipient or an authorized representative of the
+intended recipient, you are hereby notified that any dissemination of this
+communication is strictly prohibited. If you have received this communication in
+error, please notify us immediately by e-mail and delete the message and any
+attachments from your system.
+

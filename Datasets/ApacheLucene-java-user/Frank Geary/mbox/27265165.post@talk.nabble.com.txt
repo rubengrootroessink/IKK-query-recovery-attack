@@ -1,0 +1,341 @@
+FROM: Frank Geary <fge...@acquiremedia.com>
+SUBJECT: Re: Index corruption using Lucene 2.4.1 - thread safety issue?
+DATE: 21 Jan 2010
+
+
+Nope.  When it's time to inactivate a RAMDir indexWriter, I get that
+directory,  close that writer, then clear out the directory.  Then after
+clearing out the directory, I create a new IW passing in the directory that
+was used previously.  No, I do not override the LockFactory - not familiar
+with it.
+
+Hmm...for what it's worth we are using ConcurrentMergeScheduler.
+We do actaully have setInfoStream turned on for all our indexers.  I'll have
+to hunt down one of our logs that corresponds to one of the Exceptions
+though.  Thanks for that.
+
+We delete the files explicitly, because what we found was that under high
+index loads (i.e. rapid rolling of RAMDir indexWriters) leaving the RAMDir
+around lead to garbage collection issues as old RAMDirs accumulated waiting
+for garbage collection to take place.  It turned out that deleting the files
+explicitly avoided those garbage collection problems.
+
+Thanks again.
+
+Frank 
+
+
+Michael McCandless-2 wrote:
+> 
+> Is it possible that you're not closing the old IW on the RAMDir before
+> deleting files / re-using it?  Or, any other possible way that two
+> open writers could accidentally share the same RAMDir?  Do you
+> override the LockFactory of the RAMDir?
+> 
+> EG with ConcurrentMergeScheduler, it can continue to write files into
+> the RAMDir.  It's remotely possible (though I think rather unlikely)
+> that this could lead to the corruption you're seeing.
+> 
+> If you can turn on setInfoStream for all writers you create and
+> capture & post all output leading to the exception, that could give us
+> a clue...
+> 
+> You should be able to use IW's deleteAll method to remove all docs
+> without closing/reopening the writer (oh -- but this is only available
+> as of 2.9).
+> 
+> You shouldn't have to remove files yourself -- just open a new IW with
+> create=true?
+> 
+> Mike
+> 
+> On Tue, Jan 12, 2010 at 11:02 AM, Frank Geary <fgeary@acquiremedia.com>
+> wrote:
+>>
+>> Thanks for the reply Mike.  Your questions were good ones because I
+>> realize
+>> now I should have probably used "Corrupt IndexReader" as the subject for
+>> this thread.  Here's my answers:
+>>
+>> The number stays the same until the corrupted IndexReader is reopened (if
+>> nothing changes in the IndexReader - and thus we get the same IndexReader
+>> back from reopen - the problem persists).  Then the next time the problem
+>> occurs, after we've gotten at least one non-problematic IndexReader and
+>> thus
+>> a few successful searches, the number is different.  For what it's worth
+>> my
+>> latest ### was 176.  My assumption has always been that it is most likely
+>> to
+>> be 1 beyond the end of the BitVector because each commit() is only
+>> changing
+>> the index by adding or deleting one document.  But I don't know for sure.
+>>
+>> Yes, I had always expected that reopen during commit would be fine, and
+>> my
+>> semaphore code seems to confirm that (unless adds have something very
+>> subtle
+>> to do with it).  Any other theories would be very much appreciated.
+>>
+>> At first I wasn't sure whether it was the RAMDirectory or the main dir.
+>>  But
+>> since I now have many examples where the RAMDirectory IndexReader has
+>> changed and the main dir IndexReader has not, then I feel that the
+>> RAMDirectory IndexReader is the problem.  We reopen a new IndexReader
+>> every
+>> time we do a search on a RAMDirectory.  For the main dir, we rarely
+>> reopen
+>> an IndexReader.  We only reopen the main dir IndexReader when a RAM
+>> Directory is gotten rid of, which happens once the RAM directory indexes
+>> 10000 documents.  But here's a typical example where the main dir
+>> IndexReader stays the same throughout the problem:
+>>
+>> 1) both the RAMDirectory IndexReader and the main dir IndexReader are set
+>> after the last time we got rid of the RAMDirectory which was full with
+>> 10000
+>> documents.
+>> 2) then we receive about 1077 new documents and add them to the
+>> RAMDirectory
+>> as well as to the main dir indexes (with a number of deletes scattered
+>> throughout as well).  The RAM directory is commited after every add or
+>> delete and the main dir is not committed at all.
+>> 3) then a search comes in, we reopen the RAM Directoy IndexReader, use
+>> the
+>> existing main dir IndexReader (which does not reflect any index changes
+>> since step 1) and do the search and get ArrayIndexOutOfBounds so the
+>> search
+>> fails (in this case the ### was 208)
+>> 4) then we simply go one and get another 4000 adds and deletes in the RAM
+>> directory and main directory.  Again the RAM directory is commited after
+>> every add or delete and the main dir is not committed at all.
+>> 5) then the next search comes in, reopens the RAMDirectory IndexReader,
+>> uses
+>> the existing main dir IndexReader (which does not reflect any index
+>> changes
+>> since step 1) and the search works fine!
+>> 6) during all that time the main dir IndexReader never got reopened, and
+>> the
+>> RAMDirectory IndexReader only got reopened twice - once it was bad and
+>> the
+>> next it was OK.
+>>
+>> To answer your question about when we periodically move our in-RAM
+>> changes
+>> to the disk index (my apologies if this is redundant):
+>> We never move them.  They are duplicated in both the RAM directory and
+>> on-disk directory as they come in.  Then when the RAM directory
+>> determines
+>> that it has 10000 documents, we begin writing to a second RAM Directory,
+>> reopen and warmup the on-disk IndexReader and once that new on-disk
+>> IndexReader is ready, we throw away the RAM directory which had 10000
+>> documents (to do this we actually clean out the RAM directory by deleting
+>> all the files it contains and we create a new IndexWriter using that same
+>> RAMDirectory object).  Then we continue writing to that second
+>> RAMdirectory
+>> and the on-disk index until the second RAM directory has 10000 documents.
+>> And repeat.
+>>
+>> We have NOT run CheckIndex on the RAM directory mainly because this
+>> mostly
+>> happens in our production environment which has very high traffic and I'd
+>> have to write some special code to set aside a bad RAMDirectory index,
+>> etc
+>> to run the CheckIndex on it.  Just not an easy thing to do.
+>>
+>> I can look into enabling asserts.  That may help.
+>>
+>> Finally, for the RAM directory, we must create a new IndexWriter
+>> everytime
+>> "clean out" the RAM directory after we reach the 10000 documents limit.
+>>  We
+>> clean out the RAM directory by deleting all the files it contains and we
+>> then create a new IndexWriter using that same RAMDirectory object.  If
+>> there
+>> was a reopen for an IndexWriter, we'd use that instead.  For the on-disk
+>> directory, the IndexWriter never changes and we reopen the IndexReader
+>> each
+>> time a RAM directory reaches the 10000 document limit.
+>>
+>> Any further thoughts or ideas?  Thanks again for your help Mike!
+>>
+>> Frank
+>>
+>>
+>> Michael McCandless-2 wrote:
+>>>
+>>> Not good!  Can you post the ###'s from the exception?  How far out of
+>>> bounds is the access?
+>>>
+>>> Your usage sounds fine.  Reopen during commit is fine.
+>>>
+>>> Are you sure the exception comes from the reader on the RAMDir and not
+>>> your main dir?
+>>>
+>>> How do you periodically move your in-RAM changes to the disk index?
+>>>
+>>> Have you run CheckIndex on your index?  Also, try running with asserts
+>>> enabled... it may catch whatever is happening, sooner.
+>>>
+>>> Do you hold open a single IW on the RAMDir, and re-use it?  Or open
+>>> and then close?  What about the disk dir?
+>>>
+>>> Mike
+>>>
+>>> On Mon, Jan 11, 2010 at 1:42 PM, Frank Geary <fgeary@acquiremedia.com>
+>>> wrote:
+>>>>
+>>>> Hi,
+>>>>
+>>>> I'm using Lucene 2.4.1 and am seeing occasional index corruption.  It
+>>>> shows
+>>>> up when I call MultiSearcher.search().  MultiSearcher.search() throws
+>>>> the
+>>>> following exception:
+>>>>
+>>>> ArrayIndexOutOfBoundsException.  The error is: Array index out of
+>>>> range:
+>>>> ###
+>>>> where ### is a number representing an index into the deletedDocs
+>>>> BitVector
+>>>> in SegmentTermDocs.  the stack trace is as follows:
+>>>>
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.util.BitVector.get(BitVector.java:91)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.index.SegmentTermDocs.next(SegmentTermDocs.java:125)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.index.MultiSegmentReader$MultiTermDocs.next(MultiSegmentReader.java:554)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldCacheImpl$10.createValue(FieldCacheImpl.java:384)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldCacheImpl$Cache.get(FieldCacheImpl.java:71)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldCacheImpl.getStringIndex(FieldCacheImpl.java:351)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldSortedHitQueue.comparatorString(FieldSortedHitQueue.java:415)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldSortedHitQueue$1.createValue(FieldSortedHitQueue.java:206)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldCacheImpl$Cache.get(FieldCacheImpl.java:71)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldSortedHitQueue.getCachedComparator(FieldSortedHitQueue.java:167)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.FieldSortedHitQueue.<init>(FieldSortedHitQueue.java:55)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.TopFieldDocCollector.<init>(TopFieldDocCollector.java:43)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:122)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.MultiSearcher.search(MultiSearcher.java:232)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> org.apache.lucene.search.Searcher.search(Searcher.java:86)
+>>>> 2010-01-09 20:40:00,561 [pool-1-thread-4] ERROR -
+>>>> com.acquiremedia.opens.index.searcher.HybridIndexSearcher.search(HybridIndexSearcher.java:311)
+>>>> .
+>>>> .
+>>>> .
+>>>>
+>>>> That makes sense, but I'm trying to understand what could be causing
+>>>> the
+>>>> corruption.
+>>>>
+>>>> Here's what I'm doing:
+>>>>
+>>>> 1) I have an IndexWriter created usnig a RAMDirectory.
+>>>>
+>>>> 2) I have a single thread processing index adds and index deletes.
+>>>>  This
+>>>> thread is rather simple and calls IndexWriter.addDocument() followed by
+>>>> IndexWriter.commit() or IndexWriter.deleteDocuments() followed by
+>>>> IndexWriter.commit().  The commits are done at this point because we
+>>>> want
+>>>> the documents available for searching immediately.
+>>>>
+>>>> 3) I also have 4 search threads running at the same time as the index
+>>>> write
+>>>> thread.  Each time a search thread executes a search it calls
+>>>> IndexReader.reopen()  on the existing IndexReader for the index created
+>>>> using the RAMDirectory above, gets an existing index reader for another
+>>>> on-disk index and then calls MultiSearcher.search() (this brings
+>>>> together
+>>>> the RamDirectory index and an on-disk index) to execute the search.
+>>>>
+>>>> It generally works fine, but every few days or so I get the above
+>>>> ArrayIndexOutOfBoundsException.   My suspicion is that when the
+>>>> IndexWritert.commit() call happens due to a delete at the exact same
+>>>> time
+>>>> as
+>>>> the IndexReader.reopen() call happens, the IndexReader has a deleteDocs
+>>>> BitVector which reflects the delete, but something else internal to the
+>>>> IndexReader is not reflecting the delete.
+>>>>
+>>>> So, I implemented a semaphore mechanism to prevent IndexWriter.commit()
+>>>> from
+>>>> happening at the same time as IndexReader.reopen().  I only implemented
+>>>> the
+>>>> semaphores in the delete case because my guess was that an add would be
+>>>> unlikely to affect the deleteDocs Bit Vector.  Unfortunately, the
+>>>> problem
+>>>> continues to happen.
+>>>>
+>>>> I believe I read somewhere that a similar thread saftey issue had been
+>>>> fixed
+>>>> in Lucene 2.4, but I suspect there may still be an issue in 2.4.1.
+>>>>
+>>>> Does anyone have any knowledge or insight into what I may be doing
+>>>> wrong
+>>>> or
+>>>> how I can correct/avoid the problem?  Upgrading to Lucene 3.0 or using
+>>>> Solr
+>>>> are not really options for me at least in the short term.
+>>>>
+>>>> Thanks for any information you can provide!
+>>>>
+>>>> Frank
+>>>> --
+>>>> View this message in context:
+>>>> http://old.nabble.com/Index-corruption-using-Lucene-2.4.1---thread-safety-issue--tp27115515p27115515.html
+>>>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>
+>> --
+>> View this message in context:
+>> http://old.nabble.com/Index-corruption-using-Lucene-2.4.1---thread-safety-issue--tp27115515p27129835.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://old.nabble.com/Index-corruption-using-Lucene-2.4.1---thread-safety-issue--tp27115515p27265165.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

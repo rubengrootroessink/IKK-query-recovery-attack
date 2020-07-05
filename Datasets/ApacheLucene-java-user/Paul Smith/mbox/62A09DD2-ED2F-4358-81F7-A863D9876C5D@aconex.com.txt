@@ -1,0 +1,65 @@
+FROM: Paul Smith <psm...@aconex.com>
+SUBJECT: CompoundFileReader question/'leaking' file descriptors ?
+DATE: 13 Feb 2006
+
+
+I've been hunting an insidious problem whereby during heavy  
+incremental indexing operations in production on redhat el3 machine I  
+notice that the java process has a lot of open files which appear to  
+be deleted.
+
+Now, before anyone jumps in, yes I know the # open file limit needs  
+to be incremented, i've done that (it's at a hideous 16000 at the  
+moment..).  Things I've verified include Writers/readers/searchers  
+get closed when they should (finally blocks etc).
+
+Using the 'lsof' command to track the open files, we see tonnes of  
+these entries:
+
+[root@index1 logs]# lsof -p `ps -efww | grep '[m]el.xml' | awk  
+'{print $2}'` | grep deleted | head
+java    23749 root  120r   REG       8,3     17507  61079633 /aconex/ 
+index/current/project/39/56/0000025639/corr/000001/_dga.cfs (deleted)
+java    23749 root  121r   REG       8,3     21775  61079684 /aconex/ 
+index/current/project/39/56/0000025639/corr/000001/_dlc.cfs (deleted)
+java    23749 root  123r   REG       8,3     17507  61079728 /aconex/ 
+index/current/project/39/56/0000025639/corr/000001/_dq4.cfs (deleted)
+......
+
+What is REALLY weird is that they eventually do get released.  And  
+scarily enough, it seems to track with when the garbage collector  
+does a major collection (we managed to figure this out using Yourkit  
+profiler and hitting the force GC), and lo, they disappear...  We  
+have many indexes (2000, one for each project-entity), and not an  
+UberIndex, and hence having indexes leak file handles is much more  
+noticeable.
+
+We're using Lucene 1.4.3, and after hunting around in the source code  
+just to see what I might be missing, I came across this, and I'd just  
+like some comments.
+
+CompoundFileReader has an inner-class CSInputStream which is used to  
+read the stream (and we're using the Compound format, so this is  
+relevant here).
+
+However it overrides InputStream.close(), but does not call  
+super.close().  After tracing around where this is all used I believe  
+that this method REALLY SHOULD be calling super.close() (or not  
+overriding) it,because CompoundFileReader will be given an  
+InputStream to wrap, eventually coming down to FSInputStream which  
+apparently then calss Descriptor.close().
+
+Scarily enough this ends up calling RandomAccessFile.close, which  
+goes into native library calls and, assumably, close the file.
+
+The guard here is that the finalizer method in FSInputStream does  
+call close() so that would well explain the releasing of file handles  
+at garbage collection intervals.
+
+Why would CompoundFileReader not need to call .close()?
+
+Am I going mad here and just seeing ghosts? Comments appreciated.
+
+Paul Smith
+
+

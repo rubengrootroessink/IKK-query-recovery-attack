@@ -1,0 +1,228 @@
+FROM: "Eran Sevi" <erans...@gmail.com>
+SUBJECT: Re: Preventing index corruption
+DATE: 29 Jun 2008
+
+Thanks for the information.
+
+>From what I read in other posts it's better to prevent using RAMDirectory
+since the same result can be achieved by using the autoCommit=false as you
+suggested.
+
+I'm using 2.3.1 so I guess I'll have to wait to 2.4 or take the latest trunk
+in order to benefit from these updates.
+
+Eran.
+
+
+On Fri, Jun 27, 2008 at 12:35 PM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> If you open your IndexWriter with autoCommit=false, then no changes
+> will be visible in the index until you call commit() or close().
+> Added documents can still be flushed to disk as new segments when the
+> RAM buffer is full, but these segments are not referenced (by a new
+> segments_N file) until commit() or close() is called.  commit() is
+> only available in the trunk (to be released as 2.4 at some point)
+> version of Lucene.
+>
+> Re safety on sudden power loss or machine crash: on the trunk only,
+> the index will not become corrupt due to such events as long as the
+> underlying IO system correctly implements fsync().  But on all current
+> releases of Lucene a sudden power loss or machine crash could in fact
+> corrupt the index.  See details here:
+>
+>    https://issues.apache.org/jira/browse/LUCENE-1044
+>
+> Mike
+>
+> John Byrne <john.byrne@propylon.com> wrote:
+> > Hi,
+> >
+> > Rather than disabling the merging, have you considered putting the
+> documents
+> > in a separate index, possibly in memory, and then deciding when to merge
+> > them with the main index yourself?
+> >
+> > That way, you can change you mind and simply not merge the  new documents
+> if
+> > you want.
+> >
+> > To do this, you can create a new RAMDirectory, and add your documents to
+> > that, then when you want to merge with the main index, open an
+> IndexWriter
+> > on the main index, and call IndexWriter.addIndexes(Directory[]). Of
+> course,
+> > you don't have to use a RAMDirectory, but it would make sense, if it's
+> only
+> > purpose is to temporarily hold the documents until you decide to commit
+> > them.
+> >
+> > I don't know what will happen if the computer crashes during the merge,
+> but
+> > see http://lucene.apache.org/java/2_3_2/api/index.html
+> >
+> > This is from the "IndexWriter.addIndexes(Directory[])" documentation:
+> >
+> > "This method is transactional in how Exceptions are handled: it does not
+> > commit a new segments_N file until all indexes are added. This means if
+> an
+> > Exception occurs (for example disk full), then either no indexes will
+> have
+> > been added or they all will have been."
+> >
+> > I hope that helps!
+> >
+> > Regards,
+> > -JB
+> >
+> > Eran Sevi wrote:
+> >>
+> >> Thanks Erick.
+> >> You might be joking, but one of our clients indeed had all his servers
+> >> destroyed in a flood. Of course in this rare case, a solution would be
+> to
+> >> keep the backup on another site.
+> >>
+> >> However I'm still confused about normal scenarios:
+> >>
+> >> Let's say that in the middle of the batch I got an exception and wan't
+> to
+> >> rollback. Can I do this ?
+> >> I want to make sure that after a batch finishes (and only then), it is
+> >> written to disk (and not find out after a while during a commit that
+> >> something went wrong).Do I have to close the writer or Flush is enough?
+> I
+> >> though about raising mergeFactor and other parameters to high values (or
+> >> disabling them) so an automatic merge/commit will not happen, and then I
+> >> can
+> >> manually decide when to commit the changes - the size of the batches is
+> >> not
+> >> constant so I can't determine in advance.
+> >> I don't mind hurting the index performance a bit by doing this manually,
+> >> but
+> >> I can't efford to let the client think that the information is secured
+> in
+> >> the index and than to find out that it's not.
+> >>
+> >> My index size contains a few million docs and it's size can reach about
+> >> 30G
+> >> (we're saving a lot of fields and information for each document). Having
+> a
+> >> backup index is an option I considered but I wanted to avoid the
+> overhead
+> >> of
+> >> keeping them synchronized (they might not be on the same server which
+> >> exposes a lot of new problems like network issues).
+> >>
+> >> Thanks.
+> >>
+> >> On Thu, Jun 26, 2008 at 5:42 PM, Erick Erickson <
+> erickerickson@gmail.com>
+> >> wrote:
+> >>
+> >>
+> >>>
+> >>> How big is your index? The simpleminded way would be to copy things
+> >>> around
+> >>> as your batches come in and only switch to the *real* one after the
+> >>> additions
+> >>> were verified.
+> >>>
+> >>> You could also just maintain two indexes but only update one at a time.
+> >>> In
+> >>> the
+> >>> 99.99% case where things went well, it would just be a matter of
+> >>> continuing
+> >>> on.
+> >>> Whenever "something bad happened", you could copy the good index over
+> the
+> >>> bad one and go at it again.
+> >>>
+> >>> But to ask that no matter what, the index is OK is asking a lot....
+> There
+> >>> are fires and floods and earthquakes to consider <G>
+> >>>
+> >>> Best
+> >>> Erick
+> >>>
+> >>> On Thu, Jun 26, 2008 at 10:28 AM, Eran Sevi <eransevi@gmail.com>
+> wrote:
+> >>>
+> >>>
+> >>>>
+> >>>> Hi,
+> >>>>
+> >>>> I'm looking for the correct way to create an index given the following
+> >>>> restrictions:
+> >>>>
+> >>>> 1. The documents are received in batches of variable sizes (not more
+> >>>> then
+> >>>> 100 docs in a batch).
+> >>>> 2. The batch insertion must be transactional - either the whole batch
+> is
+> >>>> added to the index (exists physically on the disk), or the whole batch
+> >>>> is
+> >>>> canceled/aborted and the index remains as before.
+> >>>> 3. The index must remain valid at all times and shouldn't be corrupted
+> >>>>
+> >>>
+> >>> even
+> >>>
+> >>>>
+> >>>> if a power interruption occurs - *most important*
+> >>>> 4. Index speed is less important than search speed.
+> >>>>
+> >>>> How should I use a writer with all these restrictions? Can I do it
+> >>>>
+> >>>
+> >>> without
+> >>>
+> >>>>
+> >>>> having to close the writer after each batch (maybe flush is enough)?
+> >>>>
+> >>>> Should I change the IndexWriter parameters such as mergeFactor,
+> >>>> RAMBufferSize, etc. ?
+> >>>> I want to make sure that partial batches are not written to the disk
+> (if
+> >>>> the
+> >>>> computer crashes in the middle of the batch, I want to be able to work
+> >>>>
+> >>>
+> >>> with
+> >>>
+> >>>>
+> >>>> the index as it was before the crash).
+> >>>>
+> >>>> If I'm working with a single writer, is it guaranteed that no matter
+> >>>> what
+> >>>> happens the index can be opened and used (I don't mind loosing docs,
+> >>>> just
+> >>>> that the index won't be ruined).
+> >>>>
+> >>>> Thanks and sorry about the long list of questions,
+> >>>> Eran.
+> >>>>
+> >>>>
+> >>
+> >>
+>  ------------------------------------------------------------------------
+> >>
+> >> No virus found in this incoming message.
+> >> Checked by AVG. Version: 7.5.524 / Virus Database: 270.4.1/1517 -
+> Release
+> >> Date: 24/06/2008 20:41
+> >>
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

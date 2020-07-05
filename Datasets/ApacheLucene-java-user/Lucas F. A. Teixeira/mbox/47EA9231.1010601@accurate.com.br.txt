@@ -1,0 +1,137 @@
+FROM: "Lucas F. A. Teixeira" <lucas.teixe...@accurate.com.br>
+SUBJECT: Re: Index "corruption" makes it return a different result
+DATE: 26 Mar 2008
+
+This is just one of the index files.
+
+As I said, the local disk where the index is generated, it's not full, 
+the full disk it's the shared storage where my application server store 
+its logs.
+When this disk hitted 100%, all the indexing process stop (of course, 
+all the processing instances of this managed server stopped).
+
+The "thing" is that the index was not corrupted, one of the index files 
+has these log messages from my application server inside it, problably a 
+JVM problem on mixing two IO buffers when one of them coudn't flush (the 
+logs partition). For me it would be normal if it causes index 
+corruption... :-)
+
+The second and most weird thing it's that my clients application just 
+read the index, and did some queries on it, always returning different 
+(but consistent) results.
+
+I tried to edit the index file, and remove the application server logs 
+that was inside it, and after that?? Index Corrupted Exception! :-)
+
+Wow!
+
+I think this issue involves more stuff than just lucene... I had some 
+problems in my JVM IO buffer handling of course. But my point(s) is the 
+both above... ;-)
+
+[]s,
+
+Lucas
+
+
+
+
+Michael McCandless wrote:
+>
+> I couldn't quite follow the part about "_al1.cfs".
+>
+> It sounds like your indexing process hit a disk full event, that led 
+> to this error? Can you post the full exception(s) from the disk full?
+>
+> Which version of Lucene are you using?
+>
+> Mike
+>
+> Lucas F. A. Teixeira wrote:
+>> Hello all!
+>>
+>> I had a problem this week, and I like to share with you all.
+>> My weblogic server that generate my index hrows its logs in a shared 
+>> storage. During my indexing process (SOLR+Lucene), this shared 
+>> storage became 100% full, and everything collapsed (all servers that 
+>> uses this shared storage). But my index (that is generated in the 
+>> local filesystem, just "grabbed" some logs of the server (who knows 
+>> weblogic knows the managed server accesslog, that's the guy) from the 
+>> buffer (my supposition), and put inside my index files! Take a look 
+>> how my "_al1.cfs" became between some binary parts of the file:
+>>
+>> 2008-03-19    -    02:31:03    -    [ip]    -    POST    -    200    
+>> -    /AcomProductSyncServiceWeb/AcomProductSyncService
+>> 2008-03-19    -    02:31:03    -    [ip]    -    POST    -    200    
+>> -    /AcomProductSyncServiceWeb/AcomProductSyncService
+>> 2008-03-19    -    02:31:04    -    [ip]    -    POST    -    200    
+>> -    /AcomProductSyncServiceWeb/AcomProductSyncService
+>> 2008-03-19    -    02:31:04    -    [ip]    -    POST    -    200    
+>> -    /AcomProductSyncServiceWeb/AcomProductSyncService
+>> 2008-03-19    -    02:31:04    -    [ip]    -    POST    -    200    
+>> -    /AcomProductSyncServiceWeb/AcomProductSyncService
+>>
+>> The most incredible thing, is that I can open the index without a 
+>> CorruptedIndexException, normally. That's really bad for me, cause 
+>> the application didn't warn about a corrupted index (of course, it is 
+>> not). I can open it with the Luke App, and with this simple code 
+>> snippet accessing directly the lucene index without solr:
+>>
+>>        IndexReader indexReader = 
+>> IndexReader.open(FSDirectory.getDirectory("C/index/index.2008-03-19"));
+>>        IndexSearcher indexSearcher = new IndexSearcher(indexReader);
+>>              TermQuery termQuery = new TermQuery(new Term("itemId", 
+>> "680804"));
+>>        Hits hits = indexSearcher.search(termQuery);
+>>              Iterator itHits = hits.iterator();
+>>        while (itHits.hasNext()) {
+>>            Hit hit = (Hit) itHits.next();
+>>            Document document = hit.getDocument();
+>>            String itemId = document.getField("itemId").stringValue();
+>>            System.out.println("itemId="+itemId);
+>>        }
+>>              indexSearcher.close();
+>>        indexReader.close();
+>>
+>>
+>> Ok, ok. But, if it's opening, whats my real problem?  Making this 
+>> little search above, the Document that I got, was another one, with 
+>> other information different from the original one that I was looking 
+>> for (the one with the itemId field = 680804). The whole document was 
+>> another document (but a valid document, that I've indexed before). 
+>> The itemId value that I got, the one that was printed from that 
+>> application above was 578340. Wow!!
+>>
+>> I can reproduce this error anytime with this code or with luke on 
+>> this corrupted index, but was terrible for me to find the exact point 
+>> of this fault.
+>>
+>> I've reindexed everything, it solves my problem. But I wants to know 
+>> if someone have any idea why this happened...
+>>
+>> Thanks people!
+>>
+>> []s,
+>>
+>> Lucas Teixeira
+>> lucas.teixeira@accurate.com.br
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

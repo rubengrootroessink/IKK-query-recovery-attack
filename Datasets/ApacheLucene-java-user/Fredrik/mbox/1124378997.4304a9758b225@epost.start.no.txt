@@ -1,0 +1,98 @@
+FROM: Fredrik <fred...@start.no>
+SUBJECT: OutOfMemory error when searching
+DATE: 18 Aug 2005
+
+We have an index with approximately 1,2 million documents. Web site
+users search this index, but we get sporadic out of memory errors,
+as Lucene tries to allocate over 500 MB of memory.
+
+Opening the index with Luke, I can see the following:
+Number of fields: 17
+Number of documents: 1165726
+Number of terms: 6721726
+
+The size of the index is approx 5,3 GB.
+Lucene version is 1.4.3.
+
+The index contains Norwegian terms, but lots of inline HTML, etc
+is probably increasing the index term count (should 'wash' these
+unwanted terms away when indexing documents). The analysis below
+shows that TermInfosReader.java:132 -> get() is trying to allocate
+a huge memory slab.
+
+----------- analysis -----------
+<AF[338]: Allocation Failure. need 532676624 bytes, 105670 ms since last AF>
+<AF[338]: managing allocation failure, action=2 (64317856/2044721664)>
+<GC(750): GC cycle started Thu Jun 9 10:48:00 2005
+<GC(750): freed 593221816 bytes, 32% free (657539672/2044721664), in 10944 ms>
+<GC(750): mark: 2888 ms, sweep: 239 ms, compact: 7817 ms>
+<GC(750): refs: soft 0 (age >= 32), weak 356, final 1083, phantom 0>
+<GC(750): moved 16099123 objects, 1183312592 bytes, reason=1, used 13328 more bytes>
+<AF[338]: managing allocation failure, action=3 (657539672/2044721664)>
+<AF[338]: managing allocation failure, action=4 (657539672/2044721664)>
+<AF[338]: managing allocation failure, action=6 (657539672/2044721664)>
+JVMDG217: Dump Handler is Processing OutOfMemory - Please Wait.
+---------- end of analysis ------------
+
+An analysis of the heap dump shows that the two largest contiguous
+memory segmets at the time, was 512,230,096 and 137,232,560 bytes large.
+
+'need 532676624 bytes' means that something is allocating a 500Mb slab
+of memory.
+'action=2' means that this much memory was not available at all; and it
+goes through a normal GC cycle. The GC cycle needs to perform a
+compaction to be able to make a 500Mb slab available, which takes around
+8 seconds.
+'action=3', 4 and 6 indicate that the compaction did not help, and that
+even though there is around 650Mb free space in the heap, there is no
+block large enough to hold the requestet array.
+
+This, in turn triggers a normal OutOfMemory, which we have configured to
+trigger a thread dump. (see below)
+
+--------- thread dump -------------
+1XMCURTHDINFO Current Thread Details
+NULL ----------------------
+3XMTHREADINFO "tcpConnection-6802-91" (TID:10D10D70, sys_thread_t:A3A96D50,
+state:R, native ID:4F8097) prio=5
+4XESTACKTRACE at
+org.apache.lucene.index.TermInfosReader.get(TermInfosReader.java:132)
+4XESTACKTRACE at
+org.apache.lucene.index.SegmentReader.docFreq(SegmentReader.java:253)
+4XESTACKTRACE at
+org.apache.lucene.search.IndexSearcher.docFreq(IndexSearcher.java:69)
+4XESTACKTRACE at org.apache.lucene.search.Similarity.idf(Similarity.java:255)
+4XESTACKTRACE at
+org.apache.lucene.search.TermQuery$TermWeight.sumOfSquaredWeights(TermQuery.java:47)
+4XESTACKTRACE at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(BooleanQuery.java:110)
+4XESTACKTRACE at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.sumOfSquaredWeights(BooleanQuery.java:110)
+4XESTACKTRACE at org.apache.lucene.search.Query.weight(Query.java:86)
+4XESTACKTRACE at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:85)
+4XESTACKTRACE at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:64)
+4XESTACKTRACE at org.apache.lucene.search.Hits.<init>(Hits.java:43)
+4XESTACKTRACE at org.apache.lucene.search.Searcher.search(Searcher.java:33)
+[lots more non-apache stuff underneath cropped]
+--------- end thread dump -------------
+
+The thread dump indicates that it is lucene which is the culprit, trying
+to allocate the 500+Mb slab. What is interesting is that the number of
+bytes it tries to allocate is exactly the same every time (532676624 bytes)
+
+Can anyone please help me out here? Have anyone experienced similar problems
+(and solved them)?
+
+Thank you,
+Fredrik Omland
+
+-------------------------------------------------------------------------
+Start.no tilbyr nå raskere bredbånd til lavere pris.
+Sjekk http://www.start.no/bredband/ for mer informasjon
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

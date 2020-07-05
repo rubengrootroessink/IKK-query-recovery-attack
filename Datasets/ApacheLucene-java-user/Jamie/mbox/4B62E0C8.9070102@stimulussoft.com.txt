@@ -1,0 +1,140 @@
+FROM: Jamie <ja...@stimulussoft.com>
+SUBJECT: Re: Email Filter using Lucene 3.0
+DATE: 29 Jan 2010
+
+Hi Uwe
+
+Thanks so much for your help. I now understand Token Filters much better 
+and your suggestion worked! Here's the code for anyone else who is 
+interested.
+
+import org.apache.commons.logging.*;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.tokenattributes.TermAttribute;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.Stack;
+
+/* Many thanks to Michael J. Prichard" <michael_prich...@mac.com> for his
+  * original the email filter code. It is rewritten. */
+
+public class EmailFilter extends TokenFilter  implements Serializable {
+
+     LinkedList<String> partsList = null;
+     TermAttribute termAtt = null;
+
+     public EmailFilter(TokenStream in) {
+         super(in);
+         termAtt = addAttribute(TermAttribute.class);
+     }
+
+     public final boolean incrementToken() throws java.io.IOException {
+
+         if (partsList!=null && !partsList.isEmpty()) {
+             clearAttributes();
+             termAtt.setTermBuffer(partsList.removeFirst());
+             return true;
+         } else {
+             if (!input.incrementToken()) return false;
+             String emailAddress = termAtt.term();
+             emailAddress = emailAddress.replaceAll("<", "");
+             emailAddress = emailAddress.replaceAll(">", "");
+             emailAddress = emailAddress.replaceAll("\"", "");
+             partsList = extractEmailParts(emailAddress);
+             return incrementToken();
+         }
+     }
+
+     private LinkedList<String> extractWhitespaceParts(String email) {
+         String[] whitespaceParts = email.split(" ");
+         LinkedList<String> partsList = new LinkedList<String>();
+         for (int i=0; i < whitespaceParts.length; i++) {
+             partsList.add(whitespaceParts[i]);
+         }
+         return partsList;
+     }
+
+     private LinkedList<String> extractEmailParts(String email) {
+
+         if (email.indexOf('@')==-1)
+             return extractWhitespaceParts(email);
+
+         LinkedList<String> partsList = new LinkedList<String>();
+
+         LinkedList<String> whitespaceParts = extractWhitespaceParts(email);
+
+         for (String whitespacePart : whitespaceParts) {
+
+              if (whitespacePart.indexOf('@')==-1)
+                  partsList.add(whitespacePart);
+              else {
+                  partsList.add(whitespacePart);
+                  String[] splitOnAmpersand = whitespacePart.split("@");
+                  try {
+                      partsList.add(splitOnAmpersand[0]);
+                      partsList.add(splitOnAmpersand[1]);
+                  } catch (ArrayIndexOutOfBoundsException ae) {}
+
+                 if (splitOnAmpersand.length > 0) {
+                     String[] splitOnDot = splitOnAmpersand[0].split("\\.");
+                      for (int i=0; i < splitOnDot.length; i++) {
+                          partsList.add(splitOnDot[i]);
+                      }
+                 }
+                 if (splitOnAmpersand.length > 1) {
+                     String[] splitOnDot = splitOnAmpersand[1].split("\\.");
+                     for (int i=0; i < splitOnDot.length; i++) {
+                         partsList.add(splitOnDot[i]);
+                     }
+
+                     if (splitOnDot.length > 2) {
+                         String domain = splitOnDot[splitOnDot.length-2] 
++ "." + splitOnDot[splitOnDot.length-1];
+                         partsList.add(domain);
+                     }
+                 }
+              }
+          }
+         return partsList;
+     }
+
+}
+
+On 2010/01/29 02:58 PM, Uwe Schindler wrote:
+> Here another variant without a recursion:
+>
+> In ctor:
+>
+> 	Define a class member (!!!) LinkedList<String>  for your splitted email addresses,
+initially empty
+> 	termAtt = addAttribute(TermAttribute.class);
+>
+> In incrementToken:
+>
+> While (true) {
+> 	if (!linkedlist.isEmpty()) {
+> 		clearAttributes(); // important, do this only here, if you do it in the filter part
+you will break your stream!!!!
+> 		termAtt.setTermBuffer(linkedList.removeFirst());
+> 		// set eventually offsets and so on in the other attributes
+> 		return true;
+> 	} else {
+> 		if (!input.incrementToken()) return false;
+> 		read the term (the one input generated) text using termAtt.term() (no need for new
+String, termAtt is the one registered in ctor)
+> 		split your term into the token parts and add all token parts to the linkedList<String>
+ above
+> 	}
+>    
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

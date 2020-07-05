@@ -1,0 +1,74 @@
+FROM: Ype Kingma <ykin...@xs4all.nl>
+SUBJECT: RE: Index Locked For Write
+DATE: 26 Feb 2002
+
+Mark,
+
+>I am not a Lucene expert but I would like to understand the threading issues
+>also, and I'm wondering if the following is true when using Lucene in a
+>multithreaded application.
+>
+>I understand there are three modes for using IndexReader and IndexWriter:
+>
+>A- IndexReader for reading only, not deleting
+>B- IndexReader for deleting (and reading)
+>C- IndexWriter (for adding and optimizing)
+>
+>Any number of readers may be used concurrently in mode A.  But for B and C
+>the reader or writer may not be kept open for long periods.  Write
+>operations create a lock, and closing the reader or writer is the only way
+>to release the lock.  In theory a single writer could be kept open, but its
+>lock will prevent deletions (which are performed with a separate reader).
+>
+>Therefore for B and C each set of changes should be made inside a
+>synchronized block where the reader or writer is opened and closed.  This
+>prevents multiple writers (or readers used for deleting) from being open at
+>once.  The synchronization should be done on an object that identifies a
+>particular index, e.g., on a global object if there is only one index.  For
+>example:
+
+This is exactly how I understand things. I have written a LuceneDb
+class that works mostly in this way, except that it will keep an index
+reader and an index searcher open once they are opened. There is also a
+method to close these in case they are open.
+Opening an index reader is not really fast, so it pays to keep it open.
+
+Lucene itself should provide some or most of the locking needed for this.
+However I managed to get inconsistencies (ie. exceptions about wrong
+doc order during optimize()) probably due to 'unusual' semantics of
+the underlying file system. To solve this I provided my own locking
+in the LuceneDb class.
+
+I wrote methods for the A case, the B/C case and the C case
+visiting an index reader and/or an index writer as appropriate.
+Cases B and C need to be under the same lock when you are
+deleting old docs and inserting new ones.
+The B/C and C cases always end with both the reader/searcher
+and the writer closed.
+For searching an index searcher is also needed so there is
+another method to visit both a reader and a searcher, case D.
+
+I use Doug Lea's util.concurrent read/write lock, readers for
+cases A and D, writers for cases B/C and C.
+To open the reader and the searcher there is a separate lock to prevent
+races between readers/searchers.
+Finally I put a semaphore around the readers to limit the nr of
+concurrent readers to a maximum.
+
+The whole thing works fine now, despite the underlying file system.
+It keeps a dozen lucene db's (half a gig) open for searching with very
+acceptable speed. And it's written in Jython, so I need only
+half the number of lines...
+
+<snip rest>
+
+Regards,
+Ype
+
+-- 
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

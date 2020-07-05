@@ -1,0 +1,147 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Issues with escaping special characters
+DATE: 15 May 2009
+
+First, kudos for making this test and attaching it. If nothing else that
+makesme curious to see whether I really understand what's going on or not.
+
+I think you're looking at the wrong tab in Luke <G>... I modified your test
+to
+write to an FSDir. When you look at the "overview" tab, you'll see three
+terms
+"ghostbusters", "parenth" and "eses". Terms are the things searched. The
+places you're seeing "(Parenth+esis" is when Luke is trying to show you the
+*document* and using the stored values.
+
+For instance, in the "documents" tab, when you see your document, the
+"value"
+column is "(Parenth+eses", but that's the stored value, not the indexed
+terms.
+If you click the "first term" button in the upper right, you'll see "eses",
+and clicking
+through the next terms shows "ghostbusters" and "parenth".
+
+Have you tried WhitespaceAnalyzer? That one breaks things up only on
+whitespace. Beware, that that's *all* it does so things like case can mess
+you up. But you can easily construct your own Analyzer and/or pre-process
+your inputs (both at index and query time) to handle case, whichever
+you're more comfortable with (making your own analyzer is much more
+elegant).
+
+All making your own analyzer will have to do in this case is string together
+some of the pre-existing filters into a TokenStream in a class subclassed
+from Anayzer.
+
+So no, this is NOT only a index issue, it's an Analyzer issue (hence the
+advice to use the same analyzer at index and query times). The behavior
+is as expected and I doubt it's worth a JIRA since constructing special-
+purpose analyzer and using it is pretty easy. Although if you can convince
+the committers that this is a common enough use case and wanted to
+create such an analyzer they'd be happy to put it in the contrib area.
+
+Best
+Erick
+
+
+On Thu, May 14, 2009 at 9:19 PM, Ari Miller <ari1974@gmail.com> wrote:
+
+> I buy your theory that StandardAnalyzer is breaking up the stream, and that
+> this might be an indexing issue, rather than a query issue.  When I look at
+> my index in Luke, as far as I can tell the literal (Parenth+eses is stored,
+> not the broken up tokens.  Also, I can't seem to find an Analyzer that
+> doesn't suffer from these issues.
+>
+> I've created a standalone test case that demonstrates the current
+> behavior.  I've attached it to this email.  It should just require junit and
+> lucene. It might actually be useful in general for anyone trying to figure
+> out various Lucene behaviors.
+>
+> At a high level, am I correctly understanding that Lucene doesn't support
+> searching on indexed special characters without significant additional
+> machinations?  If so, has anyone gone through those machinations and posted
+> a link :)?  Given the test case, is this worthy of a JIRA issue?
+>
+>
+> On Thu, May 14, 2009 at 4:59 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+>
+>> I suspect that what's happening is that StandardAnalyzer is breaking
+>> your stream up on the "odd" characters. All escaping them on the
+>> query does is insure that they're not interpreted by the parser as (in
+>> this case), the beginning of a group and a MUST operator. So, I
+>> claim it correctly feeds (Parenth+eses to the analyzer, which then
+>> breaks it up into the tokens you indicated.
+>>
+>> Assuming you've tried to index this exact string with StandardAnalyzer,
+>> if you looked in your index (say with Luke), you'd see that "parenth" and
+>> "esis" were the tokens indexed.
+>>
+>> Warning: I haven't used the ngram tokenizers, so I know just enough to
+>> be dangerous. That said, you could tokenize these as ngrams. I'm not sure
+>> what the base ngram tokenizer does with your special characters, but you
+>> could pretty easily create your own analyzer that spits out, say, 2-(or
+>> whatever)
+>> grams and use that to index and search, possibly using a second field(s)
+>> for
+>> the data you wanted to treat this way...
+>>
+>> HTH
+>> Erick
+>>
+>> On Thu, May 14, 2009 at 7:18 PM, Ari Miller <ari1974@gmail.com> wrote:
+>>
+>> > Say I have a book title, literally:
+>> >
+>> > (Parenth+eses
+>> >
+>> > How would I do a search to find exactly that book title, given the
+>> presence
+>> > of the ( and + ?  QueryParser.escape isn't working.
+>> > I would expect to be able to search for (Parenth+eses  [exact match] or
+>> > (Parenth+e  [partial match]
+>> > I can use QueryParser.escape to escape out the user search term, but
+>> > feeding
+>> > that to QueryParser with a StandardAnalyzer doesn't return what I would
+>> > expect.
+>> >
+>> > For example, (Parenth+eses --> QueryParser.escape --> \(Parenth\+eses,
+>> when
+>> > parsed becomes:
+>> > PhraseQuery:
+>> >    Term:parenth
+>> >    Term:eses
+>> >
+>> > Note that the escaped special characters seem to be turned into spaces,
+>> not
+>> > used literally.
+>> > Up to this point, even attempting to directly create an appropriate
+>> query
+>> > (PrefixQuery, PhraseQuery, TermQuery, etc.), I've been unable to come up
+>> > with a query that will match the text with special characters and only
+>> that
+>> > text.
+>> > My longer term goal is to be able to take a user search term, identify
+>> it
+>> > as
+>> > a literal term (nothing inside should be treated as lucene special
+>> > characters), and do a PrefixQuery with that literal term.
+>> >
+>> > In case it matters, the field I'm searching on is indexed, tokenized,
+>> and
+>> > stored.
+>> >
+>> > Potentially relevant existing JIRA issues:
+>> > http://issues.apache.org/jira/browse/LUCENE-271
+>> > http://issues.apache.org/jira/browse/LUCENE-588
+>> >
+>> > Thanks,
+>> > Ari
+>> >
+>>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+

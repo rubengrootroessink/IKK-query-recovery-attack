@@ -1,0 +1,141 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: ArrayIndexOutOfBounds exception with >2000 files
+DATE: 30 Oct 2001
+
+That looks like a bug.  I guess folks have not built large RAM-based indexes
+much.  I know I haven't.
+
+Try replacing the definition of RAMInputStream.readInternal() with:
+
+  public final void readInternal(byte[] dest, int destOffset, int len) {
+    int remainder = len;
+    int start = pointer;
+    while (remainder != 0) {
+      int bufferNumber = start/InputStream.BUFFER_SIZE;
+      int bufferOffset = start%InputStream.BUFFER_SIZE;
+      int bytesInBuffer = InputStream.BUFFER_SIZE - bufferOffset;
+      int bytesToCopy = bytesInBuffer >= remainder ? remainder :
+bytesInBuffer;
+      byte[] buffer = (byte[])file.buffers.elementAt(bufferNumber);
+      System.arraycopy(buffer, bufferOffset, dest, destOffset, bytesToCopy);
+      destOffset += bytesToCopy;
+      start += bytesToCopy;
+      remainder -= bytesToCopy;
+    }
+    pointer += len;
+  }
+
+Tell me whether this fixes things for you.
+
+Doug
+
+> -----Original Message-----
+> From: Peck, Jason [mailto:Jason.Peck@McKesson.com]
+> Sent: Tuesday, October 30, 2001 12:55 PM
+> To: 'lucene-user@jakarta.apache.org'
+> Subject: ArrayIndexOutOfBounds exception with >2000 files
+> 
+> 
+> Has anybody gotten the following exception when trying to 
+> search an index
+> with a large number of files (>2000)?
+> 
+>     [junit] java.lang.ArrayIndexOutOfBoundsException
+>     [junit]     at java.lang.System.arraycopy(Native Method)
+>     [junit]     at
+> org.apache.lucene.store.RAMInputStream.readInternal(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.store.InputStream.readBytes(Unknown
+> Source)
+>     [junit]     at org.apache.lucene.index.SegmentReader.norms(Unknown
+> Source)
+>     [junit]     at org.apache.lucene.index.SegmentReader.norms(Unknown
+> Source)
+>     [junit]     at 
+> org.apache.lucene.search.TermQuery.scorer(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.search.BooleanQuery.scorer(Unknown
+> Source)
+>     [junit]     at 
+> org.apache.lucene.search.Query.scorer(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.search.IndexSearcher.search(Unknown
+> Source)
+>     [junit]     at 
+> org.apache.lucene.search.Hits.getMoreDocs(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.search.Hits.<init>(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.search.Searcher.search(Unknown Source)
+>     [junit]     at 
+> org.apache.lucene.search.Searcher.search(Unknown Source)
+>     [junit]     at
+> mmg.svc.lucene.LuceneIndex.searchKeywords(LuceneIndex.java:119)
+> 
+> As you can see I am using the RAMDirectory as the storage for 
+> my index.  The
+> following code is used to search the index for the keyword provided:
+> 
+>             Searcher searcher = new IndexSearcher(m_index);   
+>             Analyzer analyzer = new StopAnalyzer();
+>             Query query = QueryParser.parse(exp, 
+> IndexedFile.KEYWORD_FIELD,
+> analyzer);
+>             Hits hits = searcher.search(query);
+> 
+> The exception is thrown from the Searcher.search() method.  I 
+> did a little
+> bit of research and found that in the 
+> RAMInputStream.readInternal() method
+> it is trying to read (6218 - 1024) bytes from the second buffer in the
+> RAMFile object.  Well the buffer size is only 1024 so the exception is
+> thrown.  It looks like it was assumed that any RAMFile object 
+> will have at
+> most 2 buffers (ie. max 2048 bytes).  Another peculiar piece 
+> of information
+> is that that 6218 number just so happens to be the exact 
+> number of files
+> that I indexed.
+> 
+> Any help would be greatly appreciated.
+> 
+> 
+> ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> Jason Peck
+> Senior Software Engineer
+> 
+> McKesson Health Solutions Group
+> 335 Interlocken Parkway
+> Broomfield, CO 80021
+> (303) 664-6359
+> jason.peck@mckesson.com
+> 
+> 
+>  
+>  
+>  
+> ______________________________________________________________
+> _____________
+> CONFIDENTIALITY NOTICE: This e-mail message, including any 
+> attachments, is 
+> for the sole use of the intended recipient(s) and may contain 
+> confidential 
+> and privileged information.  Any unauthorized review, use, 
+> disclosure or 
+> distribution is prohibited.  If you are not the intended 
+> recipient, please 
+> contact the sender by reply e-mail and destroy all copies of 
+> the original 
+> message.
+> 
+> --
+> To unsubscribe, e-mail:   
+<mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail:
+<mailto:lucene-user-help@jakarta.apache.org>
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

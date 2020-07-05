@@ -1,0 +1,233 @@
+FROM: Grant Ingersoll <gsing...@apache.org>
+SUBJECT: Re: Fine Tuning Lucene implementation
+DATE: 25 Jul 2007
+
+Hi Askar,
+
+I suggest we take a step back, and ask the question, what are you  
+trying to accomplish?  That is, what is your application trying to  
+do?  Forget the code, etc. just explain what you want the end result  
+to be and we can work from there.   Based on what you have described,  
+I am not sure you need access to the hits.  It seems like you just  
+need to make better queries.
+
+Is your itemID a unique identifier?  If yes, then you shouldn't need  
+to loop over hits at all, as you should only ever have one result IF  
+your query contains a required term.  Also, if this is the case, why  
+do you need to do a search at all?  Haven't you already identified  
+the items of interest when you did your select query in the  
+database?  Or is it that you want to score the item based on some  
+terms as well.  If that is the case, there are other ways of doing  
+this and we can discuss them.
+
+-Grant
+
+On Jul 25, 2007, at 10:10 AM, Askar Zaidi wrote:
+
+> Hey Guys,
+>
+> I need to know how I can use the HitCollector class ? I am using  
+> Hits and
+> looping over all the possible document hits (turns out its 92 times  
+> I am
+> looping; for 300 searches, its 300*92 !!). Can I avoid this using
+> HitCollector ? I can't seem to understand how its used.
+>
+> thanks a lot,
+>
+> Askar
+>
+> On 7/25/07, Dmitry <dmitrytkach1@hotmail.com> wrote:
+>>
+>> Askar,
+>> why do you need to add +id:<idWeCareAbout>?
+>> thanks,
+>> dt,
+>> www.ejinz.com
+>> search engine news forms
+>> ----- Original Message -----
+>> From: "Askar Zaidi" <askar.zaidi@gmail.com>
+>> To: <java-user@lucene.apache.org>; <nhira@cognocys.com>
+>> Sent: Wednesday, July 25, 2007 12:39 AM
+>> Subject: Re: Fine Tuning Lucene implementation
+>>
+>>
+>>> Hey Hira ,
+>>>
+>>> Thanks so much for the reply. Much appreciate it.
+>>>
+>>> Quote:
+>>>
+>>> Would it be possible to just include a query clause?
+>>>   - i.e., instead of just contents:<userQuery>, also add
+>>> +id:<idWeCareAbout>
+>>>
+>>> How can I do that ?
+>>>
+>>> I see my query as :
+>>>
+>>> +contents:harvard +contents:business +contents:review
+>>>
+>>> where the search phrase was: harvard business review
+>>>
+>>> Now how can I add +id:<idWeCareAbout>  ??
+>>>
+>>> This would give me that one exact document I am looking for , for  
+>>> that
+>> id.
+>>> I
+>>> don't have to iterate through hits.
+>>>
+>>> thanks,
+>>>
+>>> Askar
+>>>
+>>>
+>>>
+>>> On 7/24/07, N. Hira <nhira@cognocys.com> wrote:
+>>>>
+>>>> I'm no expert on this (so please accept the comments in that  
+>>>> context)
+>>>> but 2 things seem weird to me:
+>>>>
+>>>> 1.  Iterating over each hit is an expensive proposition.  I've  
+>>>> often
+>>>> seen people recommending a HitCollector.
+>>>>
+>>>> 2.  It seems that doBodySearch() is essentially saying, do this  
+>>>> search
+>>>> and return the score pertinent to this ID (using an exhaustive  
+>>>> loop).
+>>>> Would it be possible to just include a query clause?
+>>>>     - i.e., instead of just contents:<userQuery>, also add
+>>>> +id:<idWeCareAbout>
+>>>>
+>>>> In general though, I think your algorithm seems inefficient (if I
+>>>> understand it correctly):-- if I want to search for one term  
+>>>> among 3 in
+>>>> a "collection" of 300 documents (as defined by some external
+>> attribute),
+>>>> I will wind up executing 300 x 3 searches, and for each search  
+>>>> that is
+>>>> executed, I will iterate over every Hit, even if I've already  
+>>>> found the
+>>>> one that I "care about".
+>>>>
+>>>> What would break if you:
+>>>> 1.  Included "creator" in the Lucene index (or, filtered out the  
+>>>> Hits
+>>>> using a BitSet or something like it)
+>>>> 2.  Executed 1 search
+>>>> 3.  Collected the results of the first N Hits (where N is some
+>>>> reasonable limit, like 100 or 500)
+>>>>
+>>>> -h
+>>>>
+>>>>
+>>>> On Tue, 2007-07-24 at 20:14 -0400, Askar Zaidi wrote:
+>>>>
+>>>>> Sure.
+>>>>>
+>>>>>  public float doBodySearch(Searcher searcher,String query, int  
+>>>>> id){
+>>>>>
+>>>>>                  try{
+>>>>>                                 score = search(searcher,  
+>>>>> query,id);
+>>>>>                      }
+>>>>>                       catch(IOException io){}
+>>>>>                       catch(ParseException pe){}
+>>>>>
+>>>>>                       return score;
+>>>>>
+>>>>>                 }
+>>>>>
+>>>>>  private float search(Searcher searcher, String queryString,  
+>>>>> int id)
+>>>>> throws ParseException, IOException {
+>>>>>
+>>>>>         // Build a Query object
+>>>>>
+>>>>>         QueryParser queryParser = new QueryParser("contents", new
+>>>>> KeywordAnalyzer());
+>>>>>
+>>>>>         queryParser.setDefaultOperator(QueryParser.Operator.AND);
+>>>>>
+>>>>>         Query query = queryParser.parse(queryString);
+>>>>>
+>>>>>         // Search for the query
+>>>>>
+>>>>>         Hits hits = searcher.search(query);
+>>>>>         Document doc = null;
+>>>>>
+>>>>>         // Examine the Hits object to see if there were any  
+>>>>> matches
+>>>>>         int hitCount = hits.length();
+>>>>>
+>>>>>                 for(int i=0;i<hitCount;i++){
+>>>>>                 doc = hits.doc(i);
+>>>>>                 String str = doc.get("item");
+>>>>>                 int tmp = Integer.parseInt(str);
+>>>>>                 if(tmp==id)
+>>>>>                 score = hits.score(i);
+>>>>>                 }
+>>>>>
+>>>>>         return score;
+>>>>>     }
+>>>>>
+>>>>> I really need to optimize doBodySearch(...) as this takes the most
+>>>>> time.
+>>>>>
+>>>>> thanks guys,
+>>>>> Askar
+>>>>>
+>>>>>
+>>>>> On 7/24/07, N. Hira <nhira@cognocys.com> wrote:
+>>>>>
+>>>>>         Could you show us the relevant source from doBodySearch()?
+>>>>>
+>>>>>         -h
+>>>>>
+>>>>>         On Tue, 2007-07-24 at 19:58 -0400, Askar Zaidi wrote:
+>>>>>> I ran some tests and it seems that the slowness is from
+>>>>>         Lucene calls when I
+>>>>>> do "doBodySearch", if I remove that call, Lucene gives me
+>>>>>         results in 5
+>>>>>> seconds. otherwise it takes about 50 seconds.
+>>>>>>
+>>>>>> But I need to do Body search and that field contains lots
+>> of
+>>>>>         text. The field
+>>>>>> is <contents>. How can I optimize that ?
+>>>>>>
+>>>>>> thanks,
+>>>>>> Askar
+>>>>>>
+>>>>>>
+>>>>
+>>>>
+>>>>
+>>>>
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+
+--------------------------
+Grant Ingersoll
+Center for Natural Language Processing
+http://www.cnlp.org/tech/lucene.asp
+
+Read the Lucene Java FAQ at http://wiki.apache.org/lucene-java/LuceneFAQ
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

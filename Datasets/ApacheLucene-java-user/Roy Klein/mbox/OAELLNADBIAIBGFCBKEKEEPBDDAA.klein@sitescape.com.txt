@@ -1,0 +1,112 @@
+FROM: "Roy Klein" <kl...@sitescape.com>
+SUBJECT: RE: Update performance/indexwriter.delete()?
+DATE: 15 Apr 2005
+
+Hi Hoss,
+
+Thanks very much for your comments.
+
+While batch processing might work in some cases, I believe it's not "safe"
+in mine.
+
+Here's the scenario that I can't guarantee won't happen:
+
+There might be 3 transactions in a very short time span (for example, 1
+second), here's what they are:
+
+1) update doc1 (DEL doc1, ADD doc1)
+2) update doc2 (DEL doc2, ADD doc2)
+3) delete doc1
+
+If I process these in order, then at the end of the 3 transactions, my index
+will only have one document in it, doc2.
+
+
+
+If I batch process these, I'll first do all the deletes, and then do all the
+adds:
+
+1) DEL doc1
+2) DEL doc2
+3) DEL doc1
+4) ADD doc1
+5) ADD doc2
+
+At the end of processing these, my index will have 2 documents, doc1 and
+doc2, which, is incorrect.
+
+
+
+The first thing that comes to mind is that I could look at the transactions
+in the batch queue, and based on the docid, I could make sure to delete all
+the matching ADD docid's in the batch queue whenever a matching DEL comes
+in.   However, that will only work if I know the docid's.  But, what happens
+when the deletes are "term" deletes. My app would have to know how to search
+the ADD docs that are already in the batching queue, and delete the ones
+that match.  While it might be possible, and I could come up with some
+interesting ways to do that (i.e. keep all the batched docs in a ram index,
+and use that to match previously added docs), I think that's probably going
+to be slower than just doing the transactions synchronously.
+
+Another option is that I could process all the entries in the batch queue
+whenever a delete comes in. However, based on the way the application is
+feeding me transactions, that won't be much of an optimization either...
+
+In my mind, the right way to fix this for my application was to have a
+single object(i.e. indexwriter) that could do deletes and adds, so that it
+would be aware of previously added docs whenever the batching queue looked
+like my example above. That's why I wanted to understand more about the
+architecture.
+
+I wonder how unique my application is?  I thought many ecommerce/commercial
+websites would have similar requirements, but, I might be mistaken.
+
+Roy
+
+
+
+
+-----Original Message-----
+From: hossman@hal.rescomp.berkeley.edu
+[mailto:hossman@hal.rescomp.berkeley.edu]On Behalf Of Chris Hostetter
+Sent: Thursday, April 14, 2005 8:19 PM
+To: java-user@lucene.apache.org
+Subject: RE: Update performance/indexwriter.delete()?
+
+
+
+You mentioned before that you can't "batch" your updates ... i can
+understand not being able to batch updates by number of updates -- but why
+can't you batch by time?
+
+It may sound bad to only process updates once an hour, or once every half
+hour, or once every 5 minutes, or even once every 30 seconds ... but if
+you are truely processing your records in such rapid fire succession that
+the cumulative (milli)seconds it takes to open/close the reader and
+open/close the writer for each doc is expensive, then why can't you batch
+on whatever that cumulative time durration is?
+
+Why not write your updater such that waits at most N milliseconds for
+updates to be sent to it, then as long as it recieved at least 1 doc: open
+a reader, deletes all the matching docs, closes the reader, opens a
+writer, add the new versions of the docs, close the writter.
+
+then do some performance tests, and find the optimal value of N, so that
+you are processing docs as fast you possibly can.
+
+	?
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

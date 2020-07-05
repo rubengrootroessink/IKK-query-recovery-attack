@@ -1,0 +1,77 @@
+FROM: Dominik Bruhn <domi...@dbruhn.de>
+SUBJECT: addIndexes getting slower and slower plus eating up Mem
+DATE: 7 Jul 2006
+
+Hy, 
+I use the following code to index about 1 Million Documents to a empty index:
+=============
+	private static void do_searchindex(Connection target) throws 
+SQLException,IOException {
+		int i=1164;
+		PostIndexer.createIndexDir();	//Creates Index-Director
+		IndexWriter fsWriter = new IndexWriter(PostIndexer.getIndexDir(), 
+PostIndexer.getAnalyser(), false);
+		while (do_searchindex(fsWriter,target,i)>0) {
+			i++;
+		}
+		fsWriter.close();
+	}
+
+	private static int do_searchindex(IndexWriter writer,Connection ctarget,int 
+page) throws SQLException,IOException {
+		ResultSet rs = ctarget.createStatement().executeQuery("SELECT 
+postid,db_post.threadid,posttext,db_thread.threadtitle FROM db_post LEFT JOIN 
+db_thread ON (db_thread.threadid=db_post.threadid) ORDER BY postid DESC 
+LIMIT "+(page*500)+",500 ;");
+		int c=0;
+		
+		RAMDirectory ramDir = new RAMDirectory();
+		IndexWriter ramWriter = new IndexWriter(ramDir, PostIndexer.getAnalyser(), 
+true);
+		
+		while (rs.next()) {
+			
+PostIndexer.addToIndex(ramWriter,rs.getInt("postid"),rs.getString("posttext"),rs.getString("threadtitle"));
+			c++;
+		}
+		writer.addIndexes(new Directory[] { ramDir });
+		ramWriter.close();
+		
+		rs.close();
+		System.out.println("Did Page "+page);
+		return(c);		
+	}
+=================
+
+The Code for "PostIndex.addToIndex" is:
+===============
+Document doc = new Document();
+		Field title = new 
+Field("title",threadtitle,Field.Store.NO,Field.Index.TOKENIZED,Field.TermVector.NO);
+		title.setBoost(2);
+		
+		doc.add(title);
+		doc.add(new 
+Field("text",posttext,Field.Store.NO,Field.Index.TOKENIZED,Field.TermVector.YES));
+		doc.add(new Field("id",""+postid,Field.Store.YES, 
+Field.Index.UN_TOKENIZED));
+					
+		writer.addDocument(doc);	
+============
+
+When I run this code the first 500 Entries get added in about 2 seconds. But 
+for the 1167*500 to (1167+1)*500 Entries it takes more than 10 Minutes. Also 
+the RAM-Usage is increasing dramatically. Is this a normal behaviour, or is 
+it a mistake in my code or is it a bug in Lucene? I remeber someone here on 
+the list talking about this problem but cant find the post anymore.
+Thanks
+-- 
+Dominik Bruhn
+mailto: dominik@dbruhn.de
+http://www.dbruhn.de
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

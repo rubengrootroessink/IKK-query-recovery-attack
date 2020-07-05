@@ -1,0 +1,54 @@
+FROM: Doug Cutting <DCutt...@grandcentral.com>
+SUBJECT: RE: results sorting
+DATE: 19 Feb 2002
+
+> From: Chris Opler [mailto:chrisopler@free.fr]
+> 
+> Am wondering if there is any facility to sort search hits by 
+> fields in the
+> Document.
+
+No, there's nothing like this built in to Lucene.
+
+This can be very expensive with large collections, since it requires reading
+a Document object for every hit.  Reading a Document requires a
+random-access disk read.  And when someone includes a common word in a
+query, there can be lots of hits, far more than will ever be viewed by the
+user.
+
+An exception is date sorting, which can be easily implemented using a
+HitCollector.  Documents are delivered to a hit collector in the order they
+were added to the index, so returning the oldest or most recent hits can be
+done without reading field values.  This is discussed more in:
+  http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg00228.html
+Someday this will be built into Lucene...
+
+To implement efficient field sorting for a large collection you could
+construct a fast index of a field (e.g., an in-memory array) and then
+implement a HitCollector which uses this.  For example, you could construct
+an array of floats for a "price" field.  Then your hit collector could do
+something like:
+  class MyCollector implements HitCollector {
+    private float maxPrice = Float.MAX_VALUE;
+    public final void collect(int doc, float score) {
+      float price = prices[doc];
+      if (price <= maxPrice) {
+        hits.add(price, doc);
+        if (hits.size() > maxHitCount) {
+          hits.remove(hits.get(maxPrice));
+          maxPrice = hits.lastKey();
+        }
+      }
+    }
+  }
+
+Also, if your collection is small, you can probably afford to simply
+enumerate all hit documents and sort them as you wish.
+
+Doug
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

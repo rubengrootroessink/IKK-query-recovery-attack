@@ -1,0 +1,87 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: Realtime search best practices
+DATE: 12 Oct 2009
+
+Hi Cedric,
+
+  I don't know of anyone with a substantial throughput production system who
+is doing realtime search with the 2.9 improvements yet (and in fact, no
+serious performance analysis has been done on these even "in the lab" so to
+speak: follow https://issues.apache.org/jira/browse/LUCENE-1577 to track
+work
+on this), so some experimentation will be necessary to know how well it fits
+in your environment.
+
+  Your approach has the basic components of how to do 2.9 NRT search,
+but it's missing the point when you're making your commit() calls.  Your
+choices
+here depend on some tradeoffs, as lucene provides ACID-like transactional
+semantics whereby if you decide to commit() after every add(), then yes,
+getReader() will be up-to-date with the most recent commit(), but at a cost
+of indexing throughput (and much more frequent segment merges), at least
+in comparison to only calling commit() at a slower rate (but calling
+commit()
+less frequently means, of course, that you only have readers as fresh as
+your most recent commit).
+
+  Also, you have to be aware that there are no guarantees as far as
+realtimeliness is concerned with 2.9 NRT - if there is an addIndexes() going
+
+on in anther thread on your IndexWriter, this is another instance where your
+
+getReader() call won't block, but also won't necessarily get access to the
+all of these new segments if the addIndexes() hasn't completed yet.
+
+  Please post here any results you find with this - this is a very new
+feature
+and seeing how it works in the wild would be very helpful to everyone else
+who is interested.
+
+  -jake
+
+On Mon, Oct 12, 2009 at 2:24 AM, melix <cedric.champeau@lingway.com> wrote:
+
+>
+> Hi,
+>
+> I'm going to replace an old reader/writer synchronization mechanism we had
+> implemented with the new near realtime search facilities in Lucene 2.9.
+> However, it's still a bit unclear on how to efficiently do it.
+>
+> Is the following implementation the good way to do achieve it ? The context
+> is concurrent read/writes on an index :
+>
+> 1. create a Directory instance
+> 2. create a writer on this directory
+> 3. on each write request, add document to the writer
+> 4. on each read request,
+>  a. use writer.getReader() to obtain an up-to-date reader
+>  b. create an IndexSearcher with that reader
+>  c. perform Query
+>  d. close IndexSearcher
+> 5. on application close
+>  a. close writer
+>  b. close directory
+>
+> While this seems to be ok, I'm really wondering about the performance of
+> opening a searcher for each request. I could introduce some kind of delay
+> and cache a searcher for some seconds, but I'm not sure it's the best thing
+> to do.
+>
+> Thanks,
+>
+> Cedric
+>
+>
+> --
+> View this message in context:
+> http://www.nabble.com/Realtime-search-best-practices-tp25852756p25852756.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

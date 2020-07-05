@@ -1,0 +1,118 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Turning PrefixQuery into a TermQuery
+DATE: 11 Apr 2007
+
+Rather than using a search, have you thought about using a TermEnum?
+It's much, much, much faster than a query. What it allows you to do
+is enumerate the terms in the index on a per-field basis. Essentially, this
+is what happens when you do a PrefixQuery as BooleanClauses are
+added, but you have very few options for restricting the returned list when
+you use PrefixQuery.
+
+In particular, WildcardTermEnum will allow you to rapidly enumerate
+all the terms that match a particular wildcard pattern and return
+whatever portion of that list you want. I'm not sure it's very valuable
+to the user to return many thousands of terms for suggestions, but
+you'll have to determine that for your situation. But you'll be surprised
+by how fast it is <G>.
+
+Parenthetically, there also exists a RegexTermEnum in the contrib
+area, but in my experience that's significantly slower than
+WildcardTermEnum, which only makes sense since regular expressions
+are intrinsically harder to evaluate than simple wildcards.
+
+What I have in mind is something like returning the first N terms
+that match a particular prefix pattern. Even if you elect not to do this,
+and return all the possibilities, this will be much faster than
+executing a query. And won't run afoul of the TooManyClauses
+exception, you'll only be restricted by available memory. Not to
+mention simplifying your index over the bigram/trigram option <G>.....
+
+BTW, you can alter the limit for returning the TooManyClauses option
+by BooleanQuery.setMaxClauseCount, but I'd really recommend the
+WildCardTermEnum approach first.
+
+Finally, your question about copying an index... it may not be easy.
+Particularly if you have terms that are indexed but not stored, you
+won't be able to reconstruct your documents exactly from the index....
+
+Best
+Erick
+
+On 4/11/07, Steffen Heinrich <lucene-users@atablis.com> wrote:
+>
+> Hello Lucene users,
+>
+> I'm rather new to lucene and java but have done work with other
+> search engines some time before.
+> Right now I'm trying my hands (and luck) on a 'search as you type'-
+> sort of high performance search a la GoogleSuggest.
+>
+> There meanwhile are on the net, a number of examples for such script-
+> driven forms that are suggesting new possible input to the user with
+> every keystroke. Mostly for some sort of products.
+> Some instances are even combining the input from two or more text
+> fields or giving fault tolerant feedback.
+>
+> According to occasional references on this list some people have
+> already tried to implement such a search with lucene but did they
+> succeed?
+>
+> My first idea was to run every completed token of the request
+> (current user input) through a spellchecker and expand an incomplete
+> token to a PrefixQuery.
+>
+> Example:
+> artist:'beetles'
+> title:'yellow submar'
+>
+> Alternative terms for 'beetles' and 'yellow' would be looked up by
+> Spellcheckers for their respective fields and 'submar' being the last
+> token of the active textfield with no trailing whitespace would be
+> turned into a PrefixQuery.
+> And of course the performance considerations have to be of major
+> concern with these searches.
+>
+> I'm currently dealing with the problem that short prefixes are
+> resulting in BooleanQuery$TooManyClauses exceptions.
+> That's why I've thought of discarding them in favour of extra fields
+> with the first bigrams and trigrams of every indexed token.
+>
+> artist:'the beatles'
+> artist_start:'be bea'    ('the' being a stopword)
+> title:'yellow submarine'
+> title_start:'ye yel su sub'
+>
+> Every PrefixQuery of length 2 or 3 could thus be turned into a simple
+> TermQuery on the appropriate field. (With searches for 1-letter-
+> prefixes altogether discarded.)
+>
+> I've seen Otis Gospodnetic suggesting the very same strategy in a
+> former thread but I have no idea about how I could possibly add these
+> extra fields.
+>
+> Normally an IndexWriter uses only one default Analyzer for all its
+> tokenizing businesses. And while it is appearantly possible to supply
+> a certain other instance when adding a specific document there seems
+> to be no way to use different analyzers on different fields within
+> one document.
+>
+> Could this be done in one pass at all, or do I have to copy all
+> documents from one index to a new one, parsing field tokens and
+> adding new fields on the 2nd go?
+>
+> I'd appreciate every hint and suggestion on what classes and methods
+> to write for this purpose because I definitely lack a knack when it
+> comes to OOP.
+>
+>
+> Thank You In Advance,
+> Steffen
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

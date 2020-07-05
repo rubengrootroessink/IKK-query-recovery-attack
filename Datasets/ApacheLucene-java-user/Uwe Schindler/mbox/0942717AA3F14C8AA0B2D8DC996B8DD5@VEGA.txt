@@ -1,0 +1,344 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Question about the extends the query parser to support NumericField on Lucene 2.9.0
+DATE: 22 Oct 2009
+
+If you look into the testcase I provided with my QueryParser example, you
+will see, that the negative numbers have a problem in newTermQuery.
+
+"-" is a control character in QueryParser, which means to do a "NOT" on this
+term. Because of this the syntax of the query is wrong. To hit the negative
+number there is no way around putting the number in quotes: age:"-32":
+
+http://www.lucidimagination.com/search/document/ef7a9dc1444c9d28/how_do_you_
+properly_use_numericfield#de054d728e252174
+
+Sorry, I see no other solution without changing the query parser JavaCC
+syntax. Maybe the new Contrib QueryParser will handle this better in future
+(there is an open issue about that).
+
+Uwe
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+> -----Original Message-----
+> From: java8964 java8964 [mailto:java8964@hotmail.com]
+> Sent: Thursday, October 22, 2009 11:56 PM
+> To: java-user@lucene.apache.org
+> Subject: Question about the extends the query parser to support
+> NumericField on Lucene 2.9.0
+> 
+> 
+> Hi,  I have a problem to work support the NumericField in query parser.
+> 
+> My environment is like this:
+> 
+> Windows XP with
+> C:\work\> java -version
+> java version "1.6.0_10"
+> Java(TM) SE Runtime Environment (build 1.6.0_10-b33)
+> Java HotSpot(TM) Client VM (build 11.0-b15, mixed mode, sharing)
+> 
+> I am using the lucene 2.9.0 releases.
+> 
+> I write my query parser class to support this numeric field, here is copy
+> of the override methods:
+> 
+>     /**
+>      * Create a new range query of query parser.
+>      *
+>      * If the filed is a numeric field, return NumericRangeQuery;
+>      * otherwise, let super class handle it
+>      *
+>      * @param fieldName The file name
+>      * @param part1 The lower bound
+>      * @param part2 The high bound
+>      * @throws IllegalArgumentExceptoin if the field type is not supported
+>      * @throws NumberFormatException if the query data does not match with
+> the field type
+>      */
+>     @Override
+>     protected Query newRangeQuery(String fieldName, String part1, String
+> part2, boolean inclusive)
+>     {
+>         fieldName = fieldName.toLowerCase();
+>         if (LogUtil.getInstance().isDebugEnabled(DcQueryParser.class))
+>         {
+>             LogUtil.getInstance().debug(DcQueryParser.class,
+>                     "Create a new range query for: " + fieldName);
+>         }
+> 
+>         mFieldNames.add(fieldName);
+>         IFieldDefinition fieldDef =
+> mIndexDef.getFieldDefinition(fieldName);
+>         if (part1.trim().startsWith("+"))
+>         {
+>             part1 = part1.substring(1);
+>         }
+>         if (part2.trim().startsWith("+"))
+>         {
+>             part2 = part2.substring(1);
+>         }
+>         if (fieldDef != null && fieldDef.isNumericField())
+>         {
+>             if (fieldDef.getFieldType() == IFieldDefinition.FieldType.INT)
+>             {
+>                 return NumericRangeQuery.newIntRange(fieldDef.getName(),
+> Integer.parseInt(part1), Integer.parseInt(part2), inclusive, inclusive);
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.LONG)
+>             {
+>                   return
+> NumericRangeQuery.newLongRange(fieldDef.getName(), Long.parseLong(part1),
+> Long.parseLong(part2), inclusive, inclusive);
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.FLOAT)
+>             {
+>                    return
+> NumericRangeQuery.newFloatRange(fieldDef.getName(),
+> Float.parseFloat(part1), Float.parseFloat(part2), inclusive, inclusive);
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.DOUBLE)
+>             {
+>                    return
+> NumericRangeQuery.newDoubleRange(fieldDef.getName(),
+> Double.parseDouble(part1), Double.parseDouble(part2), inclusive,
+> inclusive);
+>             }
+>             else
+>             {
+>                 throw new IllegalArgumentException("Unsupported new
+> Numeric field type, as the type is: " + fieldDef.getFieldType().name());
+>             }
+>         }
+>         else
+>         {
+>             return super.newRangeQuery(fieldName, part1, part2,
+> inclusive);
+>         }
+>     }
+> 
+>     /**
+>      * Create a new term query of query parser.
+>      * If the filed is a numeric field, use xxxPrefixCoded
+>      * otherwise, let super class handle it
+>      *
+>      * @param term The term object
+>      * @return The query object
+>      * @throws IllegalArgumentExceptoin if the field type is not supported
+>      * @throws NumberFormatException if the query data does not match with
+> the field type
+>      */
+>     @Override
+>     protected Query newTermQuery(Term term)
+>     {
+>         System.out.println("......................1");
+>         String fieldName = term.field();
+>         if (LogUtil.getInstance().isDebugEnabled(DcQueryParser.class))
+>         {
+>             LogUtil.getInstance().debug(DcQueryParser.class,
+>                     "Create a new term query for: " + fieldName);
+>         }
+> 
+>         mFieldNames.add(fieldName);
+>         IFieldDefinition fieldDef =
+> mIndexDef.getFieldDefinition(fieldName);
+>         if (fieldDef != null && fieldDef.isNumericField())
+>         {
+>             System.out.println("......................2");
+>             String queryString = term.text().trim();
+>             if (queryString.startsWith("+"))
+>             {
+>                 queryString.substring(1);
+>             }
+>             if (fieldDef.getFieldType() == IFieldDefinition.FieldType.INT)
+>             {
+>                 return new TermQuery(new Term(term.field(),
+> NumericUtils.intToPrefixCoded(Integer.parseInt(queryString))));
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.LONG)
+>             {
+>                 return new TermQuery(new Term(term.field(),
+> NumericUtils.longToPrefixCoded(Long.parseLong(queryString))));
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.FLOAT)
+>             {
+>                    return new TermQuery(new Term(term.field(),
+> NumericUtils.floatToPrefixCoded(Float.parseFloat(queryString))));
+>             }
+>             else if (fieldDef.getFieldType() ==
+> IFieldDefinition.FieldType.DOUBLE)
+>             {
+>                    return new TermQuery(new Term(term.field(),
+> NumericUtils.doubleToPrefixCoded(Double.parseDouble(queryString))));
+>             }
+>             else
+>             {
+>                 throw new IllegalArgumentException("Unsupported new
+> Numeric field type, as the type is: " + fieldDef.getFieldType().name());
+>             }
+>         }
+>         else
+>         {
+>             return super.newTermQuery(term);
+>         }
+>     }
+> 
+> For my case, range query works as expected. The problem I met now is for
+> the Field query.
+> 
+> Here is my unit test:
+> 
+> I indexed one line data as following:
+> operation,user_id,city,province,country,age,isbn,title,author,pub_year,pub
+> _name,rating
+> A,56,cheyenne,wyoming,usa,-32,671623249,LONESOME DOVE,Larry
+> McMurtry,1986,Pocket,7.0
+> 
+> To make my case simple, I only set the age as type int.
+> Right before I add the field into the document, I have to following
+> statement to check as the output:
+> 
+>             if (fieldDef.isNumericField())
+>             {
+>                 System.out.println("Add the numeric field for name: " +
+> fieldDef.getName() + " and value is " + docFieldValue);
+>                 NumericField numField = new
+> NumericField(fieldDef.getName(), Field.Store.YES, true);
+>                 numField.setLongValue(Long.parseLong(docFieldValue));
+>                 doc.add(numField);
+>             }
+> 
+> which output the following message in my console:
+> ------------------->  Add the numeric field for name: age and value is -32
+> 
+> which proves that I add one numeric field object into the document, the
+> name is 'age', and the value is '-32'.
+> 
+> here is my junit test case:
+>         IndexSearcher searcher = new IndexSearcher(new
+> SimpleFSDirectory(indexDir), true);
+>         MyQueryParser queryParser = new MyQueryParser("age",
+> defaultAnalyzer); --The default analyzer is the stand analyzer in this
+> case.
+>         TopDocs docs = searcher.search(queryParser.parse("age:-32"), 10);
+>         Assert.assertTrue(docs.totalHits == 1);
+> 
+> I expect it will pass, but it gives me back the following error message:
+> 
+>     [junit] Testcase: testBuildIndex took 9.516 sec
+>     [junit]     Caused an ERROR
+>     [junit] Cannot parse 'age:-32': Encountered " "-" "- "" at line 1,
+> column 4.
+>     [junit] Was expecting one of:
+>     [junit]     "(" ...
+>     [junit]     "*" ...
+>     [junit]     <QUOTED> ...
+>     [junit]     <TERM> ...
+>     [junit]     <PREFIXTERM> ...
+>     [junit]     <WILDTERM> ...
+>     [junit]     "[" ...
+>     [junit]     "{" ...
+>     [junit]     <NUMBER> ...
+>     [junit]
+>     [junit] org.apache.lucene.queryParser.ParseException: Cannot parse
+> 'age:-32': Encountered " "-" "- "" at line 1, column 4.
+>     [junit] Was expecting one of:
+>     [junit]     "(" ...
+>     [junit]     "*" ...
+>     [junit]     <QUOTED> ...
+>     [junit]     <TERM> ...
+>     [junit]     <PREFIXTERM> ...
+>     [junit]     <WILDTERM> ...
+>     [junit]     "[" ...
+>     [junit]     "{" ...
+>     [junit]     <NUMBER> ...
+>     [junit]
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.parse(QueryParser.java:181)
+>     [junit]     at
+> nokia.dc.server.build.index.IndexBuilderTest.testBuildIndex(IndexBuilderTe
+> st.java:236)
+>     [junit] Caused by: org.apache.lucene.queryParser.ParseException:
+> Encountered " "-" "- "" at line 1, column 4.
+>     [junit] Was expecting one of:
+>     [junit]     "(" ...
+>     [junit]     "*" ...
+>     [junit]     <QUOTED> ...
+>     [junit]     <TERM> ...
+>     [junit]     <PREFIXTERM> ...
+>     [junit]     <WILDTERM> ...
+>     [junit]     "[" ...
+>     [junit]     "{" ...
+>     [junit]     <NUMBER> ...
+>     [junit]
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.generateParseException(QueryPars
+> er.java:1822)
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.jj_consume_token(QueryParser.jav
+> a:1704)
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.Clause(QueryParser.java:1331)
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.Query(QueryParser.java:1241)
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.TopLevelQuery(QueryParser.java:1
+> 230)
+>     [junit]     at
+> org.apache.lucene.queryParser.QueryParser.parse(QueryParser.java:176)
+> 
+> My question is about to support the FieldQuery in this case. As I said,
+> the RangeQuery works as I expect.
+> 
+> The question is:
+> 
+> 1) The above prove that I set the field name to 'age', which matched the
+> query field name I put in the query parser. Why I got the above error?
+> 2) I override the newTermQuery method. I am thinking that it sould be
+> invoked in this case. As you can see, I system.out a line in the first
+> statement. But before the above error show up, I didn't see that line
+> output, which menas the execution is not reach to newTermQuery method when
+> the error happened.
+> 3) I did as above is I saw a few days ago, there is a discussion about the
+> same topic. So I just basically copy the idea from "Uwe Schindler" code.
+> My more general question is that when should we override the newXXX
+> method(), or when should we override getXXXX method? What is the
+> difference between them?
+> 4) As you can see my above example, we want to support the query string
+> for numerice field with '+' in it. Even java won't support it and throw
+> NumberFormat Exception, but my case need to support it. So I will remove
+> it from the query string and then send to the super class. I would like to
+> know it won't cause ParseException before it reaches my override methods.
+> 5) As these numeric field features, The query parser class methods did NOT
+> throw ParserException in the method signature. But if I want to catch
+> NumberFormatException, then rethrow ParserException, so my client only
+> need to worry the ParseException. But the ParseException is a regular
+> exception, and I can NOT add it into the override method signture. Any
+> work around?
+> 
+> Thanks for your kind help.
+> 
+> 
+> 
+> 
+> _________________________________________________________________
+> Windows 7: It helps you do more. Explore Windows 7.
+> http://www.microsoft.com/Windows/windows-
+> 7/default.aspx?ocid=PID24727::T:WLMTAGL:ON:WL:en-
+> US:WWL_WIN_evergreen3:102009
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

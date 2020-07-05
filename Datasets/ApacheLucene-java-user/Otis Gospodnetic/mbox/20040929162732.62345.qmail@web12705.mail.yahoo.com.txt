@@ -1,0 +1,196 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: RE: Memory usage: IndexSearcher & Sort
+DATE: 29 Sep 2004
+
+Hello Bryan,
+
+--- Bryan Dotzour <BDotzour@widen.com> wrote:
+
+> Thanks very much for the reply Otis.  Your code snippet is pretty
+> interesting and made me think about a few questions. 
+> 
+> 1.  Do you just have one IndexReader for a given index?  It looks
+> like you
+> are handing out a new IndexSearcher when the IndexReader has been
+> modified.
+
+1 index for each index.  Simpy has a LOT of Lucene indices.
+
+> 2.  How does this approach work with multiple, simultaneous users?
+
+IndexSearcher is thread-safe.
+
+> 3.  When does the reader need to get closed?
+
+Just leave it open.  You can close it when you are sure you no longer
+need it, if you can determine that in your application.
+
+Otis
+
+> -----Original Message-----
+> From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com] 
+> Sent: Wednesday, September 29, 2004 8:47 AM
+> To: Lucene Users List
+> Subject: Re: Memory usage: IndexSearcher & Sort
+> 
+> 
+> Hello,
+> 
+> --- Bryan Dotzour <BDotzour@widen.com> wrote:
+> 
+> > I have been investigating a serious memory problem in our web app 
+> > (using Tapestry, Hibernate, & Lucene) and have reduced it to being
+> the 
+> > way in which
+> > we are using Lucene to search on things.  Being a webapp, we have
+> > focused on
+> > doing our work within a user's request.  So we basically end up
+> > opening at
+> > least one new IndexSearcher on each individual page view.  In one
+> > particular
+> > case, we were doing this in a loop, eventually opening ~20-~40
+> > IndexSearchers which caused our memory usage to skyrocket.  After
+> > viewing
+> > that one page 3 or 4 times we would exhaust the server's memory
+> > allocation.
+> >  
+> > Most helpful in this search was the following thread from Bugzilla:
+> >  
+> > http://issues.apache.org/bugzilla/show_bug.cgi?id=30628
+> > <http://issues.apache.org/bugzilla/show_bug.cgi?id=30628>
+> >  
+> > From this thread, it sounds like constantly opening and closing 
+> > IndexSearcher objects is a "BAD THING", but it is exactly what we
+> are 
+> > doing in our app.
+> > There are a few things that puzzle me and I'd love it if anyone has
+> > some
+> > input that might clear up some of these questions.
+> >  
+> > 1.  According to the Bugzilla thread, and from my own testing, you
+> can 
+> > open lots of IndexSearchers in a loop and do a search WITHOUT
+> SORTING 
+> > and not
+> > have this memory problem.  Is there an issue with the Sort code?
+> 
+> Yes, there is a memory leak in Sort code.  A kind person from Poland
+> contributed a patch earlier today.  It's not in CVS yet.
+> 
+> > 2.  Can anyone give a brief, technical explanation as to why
+> opening 
+> > multiple IndexSearcher objects is bad?
+> 
+> Very simple.  A Lucene index consists of X number of files that
+> reside on a
+> disk.  Every time you open a new IndexSearcher, some of these files
+> need to
+> be read.  If files do not change (no documents added/removed), why do
+> this
+> repetitive work?  Just do it once.  When these files are read, some
+> data is
+> stored in memory.  If you read them multiple times, you will store
+> the same
+> data in memory multiple times.
+> 
+> > 3.  Certainly some of you on this list are using Lucene in a
+> web-app 
+> > environment.  Can anyone list some best practices on managing 
+> > reading/writing/searching a Lucene index in that context?
+> 
+> I use something like this for http://www.simpy.com/ and it works well
+> for
+> me:
+> 
+>     private IndexDescriptor getIndexDescriptor(String indexID)
+>         throws SearcherException
+>     {
+>         File indexDir = validateIndex(indexID);
+>         IndexDescriptor indexDescriptor =
+> getIndexDescriptorFromCache(indexDir);
+> 
+>         try
+>         {
+>             // if this is a known index
+>             if (indexDescriptor != null)
+>             {
+>                 // if the index has changed since this Searcher was
+> created,
+> make a new Searcher
+>                 long currentVersion =
+> IndexReader.getCurrentVersion(indexDir);
+>                 if (currentVersion >
+> indexDescriptor.lastKnownVersion)
+>                 {
+>                     indexDescriptor.lastKnownVersion =
+> currentVersion;
+>                     indexDescriptor.searcher = new
+> LuceneUserSearcher(indexDir);
+>                 }
+>             }
+>             // if this is a new index
+>             else
+>             {
+>                 indexDescriptor = new IndexDescriptor();
+>                 indexDescriptor.indexDir = indexDir;
+>                 indexDescriptor.lastKnownVersion =
+> IndexReader.getCurrentVersion(indexDir);
+>                 indexDescriptor.searcher = new
+> LuceneUserSearcher(indexDir);
+>             }
+>             return cacheIndexDescriptor(indexDescriptor);
+>         }
+>         catch (IOException e)
+>         {
+>             throw new SearcherException("Cannot open index: " +
+> indexDir,
+> e);
+>         }
+>     }
+> 
+> IndexDescriptor is a simple 'struct' with everything public (not good
+> practise, you should change that):
+> 
+> final class IndexDescriptor
+> {
+>     public File indexDir;
+>     public long lastKnownVersion;
+>     public Searcher searcher;
+> 
+>     public String toString()
+>     {
+>         return IndexDescriptor.class.getName() + ": index directory:
+> "
+> + indexDir.getAbsolutePath()
+>             + ", last known version: " + lastKnownVersion + ",
+> searcher: " + searcher;
+>     }
+> }
+> 
+> These two things combined allow me to re-open an IndexSearcher when
+> the
+> index changes, and re-use the same IndexSearcher while the index
+> remains
+> unmodified.  Of course, that LuceneUserSearcher could be Lucene's
+> IndexSearcher, probably.
+> 
+> Otis
+> http://www.simpy.com/ -- Index, Search and Share your bookmarks
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

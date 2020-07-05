@@ -1,0 +1,148 @@
+FROM: "Stephane Nicoll" <stephane.nic...@gmail.com>
+SUBJECT: Re: confused about an entry in the FAQ
+DATE: 12 May 2008
+
+I tried all this and I am confused about the result. I am trying to
+implement an hybrid query handler where I fetch the IDs from a
+database criteria and the IDs from a full text lucene query and I
+intersect them to return the result to the user. The database query
+and the intersection works fine even with high load. However the
+lucene query is much slower when the number of concurrent users
+raises.
+
+Here is what I am doing on the lucene side
+
+        final QueryParser queryParser = new
+QueryParser(criteria.getDefaultField(), analyzer);
+        final Query q = queryParser.parse(criteria.getFullTextQuery());
+        // Index Searcher is shared for all threads and is not
+reopened during the load test
+        final IndexSearcher indexSearcher = getIndexSearcher();
+        final Set<Long> result = new TreeSet<Long>();
+        indexSearcher.search(q, new HitCollector() {
+            public void collect(int i, float v) {
+                try {
+                    final Document d =
+indexSearcher.getIndexReader().document(i, new FieldSelector() {
+                        public FieldSelectorResult accept(String s) {
+                            if (s.equals(CatalogItem.ATTR_ID)) {
+                                return FieldSelectorResult.LOAD;
+                            } else {
+                                return FieldSelectorResult.NO_LOAD;
+                            }
+                        }
+                    });
+                    result.add(Long.parseLong(d.get(CatalogItem.ATTR_ID)));
+                } catch (IOException e) {
+                    throw new RuntimeException("Could not collect
+lucene IDs", e);
+                }
+            }
+        });
+        return result;
+
+
+When running with one thread, I have the following figures per test:
+
+Database query is done in[125 msecs] (size=598]
+Lucene query is done in[80 msecs (size=15204]
+Intersect is done in[4 msecs] (size=103]
+Hybrid query is done in[97 msecs]
+
+-> 327 msec / user
+
+When running with ten threads, I have the following figures per user per test:
+
+Database query is done in[222 msecs] (size=94]
+Lucene query is done in[2364 msecs (size=15367]
+Intersect is done in[0 msecs] (size=12]
+Hybrid query is done in[18 msecs]
+
+-> 2.5 sec / user !!
+
+I am just wondering how I can improve this. Clearly there is something
+wrong in my code since it's much slower with multiple threads running
+concurrently on the same index. The size of the index is 5Mb, I only
+store:
+
+* an "id" field (which is the primary key of the related object in the db
+* a "class" field which is the class nazme of the related object
+(Hibernate search does that for me)
+
+The "keywords" field is indexed but not stored as it is a
+representation of other data stored in the db. The searches are
+performed on the keywords field only ("foo AND bar" is a typical
+query)
+
+Any help is appreciated. If you also know a Spring bean that could
+take care of opening/closing the index readers properly, let me know.
+Hibernate Search introduces deadlock with multiple threads and the
+lucene integration in spring modules does not seeem to do what I want.
+
+Thanks,
+Stéphane
+
+
+On Sat, May 10, 2008 at 8:05 PM, Patrick Turcotte <patrek@gmail.com> wrote:
+> Did you try the IndexSearcher.doc(int i, FieldSelector fieldSelector)  method?
+>
+>  Could be faster because Lucene don't have do "prepare" the whole document.
+>
+>  Patrick
+>
+>
+>  On Sat, May 10, 2008 at 9:35 AM, Stephane Nicoll
+>  <stephane.nicoll@gmail.com> wrote:
+>
+>
+> > From the FAQ:
+>  >
+>  > "Don't iterate over more hits than needed.
+>  > Iterating over all hits is slow for two reasons. Firstly, the search()
+>  > method that returns a Hits object re-executes the search internally
+>  > when you need more than 100 hits. Solution: use the search method that
+>  > takes a HitCollector instead."
+>  >
+>  > I had a look to HitCollector but it returns the documentId and the
+>  > javadoc recommends not fetching the original query there.
+>  >
+>  > I have to return *one* indexed field from the query result and
+>  > currently I am iterating on all results and it's slow. Can you explain
+>  > a bit more how I could improve this?
+>  >
+>  > Thanks,
+>  > Stéphane
+>  >
+>  >
+>  > --
+>  > Large Systems Suck: This rule is 100% transitive. If you build one,
+>  > you suck" -- S.Yegge
+>  >
+>
+> > ---------------------------------------------------------------------
+>  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >
+>  >
+>
+>
+> ---------------------------------------------------------------------
+>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>
+>
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+-- 
+Large Systems Suck: This rule is 100% transitive. If you build one,
+you suck" -- S.Yegge
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

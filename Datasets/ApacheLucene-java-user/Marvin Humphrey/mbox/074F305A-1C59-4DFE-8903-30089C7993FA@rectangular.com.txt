@@ -1,0 +1,74 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: Thinking about better highlighting
+DATE: 26 Aug 2005
+
+On Aug 24, 2005, at 7:47 PM, Fred Toth wrote:
+> However, after reviewing recent discussions about highlighting,
+> and struggling with our own highlighting issues, I'm wondering if
+> there's a better way.
+
+Here's one way.  This is the algo used by a developer's version of my  
+Perl/C search engine library Kinosearch, which is on hold in Alpha  
+while I have a go at optimizing Plucene.
+
+Every ResultSet is an object which keeps track of document numbers,  
+scores, and positions.
+
+When two ResultSets are merged, the positions associated with  
+document 1 in ResultSet A and the positions associated with the same  
+document 1 in ResultSet B are merged into a single array.
+
+Positions are used by the phrase matching engine while two ResultSets  
+with a phrase relationship are being merged.  In the resulting merged  
+ResultSet, positions which didn't take part in a phrase match will  
+have been filtered out.
+
+[I can build an ascii illustration of this if it isn't clear.]
+
+Conveniently, when we arrive at a final result set, each document is  
+associated with an array of positions.  If a search term wasn't part  
+of a phrase query, then all the positions it occurred in are  
+represented.  If a term was part of a phrase query, only the  
+positions that were part of a phrase match are represented.
+
+Next, Kinosearch builds an array of actual token start offsets  
+(measured in characters) in the target document. (The start offsets  
+are stored using delta encoding alongside stored fields at index- 
+time).  The start offsets which represent matched terms are extracted  
+out into an array.  Each position is assigned a score based on its  
+distance to other positions within a limited range (using an inverse  
+log formula).  The position with the highest score determines where  
+the excerpt will be taken from.
+
+Since we know the token start offsets, it's trivial to insert the  
+highlight tags.
+
+The downside of this approach is that it's quite expensive to load  
+and keep track of all those positions during set merging.  The  
+upsides are that it is unnecessary to load the full analysis  
+apparatus, it works fine with stemmed words, and there's no need to  
+go back to retrieve positions from disk later.  The larger your  
+index, the more the downsides outweigh the upsides, because the work  
+necessary to process the increasing number of positions grows  
+linearly with index size, while the amount of work to perform post- 
+search analysis on matched documents stays constant.
+
+It occurs to me that a hybrid approach may be possible which  
+addresses the phrase-matching conundrum.  I'm not yet familiar with  
+the guts of Lucene's searching, but from a high level it looks  
+similar, so this might work...
+
+Keep track of positions matched during phrase-matching.  Use those  
+for highlighting terms which are part of the phrase match.  Use post- 
+search analysis for highlighting anything that isn't part of a phrase.
+
+Marvin Humphrey
+Rectangular Research
+http://www.rectangular.com/
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

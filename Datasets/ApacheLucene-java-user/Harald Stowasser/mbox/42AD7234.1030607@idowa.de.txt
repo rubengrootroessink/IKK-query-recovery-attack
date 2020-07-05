@@ -1,0 +1,153 @@
+FROM: Harald Stowasser <stowasse...@idowa.de>
+SUBJECT: TooManyClauses in BooleanQuery
+DATE: 13 Jun 2005
+
+Hello lucene-list readers,
+
+first I want to introduce myself a little. Because I am new at this List:
+
+I am a programmer in a publishing company, 32 years of Age and you can
+find my picture at http://www.idowa.de/service/kontakt.
+We release some local newspapers and a website (http://www.idowa.de)
+with the main focus on regional content.
+
+We use Lucene to create an index over the whole newspaper and website
+content. So there is more than 2GB text to indicate.
+
+And now I will tell you my problems in my implementation[1]:
+
+1. Sorting by Date is ruinously slow. So I deactivated it.
+2. Because the sorting is so slow, I want to allow the user specifying a
+Date-Range. But Lucene throws an BooleanQuery$TooManyClauses[2].
+Anywhere I read if you give lucene a higher MaxClauseCount, this will
+solve that Problem. But it doesn't work :-(
+3. I also read that we should save the Date as YYYYMMDD-String. I don't
+like this solution, because I don't know that this will work. And then I
+have to reindex the whole Data!
+
+So could you give me a little hint, how i can solve my Date-Prblems?
+
+
+
+[1]
+Implementation:
+
+  BooleanQuery query= new BooleanQuery();
+  query.setMaxClauseCount(262144);
+  Query q1= QueryParser.parse(query,"content",analyzer);
+  query.add(q1,true,false);
+  if(area.length()>2)
+  {
+    Query q2=new TermQuery( new Term("bereich",area) );
+    query.add(q2,true,false);
+  }
+  try {
+    DateFormat df = DateFormat.getDateInstance(
+       DateFormat.DATE_FIELD, Locale.GERMAN);
+    df.setLenient(true);
+    Date d1 = df.parse(date_from);
+    Date d2 = df.parse(date_to);
+    date_from = DateField.dateToString(d1);
+    date_to = DateField.dateToString(d2);
+  }   catch (Exception e) { }
+  Query q3=new RangeQuery( new Term("datum",date_from),
+                           new Term("datum",date_to),true );
+  query.add(q3,true,false);
+  /*Sort csort= new Sort();
+  if (sort.length()>2)
+  {
+     csort.setSort(sort,reverse);
+  }*/
+  Hits hits = searcher.search(query);
+  //Hits hits = searcher.search(query,csort);
+  makeOutput(hits, start, length);
+  Date ende= new Date();
+  long zeit=(ende.getTime()-anfang.getTime())/100 ;
+  ausgabe.append("|" + (float)zeit/10);
+
+
+
+  private void makeOutput(Hits hits,int start,int length)
+    throws Exception
+  {
+    int i=start;
+    if (hits.length()>0)
+    {
+      ausgabe.append("<table>");
+      for (;(i<hits.length() && (i<start+length));i++)
+      {
+        Document doc=hits.doc(i);
+        ausgabe.append("<tr><td>");
+        ausgabe.append(doc.getField("bereich").stringValue()
+        ausgabe.append(""</td><td>"");
+        DateFormat df = DateFormat.getDateInstance(
+          DateFormat.DATE_FIELD, Locale.GERMAN);
+        df.setLenient(true);
+        ausgabe.append(df.format(
+          DateField.stringToDate(doc.getField("datum").stringValue())));
+        ausgabe.append("</td><td>");
+        ausgabe.append("<a href=\""+doc.getField("link").stringValue());
+        ausgabe.append(doc.getField("content_id").stringValue()+ "\">");
+        ausgabe.append(doc.getField("content_vorschau").stringValue()
+        ausgabe.append("</a>");
+        ausgabe.append("</td></tr>");
+      }
+      ausgabe.append("</table>");
+    }
+    ausgabe.append("|X|" + hits.length() + "|" + start + "|" + i);
+  }
+
+__________________________________________________
+
+[2]
+StackTrace:
+
+org.apache.lucene.search.BooleanQuery$TooManyClauses
+        at org.apache.lucene.search.BooleanQuery.add(BooleanQuery.java:79)
+        at org.apache.lucene.search.BooleanQuery.add(BooleanQuery.java:71)
+        at org.apache.lucene.search.RangeQuery.rewrite(RangeQuery.java:99)
+        at
+org.apache.lucene.search.BooleanQuery.rewrite(BooleanQuery.java:243)
+        at
+org.apache.lucene.search.IndexSearcher.rewrite(IndexSearcher.java:166)
+        at org.apache.lucene.search.Query.weight(Query.java:84)
+        at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:117)
+        at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:64)
+        at org.apache.lucene.search.Hits.<init>(Hits.java:51)
+        at org.apache.lucene.search.Searcher.search(Searcher.java:41)
+        at suchmaschine.LuceneSearcher.erweitert(LuceneSearcher.java:138)
+        at suchmaschine.XmlRpcSearcher.erweitert(XmlRpcSearcher.java:49)
+        at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+        at
+sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:39)
+        at
+sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:25)
+        at java.lang.reflect.Method.invoke(Method.java:585)
+        at org.apache.xmlrpc.Invoker.execute(Invoker.java:168)
+        at
+org.apache.xmlrpc.XmlRpcWorker.invokeHandler(XmlRpcWorker.java:123)
+        at org.apache.xmlrpc.XmlRpcWorker.execute(XmlRpcWorker.java:185)
+        at org.apache.xmlrpc.XmlRpcServer.execute(XmlRpcServer.java:151)
+        at org.apache.xmlrpc.XmlRpcServer.execute(XmlRpcServer.java:139)
+        at org.apache.xmlrpc.WebServer$Connection.run(WebServer.java:773)
+        at org.apache.xmlrpc.WebServer$Runner.run(WebServer.java:656)
+        at java.lang.Thread.run(Thread.java:595)
+
+__________________________________________________
+[3]
+My Fields:
+  neu.setBoost( boost  );
+  neu.add(Field.UnStored("content",content));
+  neu.add(Field.Keyword("keyword",keyword));
+  ConfDate date = new ConfDate(datum);
+  neu.add(Field.Keyword("datum",(Date)date.getUtilDate()));
+  neu.add(Field.UnIndexed("content_vorschau",content_vorschau));
+  neu.add(Field.UnIndexed("content_id",""+content_id));
+  neu.add(Field.UnIndexed("zeitstempel",zeitstempel));
+  neu.add(Field.UnIndexed("link",link));
+  neu.add(Field.Keyword("bereich",bereich));
+  index.addDocument(neu);
+
+
+

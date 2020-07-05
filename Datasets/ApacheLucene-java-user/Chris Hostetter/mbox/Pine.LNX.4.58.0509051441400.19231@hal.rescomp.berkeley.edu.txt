@@ -1,0 +1,71 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: SAME-opattor (possible newbie question)
+DATE: 5 Sep 2005
+
+
+: > : For example, given this data:
+: > :
+: > : author: a b c
+: > : author: d e f
+
+: > : a search for "a SAME c" would match the first row, but "a SAME d"
+: > would
+: > : match nothing, which is what I want.
+
+: No, both fields are in the same document. Which is also why proximity
+: does not work.
+
+: Or is there some way of telling a proximity query to not cross field
+: boundaries?
+
+you have to be careful about your terms.  In lucene, there isn't really
+any notion of a "field boundary" unless you are talking about two fields
+with different names.  If you create a document and add two
+(indexed and tokenized) Field objects with the same field name, they are
+treated the same as if they had been concatenated together (see the
+javadocs for Document.add)
+
+The good news is: as long as you've got some practical limits on the size
+of your field values, you should be able to use a custom
+Analyzer/TokenFilter to get the bahavior you want -- by creating a "magic
+token" to seperate your individual values, and using a TokenFilter that
+throws away these magic tokens when it seems them, but artificially bumps
+up the positionIncriment for the next token it gets by some really large
+ammount -- so that Phrase/SpanNear queries with with a slop less then that
+amount will never cross your "boundary"
+
+for example: if your source data has the following values for author...
+
+   1) Napolean
+   2) Terrence "The Man With Two Dynamite Brains" Winchester
+   3) Hoss Man
+
+... add that field as a single string value...
+
+   Napolean ~AUTHOR~ Terrence "The Man With Two
+   Dynamite Brains" Winchester ~AUTHOR~ Hoss Man
+
+...and use an analyzer/tokenfilter that creates the following
+token/position pairs...
+
+   Napolean(0) Terrene(1000) The(1001) Man(1002) With(1003) Two(1004)
+   Dynamite(1005) Brains(1006), Winchester(1007), Hoss(2007), Man(2008)
+
+now as long as you use a slop less then 1000, searches for
+author:"Hoss Man" and author:"Terrence Winchester" will return this
+document, but a search for author:"Napolean Dynamite" will fail.
+
+
+
+LIA has good info on writting your own analyzer/tokenfilter.
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

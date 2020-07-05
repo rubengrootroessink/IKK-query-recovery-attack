@@ -1,0 +1,185 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: DocumentWriter, StopFilter should use HashMap... (patch)
+DATE: 9 Mar 2004
+
+I don't see any reason for this to be a Hashtable.
+
+It seems an acceptable alternative to not share analyzer/filter  
+instances across threads - they don't really take up much space, so is  
+there a reason to share them?  Or I'm guessing you're sharing it  
+implicitly through an IndexWriter, huh?
+
+I'll away further feedback before committing this change, but seems  
+reasonable to me.
+
+	Erik
+
+
+On Mar 8, 2004, at 8:50 PM, Kevin A. Burton wrote:
+> I'm looking at StopFilter.java right now...
+>
+> I did a kill -3 java and a number of my threads were blocked here:
+>
+> "ksa-task-thread-34" prio=1 tid=0xad89fbe8 nid=0x1c6e waiting for  
+> monitor entry [b9bff000..b9bff8d0]
+>        at java.util.Hashtable.get(Hashtable.java:332)
+>        - waiting to lock <0x61569720> (a java.util.Hashtable)
+>        at  
+> org.apache.lucene.analysis.StopFilter.next(StopFilter.java:94)
+>        at  
+> org.apache.lucene.index.DocumentWriter.invertDocument(DocumentWriter.ja 
+> va:170)
+>        at  
+> org.apache.lucene.index.DocumentWriter.addDocument(DocumentWriter.java: 
+> 111)
+>        at  
+> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:257)
+>        at  
+> org.apache.lucene.index.IndexWriter.addDocument(IndexWriter.java:244)
+>        at  
+> ksa.index.AdvancedIndexWriter.addDocument(AdvancedIndexWriter.java: 
+> 136)
+>        at  
+> ksa.robot.FeedTaskParserListener.onItemEnd(FeedTaskParserListener.java: 
+> 331)
+>
+> Is there ANY reason to keep this as a Hashtable?  It's just preventing  
+> inversion across multiple threads.  They all have to lock on this  
+> hashtable.
+>
+> Note that this guy is initialized ONCE and no more puts take place so  
+> I don't see why not.  It's readonly after the StopFilter is created.
+>
+> I think this might really end up speeding up indexing a bit.  No hard  
+> benchmarks yet though.  Right now though it's just an inefficiency  
+> that should be removed.
+>
+> I've attached a quick implementation.
+> Kevin
+>
+> -- 
+>
+> Please reply using PGP:
+>
+>    http://peerfear.org/pubkey.asc
+>    NewsMonster - http://www.newsmonster.org/
+>    Kevin A. Burton, Location - San Francisco, CA, Cell - 415.595.9965
+>       AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+> GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+>  IRC - freenode.net #infoanarchy | #p2p-hackers | #newsmonster
+>
+> package org.apache.lucene.analysis;
+>
+> /* ====================================================================
+>  * The Apache Software License, Version 1.1
+>  *
+>  * Copyright (c) 2001 The Apache Software Foundation.  All rights
+>  * reserved.
+>  *
+>  * Redistribution and use in source and binary forms, with or without
+>  * modification, are permitted provided that the following conditions
+>  * are met:
+>  *
+>  * 1. Redistributions of source code must retain the above copyright
+>  *    notice, this list of conditions and the following disclaimer.
+>  *
+>  * 2. Redistributions in binary form must reproduce the above copyright
+>  *    notice, this list of conditions and the following disclaimer in
+>  *    the documentation and/or other materials provided with the
+>  *    distribution.
+>  *
+>  * 3. The end-user documentation included with the redistribution,
+>  *    if any, must include the following acknowledgment:
+>  *       "This product includes software developed by the
+>  *        Apache Software Foundation (http://www.apache.org/)."
+>  *    Alternately, this acknowledgment may appear in the software  
+> itself,
+>  *    if and wherever such third-party acknowledgments normally appear.
+>  *
+>  * 4. The names "Apache" and "Apache Software Foundation" and
+>  *    "Apache Lucene" must not be used to endorse or promote products
+>  *    derived from this software without prior written permission. For
+>  *    written permission, please contact apache@apache.org.
+>  *
+>  * 5. Products derived from this software may not be called "Apache",
+>  *    "Apache Lucene", nor may "Apache" appear in their name, without
+>  *    prior written permission of the Apache Software Foundation.
+>  *
+>  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+>  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+>  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+>  * DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
+>  * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+>  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+>  * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+>  * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+>  * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+>  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+>  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+>  * SUCH DAMAGE.
+>  * ====================================================================
+>  *
+>  * This software consists of voluntary contributions made by many
+>  * individuals on behalf of the Apache Software Foundation.  For more
+>  * information on the Apache Software Foundation, please see
+>  * <http://www.apache.org/>.
+>  */
+>
+> import java.io.IOException;
+> import java.util.*;
+>
+> /** Removes stop words from a token stream. */
+>
+> public final class StopFilter extends TokenFilter {
+>
+>   //Note: this could migrate to using a HashSet
+>   private HashMap table;
+>
+>   /** Constructs a filter which removes words from the input
+>     TokenStream that are named in the array of words. */
+>   public StopFilter(TokenStream in, String[] stopWords) {
+>     super(in);
+>     table = makeStopTable(stopWords);
+>   }
+>
+>   /** Constructs a filter which removes words from the input
+>     TokenStream that are named in the HashMap. */
+>   public StopFilter(TokenStream in, HashMap stopTable) {
+>     super(in);
+>     table = stopTable;
+>   }
+>
+>   /** Builds a HashMap from an array of stop words, appropriate for  
+> passing
+>     into the StopFilter constructor.  This permits this table  
+> construction to
+>     be cached once when an Analyzer is constructed. */
+>   public static final HashMap makeStopTable(String[] stopWords) {
+>       HashMap stopTable = new HashMap(stopWords.length);
+>
+>       for (int i = 0; i < stopWords.length; i++)
+>           stopTable.put(stopWords[i], stopWords[i]);
+>
+>       return stopTable;
+>   }
+>
+>   /** Returns the next input Token whose termText() is not a stop  
+> word. */
+>   public final Token next() throws IOException {
+>     // return the first non-stop word found
+>     for (Token token = input.next(); token != null; token =  
+> input.next())
+>       if (table.get(token.termText) == null)
+> 	return token;
+>     // reached EOS -- return null
+>     return null;
+>   }
+> }
+> <burton.vcf>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

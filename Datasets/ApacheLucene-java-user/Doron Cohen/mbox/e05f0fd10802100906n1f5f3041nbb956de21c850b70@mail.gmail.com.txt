@@ -1,0 +1,190 @@
+FROM: "Doron Cohen" <cdor...@gmail.com>
+SUBJECT: Re: Extracting terms from a query splitting a phrase.
+DATE: 10 Feb 2008
+
+PhraseQuery.extractTerms() returns the terms making up the phrase,
+and so it is not adequate for 'finding' a single term that represents
+the phrase query, one that represents the searched entire text.
+
+It seems you are trying to obtain a string that can be matched against
+the displayed text for e.g. highlighting, and for that looks for a general
+way to get that string from the query.
+
+If so, then PhraseQuery.toString(field) will be quite near. You need
+to provide the correct field, or remove it. The quotes need to
+be removed as well. (A slop larger than 0 is problematic though.)
+
+But (although I personally never used it), I would first try to use
+contrib's highlighter.
+
+Doron
+
+On Feb 5, 2008 11:53 PM, Spencer Tickner <spencertickner@gmail.com> wrote:
+
+> I guess to be move concise I'm looking to get all the terms that were
+> searched for so I can highlight them in the original document. After
+> looking through the highlighter contrib class I figure I had found my
+> solution with query.extractTerms. Works great for searches like:
+>
+> genera* -> generally, general
+> ac? -> act
+> General Act -> general, act
+>
+> and a bunch of others I've tested.. So it's almost perfect except when
+> searching for a Phrase. If someone searched for "General Act" I
+> wouldn't want General and Act highlighted unless they were right
+> beside each other.
+>
+> Thanks,
+>
+> Spencer
+>
+> On Feb 5, 2008 12:50 PM, Spencer Tickner <spencertickner@gmail.com> wrote:
+> > Hi Erick,
+> >
+> > Thanks for your response. I think you're right about the Whitespace
+> > anlayzer. I was actually useing the StandardAnalyzer before and tried
+> > the Whitespace analyzer to see if the StandardAnalyzer was pulling off
+> > the quotes. I guess what I'm trying to mimic is the information found:
+> >
+> > http://lucene.apache.org/java/docs/queryparsersyntax.html
+> >
+> > What analyzer would you suggest when parsing a query like:
+> >
+> > title:"The Right Way" AND text:go
+> >
+> > Or will I have to pull apart a user entered query using regular
+> > expressions, or whatever, and use different Queries (such as the
+> > SpanNearQuery) to get the extracted terms?
+> >
+> > Thanks for any advice.
+> >
+> > Spencer
+> >
+> >
+> >
+> > On Feb 5, 2008 12:19 PM, Erick Erickson <erickerickson@gmail.com> wrote:
+> > > I don't think WhitespaceAnalyzer is doing what you think it is. From
+> > > the Javadoc...
+> > >
+> > > public class *WhitespaceTokenizer*extends
+> > > CharTokenizer<file:///C:/lucene-2.1.0
+> /docs/api/org/apache/lucene/analysis/CharTokenizer.html>
+> > >
+> > > A WhitespaceTokenizer is a tokenizer that divides text at
+> > > whitespace. Adjacent sequences of non-Whitespace characters form
+> tokens.
+> > >
+> > >  ------------------------------
+> > >
+> > >  CharacterTokenizer
+> > > An abstract base class for simple, character-oriented tokenizers.
+> > >
+> > > So I'm pretty sure that CharacterTokenizer is throwing out all the
+> > > non-character data (i.e. your double quotes), then WhitespaceTokenizer
+> > > is breaking on the space.
+> > >
+> > > What is it that you want to have happen? If you're searching for
+> > > "General" right next to "Act", you can use a SpanNearQuery with
+> > > two SpanTermQuerys and a slop of 0.
+> > >
+> > > The other thing to be aware of with WhitespaceAnalyzer is that
+> > > it doesn't lower case anything, so whether you'll get any hits
+> > > in your index depends upon the analyzers you used to index with
+> > > and whether case matches exactly.
+> > >
+> > > Best
+> > > Erick
+> > >
+> > >
+> > > On Feb 5, 2008 3:03 PM, Spencer Tickner <spencertickner@gmail.com>
+> wrote:
+> > >
+> > > > Hi List,
+> > > >
+> > > > Thanks in advance for the help. I'm trying to extract terms from a
+> > > > query. From the reading I've done a phrase such as "General Act" is
+> > > > considered a term.
+> > > > http://lucene.apache.org/java/docs/queryparsersyntax.html#Terms .
+> > > > However when I'm doing testing to get the extractTerms of my query
+> it
+> > > > splits this into General and Act. I'm wondering if I'm missing or
+> not
+> > > > understanding something.
+> > > >
+> > > > My test Java code is:
+> > > >
+> > > >        private String FIELD_NAME = "rr_root";
+> > > >        private Query query;
+> > > >        private Hits hits = null;
+> > > >
+> > > >        public void testSearch() throws Exception
+> > > >        {
+> > > >                doSearching("\"General Act\"");
+> > > >                HashSet terms = new HashSet();
+> > > >                query.extractTerms(terms);
+> > > >                int i = 0;
+> > > >                for (Iterator iter = terms.iterator(); iter.hasNext
+> ();)
+> > > >                {
+> > > >                        i++;
+> > > >                        Term term = (Term)iter.next();
+> > > >                        System.out.println(i + " " + "term-" +
+> term.text()
+> > > > + " field-" +
+> > > > term.field());
+> > > >                }
+> > > >         }
+> > > >
+> > > >        public void doSearching(String queryString) throws Exception
+> > > >        {
+> > > >                QueryParser parser=new QueryParser(FIELD_NAME, new
+> > > > WhitespaceAnalyzer());
+> > > >                query = parser.parse(queryString);
+> > > >                doSearching(query);
+> > > >        }
+> > > >        public void doSearching(Query unReWrittenQuery) throws
+> Exception
+> > > >        {
+> > > >                searcher = aspect.getSearcher(); // searcher comming
+> from a
+> > > > cahed class
+> > > >                query=unReWrittenQuery.rewrite(aspect.getReader());
+> //
+> > > > reader
+> > > > comming from a cached class
+> > > >                System.out.println("Searching for: " + query.toString
+> > > > (FIELD_NAME));
+> > > >                hits = searcher.search(query);
+> > > >        }
+> > > >
+> > > > The current output is:
+> > > >
+> > > > Searching for: "General Act"
+> > > > 1 term-General field-rr_root
+> > > > 2 term-Act field-rr_root
+> > > >
+> > > > The output I expect is:
+> > > >
+> > > > Searching for: "General Act"
+> > > > 1 term-General Act field-rr_root
+> > > >
+> > > > Thanks for any help.
+> > > >
+> > > > Spencer
+> > > >
+> > > >
+> ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> > > >
+> > >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

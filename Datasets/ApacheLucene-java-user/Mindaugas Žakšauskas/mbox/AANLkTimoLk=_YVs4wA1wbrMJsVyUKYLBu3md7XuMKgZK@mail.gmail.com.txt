@@ -1,0 +1,82 @@
+FROM: Mindaugas Žakšauskas <min...@gmail.com>
+SUBJECT: Safely closing stale IndexReaders
+DATE: 5 Oct 2010
+
+Hi,
+
+I am keeping a ConcurrentMap of o.a.l.index.IndexReader which I use in
+my system. These readers are retrieved by multiple threads and I have
+no knowledge when these readers are actively used and when not.
+
+When underlying index is updated, I reopen the reader and replace it in the map:
+
+IndexReader newReader = oldReader.reopen();
+if (newReader != oldReader) {  // reader has been changed
+  map.replace(key, newReader);
+}
+
+The problem with this is that old reader doesn't get closed which adds
+to open file handle footprint. I cannot close oldReader immediately
+after map.replace() as there might be some other threads actively
+using it.
+
+One of solutions would be to use object pools. Each time IndexReader
+is necessary, it would have to be borrowed from the pool and then
+given back when done. This however has a disadvantage of massive
+amount of scaffolding useless code and would still not guarantee that
+all objects are given back safely as caller might forget to return the
+object to the pool.
+
+Another solution is to use finalizers. This requires extending IndexReader, e.g.
+
+class SelfClosingIndexReader extends IndexReader {
+  private final IndexReader delegate;
+  public SelfClosingIndexReader(IndexReader delegate) {
+    this.delegate = delegate;
+  }
+
+  public void anyPublicMethod() {
+    delegate.anyPublicMethod();
+  }
+
+  public void anyProtectedMethod() {
+    delegate.anyProtectedMethod();
+  }
+
+  protected void finalize() throws Throwable {
+    try {
+      delegate.close();
+    } finally {
+      super.finalize();
+    }
+  }
+}
+
+This solution works, but is utterly ugly:
+- Finalizers are bad. I won't digress explaining why, just read Josh
+Bloch's "Effective Java second edition" Item 7;
+- IndexReader is an abstract class, not an interface -- this means I
+have to override every single public and protected method, otherwise
+this will fail. Moreover, it is very very slippery: if I upgrade to a
+newer Lucene version, I have to carefully go through every single
+method to ensure there are no new ones which I have to
+override/un-override.
+
+A better solution would be to use WeakReferences. However there is no
+inner purposed object (e.g. Reader) of IndexReader that could be
+referenced strongly and used for .close() upon polling relevant
+reference queue. Extending WeakReference and keeping hard reference to
+IndexReader inside it simply prevents whole object from being
+reclaimed (or there's something I don't understand about
+WeakReferences).
+
+I was wondering if anybody has been in a similar situation and solved
+this. Thanks in advance.
+
+m.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

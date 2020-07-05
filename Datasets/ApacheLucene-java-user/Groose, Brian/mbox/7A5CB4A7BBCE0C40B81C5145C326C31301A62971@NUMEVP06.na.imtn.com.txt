@@ -1,0 +1,60 @@
+FROM: "Groose, Brian" <Brian.Gro...@ironmountain.com>
+SUBJECT: SegmentReader retaining memory
+DATE: 22 Jun 2009
+
+In the application I'm working on, I'm opening a new index every 15-20
+minutes.  This is done by opening the new index and then closing the old
+index.
+
+Opening one of these indexes, about 58GB on disk, appears to use about
+700MB of memory based on some simple testing. I am passing -Xmx3072m to
+the JVM.
+
+I've run into some OutOfMemoryErrors, and looking at the heap dump that
+was generated, I see three ReadOnlyMultiSegmentReaders, each one
+referencing roughly 700MB of heap:
+- One is referenced as the currently in-use index.
+- One is being opened and a simple query is running to force the terms
+to be cached in RAM.
+- One is only referenced by the Finalizer thread.
+
+I definitely have an issue where GC isn't keeping up, but I'm a bit
+concerned that a class (DirectoryIndexReader) that has a finalize()
+method is referencing so much memory and delaying GC of that memory
+until the finalizer can get around to it.  Has anyone else run into an
+issue like this?
+
+It seems like SegmentReader.doClose() could null out its TermInfosReader
+to make the large amount of cached terms available for GC much sooner
+and not reliant on the finalizer.
+
+I'm using Lucene 2.4.1 with Sun's JDK 6 update 12, 64-bit, on Debian
+Lenny.
+
+Thanks,
+Brian
+The information contained in this email message and its attachments
+is intended
+only for the private and confidential use of the recipient(s) named
+above, unless the sender expressly agrees otherwise. Transmission
+of email over the Internet
+ is not a secure communications medium. If you are requesting or
+have requested
+the transmittal of personal data, as defined in applicable privacy
+laws by means
+ of email or in an attachment to email you must select a more
+secure alternate means of transmittal that supports your
+obligations to protect such personal data. If the reader of this
+message is not the intended recipient and/or you have received this
+email in error, you must take no action based on the information in
+this email and you are hereby notified that any dissemination,
+misuse, copying, or disclosure of this communication is strictly
+prohibited. If you have received
+this communication in error, please notify us immediately by email
+and delete the original message.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

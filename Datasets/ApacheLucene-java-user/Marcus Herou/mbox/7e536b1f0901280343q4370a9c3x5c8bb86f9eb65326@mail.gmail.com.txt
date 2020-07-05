@@ -1,0 +1,186 @@
+FROM: Marcus Herou <marcus.he...@tailsweep.com>
+SUBJECT: Re: Group by in Lucene ?
+DATE: 28 Jan 2009
+
+Hi.
+
+This is way too slow I think since what you are explaining is something I
+already tested. However I might be using the HitCollector badly.
+
+Please prove me wrong. Supplying some code which I tested this with.
+It stores a hash of the value of the term in a TIntHashSet and just
+calculates the size of that set.
+This one takes approx 3 sec on about 0.5M rows = way too slow.
+
+
+main test class:
+public class GroupingTest
+{
+    protected static final Log log =
+LogFactory.getLog(GroupingTest.class.getName());
+    static DateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+    public static void main(String[] args)
+    {
+        Utils.initLogger();
+        String[] fields =
+{"uid","ip","date","siteId","visits","countryCode"};
+        try
+        {
+            IndexFactory fact = new IndexFactory();
+            String d = "/tmp/csvtest";
+            fact.initDir(d);
+            IndexReader reader = fact.getReader(d);
+            IndexSearcher searcher = fact.getSearcher(d, reader);
+            QueryParser parser = new MultiFieldQueryParser(fields,
+fact.getAnalyzer());
+            Query q = parser.parse("date:20090125");
+
+
+            GroupingHitCollector coll = new GroupingHitCollector();
+            coll.setDistinct(true);
+            coll.setGroupField("uid");
+            coll.setIndexReader(reader);
+            long start = System.currentTimeMillis();
+            searcher.search(q, coll);
+            long stop = System.currentTimeMillis();
+            System.out.println("Time: " + (stop-start) + ", distinct
+count(uid):"+coll.getDistinctCount() + ", count(uid): "+coll.getCount());
+        }
+        catch (Exception e)
+        {
+            log.error(e.toString(), e);
+        }
+    }
+}
+
+
+public class GroupingHitCollector  extends HitCollector
+{
+    protected IndexReader indexReader;
+    protected String groupField;
+    protected boolean distinct;
+    //protected TLongHashSet set;
+    protected TIntHashSet set;
+    protected int distinctSize;
+
+    int count = 0;
+    int sum = 0;
+
+    public GroupingHitCollector()
+    {
+        set = new TIntHashSet();
+    }
+
+    public String getGroupField()
+    {
+        return groupField;
+    }
+
+    public void setGroupField(String groupField)
+    {
+        this.groupField = groupField;
+    }
+
+    public IndexReader getIndexReader()
+    {
+        return indexReader;
+    }
+
+    public void setIndexReader(IndexReader indexReader)
+    {
+        this.indexReader = indexReader;
+    }
+
+    public boolean isDistinct()
+    {
+        return distinct;
+    }
+
+    public void setDistinct(boolean distinct)
+    {
+        this.distinct = distinct;
+    }
+
+    public void collect(int doc, float score)
+    {
+        if(distinct)
+        {
+            try
+            {
+                Document document = this.indexReader.document(doc);
+                if(document != null)
+                {
+                    String s = document.get(groupField);
+                    if(s != null)
+                    {
+                        set.add(s.hashCode());
+                        //set.add(Crc64.generate(s));
+                    }
+                }
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+        }
+        count++;
+        sum += doc;  // use it to avoid any possibility of being optimized
+away
+    }
+
+    public int getCount() { return count; }
+    public int getSum() { return sum; }
+
+    public int getDistinctCount()
+    {
+        distinctSize = set.size();
+        return distinctSize;
+    }
+}
+
+
+On Wed, Jan 28, 2009 at 10:51 AM, ninaS <nina256@gmx.de> wrote:
+
+>
+> By the way: if you only need to count documents (count groups) HitCollector
+> is a good choice. If you only count you don't need to sort anything.
+>
+>
+> ninaS wrote:
+> >
+> > Hello,
+> >
+> > yes I tried HitCollector but I am not satisfied with it because you can
+> > not use sorting with HitCollector unless you implement a way to use
+> > TopFieldTocCollector. I did not manage to do that in a performant way.
+> >
+> > It is easier to first do a normal search und "group by" afterwards:
+> >
+> > Iterate through the result documents and take one of each group. Each
+> > document has a groupingKey. I remember which groupingKey is already used
+> > and don't take another document of this group into the result list.
+> >
+> > Regards,
+> > Nina
+> >
+>
+> --
+> View this message in context:
+> http://www.nabble.com/Group-by-in-Lucene---tp13581760p21702742.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+-- 
+Marcus Herou CTO and co-founder Tailsweep AB
++46702561312
+marcus.herou@tailsweep.com
+http://www.tailsweep.com/
+http://blogg.tailsweep.com/
+

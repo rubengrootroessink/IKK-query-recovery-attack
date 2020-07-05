@@ -1,0 +1,65 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: More frustration with Lucene/Java file i/o on Windows
+DATE: 18 Aug 2006
+
+
+>             It was a little comforting to know that other people have
+> seen Windows Explorer refreshes crash java Lucene on Windows.  We seem
+> to be running into a long list of file system issues with Lucene, and I
+> was wondering if other people had noticed these sort of things (and
+> hopefully any tips and tricks for working around them).
+
+Sorry you're having so many troubles.  Keep these emails, questions &
+issues coming because this is how we [gradually] fix Lucene to be more
+robust!
+
+OK a few quick possibilities / suggestions:
+
+   * Make sure in your Indexer.java that when you delete docs, you
+     close any open IndexWriter's before you try to call
+     deleteDocuments from your IndexReader.  Only one writer
+     (IndexWriter adding docs or IndexReader deleting docs) can be open
+     at once and if you fail to do this you'll get exactly that "lock
+     obtain timed out" error.  You could also use IndexModifier which
+     under the hood is doing this open-close logic for you.  But: try
+     to buffer up adds and deletes together if possible to minimize
+     cost of open/closes.
+
+   * That one file really seems to have an open file handle on it.  Are
+     you sure you called close on all IndexReaders (IndexSearchers)?
+     That file is a "compound file format" segment, and IndexReaders
+     hold an open file handle to these files (IndexWriters do as well,
+     but they quickly close the file handles after writing to them).
+
+   * There was a thread recently, similar to this issue, where
+     File.renameTo was failing, and there was a suggestion that this is
+     a bug in some JVMs and to get the JVM to GC (System.gc()) to see
+     if that then closes the underlying file.
+
+   * IndexSearcher.close() will only close the underlying IndexReader
+     if you created it with a String.  If you create it with just an
+     IndexReader it will not close that reader.  You have to separately
+     call IndexReader.close to close the reader.
+
+   * If the JVM exited un-gracefully then the lock files will be left
+     on disk and Lucene will incorrectly think the lock is held by
+     another process (and then hit that "lock obtain timed out"
+     error).  You can just remove the lock files (from
+     c:\windows\temp\...) if you are certain no Lucene processes are
+     running.
+
+     We are working towards using native locks in Lucene (for a future
+     release) so that even un-graceful exits of the JVM will properly
+     free the lock.
+
+   * Perhaps, change your "build a new index" logic so that it does so
+     in an entirely fresh directory?  Just to avoid any hazards at all
+     of anything holding files open in the old directory ...
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

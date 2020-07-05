@@ -1,0 +1,97 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: SpatialQuery for location based search using Lucene
+DATE: 27 Jun 2009
+
+Hi mitu2009,
+
+For numeric searches the not yet released version 2.9 has new possibilities
+for numeric searches. You can index int, long, float or double in a special
+field type (NumericField instead of Field) and can query it with
+NumericRangeQuery/NumericRangeFilter (see
+http://hudson.zones.apache.org/hudson/job/Lucene-trunk/javadoc/core/org/apac
+he/lucene/search/NumericRangeQuery.html). You can download this unreleased
+version from svn or the hudson server (see developers resources on the
+homepage, download @
+http://hudson.zones.apache.org/hudson/job/Lucene-trunk/).
+
+If you want to work with older versions, consult also this Wiki article:
+http://wiki.apache.org/lucene-java/SearchNumericalFields
+
+What you should do with older Lucene versions:
+- Pad all your numbers, so they sort alphabetically. E.g. index terms like
+1,4,6,9,10,11 would not sort in this order and range queries would not work
+(they would sort 1,10,11,4,6,9). So the simpliest is to pad the numbers with
+zeros in front (what your example does not seem to do), e.g. by using
+DecimalFormat (new DecimalFormat("000.000000")):
+
+> My lucene index has got latitude and longitudes fields indexed as follows:
+> 
+>     doc.Add(new Field("latitude", latitude.ToString() , Field.Store.YES,
+> Field.Index.UN_TOKENIZED));
+> 
+>     doc.Add(new Field("longitude", longitude.ToString(), Field.Store.YES,
+> Field.Index.UN_TOKENIZED));
+> 
+> I want to retrieve a set of documents from this index whose lat and long
+> values are in a given range.
+> 
+> As you already know, Lat and long could be negative values.
+
+The negative values are a problem (not with NumericRangeQuery for 2.9), but
+for latitudes longitudes the solution is easy. Just add a constant offset to
+all numbers (e.g. 90 or 180). Then they are positive and can be easily
+queried (when padding with 0 is on). On the query side you have to add the
+offset, too.
+
+[...]
+
+> Also,I wanted to know how Lucene's ConstantScoreRangeQuery is better than
+> RangeQuery  class.
+
+ConstantScore is better for numeric Ranges, because, if you have too many
+different lat/lon values in your field, the non-constant query will fail
+with TooManyClausesExceptions.
+
+> Am facing another problem in this context:
+> I've one of the documents in the index with the following 3 cities:
+> 
+>  - Lyons, IL
+> 
+>    Oak Brook, IL
+> 
+>    San Francisco, CA
+> 
+> If i give input as "Lyons, IL" then this record comes up.
+> But if i give San Francisco, CA as input, then it does not.
+> 
+> However, if i store the cities for this document as follows:
+> 
+>  - San Francisco, CA
+> 
+>    Lyons, IL
+> 
+>    Oak Brook, IL
+> 
+>  and when i give San Francisco, CA  as input, then this record shows in
+> the
+> search results.
+> 
+> What i want here is that if i type any of the 3 cities in input,I should
+> get
+> this document in the search results.
+
+
+The question: How did you index those values? If you have done it with
+UN_TOKENIZED you must create a TermQuery with the exact text (because the
+whole name is the term) in correct case and spelling. For full text engines
+to work correctly, you must choose the correct anaylzer to create tokens
+from your indexed text and the query parser.
+
+Uwe
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

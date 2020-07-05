@@ -1,0 +1,119 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Lucene performance bottlenecks
+DATE: 3 Dec 2005
+
+On Saturday 03 December 2005 14:09, Andrzej Bialecki wrote:
+> Paul Elschot wrote:
+> 
+> >In somewhat more readable layout:
+> > 
+> >+(url:term1^4.0 anchor:term1^2.0 content:term1
+> >   title:term1^1.5  host:term1^2.0)
+> >+(url:term2^4.0 anchor:term2^2.0 content:term2
+> >   title:term2^1.5 host:term2^2.0)
+> >url:"term1 term2"~2147483647^4.0 
+> >anchor:"term1 term2"~4^2.0
+> >content:"term1 term2"~2147483647
+> >title:"term1 term2"~2147483647^1.5
+> >host:"term1 term2"~2147483647^2.0
+> >
+> >The first two clauses with + prefixes are required, and I would guess
+> >that the 5 way disjunctions inside these clauses take most of the cpu time
+> >during search.
+> >  
+> >
+> 
+> That's an interesting observation. This suggests that it could pay off 
+> to glue these fields together and change this to a query on a single 
+> combined field, right? I.e. to trade off space for speed.
+
+Yes.
+Querying the host field like this in a web page index can be dangerous
+business. For example when term1 is "wikipedia" and term2 is "org",
+the query will match at least all pages from wikipedia.org.
+
+> 
+> >The remaining clauses will be skipped to only when the two required
+> >clauses are both present, so these are probably not the problem.
+> >In the call tree for scoring these can be identified by the skipTo()
+> >being called inside the score() method at the top level.
+> >
+> >This is one of the cases in which BooleanScorer2 can be faster
+> >than the 1.4 BooleanScorer because the 1.4 BooleanScorer does
+> >not use skipTo() for the optional clauses.
+> >Could you try this by calling the static method
+> >BooleanQuery.setUseScorer14(true) and repeating the test?
+> >  
+> >
+> 
+> Ok, I'll be able to do this on Monday.
+> 
+> >
+> >>For those interested in profiler info, look here:
+> >>
+> >>http://www.getopt.org/lucene/20051202/
+> >>    
+> >>
+> >
+> >Thanks for making this available.
+> >I had a short look and noticed that the times in the call tree are 
+cumulative.
+> >Would it be possible to record cpu time per method by subtracting the
+> >times of the called methods?
+> >  
+> >
+> 
+> I think so, I'll check it back on Monday.
+> 
+> >Another interesting statistic is the actual numbers of times the methods 
+get
+> >called. The scorers used by BooleanScorer2 can use rather deep
+> >call trees for scoring. These method calls are not free, and I would like
+> >to know whether these form a bottleneck. 
+> >  
+> >
+> 
+> This statistics is available when I run with a high-detail profiling 
+> (which slows down JVM considerably, like 10x). I can collect these too, 
+> if it's interesting.
+
+One measurement at a time is more than enough for me, and the slow
+down does not seem to make this a good candidate to do first.
+
+> >>From the hot spots output of the profiler info I see that the following 
+methods:
+> >- PhrasePositions.nextPosition
+> >- SegmentTermDocs.read
+> >have a larger portion of cpu time spent in the method.
+> >Looking at the expanded query, seeing PhrasePositions.nextPosition
+> >here is not a surprise.
+> >
+> >The fact that SegmentTermDocs.read shows up might explain
+> >the reason why only a little heap is used:  Lucene normally leaves
+> >the file buffering to the operating system, and
+> >when the file buffers are read the index data is decompressed
+> >mostly by the readVInt method.
+> >  
+> >
+> 
+> Yes, I understand it now. But perhaps it's time to contest this 
+> approach: if there is so much heap available, does it still make sense 
+> to rely so much on OS caching, if we have the space to do the caching 
+> inside JVM (at least for a large portion of the index)?
+
+You can try and use Lucene's RAMDirectory when you have enough RAM.
+However, for larger indexes, It is easier to fit the index files  in RAM
+(in OS buffers) than the decompressed index data (inside the JVM).
+
+Also, caching query results by query text is probably more effective
+than caching the JVM version of the searched index data.
+
+Regards,
+Paul Elschot
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

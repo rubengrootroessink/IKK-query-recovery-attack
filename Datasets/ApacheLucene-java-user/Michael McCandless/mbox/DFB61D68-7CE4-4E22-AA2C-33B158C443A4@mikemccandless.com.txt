@@ -1,0 +1,76 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: FileNotFoundException in ConcurrentMergeScheduler
+DATE: 30 May 2008
+
+
+A few more questions, below:
+
+Paul J. Lucas wrote:
+
+> I have a thread than handles the unindexing/reindexing.  It gets  
+> changed from a BlockingQueue.  My unindex code is like:
+>
+> 	IndexWriter writer = new IndexWriter( INDEX, INDEX_ANALYZER, false );
+> 	final Term t = new Term( DIR_FIELD, dir.getAbsolutePath() );
+> 	writer.deleteDocuments( t );
+> 	writer.close();
+>
+> My indexing code is like:
+>
+> 	IndexWriter writer = new IndexWriter( INDEX, INDEX_ANALYZER );
+> 	writer.setMergeFactor( INDEX_MERGE_FACTOR );
+> 	Document doc = new Document();
+> 	// ... add fields to doc ...
+> 	writer.addDocument( doc );
+> 	writer.close();
+
+Are you indexing only one document each time you open IndexWriter?   
+Or do you open a single IndexWriter, add all documents for that  
+directory, then close it?  (Or, maybe there is only one document per  
+directory?)
+
+> While that thread is executing, other threads can search the index  
+> by doing:
+>
+> 	IndexSearcher searcher = new IndexSearcher( INDEX );
+> 	// ... prepare Query and Sort ...
+> 	Hits hits = searcher.search( query, sort );
+> 	Iterator hitIterator  hits.iterator();
+> 	// ... iterate over hitIterator ...
+> 	searcher.close();
+
+When the exception occurs, do you know how many simultaneous threads  
+are doing searching?  I realize you said it's extremely light load,  
+but if it's possibly a good number of threads, and combined with a  
+large mergeFactor, that would explain the exhaustion.
+
+Do you know what your descriptor limit actually is?  You can use this  
+simple JUnit test (from the upcoming Lucene in Action revision) to  
+check:
+
+public class TestOpenFileLimit extends LuceneTestCase {
+   public void testLimit() throws IOException {
+     int count = 0;
+     List files = new ArrayList();
+     try {
+       while(true) {
+         files.add(new RandomAccessFile("tmp" + count, "rw"));
+         count++;
+       }
+     } catch (IOException ioe) {
+       System.out.println("IOException after  " + count + " open  
+files:");
+       ioe.printStackTrace(System.out);
+       for(int i=0;i<count;i++)
+         new File("tmp" + i).delete();
+     }
+   }
+}
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

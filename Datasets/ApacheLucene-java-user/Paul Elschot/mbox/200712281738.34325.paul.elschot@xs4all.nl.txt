@@ -1,0 +1,98 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: question on the implementation of a SetFilter
+DATE: 28 Dec 2007
+
+On Friday 28 December 2007 13:00:03 christophe blin wrote:
+> 
+> Hi,
+> 
+> I'd like to implement a SetFilter like describe in
+> http://www.nabble.com/Re%3A-Too-many-clauses-p1145373.html
+> 
+> At the moment, I have a working implementation but there are some gotchas I
+> do not understand (i.e I take the code from RangeFilter and adapt it as
+> suggested by the post)
+> 
+> Could someone have a look at my implementation and do some suggestion about
+> the TODO flags (or about the code if it is not so good)
+
+The code looks good to me. Call it classic Lucene style if you will.
+A TermEnum can return null the first time term() is called, note that the next()
+method is called after the first call to term().
+That's the way the TermEnum is implemented iirc since the first days of Lucene.
+
+Maybe it's time to replace it with a TermIterator, or add that on top of TermEnum.
+
+The TermEnum starts at a given field/term and iterates through all indexed
+terms after that, including terms with field names ordered later than
+the given field. That's why the field name must be checked in the Term.
+
+Perhaps that could be another bit functionality for a future TermIterator?
+
+Regards,
+Paul Elschot
+
+
+> 
+> public class SetFilter extends org.apache.lucene.search.Filter {
+>     private String fieldName;
+>     private Set<String> fieldAuthorizedValues;
+> 
+>     public SetFilter(String fieldName, Set<String> fieldAuthorizedValues) {
+>         this.fieldName = fieldName;
+>         this.fieldAuthorizedValues = fieldAuthorizedValues;
+>     }
+> 
+>     @Override
+>     public BitSet bits(IndexReader reader) throws IOException {
+>         BitSet bits = new BitSet(reader.maxDoc());
+>         //builds an enum only on the inspected field
+>         TermEnum enumerator = reader.terms(new Term(fieldName,""));
+> 
+>         try {
+>             //TODO: why should this happen ?
+>             if (enumerator.term() == null) {
+>                 return bits;
+>             }
+> 
+>             TermDocs termDocs = reader.termDocs();
+>             try {
+>                 do {
+>                     Term term = enumerator.term();
+>                     //TODO: why the term can be null ? 
+>                     //TODO: why the term can have a field different from the
+> inspected one ?
+>                     if (term != null && term.field().equals(fieldName)) {
+>                         if
+> (this.fieldAuthorizedValues.contains(term.text())) {
+>                             /* we have a good term, find the docs */
+>                             termDocs.seek(enumerator.term());
+>                             while (termDocs.next()) {
+>                                 bits.set(termDocs.doc());
+>                             }
+>                         }
+>                     } else {
+>                         break;
+>                     }
+>                 }
+>                 while (enumerator.next());
+> 
+>             } finally {
+>                 termDocs.close();
+>             }
+>         } finally {
+>             enumerator.close();
+>         }
+> 
+>         return bits;
+>     }
+> }
+> 
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,313 @@
+FROM: "Ernesto De Santis" <edesan...@fibertel.com.ar>
+SUBJECT: Index pdf files with your content in lucene.
+DATE: 23 Oct 2003
+
+Hello
+
+I am new in opencms and lucene tecnology. 
+
+I won index pdf files, and index de content of this files.
+
+I work in this way:
+
+Make a PDFDocument class like JspDocument class. 
+use org.textmining.text.extraction.PDFExtractor class, this class work fine out of vfs.
+
+and write my registry.xml for pdf document, in plainDocFactory tag.
+
+                    <fileType name="pdftext">
+                        <extension>.pdf</extension>
+                        <!-- This will strip tags before processing -->
+                        <class>net.grcomputing.opencms.search.lucene.PDFDocument</class>
+                    </fileType>
+
+my PDFDocument content this code:
+I think that the probrem is how take the content from CmsFile?, what InputStream use?
+PDFExtractor work with extractText(InputStream) method.
+
+public class PDFDocument implements I_DocumentConstants, I_DocumentFactory {
+
+public PDFDocument(){
+
+}
+
+
+public Document Document(CmsObject cmsobject, CmsFile cmsfile)
+
+throws CmsException 
+
+{
+
+return Document(cmsobject, cmsfile, null);
+
+}
+
+public Document Document(CmsObject cmsobject, CmsFile cmsfile, HashMap hashmap)
+
+throws CmsException
+
+{
+
+Document document=(new BodylessDocument()).Document(cmsobject, cmsfile);
+
+
+//put de content in the pdf file.
+
+String contenido = new String(cmsfile.getContents());
+
+StringBufferInputStream in = new StringBufferInputStream(contenido);
+
+// ByteArrayInputStream in = new ByteArrayInputStream(contenido.getBytes());
+
+
+/* try{
+
+FileInputStream in = new FileInputStream (cmsfile.getPath() + cmsfile.getName());
+
+*/
+
+PDFExtractor extractor = new PDFExtractor();
+
+String body = extractor.extractText(in);
+
+
+document.add(Field.Text("body", body));
+
+/* }catch(FileNotFoundException e){
+
+e.toString();
+
+throw new CmsException();
+
+}
+
+
+*/ 
+
+return (document);
+
+}
+
+
+thanks
+Ernesto
+PD: Sorry for my poor english.
+
+
+
+
+----- Original Message ----- 
+From: "Hartmann, Waehrisch & Feykes GmbH" <hartmann@waehrisch-feykes.de>
+To: <opencms-dev@opencms.org>
+Sent: Wednesday, October 22, 2003 3:50 AM
+Subject: Re: [opencms-dev] (no subject)
+
+
+> Hi Ben,
+> 
+> i think this won't work since the plainDocFactory will only be used for
+> files of type "plain" but not for files of type "binary".
+> Recently we have done some additions to the module - by order of Lenord,
+> Bauer & Co. GmbH - that could meet your needs. It introduces a more flexible
+> way of defining docFactories that you can add new factories without having
+> to recompile the whole module. So other modules (like the news) can bring
+> their own docFactory and all you have to do is to edit the registry.xml.
+> Here is an example:
+> 
+>             <docFactories>
+>                 <docFactory enabled="true" type="plain">
+>                     <fileType name="plaintext">
+>                         <extension>.txt</extension>
+> 
+> <class>net.grcomputing.opencms.search.lucene.PlainDocument</class>
+>                     </fileType>
+>                 </docFactory>
+>                 <docFactory enabled="true" type="news">
+> 
+> <class>net.grcomputing.opencms.search.lucene.NewsDocument</class>
+>                 </docFactory>
+>             </docFactories>
+> 
+> To index binary files all you need to add is this:
+> 
+>            <docFactory enabled="true" type="binary">
+> 
+> <class>net.grcomputing.opencms.search.lucene.BodylessDocument</class>
+>            </docFactory>
+> 
+> There should be no need for an extension mapping.
+> 
+> For the interested people:
+> For ContentDefinitions (like news) i introduced the following:
+>             <contentDefinitions>
+>                 <contentDefinition type="news"> <!-- must match docFactory
+> type -->
+> 
+> <class>com.opencms.modules.homepage.news.NewsContentDefinition</class>
+> 
+> <initClass>net.grcomputing.opencms.search.lucene.NewsInitialization</initCla
+> ss>
+>                     <listMethod name="getNewsList">
+>                         <param type="java.lang.Integer">1</param>
+>                         <param type="java.lang.String">-1</param>
+>                     </listMethod>
+>                     <page uri="/news.html?__element=entry">
+>                         <param method="getIntId" name="newsid"/>
+>                     </page>
+>                 </contentDefinition>
+> 
+> In short:
+> initClass is optional: For the news the news classes have to be loaded to
+> initialize the db pool.
+> listMethod: a method of the content definition class that returns a List of
+> elements
+> page: the page that can display an entry. Here a jsp that has a template
+> element "entry". It also needs the id of the news item.
+> getIntId is a method of the content definition class and newsid is the url
+> parameter the page needs. A link like
+> news.html?__element=entry&newsid=xy
+> will be generated.
+> 
+> Best regards,
+> Stephan
+> 
+> 
+> ----- Original Message ----- 
+> From: "Ben Rometsch" <ben@solidstategroup.com>
+> To: <opencms-dev@opencms.org>
+> Sent: Wednesday, October 22, 2003 6:15 AM
+> Subject: [opencms-dev] (no subject)
+> 
+> 
+> > Hi Matt,
+> >
+> > I am not having any joy! I've updated my registry.xml file, with the
+> > appropriate section reading:
+> >
+> > <luceneSearch>
+> > <mergeFactor>100000</mergeFactor>
+> > <permCheck>true</permCheck>
+> > <indexDir>c:\search</indexDir>
+> >
+> > <analyzer>org.apache.lucene.analysis.standard.StandardAnalyzer</analyzer>
+> > <subsearch>true</subsearch>
+> > <project>online</project>
+> > <docFactories>
+> > <pageDocFactory enabled="true">
+> >
+> > <class>net.grcomputing.opencms.search.lucene.PageDocument</class>
+> > </pageDocFactory>
+> > <plainDocFactory enabled="true">
+> > <fileType name="plaintext">
+> > <extension>.txt</extension>
+> >
+> > <class>net.grcomputing.opencms.search.lucene.PlainDocument</class>
+> > </fileType>
+> > <fileType name="taggedtext">
+> > <extension>.html</extension>
+> > <extension>.htm</extension>
+> > <extension>.xml</extension>
+> > <!-- This will strip tags before processing
+> > -->
+> >
+> > <class>net.grcomputing.opencms.search.lucene.TaggedPlainDocument</class>
+> > </fileType>
+> >
+> > <!-- Index binary documents -->
+> > <fileType name="plaindocument">
+> > <extension>.doc</extension>
+> > <extension>.xls</extension>
+> > <extension>.pdf</extension>
+> >
+> > <class>net.grcomputing.opencms.search.lucene.BodylessDocument</class>
+> > </fileType>
+> >
+> > </plainDocFactory>
+> > <jspDocFactory enabled="true">
+> >
+> > <class>net.grcomputing.opencms.search.lucene.JspDocument</class>
+> > </jspDocFactory>
+> > <xmlTemplateDocFactory enabled="false"/>
+> > </docFactories>
+> > <directories>
+> > <directory location="/release/">
+> > <section>Test</section>
+> > <subsearch>true</subsearch>
+> > </directory>
+> > <directory location="/RGLIntranet/">
+> > <section>Test2</section>
+> > <subsearch>true</subsearch>
+> > </directory>
+> > </directories>
+> > </luceneSearch>
+> >
+> > Notice the section beginning after the remark "Index binary documents".
+> >
+> > But I cannot get any hits when searching for document names that are in
+> the
+> > VFS. The other (HTML) searches are working ok. Is the "name" property of
+> the
+> > fileType tag important? I wasn't sure what to add here...I'm not quite
+> sure
+> > how to move forward. Maybe it would be an idea to add some debugging trace
+> > to the BodylessDocument class to see what is going on inside it? I want to
+> > make sure my XML is correct first tho!
+> >
+> > Thanks for the help,
+> > Ben
+> >
+> >
+> > On Thu, 2003-10-16 at 22:46, Ben Rometsch wrote:
+> > > Hi Matt,
+> > >
+> > > Thanks for the reply. If I just want to get the document title to be
+> > > included in the Lucene index, looking at the code in the
+> > > net.grcomputing.opencms.search.BodylessDocument class it appears to
+> ignore
+> > > what the CMSObject is, and attempt to index it regardless. Is this
+> > correct?
+> > >
+> >
+> > Correct. It will already index the title, but it will not attempt to
+> > index the body.
+> >
+> > > If this is the case, is it simply a matter of instructing Lucene to
+> index
+> > > obects other than HTML files in the VFS  (i.e. Documents) ? Or would I
+> > have
+> > > to create another class, something like
+> > > net.grcomputing.opencms.search.FileDocument and add a new hook into that
+> > > class via the registry.xml fragment?  Or does the BodyLess document
+> > provide
+> > > this functionality, and it's just a matter of adding a new XML fragment
+> to
+> > > the registry.xml are?
+> >
+> > Again, you are right -- simply adding the appropriate configuration to
+> > the registry.xml file will suffice. I believe that you will just need to
+> > extend the plainDocument tag set to include extensions and processors...
+> > I _think_ that binary files get handled by the plain handler.
+> >
+> > Matt
+> >
+> > _______________________________________________
+> > This mail is send to you from the opencms-dev mailing list
+> > To change your list options, or to unsubscribe from the list, please visit
+> > http://mail.opencms.org/mailman/listinfo/opencms-dev
+> 
+> Stephan Hartmann
+> Unternehmensberatung Währisch & Feykes GmbH
+> Gustav-Adolf-Str. 5
+> 47057 Duisburg
+> 
+> Tel.: 0203-373070
+> Fax: 0203-376766
+> E-Mail: hartmann@wfnetz.de
+> Internet: www.wfnetz.de
+> 
+> Über das Internet versandte E-Mails können unter fremden Namen erstellt oder
+> manipuliert werden. Aus diesem Grund enthalten unsere mit E-Mail
+> verschickten Nachrichten grundsätzlich keine rechtsverbindlichen
+> Willenserklärungen.
+> 
+

@@ -1,0 +1,191 @@
+FROM: Sanne Grinovero <sanne.grinov...@gmail.com>
+SUBJECT: Re: how to do simple search paging results of 100 each? and query syntax question
+DATE: 14 Jul 2011
+
+Hello,
+sorry for the late reply.
+I don't think that generally noSQL users need a ScrollableResult as
+usually NoSQL is being used in big data environments, in which case
+it's preferred to send your computation and data crunching to the data
+as with Map/Reduce operations (but not limited to) rather than
+fetching all the data locally.
+This is just my opinion in the general case. With Lucene specifically
+you can implement something similar, and in fact we implemented
+exactly Hibernate's interface in Hibernate Search, which is providing
+the full JPA api to a Lucene index; feel free to have a look:
+
+Implementation:
+  https://github.com/hibernate/hibernate-search/blob/master/hibernate-search/src/main/java/org/hibernate/search/query/hibernate/impl/ScrollableResultsImpl.java
+
+Tests:
+  https://github.com/hibernate/hibernate-search/blob/master/hibernate-search/src/test/java/org/hibernate/search/test/query/ScrollableResultsTest.java
+
+This code is implementing the full Hibernate semantics (including
+keeping loaded entities attached to the session), so if you don't need
+that you could extract the logic into something much simpler - or use
+it directly and clear the Session regularly, as with all batch
+operations.
+
+Generally I think (and hope!) this implementation makes sense as the
+goal is to facilitate developers having a JPA or Hibernate
+applications to get started with Lucene.
+
+Regards,
+Sanne
+
+2011/6/19 Hiller, Dean  x66079 <dean.hiller@broadridge.com>:
+> No need to score at all.  Just need paging and typically it is a loop since this is
+an overnight batch job pairing up a trade with one or many trades on a nosql system.  We
+do need a sorted order as well so we kind of want to
+>
+> 1. have something like ScrollableResultSet
+> 2. be able to pass in order by xxx
+> 3. page over the results without releasing the cursor until we are all matched up(which
+can typically be the third page once in a while is the 80th page).
+>
+> BIG NOTE: Our first page even with indexing is slow because the index is HUGE.  The
+second page incurs that same hit if it starts over which is why ScrollableResultSet is very
+desired in the noSQL world.  Ideally, we only want the first page to have that hit, and the
+second page picks up in the tree where the first one left off.
+>
+> I did post on the hbase list as I am curious if other noSQL users are starting to see
+this need yet.  I am sure people well just as ScrollableResultSet was eventually added into
+hibernate.
+>
+> Thanks,
+> Dean
+>
+> -----Original Message-----
+> From: Simon Willnauer [mailto:simon.willnauer@googlemail.com]
+> Sent: Sunday, June 19, 2011 1:48 PM
+> To: Hiller, Dean x66079
+> Cc: java-user@lucene.apache.org
+> Subject: Re: how to do simple search paging results of 100 each? and query syntax question
+>
+> So do you need to score the documents or can they be in arbitrary order?
+>
+> On Sun, Jun 19, 2011 at 8:45 PM, Hiller, Dean  x66079
+> <dean.hiller@broadridge.com> wrote:
+>> Hmmm, maybe I am using the wrong library?
+>>
+>> See the post I just sent especially on the hibernate section where in hibernate
+>> you can do select * from xxx where yyy and page the results(gets slower and slower
+>> as you go to the nth page) vs. using ScrollableResultSet in hibernate which does
+>> not get any slower as you move towards the nth page.
+>>
+>> I am not close to a web app search at all.  More of a noSQL environment that I need
+indexing on.
+>>
+>> Thanks,
+>> Dean
+>>
+>> -----Original Message-----
+>> From: Simon Willnauer [mailto:simon.willnauer@googlemail.com]
+>> Sent: Sunday, June 19, 2011 11:48 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: how to do simple search paging results of 100 each? and query syntax
+question
+>>
+>> On Sun, Jun 19, 2011 at 7:29 PM, Hiller, Dean  x66079
+>> <dean.hiller@broadridge.com> wrote:
+>>> On the link
+>>> http://lucene.apache.org/java/3_0_3/queryparsersyntax.html#Range%20Searches
+>>>
+>>>
+>>> There is ranged searched, how do I specify everything above a date from date
+20020101  to end of time?
+>>
+>> here you can simply go for field:[20020101 TO ] and leave the end
+>> blank. If you want to do fast numeric searches you should use
+>> NumericRangeQuery instead.
+>>>
+>>>
+>>>
+>>> Next, I am temporarily using lucene in a noSQL solution(to switch to Solr later
+after prototype) and
+>>>
+>>> So I am just indexing basic columns..no need for "top search results", etc.
+>>>
+>>>
+>>>
+>>> When I look at the IndexSearcher and it's list of methods I am not sure how I
+can grab the first 100
+>>>
+>>> Results, then the second 100 results(that is if I need them), then the third
+100 results (again if needed)
+>>
+>> so what you do here is basically requesting as many documents as you
+>> need lets say 100, then you display it. Once you need the next hundred
+>> you search again requesting 200 results and once the search returns
+>> simply discard the first 100
+>> use this as the basic method if you simply use a query without filters
+>> or anything.
+>>
+>>  public TopDocs search(Query query, int n)
+>>>
+>>>
+>>>
+>>> I see a TopScoreDocCollector.create method but the IndexSearcher.search(Query,
+Collector) method states only to call that method if you need ALL the results.  I definitely
+don't need all but need to page through the
+>>>
+>>> Results and typically exit out around the third page.  This is not a web app,
+so ideally I want a reference held into the indexed tree so it can keep giving me the next
+100 results.
+>>
+>> in lucene you must search again to the the next 100 but in general the
+>> search should be very fast.
+>>
+>> lemme know if you have more quesitons.
+>>
+>> simon
+>>>
+>>>
+>>>
+>>> Thanks,
+>>>
+>>> Dean
+>>>
+>>> This message and any attachments are intended only for the use of the addressee
+and
+>>> may contain information that is privileged and confidential. If the reader of
+the
+>>> message is not the intended recipient or an authorized representative of the
+>>> intended recipient, you are hereby notified that any dissemination of this
+>>> communication is strictly prohibited. If you have received this communication
+in
+>>> error, please notify us immediately by e-mail and delete the message and any
+>>> attachments from your system.
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> This message and any attachments are intended only for the use of the addressee and
+>> may contain information that is privileged and confidential. If the reader of the
+>> message is not the intended recipient or an authorized representative of the
+>> intended recipient, you are hereby notified that any dissemination of this
+>> communication is strictly prohibited. If you have received this communication in
+>> error, please notify us immediately by e-mail and delete the message and any
+>> attachments from your system.
+>>
+>>
+>
+> This message and any attachments are intended only for the use of the addressee and
+> may contain information that is privileged and confidential. If the reader of the
+> message is not the intended recipient or an authorized representative of the
+> intended recipient, you are hereby notified that any dissemination of this
+> communication is strictly prohibited. If you have received this communication in
+> error, please notify us immediately by e-mail and delete the message and any
+> attachments from your system.
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

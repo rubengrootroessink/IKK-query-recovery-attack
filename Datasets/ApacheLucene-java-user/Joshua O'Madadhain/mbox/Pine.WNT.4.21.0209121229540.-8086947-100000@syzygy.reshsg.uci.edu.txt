@@ -1,0 +1,163 @@
+FROM: "Joshua O'Madadhain" <jmad...@ics.uci.edu>
+SUBJECT: RE: GoogleQueryParser
+DATE: 12 Sep 2002
+
+This issue confused me somewhat when I first encountered it from the other
+direction (looking at the inputs to, and behavior of, BooleanQuery).  
+
+However, ultimately--as I understand it--what's going on here is that
+while the AND, OR syntax suggests Boolean queries, the indexing and
+searching engines use the vector model (which ranks documents by their
+score on the query) rather than the Boolean model (which returns all
+documents which satisfy the query).  It may be that the Boolean syntax is
+more misleading than useful in some cases.
+
+Part of the problem, too (as Peter pointed out), may be that the example
+queries under discussion are not well-formed Boolean queries, so it's not
+necessarily clear what their behavior *should* be.
+
+Let's consider the example:
+
+a b OR c
+
+If I assume a default of AND, "a AND (b OR c)" seems plausible; so
+does "(a AND b) OR c"; or perhaps "(a AND c) OR (b AND c)".
+
+I believe that the vector model interpretation of this query may be this
+(with AND default):
+
++a +b c
+
+which means 
+
+"The more of the search terms 'a', 'b', 'c' that a document has, the
+higher its score will be, all other things being equal; however, if a
+document doesn't have 'a', or doesn't have 'b', give it score 0
+regardless of any other factors."
+
+This is probably most similar to "(a AND c) OR (b AND c)".
+
+The Boolean interpretation of "(a AND c) OR (b AND c)" would be
+
+"Return all documents [in any order] that have *at least one of the
+following* term sets: {'a', 'c'}; {'b', 'c'}."
+
+which, if you think about it, gives you the same document set as the
+vector model interpretation.
+
+
+Personally, I avoid using the QueryParser entirely and just do my own
+parsing and query construction.  Part of the reason for this is that my
+code is doing term expansion and reweighting, but part of it is just that
+I feel that I get more power and flexibility--and less opportunity for
+ambiguity such as this--by doing my own parsing.  Your mileage may vary.  
+:)
+
+Regards,
+
+Joshua O'Madadhain
+
+ jmadden@ics.uci.edu...Obscurium Per Obscurius...www.ics.uci.edu/~jmadden
+  Joshua O'Madadhain: Information Scientist, Musician, Philosopher-At-Tall
+ It's that moment of dawning comprehension that I live for--Bill Watterson
+My opinions are too rational and insightful to be those of any organization.
+
+On Thu, 12 Sep 2002, John Cwikla wrote:
+
+> Actually to expand a little more after a little more digging, it
+> appears that the AND/OR terms are being flattened into a list of
+> + - or optional query terms that are used to remove/add results
+> one after the other.
+> 
+> In this sense, I think the AND, OR and NOT operators seems to have
+> been an afterthought to the queryparser, since they cannot give the
+> same results as +, - and optional.  AND, OR and NOT should use intersections
+> and unions, while + and - is doing strict adds or rejections.
+> 
+> I guess I was expecting a syntax tree, but it looks like just flattening
+> of terms.
+> 
+> cwikla
+> 
+> -----Original Message-----
+> From: John Cwikla [mailto:Cwikla@Biz360.com]
+> Sent: Thursday, September 12, 2002 11:53 AM
+> To: 'Lucene Users List'
+> Subject: RE: GoogleQueryParser
+> 
+> 
+> So here is the problem, AND default operator:
+> 
+> a b OR c == a AND b OR c == c OR (a AND b) == c OR (+a +b) != c b +a != c +b
+> +a
+> 
+> However with default OR operator:
+> 
+> a AND b c == a AND b OR c == c OR (a AND b) == c OR (+a +b) == c (+a +b)
+> 
+> Since AND and OR do not actually mean "required" or "optional" in a strict
+> boolean sense, I claim you cannot correctly use the query parser with
+> a default AND operator and get results that would be expected.
+> 
+> I haven't looked more into the QueryParser yet, but in the last case with
+> the
+> AND operator, if at some point the internal query "switched" to OR, then
+> the last item would be correct if it had parenthesis like c (+a +b)
+> 
+> Or is it early and I'm missing something?
+> 
+> cwikla
+> 
+> 
+> 
+> -----Original Message-----
+> From: Halcsy Pter [mailto:halacsy.peter@axelero.com]
+> Sent: Wednesday, September 11, 2002 11:58 PM
+> To: Lucene Users List
+> Subject: RE: GoogleQueryParser
+> 
+> >-----Original Message-----
+> >From: Philip Chan [mailto:PChan@Biz360.com]
+> >Sent: Wednesday, September 11, 2002 11:04 PM
+> >To: Lucene Users List
+> >Subject: RE: GoogleQueryParser
+> >
+> >
+> >I think there's a bug, if I set the default operator to be OR, 
+> >when I run
+> >
+> >java org.apache.lucene.queryParser.QueryParser "a AND b OR c"
+> >
+> >it will give me the result of "+a +b c"
+> >if I set the default operator to be AND, and run it with the 
+> >term "a b OR
+> >c", it will give me "+a b c", which is different
+> 
+> To be exact it's not a bug, it's feature ;) Well, the structured query
+> language of Lucene (and Google and others) is not a strict boolean language.
+> For example I think the QueryParser of Lucene do not support parenthesis: a
+> AND (b OR C) 
+> 
+> Instead of strict boolean logic it supports constraint on query terms: a
+> query term is either required or optional or prohibited. If you write + sign
+> before the term it will be required. If you write - it will be prohibited.
+> The question is: is a term required or optional if you do not specify
+> anything? 
+> 
+> DEFAULT_OPERATOR_OR (default QueryParser):
+> A B C --> all three terms are optional
+> 
+> DEFAULT_OPERATOR_AND (Google style):
+> A B C --> +A +B +C all three terms are required.
+> 
+> Because a b OR c query is not a strict boolean query, the query parser can
+> choose how to translate it. +a +b c not too good since doesn't equal to the
+> result of input query c OR a b
+
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

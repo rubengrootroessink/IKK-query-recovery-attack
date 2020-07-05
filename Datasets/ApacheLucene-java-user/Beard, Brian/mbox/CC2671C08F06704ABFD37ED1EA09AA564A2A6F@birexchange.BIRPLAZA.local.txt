@@ -1,0 +1,124 @@
+FROM: "Beard, Brian" <Brian.Be...@mybir.com>
+SUBJECT: RE: WildCardQuery and TooManyClauses
+DATE: 14 Apr 2008
+
+You can use your approach w/ or w/o the filter.
+>                td = indexSearcher.search(query, filter, maxnumhits);
+
+You need to use a filter for the wildcards which is built in to the
+query.
+
+1) Extend QueryParser to override the getWildcardQuery method.
+(Or even if you don't use QueryParser, just use the query api and
+combine the ConstantScoreQuery in #2 with your own query).
+2) Inside of getWildcardQuery you need to return a  
+   ConstantScoreQuery(new WildcardFilter(new Term(field, termStr)))
+3) The first execution will take longer to initialize, but subsequent
+searches are fairly fast.
+4) Someone posted a WildcardFilter a while back which is below.
+5) Now you can plug in to topDocs.
+
+public class WildcardFilter extends Filter {
+
+...
+
+    public BitSet bits(IndexReader reader) throws IOException {
+        BitSet bits = new BitSet(reader.maxDoc());
+        WildcardTermEnum enumerator = new WildcardTermEnum(reader,
+term);
+        TermDocs termDocs = reader.termDocs();
+
+        try {
+            do {
+                Term term = enumerator.term();
+
+                if (term != null) {
+                    termDocs.seek(term);
+
+                    while (termDocs.next()) {
+                        bits.set(termDocs.doc());
+                    }
+                } else {
+                    break;
+                }
+            } while (enumerator.next());
+        } finally {
+            termDocs.close();
+            enumerator.close();
+        }
+
+        return bits;
+    }
+-----Original Message-----
+From: Joe K [mailto:chose77@gmail.com] 
+Sent: Thursday, April 10, 2008 11:46 AM
+To: java-user@lucene.apache.org
+Subject: Re: WildCardQuery and TooManyClauses
+
+Donna,
+so this doesn't work because search calls internaly
+MultiTermQuery.rewrite
+which causes TooManyClauses exception anyway even if the maxnumhits
+is set to 200 !!
+
+So I am lost again...
+
+Chose
+
+
+On Thu, Apr 10, 2008 at 3:02 PM, Donna L Gresh <gresh@us.ibm.com> wrote:
+
+> Doesn't the following do what you want with maxnumhits =200?
+>                TopDocs td;
+>                td = indexSearcher.search(query, filter, maxnumhits);
+> where filter can be null
+>
+>
+>
+> Donna L. Gresh
+> Services Research, Mathematical Sciences Department
+> IBM T.J. Watson Research Center
+> (914) 945-2472
+> http://www.research.ibm.com/people/g/donnagresh
+> gresh@us.ibm.com
+>
+>
+> "Joe K" <chose77@gmail.com> wrote on 04/10/2008 08:53:06 AM:
+>
+> > Hello everybody,
+> > I know there was written a tons of words about this issue, but I'm
+just
+> not
+> > clear enough about it.
+> >
+> > I have these facts:
+> >
+> > 1. my query is always 1 letter and *, eg. M*
+> > 2. i always want to get max 200 results, no more!
+> > 3. i don't want to fix this issue by setting maxClauseCount
+> >
+> > I just don't see the easy way how to get my results, did i missed
+> something?
+> >
+> > From what I've read here I know that probably i should play with
+filters
+> or
+> > with WildCardEnum, but why?
+> > I just want to get simple this:
+> > SELECT FROM XXX WHERE XXX.name LIKE 'M%' LIMIT 200;
+> >
+> > (there is no filtering in this query except the wildcard itself)
+> >
+> > Please, what is the easiest solution to achieve this?
+> >
+> > Thanks in advance,
+> > Chose
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

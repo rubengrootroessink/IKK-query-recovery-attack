@@ -1,0 +1,60 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Merge Index Filling up Disk Space
+DATE: 21 Dec 2006
+
+Yonik Seeley wrote:
+> On 12/21/06, Michael McCandless <lucene@mikemccandless.com> wrote:
+>> Harini Raghavan wrote:
+>> > I am using lucene 1.9.1 for search functionality in my j2ee application
+>> > using JBoss as app server. The lucene index directory size is almost 
+>> 20G
+>> > right now. There is a Quartz job that is adding data to the index evey
+>> > min and around 20000 documents get added to the index every day.When 
+>> the
+>> > documents are added and the segments are merged, the index size
+>> > increases and sometimes grows to more than double its original size.
+>> > This results in filling up the disk space. We have allotted a f/s size
+>> > of 50G and even that is not sufficient at times. Is there an optimum
+>> > vales for the f/s size to be allotted in such scenario.
+>> > Any suggestions would be appreciated.
+>>
+>> I believe optimize should use at most 2X the starting index size,
+>> transiently, if there are no readers open against the index.
+> 
+> Isn't it up to 3x with the compound index format? (and 4x with readers 
+> opened)
+
+I *think* it's really max 2X even with compound file (if no readers)?
+
+Because, in IndexWriter.mergeSegments we:
+
+   1. Create the newly merged segment in non-compound format (brings us
+      up to 2X, when it's the last merge).
+
+   2. Commit the new segments(_N) file referencing this new segment (in
+      non-compound format).
+
+   3. Remove all input segments so back to 1X.
+
+   4. Build the compound file (brings us up to 2X).
+
+   5. Commit the next segments(_N) file referencing the new segment in
+      compound format.
+
+   6. Delete the non-cfs segment files (back to 1X or less).
+
+What's spooky is if a reader reopens eg after 2 and before 5, and if
+another reader still holds the original index open, then that brings
+us to 4X (I think?).  More generally, since optimize may do a whole
+series of merges (typical) leading up to the final merge, if readers
+are aggressively re-opening then the held disk usage can be extremely
+high (far more than 4X).  I think it's best not to recycle readers
+during merge/optimize!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

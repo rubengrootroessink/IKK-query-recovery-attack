@@ -1,0 +1,52 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: Realtime & distributed
+DATE: 9 Oct 2009
+
+On Thu, Oct 8, 2009 at 7:56 PM, Jason Rutherglen <jason.rutherglen@gmail.com
+> wrote:
+
+> There is the Zoie system which uses the RAMDir
+> solution,
+>
+
+Also, to clarify: zoie does not index into a RAMDir and then periodically
+merge that
+down to disk, as for one thing, this has a bad failure mode when the system
+crashes,
+as you lose the entire RAMDir and have to figure out how far back to look in
+your
+transaction log to know how much to reindex.
+
+Zoie instead indexes "redundantly": every incoming document is indexed into
+a
+RAMDir *and* the FSDirectory simultaneously, but the disk IndexReader for
+the
+FSDirectory is only reopened every 15 minutes or so, while the IndexReader
+for
+the RAMDirectory is reopened for every query to guarantee real-timeliness of
+the index.
+
+The only case where zoie *isn't* realtime, is when the speed of indexing
+updates
+comes in faster than can be indexed into the RAMDirectory - if this is the
+case,
+those updates will pile up in a queue being served by that indexing thread,
+and
+won't be visible until that thread has caught up.  In practice, this doesn't
+happen
+unless any given node is trying to index a hundred documents (depends on
+size,
+of course) a second.
+
+Of course, since the IndexWriter buffers some documents in RAM before
+flushing to disk, you are not totally immune to system failures, but at zoie
+is
+no more susceptible to that then non-realtime search, as it's writing
+directly to
+disk all the time as well (and yes, this is redundant, but ever since the
+fantastic
+indexing speed improvements of Lucene 2.3, I've yet to see indexing be the
+bottleneck anymore).
+
+  -jake
+

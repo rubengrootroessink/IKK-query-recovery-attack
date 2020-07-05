@@ -1,0 +1,55 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Lucene performance bottlenecks
+DATE: 12 Dec 2005
+
+
+: Oh, BTW:  I just found the DisjunctionMaxQuery class, recently added it
+: seems. Do you think this query structure could benefit from using it
+: instead of the BooleanQuery?
+
+DisjunctionMaxQuery kicks ass (in my opinion), and It certainly seems like
+(from your query structure) it's something you might want to consider
+using, but I don't know thta it will sove the performance problems you're
+having -- I can't think of any situations in which DisjunctionMaxScorer
+could skip more docs/terms then DisjuntionSumScorer.
+
+I believe Paul already suggested writting a completely new type of
+specialized Query/Scorer for your purposes -- one possibility I can
+imaging is a specialized version of BooleanQuery that skips past documents
+in the optional scorers once it's gotten a score from at least one other
+optional scorer (or N other optional scorers).  Then as long as you're
+carefull to list the really usefull sub-clauses (ie: the shorter fields,
+with the higher boosts) first, you can save a lot of calculation with
+(what i expect would be)  little loss in functionality.
+
+for example, looking at your sample query...
+
++(url:term1^4.0 anchor:term1^2.0 content:term1 title:term1^1.5 host:term1^2.0)
++(url:term2^4.0 anchor:term2^2.0 content:term2 title:term2^1.5 host:term2^2.0)
+url:"term1 term2"~2147483647^4.0
+anchor:"term1 term2"~4^2.0
+content:"term1 term2"~2147483647
+title:"term1 term2"~2147483647^1.5
+host:"term1 term2"~2147483647^2.0
+
+...if you reordered those first two clauses like this...
+
++(url:term1^4.0 anchor:term1^2.0 host:term1^2.0 title:term1^1.5 content:term1)
+
+...once the Scorers from the url term query and the achor term query
+have chimed in with a non-zero score for a document, the scores from the
+other sub-clauses maynot be very relevant in the final score calculation
+... so why not skip them?
+
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

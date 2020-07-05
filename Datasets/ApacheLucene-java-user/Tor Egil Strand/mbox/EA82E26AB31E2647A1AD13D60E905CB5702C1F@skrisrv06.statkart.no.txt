@@ -1,0 +1,90 @@
+FROM: "Tor Egil Strand" <Tor-Egil.Str...@statkart.no>
+SUBJECT: IOException during search and NullPointerException when closing IndexReader
+DATE: 2 Mar 2011
+
+Hi
+
+I have been investigating a problem where our servers kept old index
+files open even though our logs indicated that we had closed the
+IndexReader. Eventually I found out that the files were not closed
+because a NullPointerException had been thrown from somewhere inside
+Lucene before it got to closing the files. Here is the stack trace for
+this exception:
+
+java.lang.NullPointerException
+	at
+org.apache.lucene.index.SegmentReader$Norm.decRef(SegmentReader.java:409
+)
+	at
+org.apache.lucene.index.SegmentReader.doClose(SegmentReader.java:815)
+	at
+org.apache.lucene.index.IndexReader.decRef(IndexReader.java:163)
+	at
+org.apache.lucene.index.DirectoryReader.doClose(DirectoryReader.java:828
+)
+	at
+org.apache.lucene.index.IndexReader.decRef(IndexReader.java:163)
+	at
+org.apache.lucene.index.IndexReader.close(IndexReader.java:1004)
+	
+I also found out that the cause of this exception was another exception
+we had gotten several hours earlier:
+
+java.io.IOException: read past EOF
+	at
+org.apache.lucene.store.BufferedIndexInput.readBytes(BufferedIndexInput.
+java:138)
+	at
+org.apache.lucene.index.SegmentReader$Norm.bytes(SegmentReader.java:471)
+	at
+org.apache.lucene.index.SegmentReader.getNorms(SegmentReader.java:1017)
+	at
+org.apache.lucene.index.SegmentReader.norms(SegmentReader.java:1024)
+	at
+org.apache.lucene.search.TermQuery$TermWeight.scorer(TermQuery.java:79)
+	at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.scorer(BooleanQuery.
+java:306)
+	at
+org.apache.lucene.search.BooleanQuery$BooleanWeight.scorer(BooleanQuery.
+java:306)
+	at
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:210)
+	at org.apache.lucene.search.Searcher.search(Searcher.java:67)
+	
+This brings two questions:
+
+1. Why did we get the IOException in the first place. Other searches
+that day were working just fine. Unfortunately, the files from that day
+have long since been overwritten. The search that failed was the first
+search in a newly opened IndexReader. Two other searches being performed
+within the same second went perfectly fine, and the queries should be
+equal except for the keyword. Could it be Lucene that was trying to read
+beyond EOF, or is it more likely that an index file was corrupted, or
+even a problem in out storage system?
+
+2. As several things could cause an IOException at the given point we
+got it, it is bad that it is then no longer possible to close the
+IndexReader properly. As far as I can see, Lucene assumes that two
+fields, bytes and bytesRef, in SegmentReader.Norm are both null or both
+non-null. In Norm.decRef(), only bytes is checked before calling a
+method on bytesRef, but an exception in Norm.bytes() may cause bytes to
+be non-null while bytesRef is still null. Is this a bug that should be
+fixed?
+
+
+This problem occured on Lucene 3.0.2, but I have looked at the source
+code for 3.0.3 and problem 2 appears to still be there.
+
+
+
+Regards
+Tor Egil Riegels Strand
+Software developer
+Norwegian Mapping Authority
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

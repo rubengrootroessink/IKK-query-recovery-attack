@@ -1,0 +1,46 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: FileNotFoundException
+DATE: 1 Aug 2006
+
+
+> Yes, I use the nfs mount to share the index for other search instance 
+> and all the instances have same lock directory configured, but the only 
+> the difference is that nfs mount is read-only mount, so I have to 
+> disable the lock mechanism for search instances, only lock is enabled 
+> for index modification instance. We have 6 jboss cluster for our 
+> application. so 5 instances of jboss search on the same index and the 
+> 6th instance used for index update.
+
+OK unfortunately this won't work.
+
+Well, it will "work" but you'll hit occasional FileNotFoundExceptions on 
+your searchers, whenever a searcher tries to restart itself while the 
+updater is writing a new segments file.
+
+Even though the searcher's are read only, they still need to briefly 
+hold the commit lock to ensure the updater doesn't write a new segments 
+file while the searcher is reading it (and opening each segment).
+
+We are working towards a fix for lock files over NFS mounts, first by 
+decoupling locking from directory implementation 
+(http://issues.apache.org/jira/browse/LUCENE-635) and second by creating 
+better LockFactory implementations for different cases (eg at least a 
+locking implementation based on native OS locks).  But this is still in 
+process...
+
+I think the best workaround for now is to take an approach like Solr:
+
+   http://incubator.apache.org/solr/features.html
+   http://incubator.apache.org/solr/tutorial.html
+
+whereby the single writer will occasionally (at a known safe time) make 
+a snapshot of its index, and then the multiple searchers can switch to 
+that index once it's safe.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

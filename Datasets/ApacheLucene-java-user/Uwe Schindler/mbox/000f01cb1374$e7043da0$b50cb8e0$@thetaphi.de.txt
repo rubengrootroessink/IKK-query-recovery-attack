@@ -1,0 +1,257 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Help with Numeric Range
+DATE: 24 Jun 2010
+
+Hi Todd,
+
+ 
+
+I found the bug(s) in your Lucene-Only RAMDIr test:
+
+ 
+
+-          Move the reader=writer.getReader() after the writer.commit(), else you see an empty
+index from the reader (the IR is only a snapshot of the IW at the time it was retrieved. After
+the commit, you have to reopen the reader or move the getter here)! – but this is not your
+problem in Lucandra J
+
+-          Here is the general problem of your test: The second and third document have the
+same value (copypaste error), your indexing code makes mid and high the same, code must instead
+look like:
+
+                        low = 1277266160637l;
+
+                       mid = low + 1000;
+
+                       high = mid + 1000;
+
+-          Some of the tests use wrong assertions (document ids, its “first” instead of
+“one”). But your previous test never came to that place.
+
+ 
+
+With these modifications, the tests pass, see my modified version: http://lucene.pastebin.org/355982
+(I changed package name to be able to run test from Lucene testsuite). If they pass with Lucandra,
+you are fine. But these test do not test the NRQ functionality very intensive, you should
+for a real NRQ test adopt TestNumericRangeQuery64 from the Lucene source distribution! If
+this test passes, you can be sure, that Lucandra is fine!
+
+ 
+
+Uwe
+
+ 
+
+-----
+
+Uwe Schindler
+
+H.-H.-Meier-Allee 63, D-28213 Bremen
+
+ <http://www.thetaphi.de/> http://www.thetaphi.de
+
+eMail: uwe@thetaphi.de
+
+ 
+
+From: Todd Nine [mailto:todd@spidertracks.co.nz] 
+Sent: Thursday, June 24, 2010 8:26 AM
+To: Uwe Schindler
+Subject: RE: Help with Numeric Range
+
+ 
+
+Hey Uwe.  I've implemented the same test with a RAM store, and it doesn't work.  Maybe I'm
+doing something wrong, but the tests all appear to be in order and work the way I would expect
+a numeric range query to work.  Check out my tests if you would please.  I'm at a real loss
+here.
+
+http://github.com/tnine/Lucandra/tree/master/test/lucandra/
+
+
+
+
+todd 
+SENIOR SOFTWARE ENGINEER
+
+todd nine| spidertracks ltd |  117a the square 
+po box 5203 | palmerston north 4441 | new zealand 
+P: +64 6 353 3395 | M: +64 210 255 8576  
+E: todd@spidertracks.co.nz W: www.spidertracks.com 
+
+On Thu, 2010-06-24 at 07:40 +0200, Uwe Schindler wrote: 
+
+Hi Todd,
+
+
+
+At least to be sure, have you compared the results with the same test ran against pure-Lucene?
+Maybe there is something wrong in the tests, which we cannot see? Alternatively, maybe you
+try to use Lucene’s TestNumericRangeQuery64 and rewrite to Lucandra, as this one passes
+for sure.
+
+ 
+
+Uwe
+
+ 
+
+-----
+
+Uwe Schindler
+
+H.-H.-Meier-Allee 63, D-28213 Bremen
+
+http://www.thetaphi.de <http://www.thetaphi.de/> 
+
+eMail: uwe@thetaphi.de
+
+
+
+ 
+
+From: Uwe Schindler [mailto:uwe@thetaphi.de] 
+Sent: Thursday, June 24, 2010 7:36 AM
+To: 'todd@spidertracks.co.nz'
+Subject: RE: Help with Numeric Range
+
+
+
+ 
+
+Are you sure that the term enum return the terms in correct order? For all types of RangeQueries,
+the term enumeration has to be correctly sorted as specified in the docs, if this is not correct,
+the enumeration may be incomplete.
+
+ 
+
+One other thing: Lucene 4.0 with flexible indexing will change to binary-only terms (BytesRef
+class), will you be able to handle that?
+
+ 
+
+Uwe
+
+ 
+
+-----
+
+Uwe Schindler
+
+H.-H.-Meier-Allee 63, D-28213 Bremen
+
+http://www.thetaphi.de <http://www.thetaphi.de/> 
+
+eMail: uwe@thetaphi.de
+
+
+
+ 
+
+From: Todd Nine [mailto:todd@spidertracks.co.nz] 
+Sent: Thursday, June 24, 2010 2:00 AM
+To: Uwe Schindler
+Cc: java-user@lucene.apache.org
+Subject: RE: Help with Numeric Range
+
+
+
+ 
+
+Hi Uwe,
+
+  Thank you for your help, it is greatly appreciated.  Unfortunately, my tests all fail except
+for RangeInclusive.  I've changed the step to be 6 as per your recommendation.  I had it at
+max to eliminate step precision as the cause of the test failure.  Essentially, all keys in
+Cassandra are UTF-8 Keys.  In the Lucandra, the keys are constructed in the following way.
+
+1. Get the token stream for the field.  In this case it's a NumericTokenStream with (numeric,valSize=64,precisionStep=6)
+2. For all tokens in the stream, create a UTF8 String in the following format <fieldname>\uffff<token
+value>
+3. Set the term frequency to 1
+
+This gives us a list of tokens, prefixed with the field name and the delimiter.  then we do
+this
+
+for each term from above create a key of the format <indexname>\uffff<fieldname>\uffff<token
+value> and write it to TermInfo column Family
+
+After debugging the implementation of the LucandraTermEnum, it is correctly returning values
+that should match my numeric range query.  However, I never get the results in the TopDocs
+result set after they're handed back to the numeric range query object.  Any ideas why this
+is happening?
+
+Thanks,
+Todd
+
+	
+
+
+On Wed, 2010-06-23 at 08:53 +0200, Uwe Schindler wrote: 
+
+ 
+ 
+Hi Todd,
+ 
+I am not sure if I understand your problem correctly. I am not familiar with Lucandra/Cassandra
+at all, but if Lucandra implements the IndexWriter and IndexReader according to the documentation,
+numeric queries should work. A NumericField internally creates a TokenStream and "analyzes"
+the number to several Tokens, which are somehow "half binary" (they are terms containing of
+characters in the full 0..127 range for optimal UTF8 compression with 3.x versions of Lucene).
+The exact encoding can be looked at in the NumericUtils class + javadocs.
+ 
+About your testcase: The test looks good, so does it fail? If yes, where is the problem? You
+can also look into Lucene's test TestNumericRangeQuery64 for more examples. Or modify its
+@BeforeClass to instead build a Lucandra index. 
+ 
+The test has one thing, that is not intended to be done like that:
+numeric = new NumericField("long", Integer.MAX_VALUE, Store.YES, true);
+ 
+You are using MAX_VALUE as precision step, this would slowdown all queries to the speed of
+old-style TermRangeQueries. It is always better to stick with the default of 4, which creates
+64 bits / 4 precStep = 16 terms per value. Alternatively for longs, 6 is a good precision
+step (see NumericRangeQuery documentation). MAX_VALUE is only intended for fields that do
+not do numeric ranges but e.g. sort only. precisionStep is a performance tuning parameter,
+it has nothing to do with better/worse precision on terms or different query results. If you
+are using NumericRangeQuery with this large precStep, you are not using the numeric features
+at all, so your test should not behave different from a conventional TermRangeQuery with padded
+terms.
+ 
+Uwe
+ 
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+ 
+ 
+> -----Original Message-----
+> From: Todd Nine [mailto:todd@spidertracks.co.nz]
+> Sent: Wednesday, June 23, 2010 7:53 AM
+> To: java-user@lucene.apache.org
+> Subject: Help with Numeric Range
+> 
+> Hi all,
+>   I'm new to Lucene, as well as Cassandra.  I'm working on the Lucandra
+> project to modify it to add some extra functionality.  It hasn't been fully
+> testing with range queries, so I've created some tests and contributed them.
+> You can view my source here.
+> 
+> http://github.com/tnine/Lucandra/blob/master/test/lucandra/NumericRang
+> eTests.java
+> 
+> First, is this a sensible test?  I'm specifically testing the case of longs where I
+> need millisecond precision on my searches.
+> 
+> 
+> Second, I see that Numeric Fields are built via terms.  I think the issue lies in
+> the encoding of these terms into bytes for the Cassandra keys.  Can anyone
+> point me to some documentation on numeric queries and terms, and how
+> they are encoded at the byte level based on the precision?
+> 
+> Thanks,
+> Todd
+ 
+
+

@@ -1,0 +1,215 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: a question about indexing database tables
+DATE: 26 Feb 2007
+
+No, that's not what I was talking about. Remember that there's no
+requirement in Lucene that each document have the same fields. So, you have
+something like...
+
+Document doc = new Document()
+doc.add("table1_id", id);
+doc.add("table1_name", name);
+IndexWriter.add(doc);
+
+
+Document doc = new Document();
+doc.add("table2_id_emp", employeeId);
+doc.add("table2_address", address);
+IndexWriter.add(doc);
+
+
+You now have two documents in the index, one with fields "table1_id",
+"table1_name" and the other has fields "table2_id_emp", "table2_address".
+
+These two documents are entirely orthogonal. That is, they have no fields in
+common. Even if the values for these fields are the same (say for some
+strange reason your name from table1 has a value of "nelson" and the address
+from table2 also has a value of "nelson". These don't interfere with each
+other since searching for "table1_name:nelson" would never look in the field
+"table2_address".
+
+So, all your tables can be stored in the same *index* (not the same
+document, and most certainly not in the same field). They are all separate
+because no two fields are the same for rows (documents) from different
+tables.
+
+The basic idea is that you index one lucene document for each row.
+
+That said, I can't imagine that this is all you want to do. A one-for-one
+mapping of table rows to documents is almost sure to be not the best design.
+You'll probably want to de-normalize your data for easy lookup etc. There'll
+be some up-front design work to get optimal performance. Especially, there's
+no sense of performing joins in Lucene, and you shouldn't try.
+
+Overall, use Lucene for searching/sorting text, use your RDBMS for
+relational things.
+
+Best
+Erick
+
+On 2/26/07, Mohammad Norouzi <mnrz57@gmail.com> wrote:
+>
+> Hi Erick
+> thank you and sorry for taking long my reply. I am involving in a project.
+>
+> I was thinking of your idea about storing all tables in the same field. it
+> seems to me a good idea, but some vague issues.
+> first, how to create a lucene's document. did you mean, storing all tables
+> by joining all tables?
+> if no, how to determine each row to be inserted in the index file?
+>
+> second, let's consider we indexed all tables as you said, how to find out
+> the data related in hierarchy of tables.
+>
+> please have a look at following structure, I want to know whether I
+> understand you or not?
+>
+> table1_id     table1_name table1_family   table2_id_emp  table2_address
+>     1                   x1               f1
+> 1                     street1
+>     2                   x2               f2
+> 1                     street2
+>     3                   x3               f3
+> 2                     street6
+>
+>
+> On 2/22/07, Erick Erickson <erickerickson@gmail.com> wrote:
+> >
+> > OK, I was off on a tangent. We've had several discussions where people
+> > were
+> > effectively trying to replace a RDBMS with Lucene and finding out it
+> that
+> > RDBMSs are very good at what they do <G>...
+> >
+> > But in general, I'd probably approach it by doing the RDBMS work first
+> and
+> > indexing the result. I think this is your option (2). Yes, this will
+> > de-normalize a bunch of your data and you'll chew up some space, but
+> disk
+> > space is cheap. Very cheap <G>.
+> >
+> > One thing to remember, though, that took me a while to get used to,
+> > especially when I had my database hat on. There's no requirement that
+> > every
+> > document in a Lucene index have the same fields. Conceptually, you can
+> > store
+> > *all* your tables in the same index. So a document for table one has
+> > fields
+> > table_1_field1 table_1_field2 table_1_field3. "documents" for table two
+> > have
+> > fields table_2_field1 table_2_field2 etc.....
+> >
+> > These documents will never interfere with each other during searches
+> > because
+> > they share no fields (and each query goes against a particular field).
+> >
+> > I mention this because your maintenance will be much easier if you only
+> > have
+> > one index <G>....
+> >
+> > Best
+> > Erick
+> >
+> > On 2/22/07, Mohammad Norouzi <mnrz57@gmail.com> wrote:
+> > >
+> > > Thanks Erick
+> > > but we have to because we need to execute very big queries that create
+> > > traffik network and are very very slow. but with lucene we do it in
+> some
+> > > milliseconds. and now we indexed our needed information by joining
+> > tables.
+> > > it works fine, besides, it returns the exact result as we can get from
+> > > database. we indexed about one million records.
+> > > but let me say, we are not using it instead of database, we use it to
+> > > generate some dynamic reports that if we did it by sql queries, it
+> would
+> > > take about 15 minutes.
+> > >
+> > > On 2/22/07, Erick Erickson <erickerickson@gmail.com> wrote:
+> > > >
+> > > > don't do either one <G>.... Search this mail archive for discussions
+> > of
+> > > > databases, there are several long threads discussing this along with
+> > > > various
+> > > > options on how to make this work. See particularly a mail entitled
+> > > > *Oracle/Lucene
+> > > > integration -status- *and any discussions participated in by Marcelo
+> > > > Ochoa.
+> > > >
+> > > > But, in general, Lucene is a text search engine, NOT a RDBMS. When
+> you
+> > > > start
+> > > > saying "keep all relation in order to get right result", it sounds
+> > like
+> > > > you're trying to use Lucene as a RDBMS. It doesn't do this very
+> well,
+> > > > that's
+> > > > not what it was built for. There are several options...
+> > > > > get clever with your index such that you don't do anything like
+> join
+> > > > tables. This implies that you re-design your data layout, probably
+> > > > de-normalizing lots of data, etc.
+> > > > > Use a hybrid solution. That is, use Lucene to search text and then
+> > do
+> > > > whatever further relational processing you need in the database. You
+> > > need
+> > > > to
+> > > > store enough information in the Lucene documents to be able to query
+> > the
+> > > > database.
+> > > > > stick with a database if it works for you already.
+> > > >
+> > > > In general, it's a mis-use of lucene to try to get RDBMS behavior
+> out
+> > of
+> > > > it.
+> > > > When you find yourself trying to do this, take a few minutes and ask
+> > > > yourself if this design is appropriate, and continue only if you can
+> > > > answer
+> > > > in the affirmative...
+> > > >
+> > > > Best
+> > > > Erick
+> > > >
+> > > > On 2/22/07, Mohammad Norouzi <mnrz57@gmail.com> wrote:
+> > > > >
+> > > > > Hello
+> > > > > In our application we have to index the database tables, there is
+> > two
+> > > > way
+> > > > > to
+> > > > > make this
+> > > > >
+> > > > > 1- index each table in a separate directory and then keep all
+> > relation
+> > > > in
+> > > > > order to get right result. in this method, we should use filters
+> to
+> > > > > overcome
+> > > > > the problem of searching on another search result.
+> > > > > 2. joining two or more tables and index the result of join query.
+> > > > >
+> > > > > which approach is better, reliable, has acceptable performance.
+> > > > >
+> > > > > thanks
+> > > > > --
+> > > > > Regards,
+> > > > > Mohammad
+> > > > >
+> > > >
+> > >
+> > >
+> > >
+> > > --
+> > > Regards,
+> > > Mohammad
+> > >
+> >
+>
+>
+>
+> --
+> Regards,
+> Mohammad
+>
+

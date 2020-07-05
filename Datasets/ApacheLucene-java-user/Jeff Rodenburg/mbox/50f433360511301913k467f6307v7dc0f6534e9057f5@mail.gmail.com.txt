@@ -1,0 +1,87 @@
+FROM: Jeff Rodenburg <jeff.rodenb...@gmail.com>
+SUBJECT: Re: A couple of questions regarding load balancing and failover
+DATE: 1 Dec 2005
+
+On 11/30/05, Daniel Pfeifer <Daniel.Pfeifer@tradedoubler.com> wrote:
+>
+>
+> 1.) Does Lucenes MultiSearcher implement some kind of automatic failover
+> and/or load-balancing mechanism if both Searchables which I supply in
+> MultiSearchers constructor go to two different servers but to the very same
+> index-files?
+
+
+We're on version 1.4.3 (and I'm not sure it's current to the trunk), and
+load balancing is not built into the remote searchers.  In your scenario,
+with two servers pointing to the same index-files, if you issue a search
+against both servers (where both servers are participating), you'll have
+duplicate results.
+
+
+if server 1 crashes there is still server 2 and thus at least one server
+> will be able to complete the request. Will the MultiSearcher which is using
+> RemoteSearchables from two servers automatically detect that Searchable
+> number 1 (server 1) does not respond and then try Searchable 2? If not, what
+> is the recommended way of doing this.
+
+
+No.  The recommended way is very dependent on your underlying
+infrastructure.  My personal approach is to hardware load balance in front
+of the remote searcher systems, but this can be achieved a number of ways.
+
+
+And the second part of the question is: If both Searchables are available
+> and working, will the MultiSearcher automatically distribute requests to
+> both Searchables or is there a risk that we get duplicates since both
+> Searchables actually expose the same indexes? If this isn't the case, what
+> would be the recommended way of implemented load distribution over several
+> servers.
+
+
+Again no.  I would recommend a load balancing implementation external to
+Lucene; don't make Lucene figure out what systems are/aren't available.  If
+I were inclined to add failover functionality to Lucene, it would be within
+ParallelMultiSearcher to gracefully allow (expect?) failure in searches.
+
+I'm speaking from the v1.4.3 codebase, and the trunk is currently at v1.9.
+Check the object to see if any improvements have been made.
+
+
+2.) On our index-servers which expose the underlaying index as a
+> RemoteSearchable we do have four dualcore processors each. Since we thus
+> have great multithreading-capabilities I do use the ParallelMultiSearcher
+> instead of the MultiSearcher. On the client side (the application which
+> connects to the Index RMI-Server), should I therefore also be using a
+> ParallelMultiSearcher or is it ok if I use the standard MultiSeacher? And if
+> so, why?
+
+
+That sounds like a lot of power for Lucene, possibly overpowered.
+ParallelMultiSearcher makes use of spawning threads for individual
+subsearchers, so a multi-processor system can execute those in tandem vs.
+the MultiSearcher.  The more subsearchers, the more this makes a
+difference.  I would base your decision of which searcher to use on the
+parallel processing capacity of ParallelMultiSearcher; if your client has
+multiple processors, I'd go with ParallelMultiSearcher.
+
+3.) Currently - to increase speed - we are loading the entire index into
+> memory (using RAMDirectory rather than the FSDirectory). We found out that
+> the RAMDirectory will not update itself if the files in the directory from
+> where the RAMDirectory is loading the index are updated.
+> Therefore I simply coded a Thread which every 10 minutes instantiates new
+> RAMDirectories, unbinds the current RemoteSearchable and then rebinds to the
+> RMI Registry with the new Searchable which uses the new RAMDirectories. This
+> certainly doesn't feel like a good solution, even though the time under
+> which the RMI service will not be able to answer is minimal, there is still
+> a small chance that this very moment a client application tries to find
+> something in the index. Is there a way to refresh the RAMDirectory without
+> having to create new instances of all classes and bind this classes to the
+> RMI Registry? If so, how?
+
+
+Not that I'm aware of.  The remote searchers need to re-open to reflect the
+changes, and those have to be disconnected from the RMI binding in order to
+make that change.
+
+Hope this helps.
+

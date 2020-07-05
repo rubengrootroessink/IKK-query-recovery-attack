@@ -1,0 +1,96 @@
+FROM: "Dan Climan" <dcli...@keepmedia.com>
+SUBJECT: Deleting duplicates from a Lucene index
+DATE: 26 May 2005
+
+I noticed in my lucene index that I had mistakenly indexed some documents
+multiple times. I wrote the following piece of code to find and eliminate
+the duplicates, but it did not behave as expected.
+
+Background:
+Every document has an ItemId field that was indexed as a keyword. Two or
+more documents with the same ItemId term are considered duplicates.
+
+I tried to write this so that the document with the greatest doc id would be
+preserved on the assumption that it's likely the newest version of the
+document.
+
+I ran this on an optimized index using Lucene 1.4.2 which should be the same
+as 1.4.3 given that I don't use the QueryParser for this code nor the demo
+jsp. 
+
+The two symptoms of this not behaving as expected are
+1) ir.docFreq(t) does not always equal the value returned by
+ir.termDocs(t).read(docs, freqs) (see below for actual syntax used).
+2) Even after optimizing, I still have the same dupes in my index.
+
+Am I misusing these classes?
+
+Is there a better way to detect and delete duplicates?
+
+Thanks,
+Dan
+
+=====================
+import org.apache.lucene.index.*;
+
+public class LuceneDupeItemKiller {
+   public static void main(String[] args) {
+       String indexName = "/usr/local/cserver/search/lucene/";
+       if (args.length > 0) 
+           indexName = args[0];
+       IndexReader ir = null;
+       
+       try {
+           ir =IndexReader.open(indexName);
+           System.out.println("Using index in : " + ir.directory());
+           System.out.println("Number of Lucene Documents in index: " +
+ir.numDocs());
+           TermEnum te = ir.terms();
+           te.skipTo(new Term("ItemId", ""));
+           int numTerms = 0;
+           for (Term t = te.term(); te.next(); t = te.term() ) {
+               if (t != null && t.field().equals("ItemId")) {
+                   int dCount = ir.docFreq(t); 
+                   if ( dCount> 1) {
+                       TermDocs td = ir.termDocs(t);
+                       int[] docs = new int[dCount];
+                       int[] freqs = new int[dCount];
+                       int rdCount = td.read(docs, freqs);
+                       if (rdCount == dCount) {
+                           for (int i=0; i< dCount-1;i++) {
+                               ir.delete(docs[i]);
+                               System.out.println("Deleted doc id "+docs[i]+
+"for term "+t.text());
+                           }
+                       } else {
+                           System.err.println("rdCount <> dCount for ItemId
+"+t.text());
+                       }
+                       td.close();
+                   }
+               } else {
+                   break;
+               }
+           }
+           te.close();
+           ir.close();
+           //System.out.println("Number of ItemId Terms: " + numTerms);
+      } catch(Exception e) {
+         System.err.print("Exception: "); 
+         System.err.println(e.getMessage());
+         e.printStackTrace();
+      }
+    }
+}
+======================
+
+
+ 
+Dan Climan
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,74 @@
+FROM: Victor Hadianto <vict...@nuix.com.au>
+SUBJECT: Locking with IndexWriter
+DATE: 22 May 2002
+
+Hello,
+
+I posted this earlier in the Dev list as there is no answer there I posted 
+again hoping that someone might know here :D
+
+I am using lucene in an EJB environment. I have a message driven bean that 
+subscribe to a queue that will consume the object that I want lucene to index.
+
+Now the problem when I have many object in the queue, the Application Server 
+will instantiated multiple message driven bean object and runs the indexing 
+at the same time. When this happen I got this exception:
+
+[IndexerMDB] Problem indexing email in indexer mdb
+java.io.IOException: Index locked for write: 
+Lock@/usr/kernel/jakartalucene/install/write.lock
+        at org.apache.lucene.index.IndexWriter.<init>(Unknown Source)
+        at org.apache.lucene.index.IndexWriter.<init>(Unknown Source)
+        at com.nuix.indexer.IndexerMDB.indexData(IndexerMDB.java:304)
+
+Only the first message driven bean will successfully index the data.
+
+I had a look on the code and really FSDirectory will just simply fail if it 
+can't create the new lock file! Is this done on purpose? Why can't 
+IndexWriter tries for a few times to create the lock file? Do I miss 
+something really big here?
+
+I modified FSDirectory as follow so it works in our environment. Please 
+comment on this change and just slam me if this is blatantly against lucene 
+framework :D
+
+Basically I changed it so it does not fail straight away, instead try and 
+wait for creating the new file.
+
+RCS file: 
+/usr/local/cvsroot/nuix/kernel/jakartalucene/dist/src/java/org/apache/lucene/store/FSDirectory.java,v
+retrieving revision 1.1.1.1
+diff -u -u -r1.1.1.1 FSDirectory.java
+--- FSDirectory.java    4 Apr 2002 01:14:11 -0000       1.1.1.1
++++ FSDirectory.java    22 May 2002 07:19:20 -0000
+@@ -218,7 +218,19 @@
+     return new Lock() {
+        public boolean obtain() throws IOException {
+           if (Constants.JAVA_1_1) return true;    // locks disabled in jdk 
+1.1
+-          return lockFile.createNewFile();
++          boolean locked = false;
++          locked = lockFile.createNewFile();
++          for (int count = 0; count < 100 && !locked; count++) {
++              try {
++                  Thread.sleep(100);
++                  locked = lockFile.createNewFile();
++              } catch (InterruptedException e) {
++                  e.printStackTrace();
++                  return false;
++              }
++              
++          }
++          return locked;
+        }
+        public void release() {
+           if (Constants.JAVA_1_1) return;         // locks disabled in jdk 
+1.1
+-- 
+Victor Hadianto
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

@@ -1,0 +1,279 @@
+FROM: Christian Reuschling <christian.reuschl...@gmail.com>
+SUBJECT: Re: 1:n queries again
+DATE: 13 Nov 2008
+
+Hello Eric,
+
+our use case is to match feature vectors extracted from pictures in
+a performant way with Lucene.
+
+For this, interesting points of a picture will be derived, and each
+of them is described by an own vector. So we have one picture, but
+several feature vectors (1:n)
+
+When I now want to search (similar) interesting points in the set
+of feature vectors, I create a query with one term for each vector
+entry.
+
+E.g:
+
+Picture represented by a document inside an index:
+
+Interesting point 1: feature1Value0.5 feature2Value0.8
+Interesting point 2: feature1Value0.5 feature2Value0.7
+
+
+Query picture interesting point: feature1Value0.5 feature2Value0.7
+
+The idea is to create a lucene document with
+
+field:"startDelimiter feature1Value0.5 feature2Value0.8 endDelimiter startDelimiter feature1Value0.6
+feature2Value1.0 endDelimiter"
+
+So I have two interesting points representing a picture, which is represented by a lucene
+document.
+
+I now want to search for "startDelimiter (feature1Value0.5 feature2Value0.7) endDelimiter"
+and hopefully
+get a ranking
+
+score for interesting point 1: 0.5 (half match)
+score for interesting point 2: 1.0 (full match)
+average score for document     0.75(or sum of 1.5)
+
+...when I look at this now and think about this, the chance is high that lucene makes this
+ranking with
+standard behaviour because of the higher TF value for 'feature1Value0.5'..so indeed my fictive
+query would make no real difference for ranking..which is fantastic :)
+
+When I think about standard 1:n queries, all of you are right, there an 'AND' behaviour is
+needed -
+so the span queries are adequate, with the positionIncrementGap trick.
+
+
+Thank you guys, your answers really helped me a lot!
+
+
+Christian
+
+
+
+
+
+
+Erick Erickson schrieb:
+> Note that the SpanQuery family are Querys, so they can
+> be used as clauses of a BooleanQuery just fine.
+> 
+> 
+> Making this work will be exciting...
+> <<<a query like field1:"word3 NewNotExistingWord word1"~5
+> should match.>>>
+> I'm having trouble understanding the use case. I don't
+> understand how the user can make sense of this, but then
+> it may well be unique to your problem space. What does this
+> mean to the user? Find me any documents where any pair of
+> words in the phrase are within 5 of each other? Find me
+> all documents with *any* matching words and order them by
+> proximity possibly giving more weight to documents with the
+> most matching terms? ????
+> 
+> 
+> <<<I think the lack is that in the case of a PhraseQuery (and I think also
+> in
+> the case of the SpanQuery, but I'm not sure about yet), every term must
+> appear
+> inside the phrase, it is some kind of 'must' for every term.>>>
+> 
+> This is correct if I'm reading it right. Perhaps what's needed here
+> is a statement of the problem you're trying to solve, because I'm
+> having trouble understanding the underlying use-cases..
+> 
+> Best
+> Erick
+> 
+> 
+> On Wed, Nov 12, 2008 at 10:17 AM, Christian Reuschling <
+> christian.reuschling@gmail.com> wrote:
+> 
+>> Hello Erick,
+>>
+>> thank you very much for this interesting idea - but I'm not sure that the
+>> SpanQuery will make every aspect I search for.
+>>
+>> I think the lack is that in the case of a PhraseQuery (and I think also in
+>> the case of the SpanQuery, but I'm not sure about yet), every term must
+>> appear
+>> inside the phrase, it is some kind of 'must' for every term.
+>>
+>> I search for a 'should' - so the behaviour should be exactly the same as
+>> BooleanQuery does, but only in one dataset (maybe represented as extra
+>> field
+>> entry with an incremented PositionIncrementGap)
+>>
+>> In this context, it also was no typo with term2 in front of term1
+>>
+>> At the end, I want to know a score for the overlapping between two term
+>> lists,
+>> so in the case the index entry is
+>>
+>>> doc = new Document
+>>> doc.add("field1", "word1 word2 word3")
+>>> doc.add("field1", "word4 word5")
+>>> IndexWriter.addDocument(doc)
+>> also a query like field1:"word3 NewNotExistingWord word1"~5
+>> should match.
+>>
+>> So the semantic of this (hypothetic) query
+>> "starDelimiter (word1 notExistingWord word3) endDelimiter"
+>>
+>> would make it...but it is a good hint with the PositionIncrementGap. Maybe
+>> there is a possibility to combine this with BooleanQuery?
+>>
+>>
+>>
+>>
+>> Erick Erickson schrieb:
+>>> It's entirely unclear to me whether facets could help, since I haven't
+>> used
+>>> them, I've
+>>> seen these mentioned on the SOLR user list, it may bear investigating.
+>>>
+>>> To expand on Stefan's point. I think his solution will work for you quite
+>>> well, but
+>>> there are a couple of tricks....
+>>>
+>>> The first thing to understand is that (This won't compile, but you get
+>> the
+>>> idea)
+>>>
+>>> doc = new Document
+>>> doc.add("field1", "word1 word2 word3")
+>>> doc.add("field1", "word4 word5")
+>>> IndexWriter.addDocument(doc)
+>>>
+>>> is perfectly legal. The single document added will have all 5 words in
+>>> "field1". But
+>>> here's the trick. If you provide your own analyzer (a trivial analyzer
+>> built
+>>> from one
+>>> of the standard ones?) that returns a number other than 1 (say 10) from
+>>> getPositionIncrementGap the "distance" between word3 and word4 will be
+>>> 10 rather than 1. But the distance between word1 and word2 will be 1 as
+>>> will the distance between word2 and word3, as will the distance between
+>>> word4 and word5
+>>>
+>>> How does this help, you ask? Well, SpanQuery is your friend (PhraseQuery
+>>> might work just as well in this case). Because you can now ask that all
+>> your
+>>> terms have < 10 "holes". For instance, if you made a phrase like
+>>> "word1 word2"~5 it would match, as would "word1"~5 or just word1
+>>>
+>>> "word1 word3"~5 would NOT match since there  other tokens between
+>>>
+>>> "word3 word4"~5 would NOT match since the distance between them is
+>>> greater than 5
+>>>
+>>> Note that using 10 is arbitrary, you probably really want to use
+>> something
+>>> much
+>>> larger, say 100 larger than the maximum number of terms you expect. The
+>> only
+>>> thing you need to watch at all is that the total length of all the terms
+>> and
+>>> all
+>>> the gaps doesn't exceed MAX_INT (MAX_INT / 2? I don't know whether the
+>>> integers are signed).....
+>>>
+>>> What's really happening here is that the "gap" is taking the place of
+>> your
+>>> delimiters and you're making use of Phrase/SpanQuery characteristics
+>>> to return what you want.
+>>>
+>>> Of course I may have completely mis-read your problem, but I'm sure
+>> you'll
+>>> let us know if that's the case <G>.
+>>>
+>>>
+>>> BTW, if this isn't a typo, you probably need SpanQuery since you can
+>>> specify order not being important:
+>>> attName:"startDelimiter myterm2 myterm1 endDelimiter"...should also match
+>>>
+>>> Did you really mean to have myterm2 in front of myterm1?
+>>>
+>>> Best
+>>> Erick
+>>>
+>>> On Wed, Nov 12, 2008 at 8:58 AM, Christian Reuschling <
+>>> christian.reuschling@gmail.com> wrote:
+>>>
+>>>> Hello Friends,
+>>>>
+>>>> In order to offer some simple 1:n matching, currently we create several,
+>>>> counted
+>>>> attributes and expand our queries that we search inside each attribute,
+>>>> e.g.:
+>>>>
+>>>> Query 'attName:myTerm'  => Query 'attName1:myTerm attName2:myTerm'
+>>>>
+>>>> This is not the fastest way, and sometimes not easy to handle - also we
+>>>> have to
+>>>> consider the 1:n attributes during indexing, and must remember the
+>> highest
+>>>> 'n'
+>>>> for query expansion. We get very big queries.
+>>>>
+>>>>
+>>>> Currently I have some other scenario in mind, but I'm not sure how I can
+>>>> achieve
+>>>> this. The idea is to write all n datasets into one attribute, with a
+>>>> specialized
+>>>> start and end delimiter term, e.g.:
+>>>>
+>>>> document entry for attName:
+>>>> "startDelimiter myterm1 myterm2 endDelimiter startDelimiter myterm3
+>> myterm4
+>>>> endDelimiter"
+>>>>
+>>>> When I look to this, it would go somehow into the direction of a
+>>>> PhraseQuery,
+>>>> where I can search e.g. for
+>>>>
+>>>> attName:"startDelimiter myterm1 myterm2 endDelimiter"
+>>>> but the query
+>>>> attName:"startDelimiter myterm1 myterm4 endDelimiter"
+>>>>
+>>>> would not match.
+>>>>
+>>>> The only thing that lacks now is that the queries
+>>>> attName:"startDelimiter myterm1 endDelimiter"
+>>>> attName:"startDelimiter myterm2 myterm1 endDelimiter"
+>>>>
+>>>> also should match - which of course isn't possible with the current
+>>>> PhraseQuery
+>>>> implementation.
+>>>>
+>>>> Best would be some construct like attName:"startDelimiter (myterm1
+>> myterm2)
+>>>> endDelimiter"
+>>>>
+>>>> Whereby the stuff inside the brackets would be a standard BooleanQuery,
+>> but
+>>>> only
+>>>> applied inside the range of the delimiters. Is this somehow possible, or
+>> do
+>>>> I
+>>>> have to write my own Query implementation - and what would be the best
+>> way
+>>>> in this case.
+>>>>
+>>>>
+>>>> Thanks in advance
+>>>>
+>>>> Christian Reuschling
+>>>>
+>>>>
+>>
+> 
+
+

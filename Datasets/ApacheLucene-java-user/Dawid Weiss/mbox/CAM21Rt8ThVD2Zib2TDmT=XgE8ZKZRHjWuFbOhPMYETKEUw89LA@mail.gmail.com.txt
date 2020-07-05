@@ -1,0 +1,219 @@
+FROM: Dawid Weiss <dawid.we...@gmail.com>
+SUBJECT: Re: Autocompletion on large index
+DATE: 7 Jul 2011
+
+Another option to tradeoff dize and mem is to do a lru like cache of suffix
+nodes/ registry. Im still working on that api replacement patch so any
+changes to fst right now scare me...
+On Jul 7, 2011 12:24 PM, "Michael McCandless" <lucene@mikemccandless.com>
+wrote:
+>
+> OK, Elmer sent me the titles (thanks> OK, Elmer sent me the titles
+(thanks!) and I ran some quick tests...
+>
+> There are 1.32M titles, avg 67.3 chars per title (total 84.5 MB text
+> as utf8 on disk so at least 168.9 MB RAM for utf16, ie when loaded
+> in RAM).
+>
+> I built the suggest FST from these titles, and it required 1.25 GB
+> heap (anything less hits OOME). BUT: my test does not load all the
+> terms into RAM (just builds the FST directly from the TermsEnum), so
+> the "real" FSTLookup construction will require more RAM.
+>
+> It took 22.5 seconds to build and the resulting FST is 91.6 MB.
+>
+> Next I tried turning off suffix sharing, ie this "downgrades" the
+> resulting FST a prefix trie, but it saves RAM and CPU during building:
+> it built in 8.2 seconds and with 450 MB heap; the resulting FST is 129
+> MB. The suggest module doesn't make this an option today but maybe we
+> should? Suffix sharing requires sizable RAM while building because it
+> maintains a hash containing all nodes in order to locate the dups.
+>
+> It's also possible to improve FST to have shades of gray between
+> on/off... I'll open an issue.
+>
+> Mike McCandless
+>
+> http://blog.mikemccandless.com
+>
+> On Thu, Jul 7, 2011 at 5:09 AM, Dawid Weiss <dawid.weiss@gmail.com> wrote:
+>> Elmer. Tst will have a large overhead. Fst may not be that much better if
+>> your input has very few shared pre or suffixes. In your case i think this
+is
+>> unfortunately true. What i would do is create a regular lucene index and
+>> store it on disk. Then run prefix queries on it. Should work and scale to
+>> large number of ops per sec. See lucene revolution 2011 talks - there was
+a
+>> talk about using just this instead of a completion module.
+>>
+>> Like mike said though, it'd be interesting to investigate on your data.
+>> On Jul 6, 2011 8:52 PM, "Elmer" <evanchastelet@gmail.com> wrote:
+>>> I just profiled the application and tst.TernaryTreeNode takes 99.99..%
+of
+>>> the memory.
+>>>
+>>> I'll test further tomorrow and report on mem usage for runnable smaller
+>>> indexes.
+>>> I will email you privately for sharing the index to work with.
+>>>
+>>> BR,
+>>> Elmer
+>>>
+>>>
+>>> -----Oorspronkelijk bericht-----
+>>> From: Michael McCandless
+>>> Sent: Wednesday, July 06, 2011 8:39 PM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Re: Autocompletion on large index
+>>>
+>>> Hmm... so I suspect the fst suggest module must first gather up all
+>>> titles, then sort them, in RAM, and then build the actual FST. Maybe
+>>> it's this gather + sort that's taking so much RAM?
+>>>
+>>> 1.3 M publications times 100 chars times 2 bytes/char = ~248 MB. So
+>>> that shouldn't be it...
+>>>
+>>> Is this a an accessible corpus? Can I somehow get a copy to play
+with...?
+>>>
+>>> Are you able to [temporarily, once] build the full FST and other
+>>> suggest impls and compare how much RAM is required for building and
+>>> then lookups?
+>>>
+>>> Mike McCandless
+>>>
+>>> http://blog.mikemccandless.com
+>>>
+>>> On Wed, Jul 6, 2011 at 1:50 PM, Elmer <evanchastelet@gmail.com> wrote:
+>>>> Hi Mike,
+>>>>
+>>>> That's what I thought when I started indexing it. To be clear, it
+happens
+>>
+>>>> on
+>>>> build time.
+>>>> I don't know if memory efficiency is better when building has finished.
+>>>>
+>>>> The titles I index are titles from the dblp computer sience
+bibliography.
+>>>> They can take up to... say 100 characters.
+>>>> Examples:
+>>>> -------
+>>>> - Auditory stimulus optimization with feedback from fuzzy clustering of
+>>>> neuronal responses
+>>>> - Two-objective method for crisp and fuzzy interval comparison in
+>>>> optimization
+>>>> - Bound Constrained Smooth Optimization for Solving Variational
+>>>> Inequalities
+>>>> and Related Problems
+>>>> - Retrieval of bibliographic records using Apache Lucene
+>>>> - Digital Library Information Appliances
+>>>> -------
+>>>>
+>>>> The "title_suggest" field uses the KeyWordTokenizer and LowerCaseFilter
+>> in
+>>>> that order.
+>>>>
+>>>> I also tried to do the same for the author names, and this works
+without
+>>>> problems. Actually it builds the tree/fsa/... faster from dictionary
+than
+>>>> from file (the lookup data file that can be stored and loaded through
+the
+>>>> .store and .load methods). But the larger set of publication titles is
+>>>> currently no-go with 2.5GB of heapspace, only having a main class that
+>>>> builds the LookUp data.
+>>>>
+>>>> BR,
+>>>> Elmer
+>>>>
+>>>>
+>>>> -----Oorspronkelijk bericht----- From: Michael McCandless
+>>>> Sent: Wednesday, July 06, 2011 6:23 PM
+>>>> To: java-user@lucene.apache.org
+>>>> Subject: Re: Autocompletion on large index
+>>>>
+>>>> You could try storing your autocomplete index in a RAMDirectory?
+>>>>
+>>>> But: I'm surprised you see the FST suggest impl using up so much RAM;
+>>>> very low memory usage is one of the strengths of the FST approach.
+>>>> Can you share the text (titles) you are feeding to the suggest module?
+>>>>
+>>>> Mike McCandless
+>>>>
+>>>> http://blog.mikemccandless.com
+>>>>
+>>>> On Wed, Jul 6, 2011 at 12:08 PM, Elmer <evanchastelet@gmail.com> wrote:
+>>>>>
+>>>>> Hi again.
+>>>>>
+>>>>> I have created my own autocompleter based on the spellchecker. This
+>>>>> works well in a sense that it is able to create an auto completion
+index
+>>>>> from my 'publication' index. However, integrated in my web
+application,
+>>>>> each keypress asks autocompleter to search the index, which is stored
+on
+>>>>> disk (not in mem), just like spellchecker does (except that
+spellchecker
+>>>>> is not invoked every keypress).
+>>>>> With Lucene 3.3.0, auto completion modules are included, which load
+>>>>> their trees/fsa/... in memory. I'd like to use these modules, but the
+>>>>> problem is that they use more than 2.5GB, causing heap space
+exceptions.
+>>>>> This happens when I try to build a LookUp index (fst,jaspell or tst,
+>>>>> doesn't matter) from my 'publication' index consisting of 1.3M
+>>>>> publications. The field I use for autocompletion holds the titles of
+the
+>>>>> publications indexed untokenized (but lowercased).
+>>>>>
+>>>>> Code:
+>>>>> Lookup autoCompleter = new TSTLookup();
+>>>>> FSDirectory dir = FSDirectory.open(new File("PATHTOINDEX"));
+>>>>> LuceneDictionary dict = new
+>>>>> LuceneDictionary(IndexReader.open(dir),"title_suggest");
+>>>>> autoCompleter.build(dict);
+>>>>>
+>>>>> Is it possible to have the autocompletion module to work in-memory on
+>>>>> such a dataset without increasing java's heapspace?
+>>>>> FTR, the 3.3.0 autocompletion modules use more than 2.5GB of RAM,
+where
+>>>>> my own autocompleter index is stored on disk using about 300MB.
+>>>>>
+>>>>> BR,
+>>>>> Elmer
+>>>>>
+>>>>>
+>>>>> ---------------------------------------------------------------------
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+

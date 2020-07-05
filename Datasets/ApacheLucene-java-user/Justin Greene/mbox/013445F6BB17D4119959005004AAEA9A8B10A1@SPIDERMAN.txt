@@ -1,0 +1,82 @@
+FROM: Justin Greene <tvxh-l...@spamex.com>
+SUBJECT: RE: Stress/scalability testing Lucene
+DATE: 20 Nov 2002
+
+We wrote an Lucene based indexer that we are using to index MailDir email
+boxes.  Each file is an individual email message and they vary in size from
+a 1K to 50MB.  We are able to index about 60K messages of in about 100
+minutes on a Dual PIII 600 with 1GB of RAM (though Java is set to only use
+256MB).  The resulting index is about 500MB and we are storing the complete
+text of the messages in the index (the raw data size is about 6GB).
+
+In order to index a file, it has to be read, separated into an array of
+messages (each attachment becomes a message), each item in the array is then
+run though a parser to create a plain text version (if we have an
+appropriate parser) or discarded (if we don't), then the plaintext is turned
+into a lucene message and indexed (and run through analyzers).
+
+The process was taking about 18 hours until we added some performance
+modifications.  We created a thread pool to read and parse the email
+messages.  10 threads seems to be the magic number here for us.  We then
+created a queue of messages to be indexed onto which we push the parsed
+messages and have a single thread adding messages to the index.  We had to
+add a manager thread to the read/parse pool as we had an occassion where a
+corrupt file hung the thread... it just kept waiting to open... so now if a
+thread does not exit in X minutes we kill it.  We also do a single optimize
+at the end of the process.  I would have to look in the logs to see how much
+of the 100 minutes is the optimize.
+
+Our logic is that the thread that is indexing should never have to wait for
+a message to index.  It also allows the system to overcome any latency
+caused by the filesystem or possibly by reading across data across the
+network (though I have not tested performance across the network yet).  BTW:
+Having a second CPU makes a major difference in performance.
+
+Justin
+
+
+
+> -----Original Message-----
+> From: Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> Sent: Wednesday, November 20, 2002 12:09 PM
+> To: lucene-dev@jakarta.apache.org
+> Cc: lucene-user@jakarta.apache.org
+> Subject: Stress/scalability testing Lucene
+> 
+> 
+> Hello,
+> 
+> Has anyone tested Lucene for scalability?
+> I know that some peple have indices with 10M+ documents in it, but has
+> anyone tried going beyond there, to 50M, 100M, 500M or more documents?
+> (I know the size of the index and performance of searches depends on
+> documents, number of fields, field types, query complexity, etc.)
+> 
+> Last night I wrote a simple class that creates a Lucene index of
+> specified size with documents containing 2 fields, one Text with about
+> 24 bytes, and one UnStored without about 16000 bytes.
+> It took about 8 hours to index 100K documents, resulting in 
+> an index of
+> 578 MB (optimized).  This was on 400MHz machine with about 384MB RAM,
+> doing nothing else.
+> 
+> I then realized that I can't build a relaly big index to test Lucene's
+> scalability properly, simply because I don't have a big enough disk :)
+> 
+> So my question is:
+> Has anyone done this type of testing and can you share the results?
+> Does anyone have a machine with sufficient amount of RAM and disk and
+> wants to do this?
+> 
+> Thanks,
+> Otis
+> P.S.
+> If anyone is wondering about those 8 hours - this was with a plain
+> IndexWriter and mergeFactor set to 1000, and java -Xms50M and -Xmx80MB
+> 
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

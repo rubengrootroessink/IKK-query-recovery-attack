@@ -1,0 +1,83 @@
+FROM: Sven Duzont <sven.duz...@laposte.net>
+SUBJECT: Re[6]: Analyzer don't work with wildcard queries, snowball analyzer.
+DATE: 2 Apr 2005
+
+Hello,
+
+EH> What about handling BooleanQuery's nested within a BooleanQuery?
+EH> You'll need some recursion.
+thanks for all hints, i've re-coded the method to handle nested
+BooleanQueries
+
+EH> Could you share that filter with the community?
+Of course, the code is in the attachment
+
+>>     // The first clause is required
+>>     if(bClauses[0].prohibited != true)
+>>       bClauses[0].required = true;
+EH> Why do you flip the required flag like this?
+On the search interface, near the keyword field, there is a combo
+with 4 values :
+- KW_MODE_OR      : "Search for at least one of the terms"
+- KW_MODE_AND     : "Search for all the terms"
+- KW_MODE_PHRASE  : "Search for exact phrase"
+- KW_MODE_BOOLEAN : "Search using boolean query" (for advanced users)
+  I flip the request field only when boolean expression is selected
+  It force the first term to be required so the user will not
+  need to specify the "+" or "AND" operator
+  Maybe there is a more elegant way to do this ?
+  The code is following
+
+  Thanks
+---
+ Sven (is not a bersek)
+
+*/-------------------------------- CODE ---------------------------/*
+// mots clés contenus dans le cv
+if (cvSearchBean.keywords != null &&
+    cvSearchBean.keywords.length() != 0) {
+  // "Tous les Mot clés" ou "Au moins un des mots clés"
+  boolean required = false;
+  if ((required = cvSearchBean.keywordModeId == KW_MODE_AND) ||
+       cvSearchBean.keywordModeId == KW_MODE_OR) {
+    final Query q = CreateCustomQuery(QueryParser.parse(
+           cvSearchBean.keywords, FIELD_RESUME_BODY, analyzer));
+    if (q instanceof BooleanQuery) {
+      final BooleanClause[] terms = ((BooleanQuery) q).getClauses();
+      for (int i = 0; i < terms.length; i++) {
+        terms[i].prohibited = false;
+        terms[i].required = required;
+      }
+    }
+    bQuery.add(q, true, false);
+  }
+  // Expression exacte
+  if (cvSearchBean.keywordModeId == KW_MODE_PHRASE) {
+    final PhraseQuery q = new PhraseQuery();
+    final TokenStream ts = analyzer.tokenStream(FIELD_RESUME_BODY,
+                          new StringReader(cvSearchBean.keywords));
+    Token token;
+    while ((token = ts.next()) != null)
+      q.add(new Term(FIELD_RESUME_BODY, token.termText()));
+    bQuery.add(q, true, false);
+  }
+  // Expression booléenne
+  if (cvSearchBean.keywordModeId == KW_MODE_BOOLEAN) {
+    final Query query = QueryParser.parse(cvSearchBean.title,
+                                        FIELD_RESUME_BODY, analyzer);
+    if (query instanceof BooleanQuery) {
+      final BooleanClause[] bClauses =
+                              ((BooleanQuery) query).getClauses();
+      if (bClauses[0].prohibited != true)
+        bClauses[0].required = true;
+    }
+    bQuery.add(CreateCustomQuery(query), true, false);
+  }
+
+*/--------------------------END OF CODE --------------------------/*
+      
+      
+
+EH> 	Erik
+
+

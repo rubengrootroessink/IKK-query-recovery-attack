@@ -1,0 +1,199 @@
+FROM: David Spencer <dave-lucene-u...@tropo.com>
+SUBJECT: Re: Announcement: Lucene powering CNET.com Product Category Listings
+DATE: 31 Aug 2005
+
+
+Nice write up.
+
+One other nice thing I noticed is you seem to sort numeric attributes 
+numerically instead of alphabetically e.g. here:
+
+http://reviews.cnet.com/4566-3156_7-0.html?filter=500193_5314692_
+
+see the 3rd col, "Find by max speed", and note that has has choices in 
+this order:
+    < 2 char/sec
+      2 char/sec
+      3 char/sec
+     40 char/sec
+    236 char/sec
+    480 char/sec
+
+The usual way lame, low tech vendors display such a list is 
+alphabetically i.e.
+
+    < 2 char/sec
+      2 char/sec
+    236 char/sec         <== argh
+      3 char/sec
+     40 char/sec
+    480 char/sec
+
+So this is a nice small human-friendly touch.
+
+    - Dave
+
+
+Chris Hostetter wrote:
+
+> I'm pleased to announce that for about a month now, CNET's "Product
+> Listing" pages are powered by Lucene 1.4.3.  These pages not only allow
+> users to browse CNET's catalog of tech products by category, but also to
+> "Filter" the lists according to category specific Attribute Filters which
+> are displayed along with counts of how many products they will get if they
+> apply that Filter.  Multiple Filters can be applied (in any order) to
+> rapidly narrow down the list of products.
+> 
+> Examples of these pages can be seen here...
+> 
+> Digital Cameras
+> http://reviews.cnet.com/4566-6501_7-0.html
+> 
+> Inkjet Printers
+> http://reviews.cnet.com/4566-3156_7-0.html
+> 
+> Epson Inkjet Printers
+> http://reviews.cnet.com/4566-3156_7-0.html?filter=1000036_5251152_
+> 
+> Epson Inkjet Printers that can print on Transparencies
+> http://reviews.cnet.com/4566-3156_7-0.html?filter=1000036_5251152_500193_5314692_
+> 
+> These pages work much the same way as I've described in past threads
+> regarding "category counts", except that the logic determining which
+> filter links to display is not as simple as just pulling out the most
+> frequent terms per field, or based on a fixed list.  As you can see from
+> the example links, each category has it's own unique list of attributes
+> (ie: Price, Manufacturer, etc...) and for each of those attributes, there
+> is a list of Queries which map one to one with a possible "Find by" link.
+> Even if an Attribute is common between two categories, the list of Queries
+> to filter by may be different -- note the differences in the "Find by
+> price" lists between the various links above.  We have several thousand
+> unique categories, and some of these have as many as a thousand unique
+> Filter Queries which are needed to determine the counts to display on any
+> given page for that category, but using some very aggressive Filter
+> caching the time for a single request is kept very manageable.
+> 
+> For those who are interested, I can elaborate a little more on how these
+> pages work....
+> 
+> 
+> 
+> At a high level there are four major pieces...
+> 
+> 1) A Servlet which abstracts away most of the Lucene index modification
+> APIs into an HTTP/XML based "web service" by accepting POSTed XML
+> documents to add/update in the index.  It also replies to GET search
+> requests using query plugins that have access to an IndexReader.
+> 
+> 2) A ProductData index updater, which is executed as part of our "product
+> publishing" process.  Anytime a product is added (or modified) in our
+> database the updater creates an XML document describing the product and
+> POSTs it to the above mentioned Servlet (which indexes it).
+> 
+> 3) A Metadata index updater, which is executed as part of our "category
+> metadata publishing" process.  Anytime someone decides to change the
+> metadata that describes a category, this process creates an XML document
+> containing that metadata, and POSTs it to the above mentioned Servlet
+> (I'll elaborate more on these category documents in a moment).
+> 
+> 4) A Query Plugin used by the Servlet specificly to generate the product
+> result lists and counts needed for these product listing pages.
+> 
+> 
+> The Category Metadata documents are what really drive the behavior of the
+> Plugin.  They contain the following information...
+> 
+>   * A Query whose results are all products to display in this category
+>   * An ordered list of Attributes that can be filtered on
+>     - A datatype for each Attribute
+>     - An ordered list of "Filters" for each Attribute
+>       + A label to display for each Filter
+>       + A Query to define what products match that Filter
+> 
+> When a request comes in for a category, the first thing the Plugin does is
+> an initial query on the category Id to get the category's Metadata
+> document.  From that document, the field containing the Query that defines
+> that category is extracted, and a search is issued against it (using
+> whatever Sort options have been specified).  This Category Query is also
+> used to build a QueryFilter so that a BitSet of every matching product can
+> be obtained.  For each Filter in each Attribute found in the Category's
+> document, the Query is extracted, and again a QueryFilter is built to
+> obtain a BitSet of all products which match.  The intersection of that
+> BitSet with the BitSet from the initial Category Query is computed to
+> determine the "count" to display next to the Filter label.  Once all of
+> this is done the list of products, all of the data from the Category
+> Metadata document, and the counts for each of the Category Filters are
+> bundled up into an XML response document.  The client which initiated the
+> search can then apply additional Business logic to decide which
+> attributes/filters to display counts for -- the simple case is to display
+> the first N attributes, and for each attribute display the Filter links
+> with the highest counts, but in some cases the links may be displayed in
+> different orders based on the datatype of the attribute.
+> 
+> When a user clicks on a Filter link the process is the same as before, but
+> the initial Category Query is augmented by the Filter that has been
+> selected -- so the results to display on the first page (and the BitSet of
+> all matching products) are correct.  The new counts (which take into
+> account the selected Filter) are computed exactly as before -- using
+> BitSet intersections.
+> 
+> 
+> What makes all of this feasible to do during a single user request, and
+> what keeps the load on our servers manageable, is an aggressive caching
+> strategy.
+> 
+> The Servlet maintains a single IndexReader for use by the any requests to
+> the Query Plugin.  The Servlet also maintains a fixed size Cache of [
+> Filter => BitSet] (This cache currently uses LRU replacement, but ideally
+> it would be LFU).  The Servlet keeps track of when it makes modifications
+> to the index, and once it's decided that it is time to make those
+> modifications visible to the plugin it uses a background thread to open a
+> new IndexReader, and create a new Cache instance which it warms up by
+> "pre-computing" the BitSets for the top N Filters in the Cache already in
+> use.  It then swaps out the "old" IndexReader/Cache pair with the new
+> IndexReader/Cache for all subsequent searches.
+> 
+> Given a large amount of RAM, and infrequent updates to the index, page
+> hits to most categories rarely involve anything more then Cache lookups.
+> But even when we make frequent updates, the Cache warming we do with a
+> newly constructed IndexReader prior to actually *using* the IndexReader
+> allows us to remain very responsive on our most popular categories.
+> Through configuration, we can decide: Is it more important to open new
+> IndexReaders as fast as possible (and display new results immediately) at
+> the expense of not being able to pre-warm the cache very much? (resulting
+> in slower page loads) ... Or: Is it more important to keep our page load
+> times very low, by pre-warming our cache with everything and the kitchen
+> sink (which means results take a while to update because we are opening
+> new IndexReaders less frequently).  Our current configuration results in
+> ~95% cache hit rate for our Filters.
+> 
+> 
+> 
+> Hopefully I've explained the overall design of our system well enough that
+> people interested in doing "category counts" and "drilling down" can see
+> that it is possible, even when you are dealing with a very large number of
+> Filters.  I'm sure my familiarity with the system has caused me to write
+> something that makes perfect sense to me, but is totally unintelligible to
+> everyone else -- if so, please feel free to ask any questions you have,
+> I'll try to answer them as best I can.  Some questions regarding the
+> internals of the Servlet and the Caching it does may be beyond my ability
+> to answer because they were developed by my coworker -- but he is also an
+> active participant on this list, and (time permitting) I'm sure he'd
+> happily answer any questions I can not.
+> 
+> 
+> 
+> -Hoss
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

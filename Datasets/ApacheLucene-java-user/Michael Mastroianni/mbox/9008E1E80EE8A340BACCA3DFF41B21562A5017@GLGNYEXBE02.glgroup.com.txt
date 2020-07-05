@@ -1,0 +1,439 @@
+FROM: Michael Mastroianni <MMastroia...@glgroup.com>
+SUBJECT: RE: kamikaze
+DATE: 29 Apr 2009
+
+Hi Anmol--
+Sorry, there was a typo in the main function of my unit test: here is a
+correct version (the utility functions remain the same).
+
+	public void testMultipleIntersections()
+	{
+		ArrayList<OpenBitSet> obs = new ArrayList<OpenBitSet>();
+		ArrayList<DocIdSet> docs = new ArrayList<DocIdSet>();
+	    Random rand = new Random(System.currentTimeMillis());
+		int maxDoc = 350000;
+		for(int i=0; i < 3; ++i)
+		{
+			int numdocs = rand.nextInt(maxDoc);
+			ArrayList<Integer> nums = new
+ArrayList<Integer>();
+			HashSet<Integer> seen = new HashSet<Integer>();
+			for (int j = 0; j < numdocs; j++) 
+		    {
+				int nextDoc = rand.nextInt(maxDoc);
+				if(seen.contains(nextDoc))
+				{
+					while(seen.contains(nextDoc))
+					{
+						nextDoc =
+rand.nextInt(maxDoc);
+					}
+				}
+				nums.add(nextDoc);
+				seen.add(nextDoc);
+		    }
+			Collections.sort(nums);
+			obs.add(createObs(nums, maxDoc));
+			docs.add(createDocSet(nums));
+		}
+		OpenBitSet base = obs.get(0);
+		for(int i = 1; i < obs.size(); ++i)
+		{
+			base.intersect(obs.get(i));
+		}
+		
+		AndDocIdSet ands = new AndDocIdSet(docs);
+		long card1 = base.cardinality();
+		long card2 = ands.size();
+		
+		assertEquals(card1, card2);
+	}
+
+
+
+-----Original Message-----
+From: Michael Mastroianni [mailto:MMastroianni@glgroup.com] 
+Sent: Wednesday, April 29, 2009 4:28 PM
+To: java-user@lucene.apache.org
+Subject: RE: kamikaze
+
+Hi Anmol--
+
+I think I may have found a problem in AndDocIdSet. I got it to pass some
+simple tests, and was in the process of integration, when some of my
+tests started to fail right after I had replaced a bunch of OpenBitSet
+intersections with creating a list of P4DocIdSets and then creating an
+AndDocIdSet from the list. I've created a unit test which I think
+illustrates the problem:
+
+regards,
+Michael
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Random;
+
+import org.apache.lucene.search.DocIdSet;
+import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.util.OpenBitSet;
+
+
+import com.kamikaze.docidset.api.DocSet;
+import com.kamikaze.docidset.impl.AndDocIdSet;
+import com.kamikaze.docidset.impl.OrDocIdSet;
+import com.kamikaze.docidset.impl.P4DDocIdSet;
+import com.kamikaze.docidset.utils.DocSetFactory;
+
+
+import junit.framework.TestCase;
+
+public class KamikazeTest extends TestCase
+{
+	public static OpenBitSet createObs(ArrayList<Integer> ints, int
+maxDoc)
+	{
+		OpenBitSet obs = new OpenBitSet(maxDoc);
+		for (Integer integer : ints) 
+		{
+			obs.set(integer);
+		}
+		return obs;
+	}
+	
+	public static DocSet createDocSet(ArrayList<Integer> ints)
+	{
+		DocSet ret = new P4DDocIdSet();
+		for (Integer integer : ints) 
+		{
+			ret.addDoc(integer);
+		}
+		return ret;
+	}
+	
+	public void testMultipleIntersections()
+	{
+		ArrayList<OpenBitSet> obs = new ArrayList<OpenBitSet>();
+		ArrayList<DocIdSet> docs = new ArrayList<DocIdSet>();
+	    Random rand = new Random(System.currentTimeMillis());
+		int maxDoc = 350000;
+		{
+			int numdocs = rand.nextInt(maxDoc);
+			ArrayList<Integer> nums = new
+ArrayList<Integer>();
+			HashSet<Integer> seen = new HashSet<Integer>();
+			for (int j = 0; j < numdocs; j++) 
+		    {
+				int nextDoc = rand.nextInt(maxDoc);
+				if(seen.contains(nextDoc))
+				{
+					while(seen.contains(nextDoc))
+					{
+						nextDoc =
+rand.nextInt(maxDoc);
+					}
+				}
+				nums.add(nextDoc);
+		    }
+			Collections.sort(nums);
+			obs.add(createObs(nums, maxDoc));
+			docs.add(createDocSet(nums));
+		}
+		OpenBitSet base = obs.get(0);
+		for(int i = 1; i < obs.size(); ++i)
+		{
+			base.intersect(obs.get(i));
+		}
+		
+		AndDocIdSet ands = new AndDocIdSet(docs);
+		long card1 = base.cardinality();
+		long card2 = ands.size();
+		
+        assertTrue(card1 == card2);
+        //When I run this, it fails every time, where I 
+        //would expect openBitSet and AndDocIdSet to produce
+        //the same cardinalities from this run of intersections
+        //one example run got card1=101946 and card2=120384
+        //card2 was larger on all runs i did
+	}
+}
+
+-----Original Message-----
+From: molz [mailto:anmol.bhasin@gmail.com] 
+Sent: Tuesday, April 28, 2009 9:00 PM
+To: java-user@lucene.apache.org
+Subject: RE: kamikaze
+
+
+Hi Micheal,
+
+Thanks for trying out Kamikaze for starters. So I guess there are a few
+issues here
+
+1. getDocSetInstance(int min, max, count,DocSetFactory.FOCUS) assumes
+that
+count < max. I guess thats an API check we should add anyways to improve
+usability. That is not to say that it will not work if count > max but
+we
+have not done the due diligence on that one.
+
+2. The way you are inserting the elements is not quite right. The addDoc
+method assumes you insert the elements in a sorted fashion. Calling
+doc.addDoc(rand.nextInt(maxDoc) does not quite ensure you are loading
+the
+docSet in a sorted fashion. This is specially useful in BitSet and P4D
+set
+cases as P4D encodes only delta values between conscutive integers.
+
+3. I would recommend using FOCUS.OPTIMAL for best performance/space
+tradeoff, albeit SPACE should work too, if you find any issues with that
+let
+us know, we will be glad to fix it.
+
+4. Finally, I believe you want to just get a plain vanilla docSet from
+one
+of the OR/AND sets. This would be cool to do, however the idea with
+Boolean
+Sets are that they are never really materialized, they are iterated over
+on
+the fly. I believe we could do an enhancement to construct the docSet on
+the
+fly while iterating the Boolean DocSet but as of now there is no
+established
+way of doing that.
+
+Hope I covered all your concerns. I rewrote and run your test case like
+this
+
+public class KamikazeTest extends TestCase
+{
+    public void testGrowingP4()
+    {
+        DocSet doc =
+            DocSetFactory.getDocSetInstance(0, 35000000, 200000,
+DocSetFactory.FOCUS.SPACE);
+        Random rand = new Random(System.currentTimeMillis());
+       // int maxDoc = 3500000;
+        //doc.addDoc(0);
+        
+        int i = 0;
+        try
+        {
+            while(i < 500000)
+            {
+                int nextDoc = i;
+                doc.addDoc(nextDoc);
+                i+=rand.nextInt(50);
+            }              
+        }
+        catch(Exception e)
+        {
+            e.printStackTrace();
+            return;
+        }
+        assertTrue(true);
+       
+    }
+    
+   
+} 
+
+Thanks,
+Anmol
+
+Software Engineer
+Anmol Bhasin
+www.linkedin.com
+
+
+
+Michael Mastroianni wrote:
+> 
+> Hi--
+> 
+> I just got kamikaze somewhat integrated into a project of mine. I'm
+> having problems growing the DocIdSets, though. Up to the point where
+the
+> first regrow happens, everything is fine. Once the regrow happens, I
+get
+> an ArrayOutOfBoundsException. The following unit test will exhibit
+this
+> behavior. If I change the third param of getDocSetInstance to be
+> something lower, I get a p4Doc, if I leave it as is, I get an
+OpenBitSet
+> doc, in either case, I get the same crash. Do I need to initialize the
+> docs in some way other than just creating them?
+> 
+> regards,
+> Michael
+> 
+> import org.apache.lucene.search.DocIdSet;
+> import org.apache.lucene.util.OpenBitSet;
+> 
+> 
+> import com.kamikaze.docidset.api.DocSet;
+> import com.kamikaze.docidset.impl.AndDocIdSet;
+> import com.kamikaze.docidset.impl.OrDocIdSet;
+> import com.kamikaze.docidset.utils.DocSetFactory;
+> 
+> import junit.framework.TestCase;
+> 
+> 
+> public class KamikazeTest extends TestCase
+> {
+>     public void testGrowingP4()
+>     {
+>         DocSet doc =
+>             DocSetFactory.getDocSetInstance(0, 350000, 3000000,
+> DocSetFactory.FOCUS.SPACE);
+>         Random rand = new Random(System.currentTimeMillis());
+>         int maxDoc = 350000;
+>         doc.addDoc(rand.nextInt(maxDoc));
+>         int i = 0;
+>         try
+>         {
+>             while(i < 256)
+>             {
+>                 int nextDoc = rand.nextInt(maxDoc);
+>                 doc.addDoc(nextDoc);
+>                 ++i;
+>             }               
+>         }
+>         catch(Exception e)
+>         {
+>             return;
+>         }
+>         assertTrue(false);
+>     }
+> }
+> 
+> -----Original Message-----
+> From: John Wang [mailto:john.wang@gmail.com] 
+> Sent: Friday, April 24, 2009 7:50 PM
+> To: java-user@lucene.apache.org
+> Subject: Re: kamikaze
+> 
+> Hi Michael:
+>     We are using it internally here at LinkedIn for both our search
+> engine
+> as well as our social graph engine. And we have a team developing
+> actively
+> on it. Let us know how we can help you.
+> 
+> -John
+> 
+> On Fri, Apr 24, 2009 at 1:56 PM, Michael Mastroianni <
+> MMastroianni@glgroup.com> wrote:
+> 
+>> Hi--
+>>
+>>
+>>
+>> Has anyone here used kamikaze much? I'm interested in using it in
+>> situations where I'll have several docidsets of >2M, plus several in
+> the
+>> 10s of thousands.
+>>
+>>
+>>
+>> On prototype basis, I got something running nicely using OpenBitSet,
+> but
+>> I can't use that much memory for my real application.
+>>
+>>
+>>
+>> regards,
+>>
+>> Michael Mastroianni
+>>
+>>
+>>
+>> This e-mail message, and any attachments, is intended only for the
+use
+> of
+>> the individual or entity identified in the alias address of this
+> message and
+>> may contain information that is confidential, privileged and subject
+> to
+>> legal restrictions and penalties regarding its unauthorized
+disclosure
+> and
+>> use. Any unauthorized review, copying, disclosure, use or
+distribution
+> is
+>> strictly prohibited. If you have received this e-mail message in
+> error,
+>> please notify the sender immediately by reply e-mail and delete this
+>> message, and any attachments, from your system. Thank you.
+>>
+>>
+> 
+> This e-mail message, and any attachments, is intended only for the use
+of
+> the individual or entity identified in the alias address of this
+message
+> and may contain information that is confidential, privileged and
+subject
+> to legal restrictions and penalties regarding its unauthorized
+disclosure
+> and use. Any unauthorized review, copying, disclosure, use or
+distribution
+> is strictly prohibited. If you have received this e-mail message in
+error,
+> please notify the sender immediately by reply e-mail and delete this
+> message, and any attachments, from your system. Thank you.
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context:
+http://www.nabble.com/kamikaze-tp23224760p23288825.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+This e-mail message, and any attachments, is intended only for the use
+of the individual or entity identified in the alias address of this
+message and may contain information that is confidential, privileged and
+subject to legal restrictions and penalties regarding its unauthorized
+disclosure and use. Any unauthorized review, copying, disclosure, use or
+distribution is strictly prohibited. If you have received this e-mail
+message in error, please notify the sender immediately by reply e-mail
+and delete this message, and any attachments, from your system. Thank
+you.
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+This e-mail message, and any attachments, is intended only for the use of the individual or
+entity identified in the alias address of this message and may contain information that is
+confidential, privileged and subject to legal restrictions and penalties regarding its unauthorized
+disclosure and use. Any unauthorized review, copying, disclosure, use or distribution is strictly
+prohibited. If you have received this e-mail message in error, please notify the sender immediately
+by reply e-mail and delete this message, and any attachments, from your system. Thank you.
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

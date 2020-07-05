@@ -1,0 +1,123 @@
+FROM: "lucene user" <luz...@gmail.com>
+SUBJECT: Re: Lucene Queries Over User-Editable Dynamic Categories of Documents
+DATE: 24 Oct 2007
+
+Thanks very much. How large can my end-user's catigories grow before this
+implementation you have outlined will start to bog down? If my users had
+thousands of items categorized, would you still recommend using a term
+filter in this way? Tens of thousands? What is a realistic max? Is there
+another idea that works for even larger numbers? Frankly, we don't yet
+understand how our users will use the system in the long run. When you have
+done stuff like this, how large have the term filters grown?
+
+Would it EVER make sense to maintain the end user's catigories in some sort
+of Lucene data structure? If so, what data structure?
+
+Would it EVER be wise to keep the end-user catigories in Lucene? If so, when
+and how?
+
+What are other realistic options for implementing user categorization of
+documents?
+
+When solr talks about "faceted searching," this isn't what they mean, is it?
+They say "Faceted Searching based on unique field values and explicit
+queries" and I'm looking to find what they mean and not getting clear.
+
+Thanks!
+
+On 10/24/07, mark harwood <markharw00d@yahoo.co.uk> wrote:
+>
+> Given the volatility in the set membership I'd be tempted to keep that
+> grouping info in a database rather than doing the reader/writer-open/close
+> dance in Lucene before you can see any updates. (I suspect this is the
+> reason you've opted not to keep the info in Lucene).
+> You can pull a user's list of a hundred or so terms out of the database
+> (typically primary keys) and add them as a TermsFilter to your Lucene
+> queries.
+> I've found that using this approach can be pretty fast even with a large
+> list of filter terms - it was a while ago so I can't quote stats, you'll
+> need to try it for yourself.
+>
+> Caching these filters may prove useful but if it's a big dataset Bitsets
+> don't sound like a memory-efficient form of storing these lists as it sounds
+> like they'll be sparsely populated.
+> You may be interested in the more memory-efficient options such as
+> SortedVIntList here: http://issues.apache.org/jira/browse/LUCENE-584.
+> Without taking the whole of that patch on board you could have a caching
+> strategy based on this pseudocode:
+>
+> getFilter(Set primaryKeys, IndexReader reader)
+> {
+>    TermsFilter tf= new TermsFilter()
+>    for all primaryKeys:
+>        tf.addTerm(primaryKey)
+>   BitSet bits;
+>   SortedVIntList cached=lruCachedMap.get(tf);
+>   if(cached==null)
+>         bits=tf.bits(reader)
+>         lruCachedMap.put(tf, convertBitsToSortedVIntList(bits))
+>   else
+>         bits=convertSortedVIntListToBits(bits)
+>   return new Filter()
+>        {
+>                  BitSet bits(IndexReader reader)
+>                  {
+>                      return bits;
+>                  }
+>        };
+> }
+>
+>
+> On a bit of a lucene-dev tangent, I think the above code has the makings
+> of an optimisation to CachingWrapperFilter - it could choose to cache
+> SortedVIntLists or BitSets depending on the sparseness of the set and
+> transparently handles any required conversions.
+>
+>
+>
+> ----- Original Message ----
+> From: lucene user <luz290@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Wednesday, 24 October, 2007 7:18:10 AM
+> Subject: Lucene Queries Over User-Editable Dynamic Categories of Documents
+>
+> Folks!
+>
+> We are building a web-based multi-user system. Users of our system are
+> able
+> to categorize items that they have found into groups of related
+> documents.
+> We would like users to be able to search these document groups and
+> rapidly
+> find matches. Each user might have ten of these categories and might
+> have
+> perhaps a few hundred documents in each. These categories might be
+> highly
+> dynamic, with users adding and deleting documents from these categories
+> many
+> times a day. How might we use Lucene to perform searches limited to
+> these
+> very dynamic and end-user editable categories? Any ideas for how we
+> might do
+> this efficiently?
+>
+> If all the data were in a SQL database, we could run a subquery that
+> returned the IDs of the items in categories and use that to limit the
+> results of the super query.
+>
+> Currently we do not plan to maintain the information about the
+> end-user's
+> categories in the Lucene index at all, or not in a big, main Lucene
+> index
+> anyway.
+>
+> What our the reasonable options for handling this? What are the
+> performance
+> implications of various choices?
+>
+> Thanks!
+>
+>
+>
+>
+

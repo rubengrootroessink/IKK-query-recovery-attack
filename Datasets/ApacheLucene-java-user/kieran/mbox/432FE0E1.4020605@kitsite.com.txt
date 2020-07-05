@@ -1,0 +1,70 @@
+FROM: kieran <kie...@kitsite.com>
+SUBJECT: (TermInfosReader, SegmentTermEnum) Out Of Memory Exception patch
+DATE: 20 Sep 2005
+
+We've been experiencing terrible memory problems on our production 
+search server, running lucene (1.4.3).
+
+Our live app regularly opens new indexes and, in doing so, releases old 
+IndexReaders for garbage collection.
+
+But...there appears to be a memory leak in 
+org.apache.lucene.index.TermInfosReader.java.
+Under certain conditions (possibly related to JVM version, although I've 
+personally observed it under both linux JVM 1.4.2_06, and 1.5.0_03, and 
+SUNOS JVM 1.4.1) the ThreadLocal member variable, "enumerators" doesn't 
+get garbage-collected when the TermInfosReader object is gc-ed.
+
+Looking at the code in TermInfosReader.java, there's no reason why it 
+_shouldn't_ be gc-ed, so I can only presume (and I've seen this 
+suggested elsewhere) that there could be a bug in the garbage collector 
+of some JVMs.
+
+I've seen this problem briefly discussed; in particular at the following 
+URL:
+   http://java2.5341.com/msg/85821.html
+The patch that Doug recommended, which is included in lucene-1.4.3 
+doesn't work in our particular circumstances. Doug's patch only clears 
+the ThreadLocal variable for the thread running the finalizer (my 
+knowledge of java breaks down here - I'm not sure which thread actually 
+runs the finalizer). In our situation, the TermInfosReader is 
+(potentially) used by more than one thread, meaning that Doug's patch 
+_doesn't_ allow the affected JVMs to correctly collect garbage.
+
+So...I've devised a simple patch which, from my observations on linux 
+JVMs 1.4.2_06, and 1.5.0_03, fixes this problem.
+
+I've thought of submitting this to the project as a patch, but the 
+lucene bugzilla account is disabled at the moment so...see the diff, 
+below, and the attached, patched, file:
+
+Kieran
+
+21a22
+ > import java.util.Hashtable;
+32c33
+<   private ThreadLocal enumerators = new ThreadLocal();
+---
+ >   private final Hashtable enumeratorsByThread = new Hashtable();
+63c64
+<     SegmentTermEnum termEnum = (SegmentTermEnum)enumerators.get();
+---
+ >     SegmentTermEnum termEnum = 
+(SegmentTermEnum)enumeratorsByThread.get(Thread.currentThread());
+66c67
+<       enumerators.set(termEnum);
+---
+ >       enumeratorsByThread.put(Thread.currentThread(), termEnum);
+197a199,208
+ >   }
+ >
+ >   /* some jvms might have trouble gc-ing enumeratorsByThread */
+ >   protected void finalize() throws Throwable {
+ >     try {
+ >         // make sure gc can clear up.
+ >         enumeratorsByThread.clear();
+ >     } finally {
+ >         super.finalize();
+ >     }
+
+

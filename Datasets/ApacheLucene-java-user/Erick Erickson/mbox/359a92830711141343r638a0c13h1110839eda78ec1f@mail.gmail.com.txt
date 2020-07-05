@@ -1,0 +1,210 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Can't code to index documents
+DATE: 14 Nov 2007
+
+Several questions:
+
+1> have you gotten a copy of Luke to examine your index? If so,
+    what does it show?
+2> Do you ever close your indexwriter? If so, is it closed
+    before you open your indexreader to search? I don't see
+    anything in your code that looks like it closes the writer, but
+    I sure don't know much about scala
+3> what does printing the document have to do with being sure
+     it gets indexed? It's unclear what relationship you see between
+     those statements.
+4> what is a LucDocument? I assume it's a sublcass of a Lucene
+    Document. But one thing I'd try is just using the raw Lucene
+    doc first.
+5> are you absolutely sure that your calls to link.(fullPath, filename,
+content, id)
+    actually return something that can be indexed?
+
+Best
+Erick
+
+
+On Nov 14, 2007 3:23 PM, bbrown <bbrown@botspiritcompany.com> wrote:
+
+> I am using this code which is pretty basic.  And it won't index the
+> documents.
+>  I run the index code and print the document to make sure that it gets
+> indexed, but when I looked at the output "gen" and "segments" file, there
+> are
+> only like 20bytes of data in the files.  I am indexing about 300k of text
+> data.  I am using scala but I dont think that is an issue as I have used
+> similar code before.  When I do a search 0 documents for everything.
+>
+> I am using Lucene 2.2.0 (just downloaded).
+>
+> Here is the core of my code:
+>
+>  def indexData(writer:IndexWriter, file: File) {
+>    val doc = new LucDocument()
+>
+>        // Read the content from the file
+>        val contentReader = new ContentReader(file.getAbsolutePath)
+>    val (title, content) = contentReader.readFile()
+>
+>        // Extract data from the java File class
+>        val link = new DocumentLink(file.getAbsolutePath, file.getName,
+>                                                        content,
+> file.getAbsolutePath)
+>
+>        // Index the document and data.
+>    doc.add(new Field(LUC_KEY_FULL_PATH, link.fullPath,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>    doc.add(new Field(LUC_KEY_FILE_NAME, link.filename,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>        doc.add(new Field(LUC_KEY_CONTENT, link.content,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>    doc.add(new Field(LUC_KEY_IDENTITY, link.id,
+>                                          Field.Store.YES,
+> Field.Index.UN_TOKENIZED))
+>    writer.addDocument(doc)
+>  }
+>
+>
+> But if you want the full scala source, here it is.  Think of it as pseudo
+> code:
+>
+> object BotlistIndexDocuments {
+>
+>  val LUC_KEY_FULL_PATH = "full_path"
+>  val LUC_KEY_FILE_NAME = "file_name"
+>  val LUC_KEY_CONTENT = "content"
+>  val LUC_KEY_IDENTITY = "id"
+>
+>    //
+>  // Read the content file.  The first line should contain
+>  // a "#title summary" line and the rest of the document
+>  // will contain the "wiki" document.
+>  class ContentReader(filename: String) {
+>    def readFile(): (String, String) = {
+>      val file = Source.fromFile(filename)
+>      var counted = file.getLines.counted
+>      val fileData = new StringBuilder()
+>      var title = ""
+>      counted.foreach { (line: String) =>
+>                if (counted.count == 0) {
+>              //title = line.substring(6).trim()
+>                  title = line
+>                } else {
+>              fileData.append(line)
+>                }
+>      }
+>      (title, fileData.toString())
+>    }
+>  } // End of Class //
+>
+>  case class DocumentLink(abs_path: String, file: String, data: String,
+>                                                  unique_id:String) {
+>    val fullPath = abs_path
+>    val filename = file
+>        val content = data
+>    val id = unique_id
+>  }
+>  def indexData(writer:IndexWriter, file: File) {
+>    val doc = new LucDocument()
+>
+>        // Read the content from the file
+>        val contentReader = new ContentReader(file.getAbsolutePath)
+>    val (title, content) = contentReader.readFile()
+>
+>        // Extract data from the java File class
+>        val link = new DocumentLink(file.getAbsolutePath, file.getName,
+>                                                        content,
+> file.getAbsolutePath)
+>
+>        // Index the document and data.
+>    doc.add(new Field(LUC_KEY_FULL_PATH, link.fullPath,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>    doc.add(new Field(LUC_KEY_FILE_NAME, link.filename,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>        doc.add(new Field(LUC_KEY_CONTENT, link.content,
+>                                          Field.Store.YES,
+> Field.Index.TOKENIZED))
+>    doc.add(new Field(LUC_KEY_IDENTITY, link.id,
+>                                          Field.Store.YES,
+> Field.Index.UN_TOKENIZED))
+>    writer.addDocument(doc)
+>  }
+>
+>  //
+>  // Utility for recursively walking directory tree
+>  // See:
+>  // override final def flatMap  [B](f : (A) => Iterable[B]) : List[B]
+>  class DocWalkFile(file: File) {
+>        def children = new Iterable[File] {
+>    def elements =
+>      if (file.isDirectory) file.listFiles.elements else Iterator.empty;
+>        }
+>        def andTree : Iterable[File] = (
+>      Seq.single(file) ++ children.flatMap(child => new
+> DocWalkFile(child).andTree))
+>  }
+>  def listDocuments(dir: File): List[File] =
+>        (new DocWalkFile(dir)).andTree.toList filter (f =>
+> (f.getName.endsWith(".java") || f.getName.endsWith(".txt")))
+>
+>  def indexDocuments(index_dir: File, files: List[File]) {
+>        Console.println("INFO: number of files to index=" + files.length)
+>    val writer = new IndexWriter(index_dir, new StandardAnalyzer(), true)
+>    for (val file <- files) {
+>      indexData(writer, file)
+>    }
+>  }
+>  def main(args: Array[String]): Unit = {
+>
+>    if (args.length != 2) {
+>      Console.println("usage: java BotlistIndexDocuments parent-index-dir
+> input-doc-dir")
+>          Console.println("\n")
+>          Console.println("\nRun the BotlistIndexDocuments index tool on
+> the provided
+> index directory.")
+>          Console.println("\nFor bug reporting instructions, please see:")
+>          Console.println("<URL:http://code.google.com/p/openbotlist>.")
+>      return
+>    }
+>
+>    Console.println("INFO: Indexing Document Data <standby> ...")
+>    val index = new File(args(0) + "/index")
+>        val doc_dir = new File(args(1))
+>    if (!index.exists()) {
+>      index.mkdir();
+>      Console.println("Creating index directory.")
+>    } else {
+>      Console.println("WARN: Index already exists (remove directory to
+> continue)")
+>      Console.println("DIR: " + index.getAbsolutePath())
+>      //return
+>    }
+>
+>        // Calculate the processing time to run application
+>    val timeStart = System.currentTimeMillis()
+>    indexDocuments(index, (listDocuments(doc_dir)))
+>    val timeEnd = System.currentTimeMillis()
+>    Console.println("Done...")
+>    Console.println("Completed processing in " + (timeEnd - timeStart) + "
+> ms.")
+>  }
+> }
+>
+> --
+> Berlin Brown
+> [berlin dot brown at gmail dot com]
+> http://botspiritcompany.com/botlist/?
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,90 @@
+FROM: Doug Cutting <cutt...@lucene.com>
+SUBJECT: Re: Numeric Support
+DATE: 26 Jul 2002
+
+Armbrust, Daniel C. wrote:
+> I don't know what a "good" numbers implementation is, but the way that I do it now, with
+filters on the bit set after they come back just feels like a hack.  Even if bit sets are
+very fast, it doesn't seem right to iterate over nearly the entire set of terms to filter
+them when I ask for results with a number 000050 < x < 050000.  It seems like that shouldn't
+be put into the term enumeration in the first place, rather than having to filter them out.
+
+Both a DateFilter and a RangeQuery must enumerate the range of matching 
+dates.  The RangeQuery uses less memory, since it does not construct a 
+bit vector, but the DateFilter does not affect scoring.
+
+Also, a Filter implementation can cache bit vectors for common queries. 
+  When this is appropriate, Filters are *much* more efficient than a 
+range query.  For example, if one tags documents with a "type" field, 
+and many of the queries are for documents of a particular type, then a 
+Filter implementation which caches a bit vector (based on the 
+IndexReader) would make these queries much faster than, e.g., a 
+"+type:XXX" clause in the query.  Similarly, one could cache bit vectors 
+for documents created in the last week, if that is a common query type, 
+instead of using a RangeQuery.
+
+Filters thus provide useful functionality that is not otherwise 
+available.  Perhaps we need some general-purpose Filter classes which 
+cache bit vectors.  The "type" example above would be an easy one to 
+program, with something like the following:
+
+/** Filter for documents which contain a particular term. */
+public class TermFilter extends Filter {
+   private Term term;
+   private WeakHashMap cache = new WeakHashMap();
+
+   public TermFilter(Term term) {
+     this.term = term;
+   }
+
+   public BitSet bits(IndexReader reader) throws IOException {
+
+     synchronized (cache) {                         // check cache
+       BitSet cached = (BitSet)cache.get(reader);
+       if (cached != null)
+         return cached;
+     }
+
+     BitSet bits = new BitSet(reader.maxDoc());
+     TermDocs termDocs = reader.termDocs(term);
+     try {
+       while (termDocs.next())
+         bits.set(termDocs.doc());
+     } finally {
+       termDocs.close();
+     }
+
+     synchronized (cache) {                         // update cache
+       cache.put(reader, bits);
+     }
+
+     return bits;
+
+   }
+}
+
+Note that I have not even compiled this, more less tested it.  If anyone 
+does, please report back.
+
+> It doesn't seem to scale very well, though I have no tests or data to back this up. 
+Admittedly, it has worked for us thus far.
+> 
+> I'm concerned, however, if we start to put in more data, (especially non integer data)
+by doing something like multiplying by 10,000 (or whatever the decimal shift needs to be,
+plus it gets even more hackish if I have to add to all the values to make all the negative
+values positive) and then padding out to X digits, and start chaining together multiple filters
+on multiple different number fields our performance is going to very significantly degrade.
+ 
+
+Lucene shares prefixes of indexed terms.  So, for example, if lots of 
+terms in a field start with a long string of zeros, then you should not 
+pay a performance penalty.
+
+Doug
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

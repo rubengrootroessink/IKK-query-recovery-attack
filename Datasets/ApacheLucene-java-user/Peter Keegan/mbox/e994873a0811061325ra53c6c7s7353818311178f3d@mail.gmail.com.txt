@@ -1,0 +1,148 @@
+FROM: "Peter Keegan" <peterlkee...@gmail.com>
+SUBJECT: Re: BoostingTermQuery scoring
+DATE: 6 Nov 2008
+
+I've discovered another flaw in using this technique:
+
+(+contents:petroleum +contents:engineer +contents:refinery)
+(+boost:petroleum +boost:engineer +boost:refinery)
+
+It's possible that the first clause will produce a matching doc and none of
+the terms in the second clause are used to score that doc. Yet another
+reason to use BoostingTermQuery.
+
+Peter
+
+
+On Thu, Nov 6, 2008 at 1:08 PM, Peter Keegan <peterlkeegan@gmail.com> wrote:
+
+> Let me give some background on the problem behind my question.
+>
+> Our index contains many fields (title, body, date, city, etc). Most queries
+> search all fields, but for best performance, we create an additional
+> 'contents' field that contains all terms from all fields so that only one
+> field needs to be searched. Some fields, like title and city, are boosted by
+> a factor of 5. In order to make term boosting work, we create an additional
+> field 'boost' that contains all the terms from the boosted fields (title,
+> city).
+>
+> Then, at search time, a query for "petroleum engineer" gets rewritten to:
+> (+contents:petroleum +contents:engineer) (+boost:petroleum +boost:engineer).
+> Note that the two clauses are OR'd so that a term that exists in both fields
+> will get a higher weight in the 'boost' field. This works quite well at
+> boosting documents with terms that exist in the boosted fields. However, it
+> doesn't work properly if excluded terms are added, for example:
+>
+> (+contents:petroleum +contents:engineer -contents:drilling)
+> (+boost:petroleum +boost:engineer -boost:drilling)
+>
+> If a document contains the term 'drilling' in the 'body' field, but not in
+> the 'title' or 'city' field, a false hit occurs.
+>
+> Enter payloads and 'BoostingTermQuery'. At indexing time, as terms are
+> added to the 'contents' field, they are assigned a payload (value=5) if the
+> term also exists in one of the boosted fields. The 'scorePayload' method in
+> our Similarity class returns the payload value as a score. The query no
+> longer contains the 'boost' fields and is simply:
+>
+> +contents:petroleum +contents:engineer -contents:drilling
+>
+> The goal is to make the payload technique behavior similar to the 'boost'
+> field technique. The problem is that relevance scores of the top hits are
+> sometimes quite different. The reason is that the IDF values for a given
+> term in the 'boost' field is often much higher than the same term in the
+> 'contents' field. This makes sense because the 'boost' field contains a
+> fairly small subset of the 'contents' field. Even with a payload of '5', a
+> low IDF in the 'contents' field usually erases the effect of the payload.
+>
+> I have found a fairly simple (albeit inelegant) solution that seems to
+> work. The 'boost' field is still created as before, but it is only used to
+> compute IDF values for the weight class
+> 'BoostingTermQuery.BoostingTermWeight. I had to make this class 'public' so
+> that I could override the IDF value as follows:
+>
+> public class MNSBoostingTermQuery extends BoostingTermQuery {
+>   public MNSBoostingTermQuery(Term term) {
+>     super(term);
+>   }
+>   protected class MNSBoostingTermWeight extends
+> BoostingTermQuery.BoostingTermWeight {
+>     public MNSBoostingTermWeight(BoostingTermQuery query, Searcher
+> searcher) throws IOException {
+>       super(query, searcher);
+>       java.util.HashSet<Term> newTerms = new java.util.HashSet<Term>();
+>       // Recompute IDF based on 'boost' field
+>       Iterator i = terms.iterator();
+>       Term term=null;
+>       while (i.hasNext()) {
+>         term = (Term)i.next();
+>         newTerms.add(new Term("boost", term.text()));
+>       }
+>       this.idf = this.query.getSimilarity(searcher).idf(newTerms,
+> searcher);
+>     }
+>   }
+> }
+>
+> Any thoughts about a better implementation are welcome.
+>
+> Peter
+>
+>
+>
+>
+>
+> On Thu, Nov 6, 2008 at 8:00 AM, Grant Ingersoll <gsingers@apache.org>wrote:
+>
+>> Not sure, but it sounds like you are interested in a higher level Query,
+>> kind of like the BooleanQuery, but then part of it sounds like it is per
+>> document, right?  Is it that you want to deal with multiple payloads in a
+>> document, or multiple BTQs in a bigger query?
+>>
+>> On Nov 4, 2008, at 9:42 AM, Peter Keegan wrote:
+>>
+>>  I'm using BoostingTermQuery to boost the score of documents with terms
+>>> containing payloads (boost value > 1). I'd like to change the scoring
+>>> behavior such that if a query contains multiple BoostingTermQuery terms
+>>> (either required or optional), documents containing more matching terms
+>>> with
+>>> payloads always score higher than documents with fewer terms with
+>>> payloads.
+>>> Currently, if one of the terms has a high IDF weight and contains a
+>>> boosting
+>>> payload but no payloads on other matching terms, it may score higher than
+>>> docs with other matching terms with payloads and lower IDF.
+>>>
+>>> I think what I need is a way to increase the weight of a matching term in
+>>> BoostingSpanScorer.score() if 'payloadsSeen > 0', but I don't see how to
+>>> do
+>>> this. Any suggestions?
+>>>
+>>> Thanks,
+>>> Peter
+>>>
+>>
+>> --------------------------
+>> Grant Ingersoll
+>>
+>>
+>> Lucene Helpful Hints:
+>> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+>> http://wiki.apache.org/lucene-java/LuceneFAQ
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+

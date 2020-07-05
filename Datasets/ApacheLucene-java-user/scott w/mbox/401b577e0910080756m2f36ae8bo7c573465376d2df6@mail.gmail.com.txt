@@ -1,0 +1,69 @@
+FROM: scott w <scottbl...@gmail.com>
+SUBJECT: Re: Question about how to speed up custom scoring
+DATE: 8 Oct 2009
+
+Oops, forgot to include the class I mentioned. Here it is:
+
+public class QueryTermBoostingQuery extends CustomScoreQuery {
+  private Map<String, Float> queryTermWeights;
+  private float bias;
+  private IndexReader indexReader;
+
+  public QueryTermBoostingQuery( Query q, Map<String, Float> termWeights,
+IndexReader indexReader, float bias) {
+    super( q );
+    this.indexReader = indexReader;
+    if (bias < 0 || bias > 1) {
+      throw new IllegalArgumentException( "Bias must be between 0 and 1" );
+    }
+    this.bias = bias;
+    queryTermWeights = termWeights;
+  }
+
+  @Override
+  public float customScore( int doc, float subQueryScore, float valSrcScore
+) {
+    Document document;
+    try {
+      document = indexReader.document( doc );
+    } catch (IOException e) {
+      throw new SearchException( e );
+    }
+    float termWeightedScore = 0;
+
+    for (String field : queryTermWeights.keySet()) {
+      String docFieldValue = document.get( field );
+      if (docFieldValue != null) {
+        Float weight = queryTermWeights.get( field );
+        if (weight != null) {
+          termWeightedScore += weight * Float.parseFloat( docFieldValue );
+        }
+      }
+    }
+    return bias * subQueryScore + (1 - bias) * termWeightedScore;
+  }
+}
+
+On Thu, Oct 8, 2009 at 7:54 AM, scott w <scottblanc@gmail.com> wrote:
+
+> I am trying to come up with a performant query that will allow me to use a
+> custom score where the custom score is a sum-product over a set of query
+> time weights where each weight gets applied only if the query time term
+> exists in the document . So for example if I have a doc with three fields:
+> company=Microsoft, city=Redmond, and size=large, I may want to score that
+> document according to the following function: city==Microsoft ? .3 : 0 *
+> size ==large ? 0.5 : 0 to get a score of 0.8. Attached is a subclass I have
+> tested that implements this with one extra component which is that it allow
+> the relevance score to be combined in.
+>
+> The problem is this custom score is not performant at all. For example, on
+> a small index of 5 million documents with 10 weights passed in it does 0.01
+> req/sec.
+>
+> Are there ways to make to compute the same custom score but in a much more
+> performant way?
+>
+> thanks,
+> Scott
+>
+

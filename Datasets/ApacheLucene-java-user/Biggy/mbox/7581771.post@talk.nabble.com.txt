@@ -1,0 +1,220 @@
+FROM: Biggy <bigg...@web.de>
+SUBJECT: Re: Searching by bit masks
+DATE: 28 Nov 2006
+
+
+The background of this is also separating content according to domains
+
+Example: 
+- pictureA (marked as a "joke" #flag :1)
+- pictureB (marked as a "adult picture" #flag: 2)
+Site1: Users allowed to view everything (pictureA, pictureB )
+Site2: Users allowed to view everything except pictureB (no adult content)
+
+This szenario, for instance means a query from each site via sql could be
+Site1: ... status & 3 ; // all pictures (joke,adult)
+Site2:...  not (status & 1) ; // no adult stuff
+
+PROBLEMS
+Because the business rules are a negation - everything except this and that.
+We have a problem
+adding new content types. Adding a new picture type means changing the whole
+picture flags with the new status. 
+
+So backward compatibility is not possible.
+
+That's why i thought with Lucene, i could search using "NOT"
+That is: Give me all non-adult pictures in case of Site2
+
+Any suggestions to overcome this flag problem, without changing the DB
+status and re-indexing everything on new picture types.
+
+thanks for good advice thus far
+
+
+
+Erick Erickson wrote:
+> 
+> Lucene will automatically separate tokens during index and search if you
+> use
+> the right analyzer. See the various classes that implement Analyzer. I
+> don't
+> know if you really wanted to use the numeric literals, but I wouldn't. The
+> analyzers that do the most for you (automatically break up on spaces,
+> lowercase, etc) often ignore numbers. Just in case you were thinking about
+> doing it that way....
+> 
+> I would NOT store the inverse and then use NOT. the NOT operator doesn't
+> behave as you expect, it's not a strict boolean operator. See the thread
+> titled *Another problem with the QueryParser *in this list. And anything
+> else Chris or Yonik or ...  has to say on the subject. This is a source of
+> considerable confusion. For instance, you can't query on just the phrase
+> "NOT no_music". Not to mention what happens if/when a user can actually
+> NOT
+> in the query.
+> 
+> In general, I *strongly* recommend doing it the simple, intuitive way
+> first.
+> Only get fancy if you actually have something to gain. Here, you're
+> talking
+> about some storage savings. Maybe (have you checked how big your index
+> will
+> be? Will this approach be enough to matter? How do you know?). You're
+> creating code that will confuse not only yourself but whoever has to get
+> into this code later.
+> 
+> By rushing in and doing an optimization (which you neither  *know* nor can
+> reasonably expect to gain you anything measurable since you don't know the
+> internals of Lucene well enough to predict. Neither do I BTW...) you're
+> creating complexity which you don't know is necessary. I'd only go there
+> if
+> doing it the straight-forward way shows performance issues. I'd also bet
+> that any performance issues you see are not related to this issue......
+> 
+> Best
+> Erick
+> 
+> On 11/28/06, Biggy <biggy97@web.de> wrote:
+>>
+>>
+>>
+>> OK here what i've come up with - After reading your suggestions
+>> - bit set from DB stays untouched
+>> - only one field shall be used to store interest field bits in the
+>> document:
+>> "interest". Saves disk space.
+>> - The bits shall be not be converted to readable string but added as
+>> values
+>> separated by space " "
+>> ====Code Below====
+>> -----------------
+>> public Document getDocument(int db_interest_bits)
+>> {
+>>    String interest_string ="";
+>>    // sport
+>>    if (db_interest_bits & 1) {
+>>        interest_string +="1"+" "; // empty space as delimiter
+>>    }
+>>    // music
+>>    if (bitsfromdb & 2) {
+>>        interest_string +="2"+" "; // empty space as delimiter
+>>    }
+>>
+>>    Document doc = new Document();
+>>    doc.add("interest", interest_string);
+>>    // how do i tell Lucene to separate tokens on search ?
+>>
+>>    return doc;
+>> }
+>> ---------------
+>>
+>> FURTHERMORE - i realized that almost all potential values are often set
+>> i.e.
+>> sport music film
+>> sport music
+>> sport music film
+>> sport music film
+>> sport music
+>> music
+>>
+>> So i was thinking : How about doing the reverse when it comes to building
+>> the index ?
+>> I would onyl store the fields that are not set.
+>> The search would be a negation.
+>>
+>> Example Values ofd interest:
+>> 1. "no_film" => Only a film is not set
+>> 2. "no_sport no_film" => film and sport are not set
+>> 3. "" => all values are set since this is a negation
+>>
+>>
+>> It follows, searching for people interested in music:
+>> => search for NOT no_music
+>>
+>> QUESTION
+>> How does the perfomance of a negative search NOT compare to a normal one
+>> I.E.
+>> "NOT no_music" vs "music" search under the premise that most interest
+>> flags
+>> are set ?
+>>
+>>
+>>
+>> ---------
+>>
+>> Daniel Noll-3 wrote:
+>> >
+>> > Erick Erickson wrote:
+>> >> Well, you really have the code already <G>. From the top...
+>> >>
+>> >> 1> there's no good way to support searching bitfields If you wanted,
+>> you
+>> >> could probably store it as a small integer and then search on it, but
+>> >> that's
+>> >> waaay too complicated than you want.
+>> >>
+>> >> 2> Add the fields like you have the snippet from, something like
+>> >> Document doc = new Document.
+>> >> if (bitsfromdb & 1) {
+>> >>    doc.add("sport", "y");
+>> >> }
+>> >> if (bitsfromdb & 2) {
+>> >>    doc.add("music", "y");
+>> >> }
+>> >
+>> > Beware that if there are a large number of bits, this is going to
+>> impact
+>> > memory usage due to there being more fields.
+>> >
+>> > Perhaps a better way would be to use a single "bits" field and store
+>> the
+>> > words "sport", "music", ... in that field.
+>> >
+>> > Daniel
+>> >
+>> >
+>> > --
+>> > Daniel Noll
+>> >
+>> > Nuix Pty Ltd
+>> > Suite 79, 89 Jones St, Ultimo NSW 2007, Australia    Ph: +61 2 9280
+>> 0699
+>> > Web: http://nuix.com/                               Fax: +61 2 9212
+>> 6902
+>> >
+>> > This message is intended only for the named recipient. If you are not
+>> > the intended recipient you are notified that disclosing, copying,
+>> > distributing or taking any action in reliance on the contents of this
+>> > message or attachment is strictly prohibited.
+>> >
+>> > ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>> >
+>>
+>> --
+>> View this message in context:
+>> http://www.nabble.com/Searching-by-bit-masks-tf2603918.html#a7576286
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Searching-by-bit-masks-tf2603918.html#a7581771
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

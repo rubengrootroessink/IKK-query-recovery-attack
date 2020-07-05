@@ -1,0 +1,214 @@
+FROM: Koji Sekiguchi <k...@r.email.ne.jp>
+SUBJECT: Re: question about Scorer.freq()
+DATE: 4 Oct 2010
+
+Hi Mike,
+
+> Hmm are you only gathering the MUST_NOT TermScorers?  (In which case
+> I'd expect that the .docID() would not match the docID being
+> collected).  Or do you also see .docID() not matching for SHOULD and
+> MUST sub queries?
+
+The snippet I copy-n-paste at previous mail was not appropriate.
+Sorry for confusing you. Please see the whole program attached
+in this mail.
+
+> Also, are you sure you are getting BooleanScorer2?
+
+Yes and no. I confirmed that I got BooleanScorer2 in my setScorer(),
+but as I said I'm interested in TermScorer rather than BooleanScorer2
+because I want to know which field a match occurred. Or am I missing
+something here?
+
+> And, yes, you should be able to get which field a match occurred in,
+> because at the lowest level the atomic (TermQuery, PhraseQuery,
+> SpanTermQuery, AtomatonQuery, etc.) all operate on a single field.  So
+> when you find a sub that "matches", you should just check the field of
+> that query.
+
+I wanted it but docId() from sub scorers didn't match...
+
+> Hmm... but not all queries make it easy/possible to get the field
+> right?  MultiTermQuery has getField, TermQuery has getTerm, but
+> PhraseQuery doesn't have a .getField (oh but you can .getTerms() and
+> then get the field).
+
+I agree, though for simple PoC, I'm interested in TermQuery in the
+following program.
+
+
+-----------------
+public class Test2LUCENE2590 {
+
+   static Analyzer analyzer = new WhitespaceAnalyzer( Version.LUCENE_31 );
+   static Directory dir = new RAMDirectory();
+   static final String F1 = "title";
+   static final String F2 = "body";
+
+   public static void main(String[] args) throws IOException {
+     makeIndex();
+     searchIndex();
+   }
+
+   static void makeIndex() throws IOException {
+     IndexWriterConfig config = new IndexWriterConfig( Version.LUCENE_31, analyzer );
+     IndexWriter writer = new IndexWriter( dir, config );
+     //writer.addDocument( doc( "lucene", "lucene is a very popular search engine library.
+lucene 
+runs overall in the world. lucene is great!" ) );
+     writer.addDocument( doc( "lucene", "lucene is a very popular search engine library" )
+);
+     writer.addDocument( doc( "solr", "solr is a very popular search server and is using lucene"
+) );
+     writer.addDocument( doc( "nutch", "nutch is an internet search engine with web crawler
+and is 
+using lucene and hadoop" ) );
+     writer.close();
+   }
+
+   static Document doc( String v1, String v2 ){
+     Document doc = new Document();
+     if( v1 != null )
+       doc.add( field( F1, v1 ) );
+     if( v2 != null )
+       doc.add( field( F2, v2 ) );
+     return doc;
+   }
+
+   static Fieldable field( String field, String value ){
+     return new Field( field, value, Store.YES, Index.ANALYZED );
+   }
+
+   static void searchIndex() throws IOException {
+     IndexSearcher searcher = new IndexSearcher( dir );
+     printResult( searcher, query( new Term( F1, "lucene"), new Term( F2, "lucene" ), new
+Term( F2, 
+"search" ) ) );
+     searcher.close();
+   }
+
+   static Query query( Term... ts ){
+     if( ts == null || ts.length == 0 ){
+       throw new IllegalArgumentException();
+     }
+     if( ts.length == 1 )
+       return new TermQuery( ts[0] );
+     BooleanQuery bq = new BooleanQuery();
+     for( Term t : ts ){
+       bq.add( new TermQuery( t ), Occur.SHOULD );
+     }
+     return bq;
+   }
+
+   static void printResult( IndexSearcher searcher, Query query ) throws IOException {
+     MyCollector collector = new MyCollector();
+     searcher.search( query, collector );
+     TopDocs docs = collector.topDocs();
+     for( ScoreDoc scoreDoc : docs.scoreDocs ){
+       Document doc = searcher.doc( scoreDoc.doc );
+       float score = scoreDoc.score;
+       System.out.println( score + " : " + doc.get( F1 ) + " / " + doc.get( F2 ) );
+       System.out.println( "  freq : " + collector.freq( scoreDoc.doc) );
+     }
+   }
+
+   static class MyCollector extends Collector {
+
+     private TopDocsCollector<ScoreDoc> collector;
+     private int docBase;
+
+     public final Map<Integer,Integer> docCounts = new HashMap<Integer,Integer>();
+
+     private final Set<TermQueryScorer> tqsSet = new HashSet<TermQueryScorer>();
+     private final ScorerVisitor<Query, Query, Scorer> visitor = new MockScorerVisitor();
+     private final EnumSet<Occur> collect;
+
+     MyCollector(){
+       collector = TopScoreDocCollector.create( 10, true );
+       collect = EnumSet.allOf( Occur.class );
+     }
+
+     @Override
+     public boolean acceptsDocsOutOfOrder() {
+       return false;
+     }
+
+     @Override
+     public void collect(int doc) throws IOException {
+       int freq = 0;
+       for( TermQueryScorer tqs : tqsSet ){
+         Scorer scorer = tqs.scorer;
+         int matchId = scorer.docID();
+         if( matchId == doc ){
+           freq += scorer.freq();
+         }
+       }
+       docCounts.put(doc + docBase, freq);
+       collector.collect(doc);
+     }
+
+     @Override
+     public void setNextReader(IndexReader reader, int docBase)
+         throws IOException {
+       this.docBase = docBase;
+       collector.setNextReader( reader, docBase );
+     }
+
+     @Override
+     public void setScorer(Scorer scorer) throws IOException {
+       collector.setScorer( scorer );
+       scorer.visitScorers( visitor );
+     }
+
+     public TopDocs topDocs(){
+       return collector.topDocs();
+     }
+
+     public int freq( int doc ) throws IOException {
+       return docCounts.get( doc );
+     }
+
+     private class MockScorerVisitor extends ScorerVisitor<Query, Query, Scorer> {
+
+       @Override
+       public void visitOptional(Query parent, Query child, Scorer scorer) {
+         if (collect.contains(Occur.SHOULD) && child instanceof TermQuery)
+           tqsSet.add( new TermQueryScorer( (TermQuery)child, scorer ) );
+       }
+
+       @Override
+       public void visitProhibited(Query parent, Query child, Scorer scorer) {
+         if (collect.contains(Occur.MUST_NOT) && child instanceof TermQuery)
+           tqsSet.add( new TermQueryScorer( (TermQuery)child, scorer ) );
+       }
+
+       @Override
+       public void visitRequired(Query parent, Query child, Scorer scorer) {
+         if (collect.contains(Occur.MUST) && child instanceof TermQuery)
+           tqsSet.add( new TermQueryScorer( (TermQuery)child, scorer ) );
+       }
+     }
+
+     private static class TermQueryScorer {
+       private TermQuery query;
+       private Scorer scorer;
+       public TermQueryScorer( TermQuery query, Scorer scorer ){
+         this.query = query;
+         this.scorer = scorer;
+       }
+     }
+   }
+}
+
+Thank you,
+
+Koji
+
+-- 
+http://www.rondhuit.com/en/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

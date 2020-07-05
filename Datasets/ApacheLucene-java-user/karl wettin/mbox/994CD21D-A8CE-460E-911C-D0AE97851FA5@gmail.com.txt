@@ -1,0 +1,242 @@
+FROM: karl wettin <karl.wet...@gmail.com>
+SUBJECT: IndexReader can not be decorated
+DATE: 19 Jan 2007
+
+For some reason I can't figure out, IndexReaders can not be  
+decorated. It is when commiting something deleted that it goes wrong.  
+Does anyone here know what the problem might be? I've been debugging  
+this more or less the whole day. Even tried desperate attempts with  
+get/settify use of the protected IndexFileDeleter deleter, et c, but  
+no luck so far.
+
+Here is a test case that demonstrate my problem:
+
+
+package org.apache.lucene.index;
+
+import junit.framework.TestCase;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.FieldSelector;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.TermQuery;
+
+import java.io.IOException;
+import java.util.Collection;
+
+/**
+* @author karl wettin <karl.wettin@gmail.com>
+* Date: 2007-jan-19
+* Time: 19:47:33
+*/
+public class TestDecoratedReader extends TestCase {
+
+   private RAMDirectory dir;
+
+   protected void setUp() throws Exception {
+     dir = new RAMDirectory();
+     IndexWriter iw = new IndexWriter(dir, new WhitespaceAnalyzer(),  
+true);
+     Document doc = new Document();
+     doc.add(new Field("foo", "bar", Field.Store.YES,  
+Field.Index.TOKENIZED));
+     iw.addDocument(doc);
+     iw.close();
+   }
+
+   public void testVanillaReader() throws Exception {
+     test(IndexReader.open(dir));
+   }
+
+   public void testDecorated() throws Exception {
+     test(new IndexReaderDecorator(IndexReader.open(dir)));
+   }
+
+   public void test(IndexReader reader) throws Exception {
+
+     IndexSearcher searcher = new IndexSearcher(reader);
+
+     assertEquals(1, searcher.search(new TermQuery(new Term("foo",  
+"bar"))).length());
+     assertEquals(1, reader.numDocs());
+     reader.deleteDocument(0);
+     assertEquals(0, searcher.search(new TermQuery(new Term("foo",  
+"bar"))).length());
+     reader.close();
+
+     searcher.close();
+
+     reader = IndexReader.open(dir);
+     assertEquals(0, reader.numDocs()); // boom
+     reader.close();
+   }
+
+   public static class IndexReaderDecorator extends IndexReader {
+     private final IndexReader decorated;
+
+      public IndexReader getDecorated() {
+        return decorated;
+      }
+
+      public IndexReaderDecorator(IndexReader indexReader) {
+        super(null);
+        this.decorated = indexReader;
+      }
+
+      public Document document(int n, FieldSelector fieldSelector)  
+throws IOException {
+        return decorated.document(n, fieldSelector);
+      }
+
+      public TermFreqVector[] getTermFreqVectors(int docNumber)  
+throws IOException {
+        return decorated.getTermFreqVectors(docNumber);
+      }
+
+      public TermFreqVector getTermFreqVector(int docNumber, String  
+field) throws IOException {
+        return decorated.getTermFreqVector(docNumber, field);
+      }
+
+      public int numDocs() {
+        return decorated.numDocs();
+      }
+
+      public int maxDoc() {
+        return decorated.maxDoc();
+      }
+
+      public Document document(int n) throws IOException {
+        return decorated.document(n);
+      }
+
+      public boolean isDeleted(int n) {
+        return decorated.isDeleted(n);
+      }
+
+      public boolean hasDeletions() {
+        return decorated.hasDeletions();
+      }
+
+      public byte[] norms(String field) throws IOException {
+        return decorated.norms(field);
+      }
+
+      public void norms(String field, byte[] bytes, int offset)  
+throws IOException {
+        decorated.norms(field, bytes, offset);
+      }
+
+      protected void doSetNorm(int doc, String field, byte value)  
+throws IOException {
+        decorated.doSetNorm(doc, field, value);
+      }
+
+      public TermEnum terms() throws IOException {
+        return decorated.terms();
+      }
+
+      public TermEnum terms(Term t) throws IOException {
+        return decorated.terms(t);
+      }
+
+      public int docFreq(Term t) throws IOException {
+        return decorated.docFreq(t);
+      }
+
+      public TermDocs termDocs() throws IOException {
+        return decorated.termDocs();
+      }
+
+      public TermPositions termPositions() throws IOException {
+        return decorated.termPositions();
+      }
+
+      protected void doDelete(int docNum) throws IOException {
+        decorated.doDelete(docNum);
+      }
+
+      protected void doUndeleteAll() throws IOException {
+        decorated.doUndeleteAll();
+      }
+
+      protected void doCommit() throws IOException {
+        decorated.doCommit();
+      }
+
+      protected void doClose() throws IOException {
+        decorated.doClose();
+      }
+
+      public Collection getFieldNames(FieldOption fldOption) {
+        return decorated.getFieldNames(fldOption);
+      }
+
+
+      public long getVersion() {
+        return decorated.getVersion();
+      }
+
+      public boolean isCurrent() throws IOException {
+        return decorated.isCurrent();
+      }
+
+      public boolean isOptimized() {
+        return decorated.isOptimized();
+      }
+
+      public boolean hasNorms(String field) throws IOException {
+        return decorated.hasNorms(field);
+      }
+
+      public void setNorm(int doc, String field, float value) throws  
+IOException {
+        decorated.setNorm(doc, field, value);
+      }
+
+      public TermDocs termDocs(Term term) throws IOException {
+        return decorated.termDocs(term);
+      }
+
+      public TermPositions termPositions(Term term) throws IOException {
+        return decorated.termPositions(term);
+      }
+
+      void startCommit() {
+        decorated.startCommit();
+      }
+
+      void rollbackCommit() {
+        decorated.rollbackCommit();
+      }
+
+      protected void setDeleter(IndexFileDeleter deleter) {
+        decorated.setDeleter(deleter);
+      }
+
+      protected IndexFileDeleter getDeleter() {
+        return decorated.getDeleter();
+      }
+
+      void init(Directory directory, SegmentInfos segmentInfos,  
+boolean closeDirectory, boolean directoryOwner) {
+        decorated.init(directory, segmentInfos, closeDirectory,  
+directoryOwner);
+      }
+
+      public Directory directory() {
+        return decorated.directory();
+      }
+   }
+
+}
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

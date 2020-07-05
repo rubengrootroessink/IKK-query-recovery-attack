@@ -1,0 +1,112 @@
+FROM: Paul Taylor <paul_t...@fastmail.fm>
+SUBJECT: Re: How do you properly use NumericField
+DATE: 11 Oct 2009
+
+Uwe Schindler wrote:
+> As we told you before. The default QueryParser has no support fro
+> NumericField (as it doesn't know the schema). To get it running, subclass it
+> and overwrite newRangeQuery method to create a NumericRangeQuery for field
+> names that are indexed using NumericField.
+>   
+Hi, yes I did this but it never called the getRangeQuery and from 
+talking to MM it seemed it would only be used for duration queries, 
+heres a full test which still fails
+
+package org.musicbrainz.search.servlet;
+
+import junit.framework.TestCase;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.NumericField;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.NumericRangeQuery;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.queryParser.ParseException;
+
+public class NumericFieldTest extends TestCase {
+
+    public void testNumericFields() throws Exception {
+        Analyzer analyzer = new StandardAnalyzer();
+        RAMDirectory dir = new RAMDirectory();
+        IndexWriter writer = new IndexWriter(dir, analyzer, true, 
+IndexWriter.MaxFieldLength.LIMITED);
+        Document doc = new Document();
+        NumericField nf  = new NumericField("dur");
+        nf.setIntValue(123);
+        doc.add(nf);
+        doc.add(new Field("dur", "789", 
+Field.Store.NO,Field.Index.ANALYZED ));
+        writer.addDocument(doc);
+        writer.close();
+
+        IndexSearcher searcher = new IndexSearcher(dir,true);
+        {
+            Query q = new 
+MusicbrainzQueryParser("dur",analyzer).parse("789");
+            assertEquals(1, searcher.search(q,10).totalHits);
+
+            q = new MuiscbrainzQueryParser("dur",analyzer).parse("123");
+            assertEquals(1, searcher.search(q,10).totalHits);
+
+
+        }
+    }
+
+    static class MusicbrainzQueryParser extends QueryParser {
+
+        public MusicbrainzQueryParser(String field, Analyzer a) {
+            super(field, a);
+            System.out.println("init parser");
+        }
+
+        public Query getRangeQuery(String field,
+                                   String part1,
+                                   String part2,
+                                   boolean inclusive)
+                throws ParseException {
+            System.out.println("RangeQuery");
+            TermRangeQuery query = (TermRangeQuery)
+                    super.getRangeQuery(field, part1, part2,
+                            inclusive);
+
+            if ("dur".equals(field)) {
+                System.out.println("dur");
+
+                return NumericRangeQuery.newIntRange(
+                        "dur",
+                        Integer.parseInt(query.getLowerTerm()),
+                        Integer.parseInt(query.getUpperTerm()),
+                        query.includesLower(),
+                        query.includesUpper());
+            } else {
+                return query;
+         
+        }
+    }
+
+
+
+> The recommended way is to instantiate the NumericQueries directly and not
+> via a query parser. You can combina a text query with query parser then
+> together with various numeric ranges using a BooleanQuery on top of it. If
+> you really need a query string range representation for numeric values,
+> there is no way around extending QueryParser.
+>   
+The UI allows the user to enter a lucene query using any valid syntax as 
+required so will always need QueryParser which I have extended as you 
+can see from above
+
+
+thanks Paul
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

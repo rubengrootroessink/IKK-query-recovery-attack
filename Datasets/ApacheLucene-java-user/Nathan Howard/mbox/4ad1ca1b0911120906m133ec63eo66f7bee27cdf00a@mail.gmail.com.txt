@@ -1,0 +1,254 @@
+FROM: Nathan Howard <natehowa...@gmail.com>
+SUBJECT: Using a precompiled index with a WAR archive
+DATE: 12 Nov 2009
+
+I'm trying to use a precompiled Lucene index from within a WAR archive, and
+was having difficulty, but found a possible solution:
+http://mail-archives.apache.org/mod_mbox/lucene-java-user/200305.mbox/%3C20030524152100.28075.qmail@web12707.mail.yahoo.com%3E
+
+The gotcha to the solution: it's written for Lucene 1.2, and I'm having some
+difficulties getting it to work correctly with 2.4.1.  Any help in updating
+the class would be most appreciated.
+
+Class from the archive (Originally written by Les Hughes):
+
+import java.io.BufferedInputStream;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.Set;
+
+import javax.servlet.ServletContext;
+import javax.servlet.ServletContextEvent;
+import javax.servlet.ServletContextListener;
+
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.InputStream;
+import org.apache.lucene.store.Lock;
+import org.apache.lucene.store.OutputStream;
+import org.apache.lucene.store.RAMDirectory;
+
+/*
+*  A delegating Directory that wraps either a RAMDirectory or
+*  FSDirectory and allows an index to be distributed in a WAR.
+*
+*  An index is stored in the WAR under /WEB-INF (eg /WEB-INF/myindex)
+*  and deployed into RAM or FS depending upon the context params below.
+*
+*  By registering this class in the web.xml
+*  we will receive ServletContextEvents on web app initialisation.
+*  The same could be achieved in an old skool style startup-servlet.
+*
+*  Add lines like
+<web-app>
+
+  <description>MySearchApp</description>
+
+  <context-param>
+    <param-name>org.apache.lucene.index</param-name>
+    <param-value>myindex</param-value>
+  </context-param>
+
+  <context-param>
+    <param-name>org.apache.lucene.index.UseRAMDirectory</param-name>
+    <param-value>false</param-value>
+  </context-param>
+
+  <listener>
+    <listener-class>WARDirectory</listener-class>
+  </listener>
+
+</web-app>
+
+
+*
+*  Once initialised, the directory can be accessed via the
+*  org.apache.lucene.store.WARDirectory attribute. Eg in a jsp do
+*
+*  Directory dir =
+(Directory)application.getAttribute("org.apache.lucene.store.WARDirectory");
+*  Searcher searcher = new IndexSearcher(dir);
+*  etc etc
+*
+*  Limitations:  Only tested in Tomcat > 4.1 (Servlet 2.4?)
+*
+*  ToDo: Change RAM/FSDirectory selection to allow passing of a classname
+(eg org.foo.Mydirectory)
+*        Needs changes for lucene > 1.2 ??
+
+* @author <a href="mailto:lesliehughes100@yahoo.com">Les Hughes</a>
+*/
+
+
+public class WARDirectory extends Directory implements
+ServletContextListener {
+
+    protected Directory directory;
+    protected ServletContext context;
+    protected Set list;
+    protected boolean useRam = false;
+    String index;
+
+    //Shame this method does not allow us to throw an exception.....Erm
+bogus use of RuntimeException...
+
+    public void contextInitialized(ServletContextEvent sce) {
+        context = sce.getServletContext();
+
+        if((index = context.getInitParameter("org.apache.lucene.index")) ==
+null) {
+            String msg = "Lucene 'org.apache.lucene.index' context-param
+missing in web.xml";
+            context.log(msg);
+            throw new RuntimeException(msg);
+        }
+
+        useRam =
+Boolean.valueOf(context.getInitParameter("org.apache.lucene.index.UseRAMDire
+ctory")).booleanValue();
+
+        context.log("Searching for index "+index);
+        list = context.getResourcePaths("/WEB-INF/"+index);
+        if(list == null || list.isEmpty()) {
+            String msg = "Index /WEB-INF/"+index+" appears to be missing or
+empty.";
+            context.log(msg);
+            throw new RuntimeException(msg);
+        }
+
+        //Now copy index from WAR into Directory
+        try {
+
+            if(useRam) {
+                context.log("Creating a new RAMDirectory");
+                directory = new RAMDirectory();
+            } else {
+                File temp =
+(File)context.getAttribute("javax.servlet.context.tempdir"); //Sevlet Spec
+P30
+                String dirPath = temp.getPath() + "/"+ index;
+                context.log("Creating a new FSDirectory at "+dirPath);
+                directory = FSDirectory.getDirectory(dirPath, true);
+            }
+
+            //Add files from WAR to Dir...
+            java.io.InputStream in;
+            OutputStream out;
+
+            int numBytes;
+            byte[] buffer = new byte[4096]; //4k buffer
+            String inresname, outresname;
+            Iterator iter = list.iterator();
+
+            while(iter.hasNext()) {
+                inresname = (String)iter.next();
+                outresname =
+inresname.substring(inresname.lastIndexOf('/')+1);
+                context.log("Reading "+inresname+" will create
+"+index+"/"+outresname);
+                in = new
+ufferedInputStream(context.getResourceAsStream(inresname));
+
+                out =  directory.createFile(outresname);
+
+                numBytes = 0;
+                while( (numBytes = in.read(buffer, 0 , buffer.length)) !=
+-1) {
+                    out.writeBytes(buffer, numBytes);
+                }
+
+                out.close();
+                in.close();
+            }
+
+            //All done?
+
+        }catch(IOException ioe) {
+            //We fail fast if there was an exception on creating the
+Directory.
+            //Perhaps later we can re-try with an FSDirectory if it was an
+outof memory issue?
+
+            context.log("Problem creating WARDirectory "+ioe.getMessage());
+            ioe.printStackTrace();
+            throw new RuntimeException("Problem creating WARDirectory
+"+ioe.getMessage());
+        }
+
+        //Finally put dir ref somewhere we can use it...
+        context.setAttribute("org.apache.lucene.store.WARDirectory", this);
+        context.log("WARDirectory done initialising.");
+    }
+
+/////////////////////////////////////////////////////////////////////////////
+//    Implement Directory's Interface.
+/////////////////////////////////////////////////////////////////////////////
+
+    /* Called on app shutdown */
+    public void contextDestroyed(ServletContextEvent sce){}
+
+    /** Returns an array of strings, one for each file in the directory. */
+    public String[] list() throws IOException, SecurityException{
+        return directory.list();
+    }
+
+    /** Returns true if a file with the given name exists. */
+    public boolean fileExists(String name) throws IOException,
+SecurityException{
+        return directory.fileExists(name);
+    }
+
+    /** Returns the time the named file was last modified. */
+    public long fileModified(String name) throws IOException,
+SecurityException{
+        return directory.fileModified(name);
+    }
+
+    /** Returns the length of a file in the directory. */
+    public long fileLength(String name) throws IOException,
+SecurityException{
+        return directory.fileLength(name);
+    }
+
+    /** Returns a stream reading an existing file. */
+    public InputStream openFile(String name) throws IOException,
+SecurityException{
+        return directory.openFile(name);
+    }
+
+    /** Closes the store. */
+    public void close() throws IOException, SecurityException {
+        directory.close();
+    }
+
+    /** Removes an existing file in the directory. */
+    public void deleteFile(String name) throws IOException,
+SecurityException  {
+        directory.deleteFile(name);
+    }
+
+    /** Renames an existing file in the directory.
+        If a file already exists with the new name, then it is replaced.
+        This replacement should be atomic. */
+    public void renameFile(String from, String to) throws IOException,
+SecurityException {
+        directory.renameFile(from, to);
+    }
+
+    /** Creates a new, empty file in the directory with the given name.
+        Returns a stream writing this file. */
+    public OutputStream createFile(String name) throws IOException,
+SecurityException {
+        return directory.createFile(name);
+    }
+
+    /** Construct a {@link Lock}.
+    * @param name the name of the lock file
+    */
+    public Lock makeLock(String name) {
+        return directory.makeLock(name);
+    }
+}
+

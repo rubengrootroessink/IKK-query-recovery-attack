@@ -1,0 +1,105 @@
+FROM: Nick Johnson <yhp...@spatula.net>
+SUBJECT: Re: problems with deleteDocuments
+DATE: 4 Jul 2007
+
+A little more digging and I found the problem (amazing what coffee can 
+do).  It was a bad assertion in my unit test.  Basically I was checking to 
+see that the article was indexed after the update, but didn't check to see 
+whether it was indexed BEFORE the update.  It wasn't.  Or rather, it was, 
+but not on the term I was using in my unit tests to check for existence.  
+I was performing this check by searching on "id:{primary key}".
+
+It turned out that switching from StopAnalyzer to StandardAnalyzer on both 
+the IndexWriter and the QueryParser cured both problems.  Looking at the 
+source, this seems to be because StopAnalyzer uses a LowerCaseTokenizer, 
+which is a LetterTokenizer, which excludes non-letters, whereas the 
+StandardAnalyzer uses a LowerCaseFilter instead, which just sends 
+everything toLowerCase() and consequently does not exclude numbers.
+
+On Wed, 4 Jul 2007, Erick Erickson wrote:
+
+> See below
+> 
+> On 7/4/07, Nick Johnson <yhprar@spatula.net> wrote:
+> >
+> > I think I follow you.  I don't have a problem with storing something like
+> > a primary key as UN_TOKENIZED, though I'm a bit baffled about why it
+> > didn't work as TOKENIZED, since the _only_ thing in that field is the
+> > value of the primary key (ie, the string value of some integer).  It seems
+> > like it should have matched exactly either way...unless perhaps the
+> > StopAnalyzer is tokenizing the primary key strangely.
+> 
+> 
+> 
+> This surprises me as well. Could you post an example of the value you store,
+> and the analyzer you're using? Perhaps a code snippet, or, better yet, a
+> small,
+> self-contained program illustrating the problem. I know when I've tried this
+> latter, I've often found out what was happening. A recommendation: if you
+> try to make a self-contained program, please use one of the stock analyzers
+> since we're interested in lucene's behavior, not the behavior of custom
+> analyzers.
+> 
+> 
+> What still confounds me is the second problem- where adding a new document
+> > that has identical fields to a deleted document fails to store the new
+> > document.
+> 
+> 
+> 
+> Ditto for the self-contained program here. How are you identifying the
+> failure to index the second doc? Luke might be your friend...
+> 
+> 
+> On Wed, 4 Jul 2007, Erick Erickson wrote:
+> >
+> > > This is exactly the behavior I'd expect.
+> > >
+> > > Consider what would happen otherwise. Say you have documents
+> > > with the following values for a field (call it blah).
+> > > some data
+> > > some data I put in the index
+> > > lots of data
+> > > data
+> > >
+> > > Then I don't want deleting on the term blah:data to remove all
+> > > of them. Which seems to be what you're asking. Even if
+> > > you restricted things to "phrases", then deleting on the term
+> > > 'blah:some data' would remove two documents.
+> > >
+> > > So, while UN_TOKENIZED isn't a *requirement*, exact total term
+> > > matches *is* the requirement. By that, I meant that whatever
+> > > goes into the field must not be broken into pieces by the indexing
+> > > tokenizer for deletes to work as you expect.
+> > >
+> > > Best
+> > > Erick
+> >
+> > --
+> > "Courage isn't just a matter of not being frightened, you know. It's being
+> > afraid and doing what you have to do anyway."
+> >    Doctor Who - Planet of the Daleks
+> > This message has been brought to you by Nick Johnson 2.3b1 and the number
+> > 6.
+> > http://healerNick.com/       http://morons.org/        http://spatula.net/
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+> 
+
+-- 
+"Courage isn't just a matter of not being frightened, you know. It's being
+ afraid and doing what you have to do anyway."
+   Doctor Who - Planet of the Daleks
+This message has been brought to you by Nick Johnson 2.3b1 and the number 6.
+http://healerNick.com/       http://morons.org/        http://spatula.net/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

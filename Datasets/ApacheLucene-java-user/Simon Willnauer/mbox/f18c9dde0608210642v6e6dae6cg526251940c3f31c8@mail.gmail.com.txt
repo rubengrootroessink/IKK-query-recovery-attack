@@ -1,0 +1,116 @@
+FROM: "Simon Willnauer" <simon.willna...@googlemail.com>
+SUBJECT: Re: Singleton and IndexModifier
+DATE: 21 Aug 2006
+
+In GDataServer I use a timed indexer who commits the modifications
+after a certain idle time or after n documents insert/update/delete.
+This ensures that your modifications will be available after a defined
+time. it also minimize opening and closing readers and writers as the
+deletes will be done after all inserts. I do really recommend to keep
+your searcher open as long as possible and keep your index modifiers
+open and close action to a minimum.
+
+best regards Simon
+
+On 8/21/06, Erick Erickson <erickerickson@gmail.com> wrote:
+> my only caution is that as your index grows, the close/open of your readers
+> may take more time than you are willing to spend. Not that I'm recommending
+> against it as I don't know the details, but it's something to keep an eye
+> on. In my experience, "immediately available" may really mean "available
+> after 10 minutes", so you can think about allowing a little latency to
+> improve query speed if that becomes an issue.....
+>
+> Best
+> Erick
+>
+> On 8/21/06, lude <lucene.developer@googlemail.com> wrote:
+> >
+> > Thanks simon.
+> >
+> > In practice my application would have around 100 queries and around 10
+> > add/deletes per minute.
+> > Add/deletes should show up immediately.
+> > That means that I should always create and close an IndexModifier (and
+> > IndexReader for Searching) for each operation, right?
+> >
+> > Sure, it cost's a litte performance. But it ensures that
+> > 1.)  The change is visible immediately
+> > 2.)  The write.lock (and commit.lock) doesn't remain when the application
+> > shut down or crashes
+> >
+> >
+> > On 8/20/06, Simon Willnauer <simon.willnauer@googlemail.com> wrote:
+> > >
+> > > On 8/20/06, lude <lucene.developer@googlemail.com> wrote:
+> > > > Hello,
+> > > >
+> > > > when using the new IndexModifier of Lucene 2.0, what would be
+> > > > the best creation-pattern?
+> > > >
+> > > > Should there be one IndexModifier instance in the application
+> > > (==singelton)?
+> > > > Could an IndexModifier be opened for a longer time or should it be
+> > > created
+> > > > on use and immediately closed?
+> > > You create an indexmodifier if you want to modify your index. if you
+> > > wanna commit your data (make it available via index reader / searcher)
+> > > you close or rather flush your indexmodifier. After closing the
+> > > modifier you can create a new searcher and all modifications are
+> > > visible to the searcher / reader. Basically there is one index
+> > > modifier (or one single modifying instances per index as you must not
+> > > modify your index with more that one instance of indexreader -writer
+> > > -modifier). If you use the flush() method you don't need to create a
+> > > new IndexModifier instance.
+> > >
+> > > You can leave your indexmod. open for a long time but without a commit
+> > > the indexed or deleted documents won't be visible to your searcher /
+> > > reader) Opening indexmodifiers is a heavy operation which should be
+> > > used carefully so you can close your modifier every n docs or after a
+> > > certain idle time.
+> > > Just be aware that IndexModifier uses IndexReader and IndexWriter
+> > > internally so if you do a delete after a addDocument the indexwriter
+> > > will be closed and a new indexreader will be opened. This is also a
+> > > heavy operation in the meaning of performance.
+> > > You could keep your deletes until you want to flush your instance of
+> > > IndexModifier to gain a bit of performance.
+> > > >
+> > > > Another issue:
+> > > > - I create an IndexModifier
+> > > > - The applicaton crashes
+> > > > - There exists a write-lock on the index
+> > > > --> Next time I start the application the IndexModifier couldn't be
+> > > opened
+> > > > because of the locks.
+> > > >
+> > > > What is the right way to check and delete old write locks?
+> > > You can use the IndexReader.unlock(Directory dir) method the java doc
+> > > says:
+> > >
+> > >   * Caution: this should only be used by failure recovery code,
+> > >   * when it is known that no other process nor thread is in fact
+> > >   * currently accessing this index.
+> > >
+> > > To make sure this happens only in recovery mode.
+> > >
+> > > best regards Simon
+> > > >
+> > > > Thanks
+> > > > lude
+> > > >
+> > > >
+> > >
+> > > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > >
+> > >
+> >
+> >
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

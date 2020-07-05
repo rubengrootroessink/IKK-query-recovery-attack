@@ -1,0 +1,280 @@
+FROM: eks dev <eks...@yahoo.co.uk>
+SUBJECT: Re: speed of BooleanQueries on 2.9
+DATE: 16 Jul 2009
+
+
+Sure, If you have enough memory to do postings caching, with or without P4... I see P4 as
+a generally faster postings format, with stopwords or not.
+
+I wouldn't blow Term dictionary, that just moves the problem to another place.
+
+What I am thinking of is quite simple, probably not the most elegant solution, but I am almost
+sure it would work:  
+- get Top N terms from index, N depends on your available memory
+- create Filter from them, stick them into ConstantScoreQuery, caluculate idf() and set boost()
+to this value, cache it
+- implement QueryOptimizer that loops all Terms in your Query and replaces Terms with cached
+ ConstantScoreQuery
+
+and voila, your made perfectly fast search... but
+
+BAD: 
+a) you reduce quality of your score value, as there is no tf() component. But for stop words,
+I am not sure if that makes any significant  difference. Also, if you are luck like me, you
+omitTf()... so no loss there
+b) if you load RAMIndex/MMAp, you duplicate ram needs for these postings...   
+
+COOL:
+- Math on out index: Zipfian distribution does magic, top 30 terms make 36% of our corpus!
+For caching them (as OpenBitSet) on 100Mio Documents  I need ~0.35G
+My terms distribution follows collection terms distribution ... so I get cache hit rate of
+36% for only 0.38Gb ram... You save a lot of VInt decoding (brings a lot, even if we ignore
+benefit of reducing disk access... these hot terms must be OS cached anyhow). If you use something
+other filter, you need even less memory... it is only important to use filter that is measurably
+faster than VInt decoding with skip lists. 
+- This speeds up the slowest queries, fast queries are anyhow fast :) 
+
+
+I think it will work just fine
+
+Would be great if Lucene could do all this for me, I just say "here, I give you 500Mb free
+for postings cache, do your magic for me"... but nothing prevents me to provide patch :)
+
+I will try it, to see if theory works.We have cases where free memory is not a problem, we
+are hitting CPU there (VInt decoding on our last profiled run). To be honest, I do not know
+is anyone today runs high volume search from disk (maybe SSD), even than, significant portion
+has to be in RAM... 
+
+One day we could throw many CPUs at Query... but this is not an easy one... 
+
+
+
+
+
+----- Original Message ----
+> From: Jason Rutherglen <jason.rutherglen@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Thursday, 16 July, 2009 19:22:28
+> Subject: Re: speed of BooleanQueries on 2.9
+> 
+> Do we think that we'll be able to support indexing stop words
+> using PFOR (with relaxation on the compression to gain
+> performance?) Today it seems like the best approach to indexing
+> stop words is to use shingles? However this blows up the term
+> dict because shingles concatenates phrases together.
+> 
+> On Thu, Jul 16, 2009 at 8:26 AM, eks devwrote:
+> >
+> > We did it for us, gave something back to community... all happy... open source 
+> works just fine here in lucene land :)
+> >
+> > Re, 10%
+> > I did not expect that much, but our index is quite dense, a lot of documents 
+> and not too many unique terms, omitTf ... so it is really hard pressure on 
+> DocIDSetIterator and Scorers.
+> >
+> > I cannot wait to see P4, pulsing index... in action...
+> > We are alo going to try to cache postings for Top N high freq. terms in plain 
+> old ConstanScoreQuery via OpenBitSet ... with zipfian distribution this should 
+> reduce VInt decoding to 50% with just a few hundred terms... having TF 
+> independent score, we just need to adjust constant score value based on idf()... 
+> so no loss in quality! expected huge performance benefit (said optimist without 
+> numbers to prove it).
+> >
+> > Cheers, Eks
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> > ----- Original Message ----
+> >> From: Michael McCandless 
+> >> To: java-user@lucene.apache.org
+> >> Sent: Thursday, 16 July, 2009 16:23:57
+> >> Subject: Re: speed of BooleanQueries on 2.9
+> >>
+> >> Super, thanks for testing!
+> >>
+> >> And, the 10% speedup overall is good progress...
+> >>
+> >> Mike
+> >>
+> >> On Thu, Jul 16, 2009 at 9:16 AM, eks devwrote:
+> >> >
+> >> > and one final touch, 4X slow down does not exist with new Lucene...
+> >> > I did not verify it again on the old one, but hey, who cares. Trunk is
+
+> clean
+> >> and, at least so far, our favourite QA team has nothing to complain about ...
+> >> >
+> >> > They will keep it under stress for a while... so if somethings comes up
+you
+> >> will hear from me...
+> >> > Thanks again to all.
+> >> >
+> >> > Cheers, Eks
+> >> >
+> >> >
+> >> >
+> >> > ----- Original Message ----
+> >> >> From: eks dev
+> >> >> To: java-user@lucene.apache.org
+> >> >> Sent: Thursday, 16 July, 2009 14:40:26
+> >> >> Subject: Re: speed of BooleanQueries on 2.9
+> >> >>
+> >> >>
+> >> >> ok new facts, less chaos :)
+> >> >>
+> >> >> - LUCENE-1744 fixed it definitely; I have it confirmed
+> >> >> Also, we found another example of the Query that was stuck (t1 t2 t3)~2
+
+> ...
+> >> this
+> >> >> is also fixed with LUCENE-1744
+> >> >>
+> >> >>
+> >> >> Re:  "some queries are 4X slower  than before".  Was that a different
+
+> issue?
+> >> >> (Because this issue is "the query runs forever").
+> >> >>
+> >> >> Maybe :) I do not know.
+> >> >> When I wrote this email about "the query runs forever" I did not know
+if 
+> this
+> >> >> slowdown is the same or different issue... I have just reported some
+
+> unusual
+> >> >> observation (4 times slower) and was later convinced that this stuck
+Query
+> >> >> confirms the same problem ....
+> >> >>
+> >> >> Now, I do not know  if that was the same effect, or wrong measurement,
+or
+> >> >> something else lurking ... Good point, will try to repeat test on this
+> >> >> slowdown...
+> >> >>
+> >> >> Just a reminder This 4_times_slower Query is different:
+> >> >> +(a b c) +(x y z)
+> >> >>
+> >> >> +((NAME:hans NAME:hahns^0.23232001 NAME:hams^0.27648002 NAME:hamz^0.25392
+> >> >> NAME:hanas^0.18722998 NAME:hanbs^0.18722998 NAME:hanfs^0.18722998
+> >> >> NAME:hangs^0.18722998 NAME:hanhs^0.24030754 NAME:hanis^0.18722998
+> >> >> NAME:hanjs^0.18722998 NAME:hanks^0.18722998 NAME:hanms^0.18722998
+> >> >> NAME:hanos^0.18722998 NAME:hanrs^0.18722998 NAME:hansb^0.20172001
+> >> >> NAME:hansd^0.20172001 NAME:hansf^0.20172001 NAME:hansg^0.20172001
+> >> >> NAME:hansi^0.20172001 NAME:hansj^0.20172001 NAME:hansk^0.20172001
+> >> >> NAME:hansl^0.20172001 NAME:hansn^0.20172001 NAME:hanso^0.20172001
+> >> >> NAME:hansp^0.20172001 NAME:hanst^0.20172001 NAME:hansu^0.20172001
+> >> >> NAME:hansw^0.20172001 NAME:hansy^0.20172001 NAME:hansz^0.20172001
+> >> >> NAME:hants^0.18722998 NAME:hanus^0.18722998 NAME:hanws^0.18722998
+> >> >> NAME:hehns^0.20172001 NAME:hens^0.2736075 NAME:hins^0.24843 
+> NAME:hons^0.24843
+> >> >> NAME:huhns^0.1801875 NAME:huns^0.24843)^2.0)
+> >> >> +(((ZIPS:berlin ZIPS:barlin^0.28227 ZIPS:berien^0.25947002
+> >> >> ZIPS:berling^0.23232001 ZIPS:perlin^0.26133335))^1.2)
+> >> >>
+> >> >>
+> >> >> Thanks!
+> >> >>
+> >> >>
+> >> >>
+> >> >>
+> >> >>
+> >> >> ----- Original Message ----
+> >> >> > From: Michael McCandless
+> >> >> > To: java-user@lucene.apache.org
+> >> >> > Sent: Thursday, 16 July, 2009 13:52:06
+> >> >> > Subject: Re: speed of BooleanQueries on 2.9
+> >> >> >
+> >> >> > On Thu, Jul 16, 2009 at 6:38 AM, eks devwrote:
+> >> >> >
+> >> >> > > and this String has exactly that form
+> >> >> > > (x OR y OR z) OR (a OR b OR c),
+> >> >> > > That is exactly how I construct the Query, have a look at
+brackets on
+> >> this
+> >> >> > toString result .
+> >> >> >
+> >> >> > Duh!  OK, I had missed that your large query actually had 2 clauses
+at
+> >> >> > the top!  Sigh.
+> >> >> >
+> >> >> > OK, that part of the puzzle now at least makes sense.  The rewrite()
+> >> >> > of your query will not reduce to a single OR query (as I previously
+> >> >> > thought).
+> >> >> >
+> >> >> > So in fact you have a BS at the top (because you called
+> >> >> > setAllowDocsOutOfOrder(true)), with 2 clauses, and each of those
+> >> >> > clauses uses BS2 to score.
+> >> >> >
+> >> >> > I think advance() is not involved, but LUCENE-1744 could very
+well
+> >> >> > have fixed this, because BS calls sub.scorer.docID() when interacting
+> >> >> > with its sub-scorers, and due to LUCENE-1744, that would always
+return
+> >> >> > -1 from a BS2, so BS could enter an infinite loop.
+> >> >> >
+> >> >> > If you run w/o the fix for LUCENE-1744, with my instrumentation,
+I can
+> >> >> > confirm this.  But I think likely this is it.
+> >> >> >
+> >> >> > Also: you started this thread by saying "some queries are 4X slower
+> >> >> > than before".  Was that a different issue?  (Because this issue
+is
+> >> >> > "the query runs forever").
+> >> >> >
+> >> >> > Mike
+> >> >> >
+> >> >> > ---------------------------------------------------------------------
+> >> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >>
+> >> >>
+> >> >>
+> >> >>
+> >> >>
+> >> >> ---------------------------------------------------------------------
+> >> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >> >
+> >> >
+> >> >
+> >> > ---------------------------------------------------------------------
+> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >> >
+> >> >
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,481 @@
+FROM: Erick Erickson <erickerick...@gmail.com>
+SUBJECT: Re: Single filter instance with different searchers
+DATE: 8 Nov 2010
+
+Ignore my previous, I thought you were constructing your own filters. What
+you're doing should
+be OK.
+
+Here's the source of my confusion.  Each of your indexes has Lucene document
+IDs starting at
+0. In your example, you have two docs/index. So, if you created a Filter via
+lower-level
+calls, it could not be applied across different indexes. See the discussion
+here:
+http://www.gossamer-threads.com/lists/lucene/java-user/106376. That is,
+the bit in your Filter for index0, doc0 would be the same bit as in index1,
+doc0.
+
+But, that's not what you are doing. The (Parallel)MultiSearcher takes
+care of mapping these doc IDs appropriately for you so you don't have to
+worry about
+what I was thinking about. Here's a program that illustrates this. It
+creates
+three RAMDirectories then  dumps the Lucene doc ID from each. Then it
+creates
+a multisearcher from the same three dirs and walks that, dumping the Lucene
+doc ID.
+You'll see that the doc IDs change even though the contents are the same....
+
+Again, though, this isn't a problem because you are using a MultiSearcher,
+which
+takes care of this for you.
+
+Which is yet another reason to never, never, never count on lucene doc IDs
+outside their context!
+
+Output at the end......
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.util.Version;
+
+import java.io.IOException;
+
+import static org.apache.lucene.index.IndexWriter.*;
+
+public class EoeTest {
+    public static void main(String[] args) {
+        EoeTest eoe = new EoeTest();
+        eoe.doIt();
+    }
+    private void doIt() {
+        try {
+            populateIndexes();
+            searchAndSpit();
+            tryMulti();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    private Searcher getMulti() throws IOException {
+        IndexSearcher[] searchers = new IndexSearcher[3];
+        searchers[0] = new IndexSearcher(_ram1, true);
+        searchers[1] = new IndexSearcher(_ram2, true);
+        searchers[2] = new IndexSearcher(_ram3, true);
+        return new MultiSearcher(searchers);
+    }
+    private void tryMulti() throws IOException {
+        searchOne("multi ", getMulti());
+    }
+
+    private void searchAndSpit() throws IOException {
+        searchOne("ram1", new IndexSearcher(_ram1, true));
+        searchOne("ram2", new IndexSearcher(_ram2, true));
+        searchOne("ram3", new IndexSearcher(_ram3, true));
+    }
+    private void searchOne(String which, Searcher is) throws IOException {
+        log("dumping " + which);
+        TopDocs hits = is.search(new MatchAllDocsQuery(), 100);
+        for (int idx = 0; idx < hits.scoreDocs.length; ++idx) {
+            ScoreDoc sd = hits.scoreDocs[idx];
+            Document doc = is.doc(sd.doc);
+            log(String.format("lid: %d, content: %s", sd.doc,
+doc.get("content")));
+        }
+        is.close();
+    }
+    private void log(String msg) {
+        System.out.println(msg);
+    }
+    private void populateIndexes() throws IOException {
+        popOne(_ram1);
+        popOne(_ram2);
+        popOne(_ram3);
+    }
+
+    private void popOne(Directory dir) throws IOException {
+        IndexWriter iw = new IndexWriter(dir, _std, MaxFieldLength.LIMITED);
+        Document doc = new Document();
+        doc.add(new Field("content", "common " +
+Double.toString(Math.random()), Field.Store.YES, Field.Index.ANALYZED,
+Field.TermVector.YES));
+        iw.addDocument(doc);
+
+        doc = new Document();
+        doc.add(new Field("content", "common " +
+Double.toString(Math.random()), Field.Store.YES, Field.Index.ANALYZED,
+Field.TermVector.YES));
+        iw.addDocument(doc);
+
+        iw.close();
+    }
+
+
+    Directory _ram1 = new RAMDirectory();
+    Directory _ram2 = new RAMDirectory();
+    Directory _ram3 = new RAMDirectory();
+    Analyzer _std = new StandardAnalyzer(Version.LUCENE_29);
+}
+
+************************************output****************
+where lid: ### is the Lucene doc ID returned in scoreDocs
+***********************************************************
+
+dumping ram1
+lid: 0, content: common 0.11100571422470962
+lid: 1, content: common 0.31555863707233567
+dumping ram2
+lid: 0, content: common 0.01235509997022377
+lid: 1, content: common 0.7017712652104814
+dumping ram3
+lid: 0, content: common 0.9472403989314128
+lid: 1, content: common 0.7105628402082196
+dumping multi
+lid: 0, content: common 0.11100571422470962
+lid: 1, content: common 0.31555863707233567
+lid: 2, content: common 0.01235509997022377
+lid: 3, content: common 0.7017712652104814
+lid: 4, content: common 0.9472403989314128
+lid: 5, content: common 0.7105628402082196
+
+
+
+
+On Mon, Nov 8, 2010 at 3:33 AM, Samarendra Pratap <samarzone@gmail.com>wrote:
+
+> Hi Erick, Thanks for the reply.
+>  Your answer have puzzled me more because what I am able to view is not
+> what you say or I am not able to grasp your meaning.
+>  I have written a small program which is exactly what my original question
+> was. Here I am creating a CachingWrapperFilter on one index and reusing it
+> on other indexes. This single filter gives me results as expected from each
+> of the index. I will appreciate if you can throw some light.
+>
+> I have given the output after the program ends
+>
+>
+> ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+> // following program is compiled with java6
+>
+> import org.apache.lucene.index.*;
+> import org.apache.lucene.analysis.*;
+> import org.apache.lucene.analysis.standard.*;
+> import org.apache.lucene.search.*;
+> import org.apache.lucene.search.spans.*;
+> import org.apache.lucene.store.*;
+> import org.apache.lucene.document.*;
+> import org.apache.lucene.queryParser.*;
+> import org.apache.lucene.util.*;
+>
+> import java.util.*;
+>
+> public class FilterTest
+> {
+> protected Directory[] dirs;
+>  protected Analyzer a;
+> protected Searcher[] searchers;
+> protected QueryParser qp;
+>  protected Filter f;
+> protected Hashtable<String, Filter> filters;
+>
+>  public FilterTest()
+> {
+> // create analyzer
+>  a = new StandardAnalyzer(Version.LUCENE_29);
+> // create query parser
+> qp = new QueryParser(Version.LUCENE_29, "content", a);
+>  // initialize "filters" Hashtable
+> filters = new Hashtable<String, Filter>();
+>  }
+>
+> protected void createDirectories(int length)
+> {
+>  // create specified number of RAM directories
+> dirs = new Directory[length];
+>  for(int i=0;i<length;i++)
+> dirs[i] = new RAMDirectory();
+> }
+>
+> protected void createIndexes() throws Exception
+> {
+> /* create indexes for each directory.
+>  each index contains two documents.
+> every document contains one term, unique across all indexes, one term
+> unique across single index and one term common to all indexes
+>  */
+> for(int i=0;i<dirs.length;i++)
+> {
+>  IndexWriter iw = new IndexWriter(dirs[i], a, true,
+> IndexWriter.MaxFieldLength.LIMITED);
+>
+> Document d = new Document();
+>  // unique id across all indexes
+> d.add(new Field("id", ""+(i*2+1), Field.Store.YES,
+> Field.Index.NOT_ANALYZED, Field.TermVector.YES));
+>  // unique id in a single indexes
+> d.add(new Field("docnumber", "1", Field.Store.YES,
+> Field.Index.NOT_ANALYZED, Field.TermVector.YES));
+>  // common word in all indexes
+> d.add(new Field("content", "common", Field.Store.YES, Field.Index.ANALYZED,
+> Field.TermVector.YES));
+>  iw.addDocument(d);
+>
+> d = new Document();
+> // unique id across all indexes
+>  d.add(new Field("id", ""+(i*2+2), Field.Store.YES,
+> Field.Index.NOT_ANALYZED, Field.TermVector.YES));
+> // unique id in a single indexes
+>  d.add(new Field("docnumber", "2", Field.Store.YES,
+> Field.Index.NOT_ANALYZED, Field.TermVector.YES));
+> // common word in all indexes
+>  d.add(new Field("content", "common", Field.Store.YES,
+> Field.Index.ANALYZED, Field.TermVector.YES));
+> iw.addDocument(d);
+>
+> iw.close();
+> }
+> }
+>
+> protected void openSearchers() throws Exception
+> {
+> // open searches for every directory and save it in an array
+>  searchers = new Searcher[dirs.length];
+> for(int i=0;i<dirs.length;i++)
+>  searchers[i] = new IndexSearcher(IndexReader.open(dirs[i], true));
+> }
+>
+>  protected Searcher getSearcher(int[] arr) throws Exception
+> {
+> // provides a ParallelMultiSearcher instance with the searchers lying at
+> index positions provided in the argument
+>  Searcher[] s = new Searcher[arr.length];
+> for(int i=0;i<arr.length;i++)
+>  s[i] = this.searchers[arr[i]];
+>
+> return new ParallelMultiSearcher(s);
+>  }
+>
+> protected ScoreDoc[] search(String query, String filter, Searcher s) throws
+> Exception
+>  {
+> Filter f = null;
+> if(filter != null)
+>  {
+> if(filters.containsKey(filter))
+> {
+>  System.out.println("Reusing filter for - " + filter);
+> f = filters.get(filter);
+>  }
+> else
+> {
+>  System.out.println("Creating new filter for - " + filter);
+> f = new CachingWrapperFilter(new QueryWrapperFilter(qp.parse(filter)));
+>  filters.put(filter, f);
+> }
+> }
+>  System.out.println("Query:("+query+"), Filter:("+filter+")");
+> return s.search(qp.parse(query), f, 1000).scoreDocs;
+>  }
+>
+> public static void main(String[] args) throws Exception
+>  {
+>  FilterTest ft = new FilterTest();
+> ft.startTest();
+> }
+>
+> public void startTest()
+> {
+> try
+>  {
+> Query q;
+>
+> createDirectories(3);
+>  createIndexes();
+> openSearchers();
+> Searcher s;
+>  ScoreDoc[] sd;
+>
+> System.out.println("===================================");
+>  System.out.println("Fields of all the documents");
+> // creating searcher for all indexes
+>  s = getSearcher(new int[]{0,1,2});
+> // search all documents and their ids
+>  sd = search("+content:common", null, s);
+> for(int i=0;i<sd.length;i++)
+>  {
+> System.out.println("\tid:"+s.doc(sd[i].doc).get("id")+",
+> docnumber:"+s.doc(sd[i].doc).get("docnumber"));
+>  }
+> System.out.println("\n\n");
+>
+> System.out.println("===================================");
+>  System.out.println("Searching for documents in a single index. Filter
+> will be created and cached");
+> s = getSearcher(new int[]{0});
+>  sd = search("+content:common", "docnumber:1", s);
+> System.out.println("Hits:"+sd.length);
+>  for(int i=0;i<sd.length;i++)
+> {
+> System.out.println("\tid:"+s.doc(sd[i].doc).get("id")+",
+> docnumber:"+s.doc(sd[i].doc).get("docnumber"));
+>  }
+> System.out.println("\n\n");
+>
+> System.out.println("===================================");
+>  System.out.println("Searching for documents in a other indexes other than
+> previous search. Query and filter will be same. Filter will be reused");
+>  s = getSearcher(new int[]{1,2});
+> sd = search("+content:common", "docnumber:1", s);
+>  System.out.println("Hits:"+sd.length);
+> for(int i=0;i<sd.length;i++)
+>  {
+> System.out.println("\tid:"+s.doc(sd[i].doc).get("id")+",
+> docnumber:"+s.doc(sd[i].doc).get("docnumber"));
+>  }
+>
+> }
+> catch(Exception e)
+>  {
+> e.printStackTrace();
+> }
+>  }
+> }
+>
+> ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+> OUTPUT:
+> [samar@myserver java]$ java FilterTest
+> ===================================
+> Fields of all the documents
+> Query:(+content:common), Filter:(null)
+>         id:1, docid:1
+>         id:2, docid:2
+>         id:3, docid:1
+>         id:4, docid:2
+>         id:5, docid:1
+>         id:6, docid:2
+>
+>
+>
+> ===================================
+> Searching for documents in a single index. Filter will be created and
+> cached
+> Creating new filter for - docid:1
+> Query:(+content:common), Filter:(docid:1)
+> Hits:1
+>         id:1, docid:1
+>
+>
+>
+> ===================================
+> Searching for documents in indexes other than previous search. Query and
+> filter will be same. Filter will be reused
+> Reusing filter for - docid:1
+> Query:(+content:common), Filter:(docid:1)
+> Hits:2
+>         id:3, docid:1
+>         id:5, docid:1
+>
+>
+>
+>
+>
+>
+>
+>
+>
+>
+> On Wed, Nov 3, 2010 at 7:04 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+>
+>> I'm assuming you're down in Lucene land. Unless somehow you've
+>> gotten 63 separate filters when you think you only have one, I don't
+>> think what you're doing will work. Or I'm failing to understand what
+>> you're doing at all.
+>>
+>> The problem is I expect each of your indexes starts with document
+>> 1. So your Filter is really a bit set keyed by Lucene document ID.
+>>
+>> So applying filter 2 to index 54 will NOT do what you want. What I
+>> suspect you're seeing is that applying your filter is producing enough
+>> results from index 54 (to continue my example) to fool you into
+>> thinking it's working.
+>>
+>> Try running the query with and without the filter on each of your indexes,
+>> perhaps as a control including a restrictive clause in the query
+>> to do the same thing your filter is doing. Or construct the filter new
+>> for comparison.... If the numbers continue to be the same, I clearly
+>> don't understand something! <G>....
+>>
+>> Best
+>> Erick
+>>
+>> On Wed, Nov 3, 2010 at 6:05 AM, Samarendra Pratap <samarzone@gmail.com
+>> >wrote:
+>>
+>> > Hi. We have a large index (~ 28 GB) which is distributed in three
+>> different
+>> > directories, each representing a country. Each of these country wise
+>> > indexes
+>> > is further distributed on the basis of last update date into 21 smaller
+>> > indexes. This index is updated once in a day.
+>> >
+>> > A user can search into any of one country and can choose last update
+>> date
+>> > plus some other criteria.
+>> >
+>> > When the server application starts, index readers and hence searchers
+>> are
+>> > created for each of the small indexes (21 x 3) and put in an array.
+>> > Depending on the option (country and last update date) chosen by user we
+>> > pick the searchers of correct date range/country and create a new
+>> > ParallelMultiSearcher instance.
+>> >
+>> > Now my question is - can I use single filter (caching filter) instance
+>> for
+>> > every search (may be on different searchers)?
+>> >
+>> >
+>> ===================================================================================
+>> >
+>> > e.g
+>> > for first search i create an filter of experience 4 years and save it.
+>> >
+>> > if another search for a different country (and hence difference index)
+>> also
+>> > has same experience criteria, i.e. 4 years, can i use the same filter
+>> > instance for second search too?
+>> >
+>> > i have tested a little for this and surprisingly i have got correct
+>> > results.
+>> > i was wondering if this is the correct way. or do i need to create
+>> > different
+>> > filters for each searcher (or index reader) instance?
+>> >
+>> > Thanks in advance.
+>> >
+>> > --
+>> > Regards,
+>> > Samar
+>> >
+>>
+>
+>
+>
+> --
+> Regards,
+> Samar
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+

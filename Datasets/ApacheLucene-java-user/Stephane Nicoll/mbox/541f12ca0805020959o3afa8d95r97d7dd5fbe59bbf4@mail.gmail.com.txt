@@ -1,0 +1,225 @@
+FROM: "Stephane Nicoll" <stephane.nic...@gmail.com>
+SUBJECT: Re: hybrid query (lucene + db)
+DATE: 2 May 2008
+
+Hi,
+
+Thanks for the response. The very first reason  we're using lucene is
+because we're building a product that must support different database
+(Oracle 10, Oracle 11 and Postgresql with spatial extensions).
+
+I had a look to this project already but we cannot stick to one database vendor.
+
+Cheers,
+Stéphane
+
+On Fri, May 2, 2008 at 6:55 PM, Marcelo Ochoa <marcelo.ochoa@gmail.com> wrote:
+> Hi Stéphane:
+>   If you are using Oracle Spatial I assume that you are using Oracle
+>  too for storing text :)
+>   Have you take a look at Oracle-Lucene integration project sponsored
+>  by LendingClub.com?
+>  http://docs.google.com/Doc?id=ddgw7sjp_54fgj9kg
+>  http://sourceforge.net/project/showfiles.php?group_id=56183&package_id=255524&release_id=589900
+>   Its a new domain index for Oracle using Lucene inside the Oracle JVM.
+>   By doing that We can use Lucene as Oracle Text, but with many other
+>  features, and using inline pagination We can get better perfomance
+>  than latest 11g Text Counpound Domain Index.
+>   If you are interested in this implementation simply drop me an email.
+>   Best regards, Marcelo.
+>
+>
+>
+>  On Fri, May 2, 2008 at 3:58 AM, Stephane Nicoll
+>  <stephane.nicoll@gmail.com> wrote:
+>  > Well for the moment we don't. The lucene index only contains the full
+>  >  text content (indexed, not stored). We use lucene to perform full text
+>  >  and fuzzy searches on the keywords field. Once we have the result, we
+>  >  match them with the geospatial box provided by the user (we use Oracle
+>  >  Spatial for that). We have no notion of city, state or zip code. Date
+>  >  overlaps more than one countries most of the time actually.
+>  >
+>  >  We are thinking of reimplementing a quad tree in lucene to flag each
+>  >  item with a spatial area. That way we will be able to pre-filter the
+>  >  zone accordingly.
+>  >
+>  >  Still, this does not explain the deadlock on SegmentReader. If anyone
+>  >  has an idea...
+>  >
+>  >  Thanks,
+>  >  Stéphane
+>  >
+>  >
+>  >
+>  >  On Thu, May 1, 2008 at 8:50 PM, Michael Stoppelman <stopman@gmail.com> wrote:
+>  >  > Stephane,
+>  >  >
+>  >  >  Could you describe how you setup the spatial area? Having BooleanQuery with
+>  >  >  200 terms in it definitely slows things down (I'm not sure exactly why yet
+>  >  >  -- it seems like it shouldn't be "that" slow). If you can describe your
+>  >  >  spatial area in fewer terms you can get much better performance. It just
+>  >  >  depends on how you're describing your spatial areas and the number of
+>  >  >  results in each zipcode. If you had a field like "city,state" in your index
+>  >  >  you would have far less terms in your query than if that query had all the
+>  >  >  zipcodes in a "city,state" combo, thus making your query much faster.
+>  >  >
+>  >  >  M
+>  >  >
+>  >  >  On Thu, May 1, 2008 at 2:15 AM, mark harwood <markharw00d@yahoo.co.uk>
+>  >  >  wrote:
+>  >  >
+>  >  >
+>  >  >
+>  >  >  > The issue here is a general one of trying to perform an efficient join
+>  >  >  > between an external resource (rdbms) and Lucene.
+>  >  >  > This experiment may be of interest:
+>  >  >  >    http://issues.apache.org/jira/browse/LUCENE-434
+>  >  >  >
+>  >  >  > KeyMap.java embodies the core service which translates from lucene
+doc ids
+>  >  >  > to DB primary keys or vice versa.
+>  >  >  > There are a couple of implementations of KeyMap that are not optimal
+(they
+>  >  >  > pre-date Lucene's FieldCache) but it may give you food for thought.
+>  >  >  >
+>  >  >  > Cheers
+>  >  >  > Mark
+>  >  >  >
+>  >  >  >
+>  >  >  > ----- Original Message ----
+>  >  >  > From: Stephane Nicoll <stephane.nicoll@gmail.com>
+>  >  >  > To: java-user@lucene.apache.org
+>  >  >  > Sent: Thursday, 1 May, 2008 9:00:33 AM
+>  >  >  > Subject: hybrid query (lucene + db)
+>  >  >  >
+>  >  >  > Hi there,
+>  >  >  >
+>  >  >  > We're using lucene with Hibernate search and we're very happy so far
+>  >  >  > with the performance and the usability of lucene. We have however a
+>  >  >  > specific use cases that prevent us to use only lucene: spatial
+>  >  >  > queries. I already sent a mail on this list a while back about the
+>  >  >  > problem and we started investigating multiple solutions.
+>  >  >  >
+>  >  >  > When the user selects a geographic area and some keywords we do the
+>  >  >  > following:
+>  >  >  >
+>  >  >  > * Perform a search on the lucene index for the keywords with a
+>  >  >  > projection that returns only the primaryKey of the element sorted by
+>  >  >  > primary key
+>  >  >  > * Perform a search on the database with other criterias and a
+>  >  >  > projection that returns only the primary key of the elements
+>  >  >  > * Iterate on both list to find N matching IDs, optionally with paging
+>  >  >  > (some from X to X + N where X is the first result of the page)
+>  >  >  > * Run a query on the database to return the actual objects (select
+a
+>  >  >  > from MyClass a where a.id IN (the list of matching IDs) ) We limit
+the
+>  >  >  > page to 1000 results
+>  >  >  >
+>  >  >  > We have searched a way to optimize the queries and to avoid to consume
+>  >  >  > too much memory, knowing that we must support paging.
+>  >  >  >
+>  >  >  > With a single user a search by kewyords takes 30msec to complete, a
+>  >  >  > search by box takes 45msec. With both (keywords + spatial area)  it
+>  >  >  > takes 300msec
+>  >  >  >
+>  >  >  > With 10 concurrent users, a search by keywords takes 150msec/user 
+but
+>  >  >  > for both it takes 3 sec/user !!!
+>  >  >  >
+>  >  >  > I had the profiler running on this scenario and I've found that *all*
+>  >  >  > threads are waiting on org.apache.lucene.index.SegmentReader. I then
+>  >  >  > configured Hibernate Search to use a separate index reader per thread.
+>  >  >  > The deadlocks disappeared but it's still very slow (2.8sec).
+>  >  >  >
+>  >  >  > Some questions:
+>  >  >  >
+>  >  >  > * Does anyone knows where the deadlocks on SegmentReader are coming
+from?
+>  >  >  > * Is the sorting on the primary keys a bad idea regarding performance
+>  >  >  > and memory usage?
+>  >  >  > * Does anyone has an idea to perform this kind of hybrid query in an
+>  >  >  > efficient way?
+>  >  >  >
+>  >  >  > I am using lucene 2.3.1 and Hibernate Search 3.0.1. I already ask for
+>  >  >  > support on the Hibernate Search forum but did not get any answer so
+>  >  >  > far.
+>  >  >  >
+>  >  >  > Thanks,
+>  >  >  > Stéphane
+>  >  >  >
+>  >  >  > --
+>  >  >  > Large Systems Suck: This rule is 100% transitive. If you build one,
+>  >  >  > you suck" -- S.Yegge
+>  >  >  >
+>  >  >  > ---------------------------------------------------------------------
+>  >  >  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >  >  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >  >  >
+>  >  >  >
+>  >  >  >
+>  >  >  >
+>  >  >  >
+>  >  >  >
+>  >  >  >       __________________________________________________________
+>  >  >  > Sent from Yahoo! Mail.
+>  >  >  > A Smarter Email http://uk.docs.yahoo.com/nowyoucan.html
+>  >  >  >
+>  >  >  > ---------------------------------------------------------------------
+>  >  >  > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >  >  > For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >  >  >
+>  >  >  >
+>  >  >
+>  >
+>  >
+>  >
+>  >  --
+>  >
+>  >
+>  > Large Systems Suck: This rule is 100% transitive. If you build one,
+>  >  you suck" -- S.Yegge
+>  >
+>  >  ---------------------------------------------------------------------
+>  >  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  >  For additional commands, e-mail: java-user-help@lucene.apache.org
+>  >
+>  >
+>
+>
+>
+>  --
+>  Marcelo F. Ochoa
+>  http://marceloochoa.blogspot.com/
+>  http://marcelo.ochoa.googlepages.com/home
+>  ______________
+>  Do you Know DBPrism? Look @ DB Prism's Web Site
+>  http://www.dbprism.com.ar/index.html
+>  More info?
+>  Chapter 17 of the book "Programming the Oracle Database using Java &
+>  Web Services"
+>  http://www.amazon.com/gp/product/1555583296/
+>  Chapter 21 of the book "Professional XML Databases" - Wrox Press
+>  http://www.amazon.com/gp/product/1861003587/
+>  Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+>  http://www.oreilly.com/catalog/oracleopen/
+>
+>
+>
+>  ---------------------------------------------------------------------
+>  To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>  For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+-- 
+Large Systems Suck: This rule is 100% transitive. If you build one,
+you suck" -- S.Yegge
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,88 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: incremental document field update
+DATE: 17 Jan 2010
+
+On Sun, Jan 17, 2010 at 7:45 AM, Babak Farhang <farhang@gmail.com> wrote:
+>> So the idea is, I can change the field for only a few docs in a
+>> massive index, and the amount of "work" done, and bytes written, is in
+>> proportion only to how many docs were changed?
+>
+> Exactly. We append auxiliary data to the parallel segment and
+> delay rewriting the segment to when it'll be merged with another segment.
+
+OK.
+
+>> What would the actual data structure look like on disk?
+>
+> Something like a surrogate docs log file
+>
+> <rowCount><<int><int>>**rowCount
+>
+> a fixed-width table, each row mapping a deleted doc-id to its "surrogate"
+> doc-id. The mapping entries are not sorted; it's a log file. If 2
+> entries reference the
+> same deleted doc-id, the last one wins. The <rowCount> header makes the
+> structure self-delimiting, and ensures clean writes (perhaps using a byte-size
+> keystone).
+
+Got it.  You'd presumably have to add a generation to this file, so
+that multiple sessions of updates + commit write to private files
+("write once")?  And then the reader merges all of them.
+
+>> And what
+>> would be loaded into RAM such that eg enumerating a postings lists
+>> would work correctly?  You'd have to remap docIDs on the fly, right?
+>
+> Yes, on the fly. I think it boils down to 3 tasks:
+>
+> 1. Map "view" doc-ids to surrogate doc-ids. Supports input, e.g. referring
+>  to a doc by id.
+> 2. Map surrogate doc-ids to "view" doc-ids. Supports output.
+> 3. Re-sort postings quickly on output, and provide correct
+> TermDocs.skipTo() semantics.
+>
+> For (1), I think an unordered HashMap<Integer,Integer> is good enough.
+> For (2) and (3), something like a TreeMap<Integer,Integer> I imagine should be
+> good enough too.  The sorted order of its keys (surrogate doc-ids)
+> should also allow
+> us to intersect the set of surrogate docs quickly with the already
+> sorted outbound
+> postings data, for example.
+
+OK though for an index with many documents, that's gonna use up alot
+of RAM, especially the Integer overhead.  Though, these will be sparse
+right?  So it only uses RAM for docs that have updates, and when
+segment merging hasn't merged them away.
+
+> Both maps would be built by replaying the surrogate docs log file.
+
+It sounds like this'd require the full posting list for a given term X
+to be loaded into RAM, mapped, and sorted, before the caller can
+actually pull the first docID, right?  I guess often this is likely an
+acceptable cost, since "usually" the fields you update are smallish.
+
+Thinking out loud... I wonder if, instead of deferring the mapping
+until search time (which is costly since every search must re-do it),
+we could do the mapping at indexing time?
+
+Say we add an IndexWriter.updateDocumentFields(Term, Document) method,
+which will update only the specified fields.  The Term must uniquely
+refer to 1 existing doc in the index.  On flush, we resolve that Term
+-> docID (we do this already, to apply deletions), and then we write
+to a new set of "delta postings" files using the correct docID.  Then
+the reader would have to merge these postings files when reading.
+We'd also have generations...
+
+> Maybe I should first try to bang out a prototype that works at the
+> index level, not the
+> segment level?
+
+Sounds great!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

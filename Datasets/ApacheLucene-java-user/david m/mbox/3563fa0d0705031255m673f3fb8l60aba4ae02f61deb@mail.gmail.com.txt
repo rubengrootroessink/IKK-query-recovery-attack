@@ -1,0 +1,79 @@
+FROM: "david m" <dmat...@gmail.com>
+SUBJECT: For indexing: how to estimate needed memory?
+DATE: 3 May 2007
+
+Our application includes an indexing server that writes to multiple
+indexes in parallel (each thread writes to a single index). In order
+to avoid an OutOfMemoryError, each request to index a document is
+checked to see if the JVM has enough memory available to index the
+document.
+
+I know that IndexWriter.ramSizeInBytes() can be used to determine how
+much memory was consumed at the conclusion of indexing a document, but
+is there a way to know (or estimate) the peak memory consumed while
+indexing a document?
+
+For example, in a test set I have a 22 MB document where nearly every
+"word" is unique. It has text like this:
+
+'DestAddrType' bin: 00 0D
+AttributeCustomerID 'Resources'
+AttributeDNIS '7730'
+AttributeUserData [295] 00 0E 00 00..
+'DNIS_DATA' '323,000,TM,SDM1K5,AAR,,,'
+'ENV_FLAG' 'P'
+'T_APP_CODE' 'TM'
+TelephoneLine' '8'
+'C_CALL_DATE' '01/19/06'
+'C_START_TIME' '145650'
+'C_END_TIME' '145710'
+ AttributeCallType 2
+
+ and so on...
+
+ We are indexing a handful of fields for document meta-data - but they
+ are tiny compared to the body of the document. Eight of those fields are
+ stored (like a messageid, posteddate, typecode).
+
+ The body is indexed into a single field. Our Analyzer splits tokens
+ based on Character.isLetterOrDigit() and when in uppercase, indexes a
+ lowercase version of the term.
+
+ After indexing that single document ramSizeInBytes() returns 15.7 MB.
+ That seems ok to me.
+
+ But for this particular document I found (via trial and error) that
+ at -Xmx165m Lucene throws an OutOfMemoryError.
+
+ At -Xmx170m the it indexes successfully.
+
+ Just before calling addDoc() I see maximum available memory of: 160.5 MB
+
+ The 160.5 MB is from this calc:
+
+  Runtime rt = Runtime.getRuntime();
+  long maxAvail = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory());
+
+ So it would appear that for this particular document, to avoid an
+ OutOfMemoryError I'd need to be certain of having available memory
+ approx 7x the doc size.
+
+ I could require 7x the doc size available memory for each doc (on
+ the assumption my test document is at the extreme), but for more
+ typical documents I'd be over-reserving memory with a result of
+ reduced throughput (as docs were forced to wait for sufficient
+ available memory that they likely don't need).
+
+ Instead I'm wondering if there is better way for the index server to
+ know (or guesstimate) what the memory requirement will be for each
+ document? - so that it doesn't start indexing in parallel more
+ documents than available memory can support.
+
+ Thanks,
+ david.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

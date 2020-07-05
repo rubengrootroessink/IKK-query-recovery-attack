@@ -1,0 +1,238 @@
+FROM: jeich...@optonline.net
+SUBJECT: Re: Index Locking Issues Resolved...I hope
+DATE: 17 Nov 2004
+
+Very cool Luke.  I am not quite there yet.  I am half way through implementing the queue approach,
+but I have hit walls that are making me sit back and figure out my strategy.   I have a struts/tomcat/ojb/mysql
+project that can potentially have a million records and growing over time and updates will
+occur perhaps 100,000/day.  This is not today, but what I am building for.
+
+My concerns not just Lucene itself, but its surrounding effects as follows.  I am finding
+out that edge case scenerios are making things difficult due to having two databases instead
+of one.
+
+----- How to know the index on this huge database is always in synch.
+----- What happens if the server crashes or is brought down.  <solution might be db last
+modified date>
+----- Backups of the database and the index handled in an efficient, safe manner on a live
+system.
+-----  How to reindex while the system is in place <solution might be doing new index to
+a different location> as a seperate tool.
+-----  How to handle the fact that the IndexWriter is not very good in incremental data cases
+in a high volume update/query system. <soluction might be to query for records from the
+database that have changed every 45 seconds or so and applying the changes>.
+-----  How the IndexWriter solution above might cause bad lag on queries frequently. <no
+solution>
+-----  how to get Tomcat to start up a thread to run this updater at startup and not have
+a problem with memory management.
+-----  How to make this all work in my startup business to allow me to feel I can sleep at
+night.
+
+
+In general, things just got much more complicated then I was hoping for though I don't know
+how I can do without using Lucene or something like Lucene.  This has been done so many times
+before that I would have suspected it would be easy, but I have not seen clear yet because
+it is all new.   I wish a database Text field could have this sort of mechanism built into
+it.   MySql does not do this (what I am using), but I am going to check into other databases
+now.  OJB will work with most all of them so that would help if there is a database type of
+solution that will allow that sleep at night thing to happen!!!
+
+If you have input to these things, I had found some answers in the mailing list, but not really
+a concept of how to manage the whole thing.  Is there an incremental big open source project
+out there that uses Lucene and a database?  I don't think so.
+
+If you have any code or ideas I would appreciate both!!!  Also having a FAQ that handles lots
+of these common problems, though a bit off topic they are, might really help people choose
+to use Lucene.
+
+Thanks,
+
+JohnE
+
+
+
+
+----- Original Message -----
+From: Luke Shannon <lshannon@hypermedia.com>
+Date: Tuesday, November 16, 2004 10:51 pm
+Subject: Index Locking Issues Resolved...I hope
+
+> Hello;
+> 
+> I think I have solved my locking issues. I just made it through 
+> the set of
+> test cases that previously resulted in Index Locking Errors. I 
+> just removed
+> the method from my code that checks for a Index lock and 
+> forcefully removes
+> it after 1 minute. Hopefully they never need to be put back in.
+> 
+> Here is what I changed:
+> 
+> I moved all my Indexer logic into a class called Index.java that 
+> implementedRunnable. Index's start() called a method named go() 
+> which was static and
+> synchronized. go() kicks off all the logic to update the index 
+> (the reader,
+> writer and other members involved with incremental updates also 
+> static). I
+> put logging in place that logs when a thread has executed the 
+> method and
+> what the thread's name is.
+> 
+> Every time a client class changes the content it can create a thread
+> reference and pass it the runnable Index. The convention I have 
+> requestedfor naming the thread is a toString() of the current 
+> date. Then they start
+> the thread.
+> 
+> How it worked:
+> 
+> A few users just tested the system, half added documents to the 
+> system while
+> another half deleted documents at the same time. No locking issues 
+> were seen
+> and the index was current with the changes made a short time after 
+> the last
+> operation (in my previous code this test resulted in a issue with 
+> indexlocking).
+> 
+> I was able to go through the log file and find the start of the 
+> synchronizedgo() method and the successful completion of the 
+> indexing operations for
+> every request made.
+> 
+> The only performance issue I noticed was if someone added a very 
+> large PDF
+> it took a while before the thread handling the request could 
+> finish. If this
+> is the first operation of many it means the operations following 
+> this large
+> file take that much longer. Luckily for me search results don't 
+> need to be
+> instant.
+> 
+> Things are looking much better. For now...
+> 
+> Thanks to all that helped me up till now.
+> 
+> Luke
+> 
+> ----- Original Message ----- 
+> From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+> To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> Sent: Tuesday, November 16, 2004 4:01 PM
+> Subject: Re: _4c.fnm missing
+> 
+> 
+> > 'Concurrent' and 'updates' in the same sentence sounds like a 
+> possible> source of the problem.  You have to use a single 
+> IndexWriter and it
+> > should not overlap with an IndexReader that is doing deletes.
+> >
+> > Otis
+> >
+> > --- Luke Shannon <lshannon@hypermedia.com> wrote:
+> >
+> > > It conistantly breaks when I run more than 10 concurrent 
+> incremental> > updates.
+> > >
+> > > I can post the code on Bugzilla (hopefully when I get to the 
+> site it
+> > > will be
+> > > obvious how I can post things).
+> > >
+> > > Luke
+> > >
+> > > ----- Original Message ----- 
+> > > From: "Otis Gospodnetic" <otis_gospodnetic@yahoo.com>
+> > > To: "Lucene Users List" <lucene-user@jakarta.apache.org>
+> > > Sent: Tuesday, November 16, 2004 3:20 PM
+> > > Subject: Re: _4c.fnm missing
+> > >
+> > >
+> > > > Field names are stored in the field info file, with suffix 
+> .fnm. -
+> > > see
+> > > > http://jakarta.apache.org/lucene/docs/fileformats.html
+> > > >
+> > > > The .fnm should be inside the .cfs file (cfs files are compound
+> > > files
+> > > > that contain all index files described at the above URL).  Maybe
+> > > you
+> > > > can provide the code that causes this error in Bugzilla for
+> > > somebody to
+> > > > look at.  Does it consistently break?
+> > > >
+> > > > Otis
+> > > >
+> > > >
+> > > > --- Luke Shannon <lshannon@hypermedia.com> wrote:
+> > > >
+> > > > > I received the error below when I was attempting to over 
+> whelm my
+> > > > > system with incremental update requests.
+> > > > >
+> > > > > What is this file it is looking for? I checked the index. It
+> > > > > contains:
+> > > > >
+> > > > > _4c.del
+> > > > > _4d.cfs
+> > > > > deletable
+> > > > > segments
+> > > > >
+> > > > > Where does _4c.fnm come from?
+> > > > >
+> > > > > Here is the error:
+> > > > >
+> > > > > Unable to create the create the writer and/or index new 
+> content> > > > /usr/tomcat/fb_hub/WEB-INF/index/_4c.fnm (No such 
+> file or
+> > > directory).
+> > > > >
+> > > > > Thanks,
+> > > > >
+> > > > > Luke
+> > > >
+> > > >
+> > > >
+> > > ---------------------------------------------------------------
+> ------
+> > > > To unsubscribe, e-mail: lucene-user-
+> unsubscribe@jakarta.apache.org> > > For additional commands, e-mail:
+> > > lucene-user-help@jakarta.apache.org
+> > > >
+> > > >
+> > >
+> > >
+> > >
+> > > ---------------------------------------------------------------
+> ------
+> > > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > > For additional commands, e-mail: lucene-user-
+> help@jakarta.apache.org> >
+> > >
+> >
+> >
+> > -----------------------------------------------------------------
+> ----
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> 
+> 
+> -------------------------------------------------------------------
+> --
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

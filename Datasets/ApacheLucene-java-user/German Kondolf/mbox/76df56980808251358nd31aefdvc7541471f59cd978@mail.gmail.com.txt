@@ -1,0 +1,116 @@
+FROM: "German Kondolf" <german.kond...@gmail.com>
+SUBJECT: Re: FilteredQuery
+DATE: 25 Aug 2008
+
+Exactly as Otis sais, you should use MatchAllDocs as query, but it has a
+drawback in performance, it checks every single document deletion state,
+I've solved the issue by making my own EnhancedMatchAllDocs query that is
+optimized to do not check this document state.
+
+Perhaps the SegmentReader should be refactorized in some other way and not
+be synchronized:
+
+  public synchronized boolean isDeleted(int n) {
+    return (deletedDocs != null && deletedDocs.get(n));
+  }
+
+With high level of concurrency this is an issue, there is a lot of
+context-switching because of this line of code...
+I didn't try an optimal solution, so I created my own EnhancedMatchAllDocs.
+
+Just copied the original class and replaced this call:
+
+    public boolean next() {
+      while (id < maxId) {
+        id++;
+        if (!reader.isDeleted(id)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+For this simplified call:
+
+    public boolean next() {
+        return (id++ < maxId);
+    }
+
+This change doesn't validate deleted documents, in my implementation it was
+not a problem, so, it's possible that this solution doesn't work with any
+other implementation.
+Maybe it wouldn't be a problem if you flush your index often...
+
+GeR
+
+On Mon, Aug 25, 2008 at 2:38 PM, Otis Gospodnetic <
+otis_gospodnetic@yahoo.com> wrote:
+
+> Heiko,
+> It's most likely because that B case has a purely negative query. Perhaps
+> you can combine it with MatchAllDocs query?
+>
+>
+> Otis
+> --
+> Sematext -- http://sematext.com/ -- Lucene - Solr - Nutch
+>
+>
+>
+> ----- Original Message ----
+> > From: Heiko <heiko.mueller@giata.de>
+> > To: java-user@lucene.apache.org
+> > Sent: Monday, August 25, 2008 11:29:22 AM
+> > Subject: FilteredQuery
+> >
+> > Hi All,
+> >
+> > i would like to use the FilteredQuery to filter my search results with
+> > the occurrence or absence of certain ids.
+> >
+> > Example A:
+> > query -> text:"albert einstein"
+> > filterQuery -> doctype:letter
+> >
+> > That's ok. I am getting the expected results. But i got no results, if
+> > i  filter with the absence of an id.
+> >
+> > Example B:
+> > query -> text:"albert einstein"
+> > filterQuery -> NOT doctype:article
+> >
+> > However following concatenation of filterQuery and query leads to the
+> > expected result.
+> >
+> > Example C:
+> > query -> text:"albert einstein"
+> > filterQuery -> text:"albert einstein" NOT doctype:article
+> >
+> > I am confused that Example B does not worked. It is bug?
+> >
+> > I am using Lucene 2.3.2 and the following code fragement:
+> >
+> > Query query;
+> > Query filterQuery;
+> > ...
+> > Filter filter = new CachingWrapperFilter(new
+> > QueryWrapperFilter(filterQuery));
+> > FilteredQuery filteredQuery = new FilteredQuery(query, filter);
+> > Hits hits = searcher.search(filteredQuery);
+> > ...
+> >
+> > Thanks,
+> > Heiko Müller
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

@@ -1,0 +1,67 @@
+FROM: Nigel <nigelspl...@gmail.com>
+SUBJECT: Re: Optimizing unordered queries
+DATE: 29 Jun 2009
+
+On Fri, Jun 26, 2009 at 11:06 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> On Thu, Jun 25, 2009 at 10:11 PM, Nigel<nigelspleen@gmail.com> wrote:
+>
+> > Currently we're (perhaps naively) doing the equivalent of
+> > query.weight(searcher).scorer(reader).score(collector).  Obviously
+> there's a
+> > certain amount of unnecessary calculation that results from this if you
+> > don't care about sorting.  Are there any general recommendations for
+> > unordered searching?  (We already omit norms.)
+>
+> As of 2.9, scoring is optional with the new Collector.  Ie, if your
+> Collector doesn't call scorer.score() then the score won't be
+> computed.
+>
+> Also, 2.9 will enable out-of-docID-order scoring if your
+> Collector.acceptsDocsOutOfOrder returns true, but currently it's
+> disjunction only (plus up to 32 prohibited terms) that will see a
+> speedup from this.
+>
+> What kind of queries are you running?
+
+
+There's quite a mix.  At the simplest they're a conjunction of 3-5 terms.
+At the most complex there are sometimes a hundred or more terms in various
+nested boolean combinations.  So it looks like 2.9 is where we'll see some
+benefits.
+
+I assume your Collector simply aggregates the list of docIDs hit?  Ie
+> no sorting, priority queue, etc., in it.
+>
+
+Exactly: it just collects all the ids and later we either load all hits or a
+random subsample.
+
+
+> > (More details: Of particular interest are things that access the
+> TermInfos,
+> > since that's the major source of RAM usage: if a smaller number of
+> TermInfos
+> > were needed then we could perhaps use an aggressive index divisor setting
+> to
+> > save RAM without a performance penalty.  For example, I was thinking
+> about a
+> > custom Similarity implementation that skipped the idf calculations, since
+> > those have to hit the TermInfos.)
+>
+> Unfortunately the TermInfos must still be hit to look up the
+> freq/proxOffset in the postings files.
+
+
+But for that data you only have to hit the TermInfos for the terms you're
+searching, correct?  So, assuming that there are vastly more terms in the
+index than you ever actually use in a query, we could rely on the LRU cache
+to keep the queried TermInfos around, rather than loading all of them
+up-front.  This was a hypothesis based on some tracing through the code but
+not a lot of knowledge of Lucene internals, so please steer me back to
+reality if necessary.  (-:
+
+Thanks,
+Chris
+

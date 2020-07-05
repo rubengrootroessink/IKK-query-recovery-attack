@@ -1,0 +1,57 @@
+FROM: Morus Walter <morus.wal...@tanto-xipolis.de>
+SUBJECT: Re: best way of reusing IndexSearcher objects
+DATE: 19 Dec 2003
+
+Doug Cutting writes:
+> Dror Matalon wrote:
+> > There are two issues:
+> > 1. Having new searches start using the new index only when it's ready,
+> > not in a "half baked" state, which means that you have to synchronize
+> > the switch from the old index to the new one.
+> 
+> That's true.  If you're doing updates (as opposed to just additions) 
+> then you probably want to do something like:
+>    1. keep a single open IndexReader used by all searches
+>    2. Every few minutes, process updates as follows:
+>      a. open a second IndexReader
+>      b. delete all documents that will be updated
+>      c. close this IndexReader, to flush deletions
+>      d. open an IndexWriter
+>      e. add all documents that are updated
+>      f. close the IndexReader
+>      g. replace the IndexReader used for searches (1, above)
+> 
+Right. As long as you can control the reader instance from the update
+process, it's better to do so, instead of checking, if the reader for search
+is still up to date in the reader itself.
+
+> > 2. It's not trivial to figure out when it's safe to discard the old
+> > index; all existing searches are done with it.
+> > 
+> > To make things more complicated, the Hits object is dependent on your
+> > IndexSearcher object, so if you have Hits objects in use you probably
+> > can't  close your IndexSearcher.
+> > 
+> > Is this a correct analysis or is there an obvious strategy to work
+> > around this issue?
+> 
+> Right, you cannot safely close the IndexReader that's being used for 
+> searching.  Rather, just drop it on the floor and let it get garbage 
+> collected.  Its files will be closed when this happens.  Provided you're 
+> not updating more frequently than the garbage collector runs, you should 
+> only ever have two IndexReaders open and shouldn't run into file handle 
+> issues.
+> 
+I guess the alternative would be to have a reference counting that is
+increased whenever a search starts and decreased when the hits object
+is no longer used.
+You could then set a flag and close the index when the count reaches 0.
+
+Thanks for the comments.
+       Morus
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

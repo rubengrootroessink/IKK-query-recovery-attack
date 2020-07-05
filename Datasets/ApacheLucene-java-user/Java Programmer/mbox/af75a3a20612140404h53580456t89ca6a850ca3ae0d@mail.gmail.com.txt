@@ -1,0 +1,181 @@
+FROM: "Java Programmer" <jprogrami...@gmail.com>
+SUBJECT: Lucene change field values to wrong ones when indexing
+DATE: 14 Dec 2006
+
+Hello,
+I have problem with my search code - i try to index some data with
+searching simultanously. Everything goes fine till some number of data
+are indexed then my fields are bugged.
+Eg. I have field with title indexed as "Nowitzki führt "Mavs" zum
+ersten Heimsieg" and inner id "15" (not doc id, just field called id).
+At the end of indexing this field disappear, and some other values in
+id field appear. I provide full listing of my program, without AXIS
+part which is responsible for data transmitting. If you can watch my
+code, maybe somewhere is wrong locking mechanism, or any other bug -
+please help me if you can.
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import javax.servlet.ServletContext;
+import javax.servlet.http.HttpServlet;
+
+import org.apache.axis.MessageContext;
+import org.apache.axis.transport.http.HTTPConstants;
+import org.apache.lucene.analysis.SimpleAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.Field.Index;
+import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.index.IndexModifier;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.queryParser.MultiFieldQueryParser;
+import org.apache.lucene.queryParser.ParseException;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Hits;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RangeQuery;
+import org.apache.lucene.search.Sort;
+
+public class SNewsSearch {
+	
+	private static SNewsSearch search = new SNewsSearch();
+	
+	private static IndexSearcher indexSearcher;
+	
+	private String indexLocation;
+	
+	private String adminLogin;
+	
+	private String adminPass;
+	
+	private SNewsSearch(){
+		System.out.println("Constructor SNewsSearch");
+		
+		Properties props = new Properties();
+		HttpServlet srv = (HttpServlet)
+MessageContext.getCurrentContext().getProperty(HTTPConstants.MC_HTTP_SERVLET);
+		ServletContext context = srv.getServletContext ();
+		InputStream is = context.getResourceAsStream("/WEB-INF/lucene.properties");
+		try {
+			props.load(is);
+			System.out.println("Using index: " + props.getProperty("index.location"));
+			this.indexLocation = props.getProperty("index.location");
+			this.adminLogin = props.getProperty("admin.login");
+			this.adminPass = props.getProperty("admin.pass");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public static SNewsSearch getInstance(){
+		return search;
+	}
+	
+	public void setIndexLocation(String indexLocation) {
+		this.indexLocation = indexLocation;
+	}
+	
+	private static Object lock = new Object();
+	
+	public void addDocument(int id,String title, String body, int
+pubDate) throws IOException{
+		Document doc = new Document();
+		doc.add(new Field("id",Integer.toString(id),Store.YES,Index.UN_TOKENIZED));
+		doc.add(new Field("title",title,Store.NO,Index.TOKENIZED));
+		doc.add(new Field("body",body,Store.NO,Index.TOKENIZED));
+		doc.add(new Field("pubDate",Integer.toString(pubDate),Store.NO,Index.UN_TOKENIZED));
+		synchronized(lock){
+			IndexWriter indexWriter = new IndexWriter(indexLocation, new
+SimpleAnalyzer(), false);
+			indexWriter.addDocument(doc);
+			indexWriter.close();
+			if(indexSearcher!=null)
+				indexSearcher.close();
+			indexSearcher = null;
+		}
+	}
+	
+	public Map<String,Object> search(String query, int pubDate, int page,
+int results, boolean reverse) throws IOException, ParseException{
+		MultiFieldQueryParser queryparser = new MultiFieldQueryParser(new
+String[]{"title","body"}, new SimpleAnalyzer());
+		Query q; // = queryparser.parse(query);
+		if(pubDate!=0){
+			BooleanQuery bq = new BooleanQuery();
+			bq.add(queryparser.parse(query),BooleanClause.Occur.MUST);
+			bq.add(new RangeQuery(
+					new Term("pubDate",Integer.toString(pubDate)),
+					new Term("pubDate","99999999"),
+					true),BooleanClause.Occur.MUST);
+			q = bq;
+		} else {
+			q = queryparser.parse(query);
+		}
+		Hits hits;
+		synchronized(lock){
+			if(indexSearcher==null)
+				indexSearcher = new IndexSearcher(indexLocation);
+			
+			if(reverse)
+				hits = indexSearcher.search(q, new Sort("pubDate",true));
+			else
+				hits = indexSearcher.search(q);
+		}
+
+		List<Integer> output = new ArrayList<Integer>();
+		int i = page*results;
+		while(i<hits.length()){
+			if(i >= (page+1)*results) break;
+			Document doc = hits.doc(i);
+			output.add(Integer.parseInt(doc.get("id")));
+			i++;
+		}
+		Map<String,Object> searchResult = new HashMap<String,Object>();
+		searchResult.put("numberOfResults", hits.length());
+		searchResult.put("results", output);
+		return searchResult;
+	}
+
+	public void deleteDocument(int id) throws IOException{
+		synchronized(lock){
+			IndexModifier indexModifier = new IndexModifier(indexLocation, new
+SimpleAnalyzer(), false);
+			indexModifier.deleteDocuments(new Term("id", Integer.toString(id)));
+			indexModifier.close();
+			if(indexSearcher!=null)
+				indexSearcher.close();
+			indexSearcher = null;
+		}
+	}
+	
+	public void setUp(String adminLogin, String adminPass) throws IOException {
+		if(adminLogin.equals(this.adminLogin) && adminPass.equals(this.adminPass)){
+			synchronized(lock){
+				IndexWriter indexWriter = new IndexWriter(indexLocation, new
+SimpleAnalyzer(), true);
+				indexWriter.close();			
+				if(indexSearcher!=null)
+					indexSearcher.close();
+				indexSearcher = null;
+			}
+		}
+	}
+}
+
+Best regards,
+Adrian
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

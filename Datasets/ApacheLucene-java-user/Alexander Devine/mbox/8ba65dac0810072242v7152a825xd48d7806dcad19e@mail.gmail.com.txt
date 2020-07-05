@@ -1,0 +1,145 @@
+FROM: "Alexander Devine" <alex.dev...@gmail.com>
+SUBJECT: Re: advice on using Lucene for sorting based on payloads
+DATE: 8 Oct 2008
+
+Thanks very much for your response, and for pointing me in the direction
+towards Function Queries - you saved me a ton of time! You're right, that
+seems to be a much better fit for what I am doing. My responses are below.
+
+On Tue, Oct 7, 2008 at 9:11 PM, Grant Ingersoll <gsingers@apache.org> wrote:
+
+> Not sure if I fully get it, but bear with me...
+>
+> Inline below.
+>
+> On Oct 6, 2008, at 11:37 PM, Alexander Devine wrote:
+>
+>  Hi Luceners,
+>>
+>> I have a particular sorting problem and I wanted some advice on what the
+>> best implementation approach would be. We currently use Lucene as the
+>> searching engine for our vacation rental website. Each vacation rental
+>> property is represented by a single document in Lucene. We want to add a
+>> feature that allows users to sort results by price. The problem is that
+>> each
+>> rental property can potentially have a different price for each day. For
+>> example, many rental properties charge more on weekends, or higher rates
+>> for
+>> on-season vs. off-season. When a user performs a search, they can specify
+>> the start and end dates of their desired travel, so we should be able to
+>> calculate the total price for that time period for each property by adding
+>> up the price for each day.
+>>
+>> I was thinking of implementing this using payloads. Each document would
+>> have
+>> a "priceByDate" field and there would be one term stored for each day for
+>> the next 2 years (which is as far out as we support booking a property).
+>>
+>
+> Don't you then have to update every document every day?
+>
+
+No, I should have been more clear. At any point in time a property has at
+most 2 years of future pricing data, and as each day passes there is a day
+less of pricing data. We update our documents when our rental owners make a
+change to their data, and we also have some automated processes that cause
+rental data to be updated, so in general every document gets updated about
+every 1-2 months.
+
+>
+>
+>  The
+>> payload associated with each term would be the price, and then when
+>> searching I could use those payloads as basis for scoring the docs using a
+>> BoostingTermQuery. For example, suppose someone was searching for travel
+>> dates Dec 1 - Dec 5, I would create a query like so:
+>>
+>> BooleanQuery query = new BooleanQuery();
+>> query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081201")),
+>> BooleanClause.Occur.MUST);
+>> query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081202")),
+>> BooleanClause.Occur.MUST);
+>> query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081203")),
+>> BooleanClause.Occur.MUST);
+>> query.add(new PriceBoostingTermQuery(new Term("priceByDate", "20081204")),
+>> BooleanClause.Occur.MUST);
+>>
+>> PriceBoostingTermQuery would be a subclass of BoostingTermQuery that
+>> overrides getSimilarity() to return a Similarity with a custom
+>> scorePayload
+>> method that scores based on the price.
+>>
+>> Does this approach sound reasonable? Can anyone think of a better
+>> approach?
+>> One thing I don't understand is that the score needs to be the SUM (or the
+>> average) of all the payloads - how does the BooleanQuery handle that?
+>> Also,
+>> I need to get the calculated total price back to the caller, and I'm
+>> worried
+>> that making priceByDate a stored field will have negative performance
+>> implications. Perhaps there is some way I could just return the calculated
+>> price as the score and then get it from the ScoreDoc?
+>>
+>> Thanks for any and all help, and a huge thank you to all the Lucene devs
+>> for
+>> a great product. The reason I'm trying to solve this problem in Lucene
+>> instead of a database is because Lucene is so much faster for our queries
+>> and I don't want to add a DB into the mix.
+>>
+>>
+>
+> I think you would be better off with a Function Query (see the
+> org.apache.search.function package), but I am not sure.
+>
+> How do you calculate the cost of the rental?  Is there some way to just
+> factor that into the scoring process?  I think if you could do this, then
+> you could implement a Function Query to do so.
+
+
+Yep, after looking at the function package this looks exactly like what I
+want to do. Essentially each rental has a set of "rate periods" which
+specify the rates between specific dates, e.g.
+    <ratePeriod start="2008-11-01" end="2008-11-21" weeklyPrice="600.00"
+midweekPrice="100.00" weekendPrice="125.00"/>
+    <ratePeriod start="2008-11-21" end="2008-11-30" weeklyPrice="900.00"
+midweekPrice="1500.00" weekendPrice="200.00"/>
+We want to look at the intersection between the user's desired travel dates
+and the ratePeriods to determine the total cost. The thing I like about the
+Function queries is this lets us get as arbitrarily complex as we want with
+our business rules for the price calculation, and we should be able to tweak
+these rules to tradeoff between quoted price accuracy/implementation
+simplicity/performance.
+
+Thanks,
+Alex
+
+>
+>
+> You might look at Solr's function query capabilities as well.
+>
+
+>
+>  Alex
+>>
+>
+> --------------------------
+> Grant Ingersoll
+>
+> Lucene Helpful Hints:
+> http://wiki.apache.org/lucene-java/BasicsOfPerformance
+> http://wiki.apache.org/lucene-java/LuceneFAQ
+>
+>
+>
+>
+>
+>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

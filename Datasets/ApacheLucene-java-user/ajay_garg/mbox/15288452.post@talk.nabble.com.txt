@@ -1,0 +1,217 @@
+FROM: ajay_garg <garg.jeena.isi.ka.naam....@gmail.com>
+SUBJECT: Re: Concurrent Indexing + Searching
+DATE: 5 Feb 2008
+
+
+Thanks Mark.
+
+Ok, I got your point. So it happens like this :
+
+a) If it is me, who is re-opening an IndxReader, at any time, but
+"manually-programmatically". That is, I don't want
+a-sort-of-automatic-reopening-of-IndexWriter, then I am fine.
+
+b) If I do wish this automatic-reopening of index (using IndexAccessor),
+then I am forced to rely on all the indexer threads releasing the reference
+to IndexWriter, which by the way, as a developer, can never be sure of (that
+is, I don't have any control, as to when exactly all the threads leave the
+reference ).
+
+Will be obliged if you could give a confirmation to my understanding.
+
+Thanks
+Ajay Garg
+
+markrmiller wrote:
+> 
+> You are right that if auto-commit=true and a user reopens an 
+> IndexReader, the docs will absolutely be visible as they are flushed. I 
+> think the part you are missing is that you need to be cooperating with 
+> the IndexAccessor: a user should not be reopening an IndexReader. The 
+> whole point of IndexAccessor is to coordinate these things...when a 
+> Writer is released, we know the index has changed, so that is when the 
+> IndexReaders are reopened for you. Because the IndexWriter is cached and 
+> shared by Threads, a thread might release the Writer while another is 
+> still using it...that is why things are not reopened and the Writer not 
+> closed until the last thread releases its reference to it. Essentially, 
+> IndexAccessor control visibility by controlling how current the view of 
+> the Readers is, by controlling their reopening -- a user should agree 
+> not to reopen -- just like he must agree not to use a ReadingWriter to 
+> delete.
+> 
+> If you want to just set an IndexWriter to indexing for eternity and then 
+> have some Readers that you occasionally reopen, you don't need 
+> IndexAccessor. Its purpose is to coordinate ReaderReaders, 
+> WritingReaders, Searchers, and Writers for you. You are proposing to 
+> coordinate them yourself. IndexAccess reopens Readers for you after a 
+> Writer has been used, and enforces Lucene requirements, like a 
+> WritingReader cannot be used at the same time as a Writer...etc.
+> 
+> Technically, IndexAccessor could reopen the readers every 2 
+> seconds...and then you would see your changes...instead it only tries to 
+> reopen them if a change has been made to the index...and it does not 
+> want to get greedy if a Writer is batch loading, so it waits for you to 
+> release the Writer. You can control how often the 'view' is updated by 
+> releasing the Writer more often -- say every 50 docs. Write 50 docs, 
+> release, get, write 50 docs.
+> 
+> - Mark
+> 
+> ajay_garg wrote:
+>> @Mark.
+>>
+>> I am sorry, but I need a bit more of explanation. So you mean to say ::
+>>
+>> "If auto-commit is false, then of course, docs will not be visible in the
+>> index, until all the threads release themselves out of a particular
+>> IndexWriter instance, and close() the IndexWriter instance.
+>> If auto-commit is true, even then the above holds true. In particular,
+>> let's
+>> say iI need an application 
+>> with the following requirements ::
+>>
+>> a) There are multiple indexer threads indexing on a SINGLE indexwriter
+>> instance with auto-commit true
+>> b) Each thread 'flushes' according to a pre-defined criteria at some
+>> point
+>> of time.
+>> c) The index should be updated immediately, that is, if any user re-opens
+>> the IndexSearcher, then the 
+>>     documents added till-that-snapshot-of-index must be visible. Note
+>> that
+>> the IndexWriter instance hasn't 
+>>     been closed as yet, the indexer threads will be indexing till
+>> eternity,
+>> so that IndexWriter instance will 
+>>     never be closed.
+>>
+>> So, you presume that building an application with the above requirements
+>> is
+>> impossible, even with auto-commit set to true. "
+>>
+>> ( If I sound ambiguous at any point, kindly forgive me for my lack of
+>> language skills. I will try to explain better, if need arises ).
+>>
+>> Looking forward to a reply
+>> Ajay Garg
+>>
+>> markrmiller wrote:
+>>   
+>>> You are correct that autocommit=false means that docs will be in the 
+>>> index before the last thread releases its concurrent hold on a Writer, 
+>>> *but because IndexAccessor controls* *when the IndexSearchers are 
+>>> reopened*, those docs will still not be visible until the last thread 
+>>> holding a Writer releases it...that is when the reopening of Searchers 
+>>> occurs as well as when the Writer is closed.
+>>>
+>>> - Mark
+>>>
+>>> ajay_garg wrote:
+>>>     
+>>>> Hi. Sorry if I seem a stranger in this thread, but there is something
+>>>> that I
+>>>> can't resist clearing myself on.
+>>>>
+>>>> Mark, you say that the additional documents added to a index, won't
+>>>> show
+>>>> up
+>>>> until the # of threads accessing the index hits 0; and subsequently the
+>>>> indexwriter instance is closed.
+>>>>
+>>>> But I suppose that the autocommit=true, asserts that all flushed
+>>>> (Added)
+>>>> documents are immediately committed ( and hence visible ) in the index,
+>>>> and
+>>>> no explicit cclosing ( releasiing ) of the Indexwriter instance is
+>>>> required.
+>>>> ( Of course, re-opening an IndexSearcher instance is required ).
+>>>>
+>>>> Am I being dumb ?
+>>>>
+>>>> Looking eagerly for you to shed some light on my doubt.
+>>>>
+>>>> Thanks
+>>>> Ajay Garg
+>>>>
+>>>>
+>>>> codetester wrote:
+>>>>   
+>>>>       
+>>>>> Hi All,
+>>>>>
+>>>>> A newbie out here.... I am using lucene 2.3.0. I need to use lucene to
+>>>>> perform live searching and indexing. To achieve that, I tried the
+>>>>> following
+>>>>>
+>>>>> FSDirectory directory = FSDirectory.getDirectory(location);
+>>>>> IndexReader reader = IndexReader.open(directory );
+>>>>> IndexWriter writer = new IndexWriter(directory , new SimpleAnalyzer(),
+>>>>> true); // <- I want to recreate the index every time
+>>>>> IndexSearcher searcher = new IndexSearcher( reader );
+>>>>>
+>>>>> For Searching, I have the following code
+>>>>> QueryParser queryParser = new QueryParser("xyz", new
+>>>>> StandardAnalyzer());
+>>>>> Hits hits = searcher .search(queryParser.parse(displayName + "*"));
+>>>>>
+>>>>> And for adding records, I have the following code
+>>>>>  // Create doc object
+>>>>>  writer.addDocument(doc);
+>>>>>
+>>>>>  IndexReader newIndexReader = reader.reopen() ;
+>>>>>  if ( newIndexReader != reader ) {
+>>>>>        reader.close() ;
+>>>>>  }
+>>>>>  reader = newIndexReader ;
+>>>>>  searcher.close() ;
+>>>>>  searcher = new IndexSearcher(reader );
+>>>>>         
+>>>>> So the issues that I face are 
+>>>>>
+>>>>> 1) The addition of new record is not reflected in the search ( even
+>>>>> though
+>>>>> I have reinited IndexSearcher )
+>>>>>
+>>>>> 2) Obviously, the add record code is not thread safe. I am trying to
+>>>>> close
+>>>>> and update the reference to IndexSearcher object. I could add a sync
+>>>>> block, but the bigger question would be that what is the ideal way to
+>>>>> achieve this case where I need to add and search record real-time ? 
+>>>>>
+>>>>> Thanks !
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>
+>>>>>     
+>>>>>         
+>>>>   
+>>>>       
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>>
+>>>     
+>>
+>>   
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Concurrent-Indexing-%2B-Searching-tp15234463p15288452.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

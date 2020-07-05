@@ -1,0 +1,51 @@
+FROM: markharw00d <markharw...@yahoo.co.uk>
+SUBJECT: Re: Q: Highlighter + Search symbols "*, ?, ~"
+DATE: 21 Nov 2006
+
+Daniel Noll wrote:
+> How efficient is this for huge wildcard queries?  e.g. "a*"
+> At the moment we highlight our terms by using for instance, 
+> WildcardQuery#getEnum(IndexReader), and only storing the strings which 
+> it returns, whereas I would assume Query#rewrite(IndexReader) would 
+> take up much more memory.
+>
+There is no discernible cost in practice. Query.rewrite always happens 
+internally anyway - it is a necessary part of searching. All we are 
+doing is pre-empting this step and calling rewrite before core Lucene 
+does so we have visibility of the terms actually used for matching. 
+Admittedly, the Lucene search code will then needlessly call rewrite on 
+our rewritten query when we search with it but this is evaluated *very* 
+quickly and does not add any noticeable performance overhead. (Always 
+remember to pass the rewritten query to the search method, not the 
+orginal). Your suggested approach of calling WildcardQuery.getEnum adds 
+an extra sweep of TermEnum on top of the one  that already happens 
+internally as part of rewrite (see base class MultiTermQuery.rewrite) so 
+is slower and uses no less memory.
+
+> Range queries are another one... try querying for a range from a to 
+> zzzz and see what happens. :-)
+Note: QueryParser does not use RangeQuery by default any more - it uses 
+a filter. This means it's faster and doesn't blow up with an explosion 
+in terms when ranges are large. Using this new default setting we lost 
+the ability to highlight terms in the range but I think that is 
+generally an unusual requirement and on balance the benefits of filters 
+over queries for ranges outweigh the costs.
+
+While we're on the subject of large wilcard queries /filtering etc I 
+also recently found it useful recently to subclass the QueryParser when 
+querying all pages for a domain i.e a query for docs with url fields 
+starting with http://www.ibm.com/*.
+The old "too many BooleanClause" exception was a likely scenario again 
+so I used the new PrefixFilter class as opposed to a WildcardQuery to 
+avoid the problem.
+
+Cheers,
+Mark
+
+Send instant messages to your online friends http://uk.messenger.yahoo.com 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

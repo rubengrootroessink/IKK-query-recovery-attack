@@ -1,0 +1,113 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Hit.getDocument performance
+DATE: 24 Nov 2006
+
+Hits will use TopDocs to return the first 100 doc ids and put them in a 
+cache (normalizing their scores first if I remember correctly)...then 
+when you retrieve a doc it will put that in a cache as well. If you ask 
+for a doc over 100 it will execute a topdocs search again to fill the 
+cache up to the doc number you requested times 2. So  you better  need 
+the extra caching (does anyone ever get the same doc twice from a result 
+set?) and you better not be interested in  more than the first 100 docs 
+(you have to search multiple times to get docs over 100). You can use  
+TopDocs instead but you wont get the score normalization or the easy 
+field access...just the id's. You can take hits and rip out the caching 
+and the getmoredocs, but that brings it's own issues...there is a 
+priority queue that needs to be initialized...etc etc
+You can also use the HitCollector API...
+
+You'll notice that Hits uses TopDocs and that TopDocs uses HitCollector, 
+so your just skipping some stuff built on top of HitCollector. Keep in 
+mind you can make your own topdocs or Hits that does just what you want, 
+taking ideas from how they currently use a HitCollector.
+
+I wouldn't mind if there where an alternative to Hits that didn't do all 
+the caching and re-searching. The normal paging method of re querying 
+seems to go against the Hits caching idea. Caching in Hits seems to be 
+nice for a single user app maybe where you would use the same hits 
+object for paging...but that would seem rarer than a multi user app 
+where you just re-query for paging and you don't want or use any 
+caching...of course you can always just build off topdocs, but it would 
+be nice to have the functionality of hits but without caching and 
+researching out of the box. If you use topdocs and you want score 
+normalization and easy field access it would seem that a lot of people 
+will be redoing the same work.
+
+Feel free to tell me how I don't know what I am talking about :)
+
+- Mark
+
+mark harwood wrote:
+> Look in the latest SVN version - there is some new code for "Lazy field loading" i.e.
+not incurring the hit for retrieving *all* fields if you only want to retrieve a subset from
+a document. Not used it myself yet but it may be applicable.
+>
+> If you *really* want all matching docs too then I wouldn't use Hits - I think it retains
+a limited set of doc ids and will rerun your query whenever you page your way through it's
+limited cache in order to get the next batch. Look at the HitCollector API instead.
+>
+> To be honest though building an app which returns an unlimited volume
+> of PDF contents sounds like a good candidate for OutOfMemory exceptions
+> - are the results streamed in any way? Any buffering of the entire result could be a
+killer.
+>
+> Cheers
+> Mark
+>
+>
+> ----- Original Message ----
+> From: Luis Rodrigo Aguado <lrodrigo@isoco.com>
+> To: java-user@lucene.apache.org
+> Sent: Friday, 24 November, 2006 12:14:27 PM
+> Subject: Re: Hit.getDocument performance
+>
+> I have just read in the API doc that going through the Hits returned is 
+> not really adviceable. However, I am not developing the final 
+> application, but a middleware that accesses Lucene, so I would not want 
+> to take the decision to cut the number of docs returned, but let the 
+> application do that. Is there any way to bypass this limitation?
+>
+> Thanks!
+>
+>
+> Luis Rodrigo Aguado escribió:
+>   
+>>    Hi all,
+>>
+>>    I am having a performance bottleneck that is driving me crazy. 
+>> Maybe anyone there has a clue of the source...
+>>
+>>    I am working with an index of 2400 pdf files. For each of them, I 
+>> index the contents, and I store the filename and the creation date. 
+>> Nothing else. The resulting index is about 6Mb.
+>>
+>>    The application generates several queries for each user input, and, 
+>> depending on the queries I launch, it may take up to 10 minutes to get 
+>> the results!!!  It depends on the number of hits, being around 1500 
+>> docs the highest number of hits I have tested. After a profiling 
+>> session I have located the Hits.getDocument as the primary source of 
+>> time (and memory) waste.
+>>
+>>    Is this reasonable?  Maybe I did something wrong to create the 
+>> index?  Are there any workarounds that you imagine?
+>>
+>>    Thanks in advance!!!
+>>
+>>    Luis.
+>>
+>>
+>> ------------------------------------------------------------------------
+>>
+>> No virus found in this incoming message.
+>> Checked by AVG Free Edition.
+>> Version: 7.5.430 / Virus Database: 268.14.14/548 - Release Date: 23/11/2006 15:22
+>>   
+>>     
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,257 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Phrase Highlighting
+DATE: 4 Jun 2009
+
+Yeah, the highlighter framework as is is certainly limiting. When I 
+first did the SpanHighlighter without trying to fit it into the old 
+Highlighter (an early incomplete prototype type thing anyway) I made 
+them merge right off the bat because it was very easy. That was because 
+I could just use the span positions I got back in any manner I wanted to 
+work with the tokens and create the text. To get things to work a token 
+at a time though (you give me a token, I score it), I did things kind of 
+differently where I collect all the valid spans for each token, and if a 
+token falls in a valid span for that token (calculated ahead of time), I 
+highlight it. I think that just makes it harder to deal with getting 
+things right with overlap and what not. Its also difficult to talk to 
+the Formatter from the Scorer to do the markup right without weird hacks 
+where they talk to each other hard coded style or something. Its 
+certainly not impossible, but it just ended up being much harder to get 
+right with the current framework. Of course, I wasn't considering 
+changing the framework at the time (wasn't even a contrib committer at 
+the time), so perhaps there is something that could be done to ease 
+things there (eg a way for the Scorer to communicate with the 
+Formatter). I don't have a complete memory of all the issues really though.
+
+I also don't want to discourage anyone from trying to get something 
+going. Its not impossible, but it was just darn hard to get right with 
+the current API. I've always just recommended post processing.
+
+- Mark
+
+Michael McCandless wrote:
+> Mark, is this because the highlighter package doesn't include enough
+> information as to why the fragmenter picked a given fragment?
+>
+> Because... the SpanScorer is in fact doing all the work to properly
+> locate the full span for the phrase (I think?), so it's ashame that
+> because there's no way for it to "communicate" this information to the
+> formatter.  The strong decoupling of fragmenting from highlighting is
+> hurting us here...
+>
+> Mike
+>
+> On Wed, Jun 3, 2009 at 8:34 PM, Mark Miller <markrmiller@gmail.com> wrote:
+>   
+>> Max Lynch wrote:
+>>     
+>>>> Well what happens is if I use a SpanScorer instead, and allocate it like
+>>>>
+>>>>         
+>>>       
+>>>>> such:
+>>>>>
+>>>>>           analyzer = StandardAnalyzer([])
+>>>>>           tokenStream = analyzer.tokenStream("contents",
+>>>>> lucene.StringReader(text))
+>>>>>           ctokenStream = lucene.CachingTokenFilter(tokenStream)
+>>>>>           highlighter = lucene.Highlighter(formatter,
+>>>>> lucene.HighlighterSpanScorer(self.query, "contents", ctokenStream))
+>>>>>           ctokenStream.reset()
+>>>>>
+>>>>>           result = highlighter.getBestFragments(ctokenStream, text,
+>>>>>                   2, "...")
+>>>>>
+>>>>>  My highlighter is still breaking up words inside of a span.  For
+>>>>>
+>>>>>           
+>>>> example,
+>>>>
+>>>>         
+>>>>> if I search for \"John Smith\", instead of the highlighter being called
+>>>>>
+>>>>>           
+>>>> for
+>>>>
+>>>>         
+>>>>> the whole "John Smith", it gets called for "John" and then "Smith".
+>>>>>
+>>>>>           
+>>>> I think you need to use SimpleSpanFragmenter (vs SimpleFragmenter,
+>>>> which is the default used by Highlighter) to ensure that each fragment
+>>>> contains a full match for the query.  EG something like this (copied
+>>>> from LIA 2nd edition):
+>>>>
+>>>>   TermQuery query = new TermQuery(new Term("field", "fox"));
+>>>>
+>>>>   TokenStream tokenStream =
+>>>>       new SimpleAnalyzer().tokenStream("field",
+>>>>           new StringReader(text));
+>>>>
+>>>>   SpanScorer scorer = new SpanScorer(query, "field",
+>>>>                                      new
+>>>> CachingTokenFilter(tokenStream));
+>>>>   Fragmenter fragmenter = new SimpleSpanFragmenter(scorer);
+>>>>   Highlighter highlighter = new Highlighter(scorer);
+>>>>   highlighter.setTextFragmenter(fragmenter);
+>>>>
+>>>>         
+>>>
+>>> Okay, I hacked something up in Java that illustrates my issue.
+>>>
+>>>
+>>> import org.apache.lucene.search.*;
+>>> import org.apache.lucene.analysis.*;
+>>> import org.apache.lucene.document.*;
+>>> import org.apache.lucene.index.IndexWriter;
+>>> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+>>> import org.apache.lucene.index.Term;
+>>> import org.apache.lucene.queryParser.QueryParser;
+>>> import org.apache.lucene.store.Directory;
+>>> import org.apache.lucene.store.RAMDirectory;
+>>> import org.apache.lucene.search.highlight.*;
+>>> import org.apache.lucene.search.spans.SpanTermQuery;
+>>> import java.io.Reader;
+>>> import java.io.StringReader;
+>>>
+>>> public class PhraseTest {
+>>>    private IndexSearcher searcher;
+>>>    private RAMDirectory directory;
+>>>
+>>>    public PhraseTest() throws Exception {
+>>>        directory = new RAMDirectory();
+>>>
+>>>        Analyzer analyzer = new Analyzer() {
+>>>            public TokenStream tokenStream(String fieldName, Reader reader)
+>>> {
+>>>                return new WhitespaceTokenizer(reader);
+>>>            }
+>>>
+>>>            public int getPositionIncrementGap(String fieldName) {
+>>>                return 100;
+>>>            }
+>>>        };
+>>>
+>>>        IndexWriter writer = new IndexWriter(directory, analyzer, true,
+>>>                IndexWriter.MaxFieldLength.LIMITED);
+>>>
+>>>        Document doc = new Document();
+>>>        String text = "Jimbo John is his name";
+>>>        doc.add(new Field("contents", text, Field.Store.YES,
+>>> Field.Index.ANALYZED));
+>>>        writer.addDocument(doc);
+>>>
+>>>        writer.optimize();
+>>>        writer.close();
+>>>
+>>>        searcher = new IndexSearcher(directory);
+>>>
+>>>        // Try a phrase query
+>>>        PhraseQuery phraseQuery = new PhraseQuery();
+>>>        phraseQuery.add(new Term("contents", "Jimbo"));
+>>>        phraseQuery.add(new Term("contents", "John"));
+>>>
+>>>        // Try a SpanTermQuery
+>>>        SpanTermQuery spanTermQuery = new SpanTermQuery(new
+>>> Term("contents",
+>>> "Jimbo John"));
+>>>
+>>>        // Try a parsed query
+>>>        Query parsedQuery = new QueryParser("contents",
+>>> analyzer).parse("\"Jimbo John\"");
+>>>
+>>>        Hits hits = searcher.search(parsedQuery);
+>>>        System.out.println("We found " + hits.length() + " hits.");
+>>>
+>>>        // Highlight the results
+>>>        CachingTokenFilter tokenStream = new
+>>> CachingTokenFilter(analyzer.tokenStream( "contents", new
+>>> StringReader(text)));
+>>>
+>>>        SimpleHTMLFormatter formatter = new SimpleHTMLFormatter();
+>>>
+>>>        SpanScorer sc = new SpanScorer(parsedQuery, "contents",
+>>> tokenStream,
+>>> "contents");
+>>>
+>>>        Highlighter highlighter = new Highlighter(formatter, sc);
+>>>        highlighter.setTextFragmenter(new SimpleSpanFragmenter(sc));
+>>>        tokenStream.reset();
+>>>
+>>>        String rv = highlighter.getBestFragments(tokenStream, text, 1,
+>>> "...");
+>>>        System.out.println(rv);
+>>>
+>>>    }
+>>>    public static void main(String[] args) {
+>>>        System.out.println("Starting...");
+>>>        try {
+>>>            PhraseTest pt = new PhraseTest();
+>>>        } catch(Exception ex) {
+>>>            ex.printStackTrace();
+>>>        }
+>>>    }
+>>> }
+>>>
+>>>
+>>>
+>>> The output I'm getting is instead of highlighting <B>Jimbo John</B>
+it
+>>> does
+>>> <B>Jimbo</B> then <B>John</B>.  Can I get around this
+some how?  I tried
+>>> several different query types (they are declared in the code, but only the
+>>> parsed version is being used).
+>>>
+>>> Thanks
+>>> -max
+>>>
+>>>
+>>>       
+>> Sorry, not much you can do at the moment. The change is non trivial for sure
+>> (its probably easier to write some regex that merges them). This limitation
+>> was accepted because with most markup, it will display the same anyway. An
+>> option to merge would be great, and while I don't remember the details, the
+>> last time I looked, it just ain't easy to do based on the implementation.
+>> The highlighter highlights by running through and scoring tokens, not
+>> phrases, and the Span highlighter asks if a given token is in a given span
+>> to see if it should get a score over 0. Token by token handed off to the
+>> SpanScorer to be scored. I looked into adding the option at one point (back
+>> when I was putting the SpanScorer together) and didn't find it worth the
+>> effort after getting blocked a couple times.
+>>
+>>
+>> --
+>> - Mark
+>>
+>> http://www.lucidimagination.com
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>     
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>   
+
+
+-- 
+- Mark
+
+http://www.lucidimagination.com
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

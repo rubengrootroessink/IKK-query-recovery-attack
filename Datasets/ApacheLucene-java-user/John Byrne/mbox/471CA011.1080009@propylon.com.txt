@@ -1,0 +1,276 @@
+FROM: John Byrne <john.by...@propylon.com>
+SUBJECT: Re: Queries spanning paragraphs
+DATE: 22 Oct 2007
+
+Thanks for that, that's exactly what I needed.
+
+Actually, I hadn't heard of qsol, but it seems to solve a few other 
+problems I have as well - correct highlighting, configurable operators, 
+sentence recogition. Is it distributed under the Apache license? and is 
+it currently stable enough to use out-of-the-box?
+
+Cheers,
+John
+
+
+Mark Miller wrote:
+> I implemented this for my qsol query parser: myhardshadow.com/qsol
+>
+> Uses a modified SpanNotQuery that takes another parameter saying how 
+> many times the span can cross the specified marker. Index a special 
+> paragraph marker with your text to delimit paragraphs and then the 
+> rest is easy.
+>
+> - Mark
+>
+> public class SpanWithinQuery extends SpanQuery {
+>
+>    private SpanQuery include;
+>    private SpanQuery exclude;
+>    private int proximity;
+>
+>    /** Construct a SpanWithinQuery matching spans from 
+> <code>include</code> which
+>     *  overlap with spans from <code>exclude</code> up to 
+> <code>proximity</code> times.*/
+>    public SpanWithinQuery(SpanQuery include, SpanQuery exclude, int 
+> proximity) {
+>        this.include = include;
+>        this.exclude = exclude;
+>        this.proximity = proximity;
+>
+>        if (!include.getField().equals(exclude.getField())) {
+>            throw new IllegalArgumentException("Clauses must have same 
+> field.");
+>        }
+>    }
+>
+>    /** Return the SpanQuery whose matches are filtered. */
+>    public SpanQuery getInclude() {
+>        return include;
+>    }
+>
+>    /** Return the SpanQuery whose matches must not overlap those 
+> returned. */
+>    public SpanQuery getExclude() {
+>        return exclude;
+>    }
+>
+>    public String getField() {
+>        return include.getField();
+>    }
+>
+>    /** Returns a collection of all terms matched by this query.
+>     * @deprecated use extractTerms instead
+>     * @see #extractTerms(Set)
+>     */
+>    public Collection getTerms() {
+>        return include.getTerms();
+>    }
+>
+>    public void extractTerms(Set terms) {
+>        include.extractTerms(terms);
+>    }
+>
+>    public String toString(String field) {
+>        StringBuffer buffer = new StringBuffer();
+>        buffer.append("spanWithin(");
+>        buffer.append(include.toString(field));
+>        buffer.append(", ");
+>        buffer.append(proximity + " ,");
+>        buffer.append(exclude.toString(field));
+>        buffer.append(")");
+>        buffer.append(ToStringUtils.boost(getBoost()));
+>
+>        return buffer.toString();
+>    }
+>
+>    public Spans getSpans(final IndexReader reader) throws IOException {
+>        return new Spans() {
+>                private Spans includeSpans = include.getSpans(reader);
+>                private boolean moreInclude = true;
+>                private Spans excludeSpans = exclude.getSpans(reader);
+>                private boolean moreExclude = true;
+>
+>                public boolean next() throws IOException {
+>                    if (moreInclude) { // move to next include
+>                        moreInclude = includeSpans.next();
+>                    }
+>
+>                    while (moreInclude && moreExclude) {
+>                        if (includeSpans.doc() > excludeSpans.doc()) { 
+> // skip exclude
+>                            moreExclude = 
+> excludeSpans.skipTo(includeSpans.doc());
+>                        }
+>
+>                        int count = 0;
+>
+>                        while (moreExclude // while exclude is before
+>                                 &&(includeSpans.doc() == 
+> excludeSpans.doc())) {
+>                            if ((!(excludeSpans.end() <= 
+> includeSpans.start()))) {
+>                                count += 1;
+>
+>                                if (count > proximity) {
+>                                    break;
+>                                }
+>                            }
+>
+>                            moreExclude = excludeSpans.next(); // 
+> increment exclude
+>                        }
+>
+>                        if (!moreExclude // if no intersection
+>                                 ||(includeSpans.doc() != 
+> excludeSpans.doc()) ||
+>                                (includeSpans.end() <= 
+> excludeSpans.start())) {
+>                            break; // we found a match
+>                        }
+>
+>                        moreInclude = includeSpans.next(); // 
+> intersected: keep scanning
+>                    }
+>
+>                    return moreInclude;
+>                }
+>
+>                public boolean skipTo(int target) throws IOException {
+>                    if (moreInclude) { // skip include
+>                        moreInclude = includeSpans.skipTo(target);
+>                    }
+>
+>                    if (!moreInclude) {
+>                        return false;
+>                    }
+>
+>                    if (moreExclude // skip exclude
+>                             &&(includeSpans.doc() > 
+> excludeSpans.doc())) {
+>                        moreExclude = 
+> excludeSpans.skipTo(includeSpans.doc());
+>                    }
+>
+>                    int count = 0;
+>
+>                    while (moreExclude // while exclude is before
+>                             &&(includeSpans.doc() == 
+> excludeSpans.doc())) {
+>                        if ((!(excludeSpans.end() <= 
+> includeSpans.start()))) {
+>                            count += 1;
+>
+>                            if (count > proximity) {
+>                                break;
+>                            }
+>                        }
+>
+>                        moreExclude = excludeSpans.next(); // increment 
+> exclude
+>                    }
+>
+>                    if (!moreExclude // if no intersection
+>                             ||(includeSpans.doc() != 
+> excludeSpans.doc()) ||
+>                            (includeSpans.end() <= 
+> excludeSpans.start())) {
+>                        return true; // we found a match
+>                    }
+>
+>                    boolean returnboolean = next();
+>
+>                    return returnboolean; // scan to next match
+>                }
+>
+>                public int doc() {
+>                    return includeSpans.doc();
+>                }
+>
+>                public int start() {
+>                    return includeSpans.start();
+>                }
+>
+>                public int end() {
+>                    return includeSpans.end();
+>                }
+>
+>                public String toString() {
+>                    return "spans(" + SpanWithinQuery.this.toString() + 
+> ")";
+>                }
+>            };
+>    }
+>
+>    public Query rewrite(IndexReader reader) throws IOException {
+>        SpanWithinQuery clone = null;
+>
+>        SpanQuery rewrittenInclude = (SpanQuery) include.rewrite(reader);
+>
+>        if (rewrittenInclude != include) {
+>            clone = (SpanWithinQuery) this.clone();
+>            clone.include = rewrittenInclude;
+>        }
+>
+>        SpanQuery rewrittenExclude = (SpanQuery) exclude.rewrite(reader);
+>
+>        if (rewrittenExclude != exclude) {
+>            if (clone == null) {
+>                clone = (SpanWithinQuery) this.clone();
+>            }
+>
+>            clone.exclude = rewrittenExclude;
+>        }
+>
+>        if (clone != null) {
+>            return clone; // some clauses rewrote
+>        } else {
+>            return this; // no clauses rewrote
+>        }
+>    }
+>
+>    /** Returns true iff <code>o</code> is equal to this. */
+>    public boolean equals(Object o) {
+>        if (this == o) {
+>            return true;
+>        }
+>
+>        if (!(o instanceof SpanWithinQuery)) {
+>            return false;
+>        }
+>
+>        SpanWithinQuery other = (SpanWithinQuery) o;
+>
+>        return this.include.equals(other.include) &&
+>        this.exclude.equals(other.exclude) &&
+>        (this.getBoost() == other.getBoost()) && (proximity == 
+> other.proximity);
+>    }
+>
+>    public int hashCode() {
+>        int h = include.hashCode();
+>        h = (h << 1) | (h >>> 31); // rotate left
+>        h ^= exclude.hashCode();
+>        h = (h << 1) | (h >>> 31); // rotate left
+>        h ^= Float.floatToRawIntBits(getBoost());
+>        h ^= proximity;
+>
+>        return h;
+>    }
+> }
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

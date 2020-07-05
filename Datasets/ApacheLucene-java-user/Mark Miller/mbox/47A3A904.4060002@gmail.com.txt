@@ -1,0 +1,174 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Concurrent Indexing + Searching
+DATE: 1 Feb 2008
+
+
+> 1) I should be calling release of writer and searcher after every call. Is
+> it always mandatory in cases like searcher, when I am sure that I havn't
+> written anything since the last search ?
+>   
+You have to be careful here. It works like this: a single searcher is 
+cached and returned every time. Once all references to the cached Writer 
+are returned, all of the cached Searchers (one per Similarity your 
+using) are reopened -- but only after all the Searcher references are 
+returned. So you must return the Searcher as soon as you are done with 
+the search...otherwise when you return the last reference to the cached 
+Writer it will wait around until you do return that Searcher. Use it and 
+return it as quick as you can. The cost is very small, its just a 
+reference count decrement to release. You do have to pay the sync cost, 
+but thats the cost of sharing resources across threads. Test for speed 
+if your worried...its beyond anything I have needed.
+
+Be careful with the Writer -- you want to return it fairly often as 
+well, but you will will want to batch load if you are adding a lot of 
+docs at once. Get the Writer, add all the docs, release the Writer. But 
+keep in mind that you won't see the added docs until the # of threads 
+referencing the Writer hits 0 -- you might want to release it every 50 
+docs or something (arbitrary there). If your just updating a doc or 
+adding a doc randomly, get it, update/add, release it.
+
+Always release the Writers and Searchers in a finally block to ensure 
+they get released regardless of exceptions.
+> 2) Based on 1), is it okay to cache the instance of writer and Searcher
+> object locally ?
+>   
+I wouldn't, but you can. You will hold things up though...everything 
+works based on them getting released. The IndexAccessor code properly 
+caches them for you. That one of its main goals...properly caching 
+Writers/Searchers and reopening Searchers when a Writer has made a 
+change. If you hold a Searcher out, when a Writer is released by the 
+last thread that had a reference to it, the thread that released the 
+Writer will be hung up waiting around for that Searcher to get released. 
+You wouldnt want this to be a long time.
+> 3) Are there any plans to push these to the trunk? Also, are there any
+> blocking/critical issues  before we can start using it in production ?
+>   
+Its doubtful. The original code has been around for years and has yet to 
+see any trunk excitement. I think the commiters prefer to keep this type 
+of thing out of the core and generally prefer Solr. I think that since 
+many of the committers work on/use Solr, there hasn't been much 
+incentive for them to use LuceneIndexAccessor. Who knows really though. 
+I only know that I have no say in the matter <g>
+
+No blocking or critical issues that I know of. This is based on work I 
+did over a year ago (based on the original LuceneIndexAcessor code of 
+course), and while its not the same code, I have been using that code at 
+6 24/7 sites for about a year now on index sizes ranging from 200,000 to 
+3 million article sized documents. I did this based on my experience 
+with that.
+
+This is the code that I plan to use for any future projects, so feel 
+free to email me with any questions or suggestions. I have had a great 
+experience with this model of operating an interactive, multi-threaded, 
+Lucene index. I'll be on any bugs like white on rice <g> I am very 
+confident in the code though. Feel free to extend the test classes if 
+you are worried about anything in particular.
+
+- Mark
+>
+> Thanks!
+>
+>
+>
+> On Feb 2, 2008 3:41 AM, Mark Miller <markrmiller@gmail.com> wrote:
+>
+>   
+>> You are not seeing the doc because you need to close the IndexWriter
+>> first.
+>>
+>> To have an interactive index you can:
+>>
+>> A: roll your own.
+>> B: use Solr.
+>> C: use the original LuceneIndexAccessor
+>> https://issues.apache.org/jira/browse/LUCENE-390
+>> D: use my updated IndexAccessor
+>> https://issues.apache.org/jira/browse/LUCENE-1026
+>>
+>> I have actually just added the ability to warm searchers before putting
+>> them into to use for option D, but i havn't gotten around to posting the
+>> new code yet.
+>>
+>>
+>> - Mark Miller
+>>
+>>
+>>
+>>
+>> codetester wrote:
+>>     
+>>> Hi All,
+>>>
+>>> A newbie out here.... I am using lucene 2.3.0. I need to use lucene to
+>>> perform live searching and indexing. To achieve that, I tried the
+>>>       
+>> following
+>>     
+>>> FSDirectory directory = FSDirectory.getDirectory(location);
+>>> IndexReader reader = IndexReader.open(directory );
+>>> IndexWriter writer = new IndexWriter(directory , new SimpleAnalyzer(),
+>>> true); // <- I want to recreate the index every time
+>>> IndexSearcher searcher = new IndexSearcher( reader );
+>>>
+>>> For Searching, I have the following code
+>>> QueryParser queryParser = new QueryParser("xyz", new
+>>>       
+>> StandardAnalyzer());
+>>     
+>>> Hits hits = searcher .search(queryParser.parse(displayName + "*"));
+>>>
+>>> And for adding records, I have the following code
+>>>  // Create doc object
+>>>  writer.addDocument(doc);
+>>>
+>>>  IndexReader newIndexReader = reader.reopen() ;
+>>>  if ( newIndexReader != reader ) {
+>>>        reader.close() ;
+>>>  }
+>>>  reader = newIndexReader ;
+>>>  searcher.close() ;
+>>>  searcher = new IndexSearcher(reader );
+>>>
+>>> So the issues that I face are
+>>>
+>>> 1) The addition of new record is not reflected in the search ( even
+>>>       
+>> though I
+>>     
+>>> have reinited IndexSearcher )
+>>>
+>>> 2) Obviously, the add record code is not thread safe. I am trying to
+>>>       
+>> close
+>>     
+>>> and update the reference to IndexSearcher object. I could add a sync
+>>>       
+>> block,
+>>     
+>>> but the bigger question would be that what is the ideal way to achieve
+>>>       
+>> this
+>>     
+>>> case where I need to add and search record real-time ?
+>>>
+>>> Thanks !
+>>>
+>>>
+>>>
+>>>
+>>>
+>>>       
+>>  ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>     
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

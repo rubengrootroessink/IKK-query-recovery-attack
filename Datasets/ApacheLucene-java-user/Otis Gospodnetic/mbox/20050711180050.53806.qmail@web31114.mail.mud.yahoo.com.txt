@@ -1,0 +1,146 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Re[2]: Index Partitioning ( was Re: Search deadlocking under load)
+DATE: 11 Jul 2005
+
+Paul - I'm doing the same (smaller indices) for Simpy.com for similar
+reasons (fast, independent and faster reindexing, etc.).  Each index
+has its own IndexSearcher, and they are kept in a LRU data structure. 
+Before each search the index version is checked, and new IndexSearcher
+created in case the index changed.
+
+Otis
+
+--- Sven Duzont <sven.duzont@keljob.com> wrote:
+
+> Hello, 
+> 
+> We are already using this design in production for a email job
+> application system.
+> Each client (company) have an account and may have multiple users
+> When a new client is created, a new lucene index is automatically
+> created when new job-applications arrive for this account. 
+> Job applications are in principle owned by users, but some times they
+> can share it with other users in same account, so the search can be
+> user-independent.
+> This design works fine for us as the flow of job applications is not
+> the same for different accounts. There are lucene indices that are
+> more often updated than others.
+> It also permit us to rebuild one client index without impacting
+> others
+> 
+> We have only one problem : when the index is updated and searched at
+> the same time, the index may be corrupted and an exception may be
+> thrown by the indexer ("Read past OEF", i unfortunately don't have
+> the stack trace right now under my hand). I think that it is because
+> the search and indexation are made in two different java processes.
+> We will rework the routines to lock the search when an indexation is
+> running and vice versa
+> 
+> --- sven
+> 
+> lundi 11 juillet 2005, 03:03:29, vous avez écrit:
+> 
+> 
+> PS> On 11/07/2005, at 10:43 AM, Chris Hostetter wrote:
+> 
+> >>
+> >> : > Generally speaking, you only ever need one active Searcher,
+> which
+> >> : > all of
+> >> : > your threads should be able to use.  (Of course, Nathan says
+> that
+> >> : > in his
+> >> : > code base, doing this causes his JVM to freeze up, but I've  
+> >> never seen
+> >> : > this myself).
+> >> : >
+> >> : Thanks for your response Chris.  Do you think we are going down
+> a
+> >> : deadly path by having "many smaller" IndexSearchers open rather
+> than
+> >> : "one very large one"?
+> >>
+> >> I'm sorry ... i think i may have confused you, i forgot  that this
+> >> thread
+> >> was regarding partioning the index.  i ment one searcher *per  
+> >> index* ...
+> >> don't try to make a seperate searcher per client, or have a pool
+> of
+> >> searchers, or anything like that.  But if you have a need to
+> partition
+> >> your data into multiple indexes, then have one searcher per index.
+> 
+> PS> Actually I think I confused you first, and then you confused me  
+> PS> back... Let me... uhh, clarify 'ourselves'.. :)
+> 
+> PS> My use of the word 'pool' was an error on my part (and a very
+> silly
+> PS> one).  I should really have meant "LRU Cache".
+> 
+> PS> We have recognized that there is a finite # of IndexSearchers
+> that
+> PS> can probably be open at one time.  So we'll use an LRU cache to
+> make
+> PS> sure only the 'actively' in use Searchers are open.  However
+> there
+> PS> will only be one IndexSearcher for a given physical Index
+> directory
+> PS> open at a time, we're just making sure only the recently used
+> ones
+> PS> are kept open to keep memory limits sane.
+> 
+> >>
+> >> now assume you partition your data into two seperate indexes,  
+> >> unless the
+> >> way you partition your data lets you cleanly so that each of hte
+> >> two indexes contains only half the number of terms as if you had  
+> >> one big
+> >> index, then sorting on a field in those two indexes will require  
+> >> more RAM
+> >> then sorting on the same data in asingle index.
+> >>
+> 
+> PS> Our data is logically segmented into Projects.  Each Project can 
+> 
+> PS> contain Documents and Mail.  So we currently have 2 physical
+> Indexes
+> PS> per Project.  90% of the time our users work within one project
+> at a
+> PS> time, and only work in "document mode" or "mail mode".  Every now
+> and
+> PS> then they may need to do a general search across all Entities
+> and/or
+> PS> Projects they are involved in (accomplished with Mulitsearcher).
+> PS> Perhaps we should just put Documents and Mail all in one Index
+> for a
+> PS> project (ie have 1 Index per project)??
+> 
+> PS> Part of the reason in to partition is to make the cost of
+> rebuilding
+> PS> a given project cheaper.  Reduces the risk of an Uber-Index being
+> PS> corrupted and screwing all the users up.  We can order the
+> reindexing
+> PS> of projects to make sure our more important customers get
+> re-indexed
+> PS> first if there is a serious issue.
+> 
+> PS> I would have thought that partitioning indexes would have
+> performance
+> PS> benefits too:  a lot less data to scan (most of the data is
+> already
+> PS> relevant).
+> 
+> PS> Since this isn't in production yet, I'd rather be proven wrong
+> now
+> PS> rather than later! :)
+> 
+> PS> Thanks for your input.
+> 
+> PS> Paul
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

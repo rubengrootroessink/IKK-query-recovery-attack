@@ -1,0 +1,229 @@
+FROM: "Sertic Mirko, Bedag" <Mirko.Ser...@bedag.ch>
+SUBJECT: AW: NFS, Stale File Handle Problem and my thoughts....
+DATE: 20 Jan 2010
+
+Yeah!
+
+You made my day!
+
+I will post my new IndexDeletionPolicy, perhaps someone else can use it too!
+
+Regards
+Mirko
+
+-----Ursprüngliche Nachricht-----
+Von: Michael McCandless [mailto:lucene@mikemccandless.com] 
+Gesendet: Mittwoch, 20. Januar 2010 17:38
+An: java-user@lucene.apache.org
+Betreff: Re: NFS, Stale File Handle Problem and my thoughts....
+
+You only have to create the deletion policy (merging uses it).
+
+Mike
+
+On Wed, Jan 20, 2010 at 11:27 AM, Sertic Mirko, Bedag
+<Mirko.Sertic@bedag.ch> wrote:
+> Ok, so does the merging go thru the IndexDeletionPolicy, or do I have to deal with the
+MergePolicy to take care of merging?
+>
+> Regards
+> Mirko
+>
+> -----Ursprüngliche Nachricht-----
+> Von: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Gesendet: Mittwoch, 20. Januar 2010 17:12
+> An: java-user@lucene.apache.org
+> Betreff: Re: NFS, Stale File Handle Problem and my thoughts....
+>
+> Yes, normal merging will cause this problem as well.
+>
+> Generally you should always use IndexReader.reopen -- it gives much
+> better reopen speed, less resources used, less GC, etc.
+>
+> Mike
+>
+> On Wed, Jan 20, 2010 at 10:49 AM, Sertic Mirko, Bedag
+> <Mirko.Sertic@bedag.ch> wrote:
+>> Mike
+>>
+>> Thank you so much for your feedback!
+>>
+>> Will the new IndexDeletionPolicy also be considered when segments are merged? Does
+merging also affect the NFS problem?
+>>
+>> Should I use IndexReader.reOpen() or just create a new IndexReader?
+>>
+>> Thanks in advance
+>> Mirko
+>>
+>> -----Ursprüngliche Nachricht-----
+>> Von: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Gesendet: Mittwoch, 20. Januar 2010 16:14
+>> An: java-user@lucene.apache.org
+>> Betreff: Re: NFS, Stale File Handle Problem and my thoughts....
+>>
+>> Right, it's only machine A that needs the deletion policy.  All
+>> read-only machines just reopen on their schedule (or you can use some
+>> communication means a Shai describes to have lower latency reopen
+>> after the writer commits).
+>>
+>> Also realize that doing searching over NFS does not usually give very
+>> good performance... (though I've heard that mounting read-only can
+>> improve performance).
+>>
+>> Mike
+>>
+>> On Wed, Jan 20, 2010 at 9:05 AM, Sertic Mirko, Bedag
+>> <Mirko.Sertic@bedag.ch> wrote:
+>>> Hi Mike
+>>>
+>>> Thank you for your feedback!
+>>>
+>>> So I would need the following setup:
+>>>
+>>> a) Machine A with custom IndexDeletionPolicy and single IndexReader instance
+>>> b) Machine B with custom IndexDeletionPolicy and single IndexReader instance
+>>> c) Machine A and B periodically check if the index needs to be reopened, at least
+at 12 o'clock
+>>> d) Machine A runs an Index update and optimization at 8 o'clock, using the IndexDeletionPolicy.
+The IndexDeletionPolicy keeps track of the files to be deleted.
+>>> e) On Machine A, the no longer needed files are taken from the IndexDeletionPolicy,
+and deleted at 12:30. At this point the files to be deleted should no longer be required by
+any IndexReader and can be safely deleted.
+>>>
+>>> So the IndexDeletionPolicy should be a kind of Singleton, and in fact would only
+be needed on Machine A, as only here index modifications are made. Machine B has read only
+access.
+>>>
+>>> Would this be a valid setup? The only limitation is there is only ONE IndexWriter
+box, and multiple IndexReader boxes. Based on our requirements, this should fix very well.
+I really want to avoid some kind of index replication between the boxes...
+>>>
+>>> Regards
+>>> Mirko
+>>>
+>>>
+>>>
+>>> -----Ursprüngliche Nachricht-----
+>>> Von: Michael McCandless [mailto:lucene@mikemccandless.com]
+>>> Gesendet: Mittwoch, 20. Januar 2010 14:45
+>>> An: java-user@lucene.apache.org
+>>> Betreff: Re: NFS, Stale File Handle Problem and my thoughts....
+>>>
+>>> Right, you just need to make a custom IndexDeletionPolicy.  NFS makes
+>>> no effort to protect deletion of still-open files.
+>>>
+>>> A simple approach is one that only deletes a commit if it's more than
+>>> XXX minutes/hours old, such that XXX is set higher than the frequency
+>>> that IndexReaders are guaranteed to have reopened.
+>>>
+>>> The TestDeletionPolicy unit test in Lucene's sources has the
+>>> ExperiationTimeDeletionPolicy that you can use (but scrutinize!).
+>>>
+>>> Another alternative is to simply reopen the reader whenever you hit
+>>> Stale file handle (think of it as NFS's means of notifying you that
+>>> your reader is no longer current ;) ).  But, if reopen time is
+>>> potentially long for your app, it's no good to make queries pay that
+>>> cost and the deletion policy is better.
+>>>
+>>> Mike
+>>>
+>>> On Wed, Jan 20, 2010 at 8:29 AM, Sertic Mirko, Bedag
+>>> <Mirko.Sertic@bedag.ch> wrote:
+>>>> Hi@all
+>>>>
+>>>>
+>>>>
+>>>> We are using Lucene 2.4.1 on Debian Linux with 2 boxes. The index is
+>>>> stored on a common NFS share. Every box has a single IndexReader
+>>>> instance, and one Box has an IndexWriter instance, adding new documents
+>>>> or deleting existing documents at a given point in time. After adding or
+>>>> deleting the documents, a IndexWriter.optimize() is called. Every box
+>>>> checks periodically with IndexReader.isCurrent if the index needs to be
+>>>> reopened.
+>>>>
+>>>>
+>>>>
+>>>> Now, we are encountering a "Stale file handle" error on box b after the
+>>>> index was modified and optimized by box a.
+>>>>
+>>>>
+>>>>
+>>>> As far as i understand the problem with NFS is that box b tries to
+>>>> open/access a file that was deleted by box a on the NFS share.
+>>>>
+>>>>
+>>>>
+>>>> The question is now, when are files deleted? Does only the index
+>>>> optimization delete files, or can files be deleted just by adding or
+>>>> removing documents from an existing index?
+>>>>
+>>>>
+>>>>
+>>>> I now that there might be a better setup with Lucene and index
+>>>> replication, but this is an existing application and we cannot change
+>>>> the architecture now. So what would be the best solution?
+>>>>
+>>>>
+>>>>
+>>>> Can I just "change" the way Lucene deletes files? I think that just
+>>>> renaming no longer needed files would be good on NFS. After every
+>>>> IndexReader has reopened the index, the renamed files can be safely
+>>>> deleted, as they are definitely no longer needed. Where would be the
+>>>> hook point? I heard something about IndexDeletionPolicy....
+>>>>
+>>>>
+>>>>
+>>>> Thanks in advance!
+>>>>
+>>>>
+>>>>
+>>>> Mirko
+>>>>
+>>>>
+>>>>
+>>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

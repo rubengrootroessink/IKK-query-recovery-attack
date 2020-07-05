@@ -1,0 +1,85 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Optimizing unordered queries
+DATE: 7 Jul 2009
+
+OK good to hear you have a sane number of TermInfos now...
+
+I think many apps don't have nearly as many unique terms as you do;
+your approach (increase index divisor & LRU cache) sounds reasonable.
+It'll make warming more important.  Please report back how it goes!
+
+Lucene is unfortunately rather wasteful in how it loads the terms
+index in RAM; there is a good improvement I've been wanting to
+implement but haven't gotten to yet... the details are described here:
+
+  http://mail-archives.apache.org/mod_mbox/lucene-java-user/200906.mbox/%3C85d3c3b60906101313t77d8b16atc4a2644ecd158e9@mail.gmail.com%3E
+
+If anyone has the "itch" this'd make a nice self-contained project and
+solid improvement to Lucene...
+
+Mike
+
+On Mon, Jul 6, 2009 at 10:31 PM, Nigel<nigelspleen@gmail.com> wrote:
+> On Mon, Jul 6, 2009 at 12:37 PM, Michael McCandless <
+> lucene@mikemccandless.com> wrote:
+>
+>> On Mon, Jun 29, 2009 at 9:33 AM, Nigel<nigelspleen@gmail.com> wrote:
+>>
+>> > Ah, I was confused by the index divisor being 1 by default: I thought it
+>> > meant that all terms were being loaded.  I see now in SegmentTermEnum
+>> that
+>> > the every-128th behavior is implemented at a lower level.
+>> >
+>> > But I'm even more confused about why we have so many terms in memory.  A
+>> > heap dump shows over 270 million TermInfos, so if that's only 128th of
+>> the
+>> > total then we REALLY have a lot of terms.  (-:  We do have a lot of docs
+>> > (about 250 million), and we do have a couple unique per-document values,
+>> but
+>> > even so I can't see how we could get to 270 million x 128 terms.  (The
+>> heap
+>> > dump numbers are stable across the index close-and-reopen cycle, so I
+>> don't
+>> > think we're leaking.)
+>>
+>> You could use CheckIndex to see how many terms are in your index.
+>>
+>> If you do the heap dump after opening a fresh reader and not running
+>> any searches yet, you see 270 million TermInfos?
+>
+>
+> Thanks, Mike.  I'm just coming back to this after taking some time to
+> educate myself better on Lucene internals, mostly by reading and tracing
+> through code.
+>
+> I think now that the 270 million TermInfo number must have been user error
+> on my part, as I can't reproduce those values.  What I do see is about 8
+> million loaded TermInfos.  That matches what I expect by examining indexes
+> with CheckIndex: there are about 250 million terms per index, and we have 4
+> indexes loaded, so 1 billion terms / 128 = 8 million cached.  So, that's
+> still a big number (about 2gb including the associated Strings and arrays),
+> but at least it makes sense now.
+>
+> My next thought, which I'll try as soon as I can set up some reproducible
+> benchmarks, is using a larger index divisor, perhaps combined with a larger
+> LRU TermInfo cache.  But this seems like such an easy win that I wonder why
+> it isn't mentioned more often (at least, I haven't seen much discussion of
+> it in the java-user archives).  For example, if I simply increase the index
+> divisor from 1 to 4, I can cut my Lucene usage from 2gb to 500mb (meaning
+> less GC and more OS cache).  That means much more seeking to find non-cached
+> terms, but increasing the LRU cache to 100,000 (for example) would allow all
+> (I think) of our searched terms to be cached, at a fraction of the RAM cost
+> of the 8 million terms cached now.  (The first-time use of any term would of
+> course be slower, but most search terms are used repeatedly, and it seems
+> like a small price to pay for such a RAM win.)  Anyway, I'm curious if there
+> are any obvious flaws in this plan.
+>
+> Thanks,
+> Chris
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

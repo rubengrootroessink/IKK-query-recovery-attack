@@ -1,0 +1,113 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Wrapping IndexSearcher so that it is safe?
+DATE: 11 Nov 2009
+
+Looks good. About your code: The searcher will not close if any other
+unchecked exception is thrown. Such code should always use finally blocks.
+So simply do not catch and rethrow the IOException, instead put release in a
+finally block and let the IOException automatically go upwards.
+
+
+> 		this.retain();
+> 		try {
+> 			TopDocs result = searcher.search(query, limit);
+> 			return result;
+> 		} finally {
+> 			this.release();
+> 		}
+
+Less code more secure and effective :-)
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: Jacob Rhoden [mailto:jrhoden@unimelb.edu.au]
+> Sent: Wednesday, November 11, 2009 11:12 PM
+> To: java-user@lucene.apache.org
+> Subject: Wrapping IndexSearcher so that it is safe?
+> 
+> I am pondering a way to allow closing of an index searcher and
+> releasing the pointer to it so that it automatically cleans up by
+> itself when all threads stop using the index searcher. Inspired by the
+> Objective C retain/release model, what do you think about this?
+> 
+> Basically when threads start a search, they increment the "retain"
+> count, when threads leave the searcher, they decrement the "retain"
+> count, and close the searcher if requested. I am attracted to this
+> solution as it seems to simplify things greatly unless I have
+> overlooked something.
+> 
+> 
+> public class SafeIndexSearcher {
+> 
+> 	private boolean finish = false;
+> 	private int retainCount = 0;
+> 	private IndexSearcher searcher;
+> 
+> 	public SafeIndexSearcher(IndexSearcher searcher) {
+> 		this.searcher = searcher;
+> 	}
+> 
+> 	public TopDocs search(Query query, int limit) throws IOException {
+> 		this.retain();
+> 
+> 		try {
+> 			TopDocs result = searcher.search(query, limit);
+> 			this.release();
+> 			return result;
+> 		} catch (IOException e) {
+> 			this.release();
+> 			throw e;
+> 		}
+> 
+> 	}
+> 
+> 	public synchronized void close() {
+> 		finish = true;
+> 	}
+> 
+> 	private synchronized void retain() throws IOException {
+> 		if(finish)
+> 			throw new IOException("SafeIndexSearcher used after
+> close has been
+> called.");
+> 		retainCount++;
+> 	}
+> 
+> 	private synchronized void release() {
+> 		retainCount--;
+> 		if(finish && retainCount==0)
+> 			try {
+> 				searcher.close();
+> 			} catch (IOException e) {
+> 				System.err.println("IndexSearcher.close()
+> unexpected error: " +
+> e.getMessage());
+> 			}
+> 	}
+> 
+> }
+> 
+> Thanks!
+> Jacob
+> 
+> ____________________________________
+> Information Technology Services,
+> The University of Melbourne
+> 
+> Email: jrhoden@unimelb.edu.au
+> Phone: +61 3 8344 2884
+> Mobile: +61 4 1095 7575
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

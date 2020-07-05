@@ -1,0 +1,74 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: query performance behavior not as expected
+DATE: 29 Aug 2005
+
+On Monday 29 August 2005 17:24, Greg Conway wrote:
+> Hello.  I've got a problem perhaps some of you have  help with.
+> 
+> I have an application that has to use fairly long queries (containing about 
+30 terms or'ed together) against an index of about 500K documents.  Because 
+of the limited vocabulary I'm indexing and querying over (~2000 terms), the 
+size of the query, and the number of documents involved my search times are 
+running a little long.  I'd like to speed them up a little more if possible.
+> 
+> One approach I've tried is structuring the queries such that one (or more) 
+of a subset of the entire 30 terms is required, the rest being optional, as 
+in:
+> 
+> +(term1 term2 term3 ... term10) term11 term12 term13 ... term30
+> 
+> this yielded a search time (on average) of about 50 msecs.
+> 
+> I then assumed that if I reduced the size of the required set from 10 to 5, 
+I would get fewer documents to score against and query performance would 
+increase.  So I tried something like this:
+> 
+> +(term1 term2 term3 term4 term5) term6 term7 ... term30
+> 
+> To my surprise, the performance of the overall query didn't change 
+(actually, it was slower, at about 63 msecs on average).   My expectation 
+about the way lucene would interpret and execute this query was apparently 
+incorrect.
+> 
+> The obvious answer here might be to use a filter for the first (required) 
+clause and then query again using that filter for the other  terms.  The 
+problem I forsee with that solution is that I can't easily re-use the filters 
+because of the sheer number of combinations of terms and the need to re-open 
+my readers/searchers every few minutes to expose the steady stream of updates 
+to querying on a regular basis.  As I understand it re-using a filter (rather 
+than creating it, using it, and discarding it) is integral to it's value as a 
+time saver and thus maybe not appropriate in this case.
+> 
+> Any thoughts or advice would be appreciated.  Many thanks in advance!
+
+The development version uses the query structure as you would
+expect, but it also uses a slightly slower way to evalute OR queries.
+Your query:
++(term1 term2 term3 term4 term5) term6 term7 ... term30
+is transformed into something like this:
+RequiredOptional( (term1 or term2 or .. or term5), (term6 or term7 .. or 
+term30))
+For every hit doc in the required subquery, it skips to the optional one
+instead of evaluating the optional one completely as it is done in 1.4.3.
+When the required subquery occurs infrequently enough, the development
+version could be faster than 1.4.3.
+Anyway, I'd expect the development version to be faster on the more
+restricted query than on the less restricted one.
+
+With a filter instead of the required subquery, the score of the required
+subquery is lost, and filters indeed do not work over index updates.
+Nevertheless, you can QueryFilter and FilteredQuery a try.
+
+As a side note, the development version has no limitation on the
+maximum number of terms/subqueries that can be required or prohibited.
+It does have the BooleanQuery.maxClauseCount as in 1.4.3.
+
+Regards,
+Paul Elschot
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

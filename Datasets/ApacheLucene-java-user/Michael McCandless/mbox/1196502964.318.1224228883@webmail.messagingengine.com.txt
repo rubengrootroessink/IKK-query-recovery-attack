@@ -1,0 +1,57 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: IndexReader locking index
+DATE: 1 Dec 2007
+
+
+"Ruslan Sivak" <rsivak@istandfor.com> wrote:
+> I am using MoreLikeThis functionality in my code.  This code is
+> running on four separate servers.
+
+How do your separate servers share the index?  What remote filesytem
+are you using here?
+
+> When I ran tests, it seemed to be fine, but looks like under heavy
+> use, the index file is always locked,
+
+Which version of Lucene are you using?  Read-only use of the index
+(using an IndexReader without using any of its "writing" methods like
+deleteDocument or setNorm) should not do any locking against the
+index, as of Lucene 2.1.
+
+> and when I reindex all the docs, it doubles the size of the index
+> (my guess is the old files are not being deleted).
+
+If you have a reader open on the index, then the reader will hold
+these files open so they cannot be deleted (until that reader/readers
+close).  If you then fully re-index into that same directory, that
+would explain the 2X usage.
+
+> Since my index is only about 11mb, I would like to load it into RAM.
+> I'm not sure if this is compatible with MoreLikeThis?  How do I load
+> the index into memory and then open and IndexReader on it?
+
+This is simple:
+
+  Directory dir = new RAMDirectory(otherDir)
+
+will load all files in otherDir into RAM.  Then you can pass that dir
+to IndexReader.open or IndexSearcher.  This will work fine with
+MoreLikeThis and all other searching, etc.  But just remember since
+this is a RAMDirectory, if you make any changes to it, they won't be
+saved to disk unless you explicitly do so.
+
+> Also if I load it into memory, how can I find out when changes have
+> been made to the index file on disk so that I can reload it?
+
+You can call IndexReader.isCurrent() if you have a reader open on the
+disk-based Directory, or, IndexReader.getCurrenVersion (static method)
+if you don't; when that version number changes, your index has
+changed.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

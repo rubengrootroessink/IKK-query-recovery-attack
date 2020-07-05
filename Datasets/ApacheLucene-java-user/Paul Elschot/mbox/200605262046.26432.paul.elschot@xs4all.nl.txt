@@ -1,0 +1,76 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: BufferedIndexInput.readByte performance; skipping
+DATE: 26 May 2006
+
+On Friday 26 May 2006 19:13, Ken Krugler wrote:
+> >On Friday 26 May 2006 16:14, Michael Chan wrote:
+> >>  Hi,
+> >>
+> >  > I have a 5gb index containing 2mil documents and am trying to run
+> >>  1mil+ queries against it. Most of the queries are SpanQueries and it
+> >>  occurs to me that the search performance is quite slow when using 2, 3
+> >>  SpanOrQueries nested inside a SpanNearQuery, which in turn is nested
+> >>  inside another SpanNearQuery. The response time is around 3-5 seconds
+> >>  even when the index is stored as a RAMDirectory, and
+> >>  BufferedIndexInput.readByte() appears to be the bottleneck. Is this
+> >  > performance typical? As I don't need any sorting of the results and
+> >
+> >That is indeed typical.
+> >
+> >  > only need the number of results returned, is there anything, besides
+> >>  Field.setOmitNorm(true), I can modify to improve performance?
+> >
+> >A few things might help:
+> >- use getSpans() on the scorer of the query, iterate the resulting Spans
+> >   and count the number of different doc values.
+> >   This saves the scoring and the sorting on score value.
+> >- Sort the queries alphabetically, to try and maximize cache usage.
+> >- Increase the skip interval when creating the index, by default lucene 
+uses
+> >   16, but nutch uses a higher value. I've never done this myself, but
+> >   you could specifically ask on how to do this.
+> 
+> I'm curious how increasing the skip interval would improve 
+> performance. From what I've read on-list and in-code, having a 
+
+I meant the skip interval between documents for a single term.
+Enlarging that allows to skipTo(docNr) to be faster in TermQuery
+and SpanTermQuery by needing fewer iterations under the covers
+when the docNr is "far ahead".
+
+> smaller skip interval means trading more memory for faster term 
+> lookup. I think Nutch uses a larger default value (128) to better 
+> handle big (e.g. 10M) indexes, at the expense of slightly slower 
+> performance.
+
+I think you mean the skip interval between terms in the index,
+IndexWriter.DEFAULT_TERM_INDEX_INTERVAL .
+
+> 
+> Also, the use of a sorted index would seem to offer the biggest 
+> potential speed win, though that would require a good way of ordering 
+> the index, and it seems like there would be lots of tuning required 
+> to pick the right cut-off value for searches.
+
+The index for terms -> documents -> positions is sorted.
+The skip interval I meant is in the terms -> documents part,
+and it is not directly accessible for normal use.
+
+Internally this is TermInfosWriter.skipInterval.
+(Class TermInfosWriter is package private in org.apache.lucene.index).
+Quoting from the javadocs for Lucene internals on
+TermInfosWriter.skipInterval:
+"The fraction of TermDocs entries stored in skip tables, used to accellerate 
+TermDocs.skipTo(int). Larger values result in smaller indexes, greater 
+acceleration, but fewer accelerable cases, while smaller values result in 
+bigger indexes, less acceleration and more accelerable cases.
+More detailed experiments would be useful here."
+
+Regards,
+Paul Elschot
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

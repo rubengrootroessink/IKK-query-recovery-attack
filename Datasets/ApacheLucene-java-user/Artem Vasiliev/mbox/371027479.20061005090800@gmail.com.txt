@@ -1,0 +1,211 @@
+FROM: Artem Vasiliev <art...@gmail.com>
+SUBJECT: Fwd: Re[2]: Fwd: Re[2]: 30 milllion+ docs on a single server
+DATE: 5 Oct 2006
+
+Hello Otis & all,
+
+I benchmarked it only subjectively - typical FieldCache'ing sort was an overkill
+for my humble server (now I give sharehound about 200M RAM for 14mln index which
+takes about 12G on disk). When sorting (using FieldCache) the first time after index change
+Lucene
+takes the whole index field set into memory - that's a big hit for memory and
+time (except the index is small). The situation is even worse for me because I
+wanted the index to be available for search while crawling the shares (so the
+index is relatively frequently updated).
+
+Now my add-on fixes these problems very nice. I'll contribute this add-on to
+Lucene soon. Recently I separated this add-on's binaries creation in the
+sharehound build procedure and I attach the jar file for convenience (to try
+it). However, for example of use you can look at Sharehound code:
+http://sharehound.cvs.sourceforge.net/*checkout*/sharehound/jNetCrawler/src/java/org/sourceforge/sharehound/lucene/FilesSearchCommandImpl.java
+
+
+Best regards,
+Artem.
+
+OG> Artem & Co.,
+
+OG> Have you benchmarked this approach against the typical non-caching
+OG> Sort?  Both performance and memory benchmark?
+
+OG> If it outperforms FieldCache based sorting, I'm interested in it :)
+OG> I'm also interested in a patch or contribution for Lucene itself.
+
+OG> Please follow-up on java-user or java-dev.
+
+OG> Thanks,
+OG> Otis
+
+
+OG> ----- Original Message ----
+OG> From: Artem Vasiliev <artvas@gmail.com>
+OG> To: markrmiller@gmail.com; otis_gospodnetic@yahoo.com; hutchiko@gmail.com
+OG> Sent: Wednesday, August 23, 2006 1:44:29 PM
+OG> Subject: Fwd: Re[2]: 30 milllion+ docs on a single server
+
+OG> Hi guys!
+
+OG> I'm not sure my mail below arrived correctly to the list as I didn't
+OG> receive it by mail subscription. I can see it only at Nabble:
+OG> http://www.nabble.com/Re-2-%3A-30-milllion%2B-docs-on-a-single-server-p5916372.html
+
+OG> I hope the solution below will help.
+
+OG> Best regards,
+OG> Artem
+
+OG> ===8<==============Original message text===============
+OG> Hi guys!
+
+OG> I have noticed many questions on the list vonsidering Lucene sorting
+OG> memory consumption and hope my solution can help someone.
+
+OG> I faced a memory/time consumption problem on sorting in Lucene back in
+OG> April. With a help of this list's experts I came to solution which I
+OG> like: documents from the sorting set (instead of given the field's
+OG> values from the whole index) are lazy-cached in a WeakHashMap so the
+OG> cached items are candidates for GC. I didn't create a patch yet (and
+OG> I'm going to make it) but the code is ready to be reused and it's used
+OG> for a while as a part of my open-source project, sharehound
+OG> (http://sharehound.sourceforge.net). The code can be now reached by a
+OG> CVS browser, it's in 4 classes in subdirectories of
+OG> http://sharehound.cvs.sourceforge.net/sharehound/jNetCrawler/src/java/org/apache/lucene/.
+
+OG> They (both classes, as a part of sharehound.jar, and sources) can also
+OG> be downloaded with the latest (1.1.3 alpha) sharehound release zip
+OG> file.
+
+OG> LazyCachingSortFactory class have an example of use in its header
+OG> comments, I duplicate it here:
+
+OG> /**
+OG>  * Creates a Sort that doesn't use FieldCache and doesn't therefore
+OG> load all the field values from the index while sorting.
+OG>  * Instead it uses CachingIndexReader (via
+OG> CachingDocFieldComparatorSource) to cache documents from which field values
+OG>  * are fetched. If the caller Searcher is based on CachingIndexReader
+OG> itself its document cache will be used here.
+OG>  *
+OG>  *
+OG>  * An example of use:
+OG>   ...
+OG>   hits = getQueryHits(query, getSort(listSorting.getSortFieldName(), listSorting.isSortDescending()));
+OG>   ...
+
+OG>   public Sort getSort(String sortFieldName, boolean sortDescending) {
+OG>     return LazyCachingSortFactory.create(sortFieldName, sortDescending);
+OG>   }
+OG>   ...
+OG>   protected Hits getQueryHits(Query query, Sort sort) throws IOException {
+OG>      IndexSearcher indexSearcher = new
+OG> IndexSearcher(CachingIndexReader.decorateIfNeeded(IndexReader.open(getIndexDir())));
+OG>      return indexSearcher.search(query, sort);
+OG>   }
+
+OG> */
+
+OG> This solution does great work saving a memory and in case of
+OG> relatively search resultsets it's almost as fast as the default
+OG> implementation. Note that this solution is ready only for single-field
+OG> sorting currently.
+
+OG> Best regards,
+OG> Artem
+
+OG>> This is unlikely to work well/fast.  It will depend on the
+OG>> size of the index (not in terms of the number of docs, but its
+OG>> physical size), the number of queries/second and desired query
+OG>> latency.  If you can wait 10 seconds to get a query and if only a
+OG>> few queries are hitting the server at any one time, then you may
+OG>> be Ok.  Having things be up to date with non-relevancy sorting
+OG>> will be quite tough.  FieldCache will consume some RAM.  Warming
+OG>> it up will take some number of seconds.  Re-opening an
+OG>> IndexSearcher after index changes will also cost you a bit of time.
+
+OG>> Consider a 64-bit server with more RAM that allowed larger
+OG>> Java heaps, and try to fit your index into RAM.
+
+OG>> Otis
+
+OG>> ----- Original Message ----
+OG>> From: Mark Miller <markrmiller@gmail.com>
+OG>> To: java-user@lucene.apache.org
+OG>> Sent: Saturday, August 12, 2006 7:45:15 PM
+OG>> Subject: Re: 30 milllion+ docs on a single server
+
+OG>> The single server is important because I think it will take a lot of
+OG>> work to scale it to multiple servers. The index must allow for close to
+OG>> real-time updates and additions. It must also remain searchable at all
+OG>> times (other than than during the brief period of single updates and
+OG>> additions). If it is easy to scale this to multiple servers please tell
+OG>> me how.
+
+OG>> - Mark
+>>> Why is a single server so important?  I can scale horizontally much
+>>> cheaper
+>>> than I scale vertically.
+>>>
+>>>
+>>>
+>>> On 8/11/06, Mark Miller <markrmiller@gmail.com> wrote:
+>>>>
+>>>> I've made a nice little archive application with lucene. I made it to
+>>>> handle our largest need: 2.5 million docs or so on a single server. Now
+>>>> the powers that be say: lets use it for a 30+ million document archive
+>>>> on a single server! (each doc size maybe 10k max...as small as a 1 or
+>>>> 2k) Please tell me why we are in trouble...please tell me why we are
+>>>> not. I have tested up to 2 million docs without much trouble but 30
+>>>> million...the average search will include a sort on a field as
+>>>> well...can I search 30+ million docs with a sort? Man am I worried about
+>>>> that. Maybe the server will have 8 procs and 12 billion gigs of RAM.
+>>>> Mabye. Even still, Tomcat seems to be able to launch with a max of 1.5
+>>>> or 1.6 gig of Ram in Windows. What do you think? 30 million+ sounds like
+>>>> too much of a load to me for a single server. Not that they care what I
+>>>> think...I only wrote the thing (man I hate my job, offer me a new one :)
+>>>> )...please...comments?
+>>>>
+>>>> Cheers,
+>>>>
+>>>> Miserable Mark
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>
+
+
+OG>> ---------------------------------------------------------------------
+OG>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+OG>> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+
+OG>> ---------------------------------------------------------------------
+OG>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+OG>> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+OG> ===8<===========End of original message text===========
+
+
+
+
+
+
+-- 
+Best regards,
+ Artem                            mailto:artvas@gmail.com
+===8<===========End of original message text===========
+
+
+
+-- 
+Best regards,
+ Artem                            mailto:artvas@gmail.com
+

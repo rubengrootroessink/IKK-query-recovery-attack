@@ -1,0 +1,81 @@
+FROM: Robert Watkins <rwatk...@foo-bar.org>
+SUBJECT: stemmed search and exact match on "same" field
+DATE: 14 Aug 2006
+
+I've been puzzling this one for a while now, and can't figure it out. 
+The idea is to allow stemmed searches and exact matches (tokenized, but 
+unstemmed phrase searches) on the same field. The subject of this email 
+had "same" in quotes, because it's from the search-client perspective 
+that the same field is being searched, whereas the implementation may be 
+different.
+
+I have actually implemented a solution whereby content that will require 
+searching with both stemmed and unstemmed queries is put into two 
+separate fields, one named (e.g.) "field" and the other 
+"UNSTEMMED_field". What this requires, however, is a custom query parser 
+that can pick out the phrase portions of a query (arbitrarily complex) 
+and shunt them to the "UNSTEMMED_" version of the required field (with 
+checks that they exist, etc.), the rest of the query being applied to
+the stemmed version of the field.
+
+What I would like, however, is to be able to allow the search client to
+use QueryParser, but I can't see how that's possible, given that a mixed
+query (including term and phrase portions) can be passed to the parser
+and only one Analyzer can be applied.
+
+Assuming that the search client, in building a query, can pull out the 
+phrase portions of a more complex query, and apply a different (i.e.
+non-
+stemming analyzer) to those portions, the question of the field would
+remain: unless I use the separate field method outlined above, the 
+field in the index is going to have stemmed tokens, unstemmed tokens
+or both. The latter I tried as an experiment, which seemed interesting,
+but turned out to be a brick wall. There may be a way through the wall,
+but I can't see it.
+
+Using the very useful "The quick brown fox jumped over the lazy dogs.",
+I created an index of one document and indexed the content in a single
+field.  The text is passed through the StandardTokenizer, StandardFilter
+and LowerCaseFilter.  Then, a custom filter creates a stemmed version of
+each Token (using SpellFilter and PorterStemmereFilter), and adds that
+at
+the same position as the unstemmed Token, with a token type of STEMMED;
+I also played with the start and end offsets. The result is:
+
+1: [the:0->3:<ALPHANUM>] [the:0->0:STEMMED] 
+2: [quick:4->9:<ALPHANUM>] [quick:0->0:STEMMED] 
+3: [brown:10->15:<ALPHANUM>] [brown:0->0:STEMMED] 
+4: [fox:16->19:<ALPHANUM>] [fox:0->0:STEMMED] 
+5: [jumps:20->25:<ALPHANUM>] [jump:0->0:STEMMED] 
+6: [over:26->30:<ALPHANUM>] [over:0->0:STEMMED] 
+7: [the:31->34:<ALPHANUM>] [the:0->0:STEMMED] 
+8: [lazy:35->39:<ALPHANUM>] [lazi:0->0:STEMMED] 
+9: [dogs:40->44:<ALPHANUM>] [dog:0->0:STEMMED]
+
+But as I poke around it appears that there's no way for me to use this
+information from the index when searching (or using something like
+a HitCollector) to either restrict a search only to the tokens in the 
+first position (i.e. the unstemmed ones) or to ignore the tokens of type
+STEMMED. Or am I missing something obvious? (I am also concerned that
+this will skew the scoring.)
+
+While I would like the queries
+
+     +fox +dog
+     "jumps over the lazy dogs"
+
+to match, the following should not match:
+
+     "jump over the lazy dog"
+
+because in my world, the quotes demand an exact match.
+
+Any ideas would be appreciated.
+-- Robert
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

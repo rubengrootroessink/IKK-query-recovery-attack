@@ -1,0 +1,119 @@
+FROM: "Karsten Konrad" <Karsten.Kon...@xtramind.com>
+SUBJECT: AW: Search for similar terms
+DATE: 2 Jun 2003
+
+
+
+Hi,
+
+the expensive part of the algorithm is the comparison
+of two terms using Levenshtein edit distance which is 
+done for all terms - with possibly horrible results for 
+performance on large indexes.
+
+With:
+
+  TermEnum enum = reader.terms(new Term(field, start));
+
+you get a term enumerator that starts at the given start prefix.
+
+Use this to compute a term enumerator that starts near the
+term(s) you are looking for. In the termCompare method,
+you should make sure that the prefix is the same and that
+the length of the terms to compare is not too different.
+
+Like, e.g.:
+
+    if ((field == term.field()) && target.startsWith(start)) {
+      int targetlen = target.length();
+
+      if (Math.abs(textlen - targetlen) < 5) {
+        int dist = editDistance(text, target, textlen, targetlen);
+
+        distance = 1 - ((double)dist / (double)Math.min(textlen, targetlen));
+
+
+The modification I propose here has some downsides - if a typo
+occures at the beginning of a word, you will not get a proper
+result.
+
+I am not sure on this, but I think that term enumeration could be
+much more efficient for purposes like this if the terms(Term t) method 
+would only enumerate terms of the same field as t. As far as I
+understand this comment, the enumeration goes over all terms
+after t:
+
+  /** Returns an enumeration of all terms after a given term.
+    The enumeration is ordered by Term.compareTo().  Each term
+    is greater than all that precede it in the enumeration.
+   */
+  public abstract TermEnum terms(Term t) throws IOException;
+
+I haven't found a way to stop the enumeration once I am sure that
+the input term can not match any more :)
+
+Regards,
+
+Karsten
+
+
+
+
+
+
+
+
+
+
+-----Ursprüngliche Nachricht-----
+Von: Eric Jain [mailto:Eric.Jain@isb-sib.ch]
+Gesendet: Montag, 2. Juni 2003 13:17
+An: Karsten Konrad
+Cc: Lucene Users List
+Betreff: Re: Search for similar terms
+
+
+> have a look at the FuzzyTermEnum class in Lucene.
+
+
+The FuzzyTermEnum class is truely useful... if I could get it to be a
+bit faster. By faster I mean something in the order of one second for a
+half gigabyte index; currently the best I get is five seconds.
+
+
+What I am trying to accomplish:
+
+- If a query does not yield any results, choose and display out of all
+similar terms the one which occurs most often in the index.
+
+
+What I have tried so far:
+
+- Required first three characters to match exactely, excluded from
+similarity search (time reduced from 15s to 5s).
+- Increased FUZZY_THRESHOLD to 1.75 (no significant effect on time).
+- Only executed termCompare for terms with a higher frequency than the
+best matching term seen so far (no effect)
+
+
+Observations:
+
+- Time seems to be independant of the frequency of a term.
+
+
+Any further ideas would be greatly appreciated!
+
+Also (dear committers...), it would be great if FuzzyTermEnum could be
+subclassed, rather than having to resort to copy paste (the class is
+final).
+
+
+--
+Eric Jain
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,125 @@
+FROM: Justin Swanhart <greenl...@gmail.com>
+SUBJECT: Re: Index in RAM - is it realy worthy?
+DATE: 28 Nov 2004
+
+My indexes are stored on a NetApp filter via NFS.  The indexer process
+updates the indexes over NFS.  I have multiple indexes.  My search
+process determines if the nfs indexes have been updated, and if they
+have, then loads the index into a RAMDirectory.   RAMDirectory is of
+course much faster than searching over NFS.  This way, I can also have
+multiple search servers running easily.  The drawback of course is
+startup time.  It takes a few minutes to start each search server
+because it has to load the data into memory.  RAMDirectory also seems
+to be kind of memory inneficient, using a lot more memory than the
+data actually consumes on disk.
+
+
+On Wed, 24 Nov 2004 14:26:40 -0800, Jonathan Hager <jhager@gmail.com> wrote:
+> When comparing RAMDirectory and FSDirectory it is important to mention
+> what OS you are using.  When using linux it will cache the most recent
+> disk access in memory.  Here is a good article that describes its
+> strategy: http://forums.gentoo.org/viewtopic.php?t=175419
+> 
+> The 2% difference you are seeing is the memory copy.  With other OSes
+> you may see a speed up when using the RAMDirectory, because not all
+> OSes contain a disk cache in memory and must access the disk to read
+> the index.
+> 
+> Another consideration is there is currently a 2GB limitation with the
+> size of the RAMDirectory.  Indexes over 2GB causes a overflow in the
+> int used to create the buffer.  [see int len = (int) is.length(); in
+> RamDirectory]
+> 
+> I ended up using RAM directory for a very different reason.  The index
+> is 1 to 2MB and is rebuilt every few hours.  It takes 3 to 4 minutes
+> to query the database and rebuild the index.  But the search should be
+> available 100% of the time.  Since the index is so small I do the
+> following:
+> 
+> on server startup:
+> - look for semaphore, if it is there delete the index
+> - if there is no index, build it to FSdirectory
+> - load the index from FSDirectory into RAMDirectory
+> 
+> on reindex:
+> - create semaphore
+> - rebuild index to FSDirectory
+> - delete semaphore
+> - load index from FSDirecttory into RAMDirectory
+> 
+> to search:
+> - search the RAMDirectory
+> 
+> RAMDirectory could be replaced by a regular FSDirectory, but it seemed
+> silly to copy the index from disk to disk, when it ultimately needs to
+> be in memory.
+> 
+> FSDirectory could be replaced by a RAMDirectory, but this means that
+> it would take the server 3 to 4 minutes longer to startup every time.
+> By persisting the index, this time would only be necessary if indexing
+> was interrupted.
+> 
+> Jonathan
+> 
+> On Mon, 22 Nov 2004 12:39:07 -0800, Kevin A. Burton
+> 
+> 
+> <burton@newsmonster.org> wrote:
+> > Otis Gospodnetic wrote:
+> >
+> > >For the Lucene book I wrote some test cases that compare FSDirectory
+> > >and RAMDirectory.  What I found was that with certain settings
+> > >FSDirectory was almost as fast as RAMDirectory.  Personally, I would
+> > >push FSDirectory and hope that the OS and the Filesystem do their share
+> > >of work and caching for me before looking for ways to optimize my code.
+> > >
+> > >
+> > Yes... I performed the same benchmark and in my situation RAMDirectory
+> > for searches was about 2% slower.
+> >
+> > I'm willing to bet that it has to do with the fact that its a Hashtable
+> > and not a HashMap (which isn't synchronized).
+> >
+> > Also adding a constructor for the term size could make loading a
+> > RAMDirectory faster since you could prevent rehash.
+> >
+> > If you're on a modern machine your filesystme cache will end up
+> > buffering your disk anyway which I'm sure was happening in my situation.
+> >
+> > Kevin
+> >
+> > --
+> >
+> > Use Rojo (RSS/Atom aggregator).  Visit http://rojo.com. Ask me for an
+> > invite!  Also see irc.freenode.net #rojo if you want to chat.
+> >
+> > Rojo is Hiring! - http://www.rojonetworks.com/JobsAtRojo.html
+> >
+> > If you're interested in RSS, Weblogs, Social Networking, etc... then you
+> > should work for Rojo!  If you recommend someone and we hire them you'll
+> > get a free iPod!
+> >
+> > Kevin A. Burton, Location - San Francisco, CA
+> >        AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+> > GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

@@ -1,0 +1,76 @@
+FROM: Steven Rowe <sar...@syr.edu>
+SUBJECT: Re: Optimize not deleting all files
+DATE: 4 Feb 2005
+
+Hi Patricio,
+
+Is it the case that the "old index files" are not removed from session to
+session, or only within the same session?  The discussion below pertains to
+the latter case, that is, where the "old index files" are used in the same
+process as the files replacing them.
+
+I was having a similar problem, and tracked the source down to IndexReaders
+not being closed in my application.  
+
+As far as I can tell, in order for IndexReaders to present a consistent
+view of an index while changes are being made to it, read-only copies
+of the index are kept around until all IndexReaders using them are
+closed.  If any IndexReaders are open on the index, IndexWriters first
+make a copy, then operate on the copy.  If you track down all of these
+open IndexReaders and close them before optimization, all of the
+"old index files" should be deleted.  (Lucene Gurus, please correct this
+if I have misrepresented the situation).
+
+In my application, I had a bad interaction between IndexReader caching,
+garbage collection, and incremental indexing, in which a new IndexReader
+was being opened on an index after each indexing increment, without
+closing the already-opened IndexReaders.
+
+On Windows, operating-system level file locking caused by IndexReaders
+left open was disallowing index re-creation, because the IndexWriter
+wasn't allowed to delete the index files opened by the abandoned
+IndexReaders.
+
+In short, if you need to write to an index more than once in a single
+session, be sure to keep careful track of your IndexReaders.
+
+Hope it helps,
+Steve
+
+Patricio Keilty wrote:
+> Hi Otis, tried version 1.4.3 without success, old index files still 
+> remain in the directory.
+> Also tried not calling optimize(), and still getting the same behaviour, 
+> maybe our problem is not related to optimize() call at all.
+> 
+> --p
+> 
+> Otis Gospodnetic wrote:
+> 
+>> Get and try Lucene 1.4.3.  One of the older versions had a bug that was
+>> not deleting old index files.
+>>
+>> Otis
+>>
+>> --- yahootintin.1247688@bloglines.com wrote:
+>>
+>>
+>>> Hi,
+>>>
+>>> When I run an optimize in our production environment, old index are
+>>> left in the directory and are not deleted. 
+>>> My understanding is that an
+>>> optimize will create new index files and all existing index files
+>>> should be
+>>> deleted.  Is this correct?
+>>>
+>>> We are running Lucene 1.4.2 on Windows. 
+>>>
+>>> Any help is appreciated.  Thanks!
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

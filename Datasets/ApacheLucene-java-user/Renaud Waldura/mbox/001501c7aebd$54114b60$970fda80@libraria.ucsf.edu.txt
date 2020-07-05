@@ -1,0 +1,169 @@
+FROM: "Renaud Waldura" <renaud.wald...@library.ucsf.edu>
+SUBJECT: RE: Wildcard query with untokenized punctuation (again)
+DATE: 14 Jun 2007
+
+Thank you for this crystal-clear explanation Mark!
+
+> Are you sure you need a PhraseQuery and not a Boolean 
+> query of Should clauses?
+
+Excellent question. What's the requirement, hey? Well, the requirement is to
+find documents referring to "annanicole smith", "anna smith" and "annaliese
+smith" etc. when users enter "smith,ann*". Right now nothing is returned. 
+
+Now, it can be argued whether it should be a phrase query or not. What does
+a user expect when searching for <<smith,ann*>>? In our application, this
+comma-separated format is used in documents metadata, so I think users
+expect an exact match, hence a phrase query. (I'll confirm with the PM.)
+
+> I don't think the support would be that difficult (use a wildcard 
+> term enumerator to correctly fill out a MultiPhraseQuery), but it 
+> might take some thought to get the QueryParser to act as you want 
+> (generate a PhraseQuery or MultiPhraseQuery when it sees <<smith ann*>>).
+
+Indeed. This is what I'm struggling with. How would I do that?
+
+I have also found
+http://www.nabble.com/Phrase-queries-with-wildcards-tf2748584.html#a7668492
+which discusses precisely this issue: how to get QueryParser to generate
+MultiPhraseQueries. Got some good ideas from it, but unfortunately no
+complete solution. I'll keep on hacking.
+
+--Renaud
+ 
+
+-----Original Message-----
+From: Mark Miller [mailto:markrmiller@gmail.com] 
+Sent: Thursday, June 14, 2007 12:07 PM
+To: java-user@lucene.apache.org
+Subject: Re: Wildcard query with untokenized punctuation (again)
+
+All depends on what you are looking for. Ill try and give a hint as to what
+is going on now:
+
+When the QueryParser parsers <<smith,ann>> it will shove that whole piece to
+the analyzer. Your analyzer returns two tokens: smith and ann. When the
+QueryParser sees that more than one token is returned from a piece that was
+fed to the analyzer, it makes a PhraseQuery with the each of the returned
+tokens. Remember that the QueryParser feeds the analyzer in pieces, and then
+creates queries based on the number of token produced from the piece (if the
+piece even goes to the analyzer).
+
+Since you will be preprocessing the query, the query parser is going to be
+parsing <<smith ann*>> which causes it to feed the analyzer smith and then
+ann*...neither of these pieces produce more than one token (ann* doesnt even
+go to the analyzer), so no PhraseQuery is produced. Instead you will produce
+a BooleanQuery with the term smith and the wildcard query ann*, both with an
+occur of whatever your default operator is.
+
+One thing I am wondering is if you even really want the query to be a
+PhraseQuery or if your just accepting the behavior you getting from the
+QueryParser. Right now, PhraseQuery's do not support wildcards (nor do
+MultiPhraseQuery's). I don't think the support would be that difficult (use
+a wildcard term enumerator to correctly fill out a MultiPhraseQuery), but it
+might take some thought to get the QueryParser to act as you want (generate
+a PhraseQuery or MultiPhraseQuery when it sees <<smith ann*>>).
+
+Are you sure you need a PhraseQuery and not a Boolean query of Should
+clauses?
+
+- Mark
+
+On 6/14/07, Renaud Waldura <renaud.waldura@library.ucsf.edu> wrote:
+>
+> Thanks guys, I like it! I'm already applying some regexps before query 
+> parsing anyway, so it's just another pass.
+>
+> Now, I'm not sure how to do that without breaking another QP feature 
+> that I kind of like: the query <<smith,ann>> is parsed to 
+> PhraseQuery("smith ann").
+> And that seems right, from a user standpoint.
+>
+> In fact, considering this, I realize <<smith,ann*>> should be parsed 
+> to MultiPhraseQuery("smith", "ann*"), not <<+smith +ann*>> as I said
+earlier.
+>
+> Brrrr. Getting hairy. Any hope?
+>
+> --Renaud
+>
+>
+>
+> -----Original Message-----
+> From: Mark Miller [mailto:markrmiller@gmail.com]
+> Sent: Thursday, June 14, 2007 6:43 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: Wildcard query with untokenized punctuation (again)
+>
+> Gotto agree with Erick here...best idea is just to preprocess the 
+> query before sending it to the QueryParser.
+>
+> My first thought is always to get out the sledgehammer...
+>
+> - Mark
+>
+> Erick Erickson wrote:
+> > Well, perhaps the simplest thing would be to pre-process the query 
+> > and make the comma into a whitespace before sending anything to the 
+> > query parser. I don't know how generalizable that sort of solution 
+> > is in your problem space though....
+> >
+> > Best
+> > Erick
+> >
+> > On 6/13/07, Renaud Waldura <renaud.waldura@library.ucsf.edu> wrote:
+> >>
+> >> My very simple analyzer produces tokens made of digits and/or 
+> >> letters only.
+> >> Anything else is discarded. E.g. the input "smith,anna" gets 
+> >> tokenized as
+> >> 2
+> >> tokens, first "smith" then "anna".
+> >>
+> >> Say I have indexed documents that contained both "smith,anna" and 
+> >> "smith,annanicole". To find them, I enter the query <<smith,ann*>>.
+> >> The stock Lucene 2.0 query parser produces a PrefixQuery for the 
+> >> single token "smith,ann". This token doesn't exist in my index, and 
+> >> I don't get a match.
+> >>
+> >> I have found some references to this:
+> >>
+> >> http://www.nabble.com/Wildcard-query-with-untokenized-punctuation-t
+> >> f3
+> >> 378386
+> >>
+> >> .
+> >> html
+> >> but I don't understand how I can fix it. Comma-separated terms like 
+> >> this can appear in any field; I don't think I can create an 
+> >> untokenized field.
+> >>
+> >> Really what I would like in this case is for the comma to be 
+> >> considered whitespace, and the query to be parsed to <<+smith
+> >> +ann*>>. Any way I can do that?
+> >>
+> >> --Renaud
+> >>
+> >>
+> >>
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

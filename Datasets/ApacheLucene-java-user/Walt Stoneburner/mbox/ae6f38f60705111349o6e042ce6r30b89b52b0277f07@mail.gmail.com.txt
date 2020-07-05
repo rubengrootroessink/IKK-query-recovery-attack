@@ -1,0 +1,196 @@
+FROM: "Walt Stoneburner" <walt.stonebur...@gmail.com>
+SUBJECT: Mixing Case and Case-Insensitive Searching
+DATE: 11 May 2007
+
+Time to give a little something back to the Lucene community, even if
+it's just a little knowledge for the maintainers...
+
+Back on 17-Apr-2007 (for those searching the archives), I expressed a
+need to match on queries using an intermix of case-sensitive with
+case-insensitive terms.
+
+The example that I cited was the word LET, which is an acronym when it
+appears in uppercase, and extremely common word otherwise, such that
+it appears in a large bulk of documents as a false positive,
+especially when one tries this query: "company LET"~10
+
+
+Erick Erickson had a fantastic idea to prefix a token with a dollar
+sign to signify that was an acronym and do a little translating back
+and forth.
+
+Chris "Hoss" Hostetter suggested a "customized bastard stepchild of
+StopFilter and LowercaseFiltter", doing processing based on whether
+something was an acronym or not.
+
+
+However, in producing a concrete example for the sake of discussion, I
+neglected to indicate that it was the mixing of case-sensitive and
+case-insensitive matching in a single Lucene field that I was after,
+not acronyms in general.
+
+Turns out there was no way to know an acronym list up front, and worse
+yet, I'd be searching for people's names... some foreign, which also
+happened to be stop words in English.
+
+
+
+Thanks to both Erick and Hoss's input, I was actually able to develop
+a working hybrid solution!  And, I'd like to share a smidge bit of the
+technical part on the off chance such a thing would be valuable to
+other people.
+
+I can now search for things like "+company +$LET" and case-insensitive
+match on 'company' while doing a case-sensitive match on 'LET',
+ignoring other cases of 'let'.
+
+Warning: what follows is a high-level technical walk-thru of how to
+bastardize your Lucene .jar file to make the above possible.  Coding
+skills required.
+
+
+STEP ZERO:  Go read the Lucene Tutorial by Steven J. Owens at
+http://darksleep.com/lucene/ -- this is the best walk through of the
+Lucene classes that I've yet to encounter.  It starts you off assuming
+zero knowledge on your part, goes through no specific implementation
+details, and addresses the responsibilities and relationships of the
+Lucene classes in such a way that there's no forward references in the
+discussion.
+
+In this tutorial he stresses not once, not twice, but three times that
+the same Analyzer that is used to build an index -must- also be used
+when performing a Query.  There is great detail explaining why this is
+so.
+
+However, in order to get our magic to work, we need to violate this
+rule in a very clever way.
+
+
+STEP ONE: Building an index that has both case-sensitive and
+case-insensitive tokens in it.
+
+As a document is ingested and turned into a stream of tokens, we want
+to do something different than the StandardAnalyzer.  For each token
+encountered, we want to emit two tokens into the index, both at the
+same physical position: one is the case-sensitive token, the other is
+the case-insensitive token.
+
+We accomplish this by building our own class derived Analyzer, though
+we don't do the LowerCaseFilter or the StopFilter steps.  Instead, we
+call a new custom filter that we'll write.
+
+It creates a token, unchanged, and prefixes a dollar sign on the front
+as-is.  It also creates a lower-cased version, which is used for the
+case insensitive.
+
+While it's common to think of filters as tossing out tokens, they can
+also be used to inject extra ones.  A reasonable way of doing this can
+be found on page 130 of the rather dated book Lucene In Action (ISBN
+1-932394-28-1) using the synonym example as a template.
+
+Using Luke, it's possible to verify that indeed that two tokens make
+it into the index.
+
+
+STEP TWO:  Being able to query with dollar signs.
+
+This step is where things get complicated.  It turns out that
+StandardAnalyzer, which uses the StandardTokenizer, throws away dollar
+signs.  So, it doesn't matter how many you type in your query, they
+all vanish, never giving you the opportunity to do anything with them
+downstream.
+
+By luck, this wasn't a problem in step one.  Any dollar signs in the
+query are thrown away, and it's only after we construct the custom
+token is one prepended.  Which, as luck would turn out, is exactly the
+format we want anyhow.
+
+It also turns out, though, that we can't use the special analyzer we
+just built in step one, because it's spewing two tokens for every one
+provided.  If a document contained only "let" and we queries for
+"+LET", then re-using the tokenizer would produce a query that looked
+like "+let +$LET", and since the latter term doesn't appear in the
+document, we won't get a hit when we should.
+
+Consequently, we've got three problems to solve before this all ties
+together nicely.
+
+First, we need to build a new Analyzer for queries.  It needs to take
+a special tokenizer that can handle dollar signs  ...more on that in a
+minute...
+
+Second, we need to run it's output through a new custom filter the
+conditionally converts a term to lowercase or not.
+
+This is easy, because if the token's termText() starts with a dollar
+sign, we leave it alone.  Otherwise, we lowercase the token.
+
+Follow that...  If we type "$LET" it searches for "$LET", but if we
+type "LET" it searches for "let".  Anything that isn't flagged with
+the dollar sign is converted to lowercase.  This nicely fits the
+syntax Erick suggested, plus it works for everything without the need
+to know the acronyms up front.  "Let" becomes "let", and "$Let" stays
+"$Let" which is different from "$LET".
+
+The third problem is the ugly one... making the tokenizer handle
+dollar signs.  When Hoss was talking about customized, bastard
+stepchildren, he wasn't kidding.
+
+We're actually going to have to go inside Lucene and twiddle the
+grammars for the Lucene parser and tokenizer.  This requires a little
+bit of knowledge of JavaCC, because you're not modifying the source,
+but the .jj files, which are used to generate the .java files.
+
+In the QueryParser.jj file, we need to let the tokenizer know a term
+can start with a dollar sign, so "$" has to be added to the end of the
+TERM_CHAR line (just like - and + are).
+
+Next we copy the StandardTokenizer.jj file to our own dollar aware
+version, making a new class (replace StandardTokenizer with the class
+name of your choice throughout the file).  Now we teach it that an
+optional dollar sign can appear before certain tokens.  Here's how.
+
+In front of the expressions for ALPHANUM, APOSTROPHE, ACRONYM,
+COMPANY, EMAIL, HOST, and NUM we add (["$"])? which is the JavaCC way
+of doing regexs.  The dollar sign now means that a new case-sensitive
+token is starting.
+
+Of course, you'll have to modify the build.xml file for Lucene to add
+your special class right after the StandardTokenizer.jj rule, the
+jjdoc rule, and the clean-javacc rule.  Then rebuild with  ant javacc
+and then  ant  to make a new .jar file, which you'll then use with
+your software.
+
+
+Bringing it all together, it's now possible to user your new query
+version token analyzer with the QueryParser.  And calling .parse()
+with dollar sign prefixed strings will search for exact-case matches,
+where omitting it works like the regular old Lucene we all know and
+love.
+
+The down side...?  The index has twice as many tokens.
+
+
+Given all of the Lucene internal code is new to me, I can't promise
+that I've done things in the most optimal fashion or that I haven't
+introduced some subtle problem.
+
+But from what I can tell using hand crafted sample documents,
+ingesting, and inspecting them with Luke, while stepping through
+source looking at generated queries, it all seems to be working
+perfectly.
+
+I'd love to see a formal syntax like this officially enter the Lucene
+standard query language someday.
+
+If someone can figure point me at how to do this without twiddling
+Lucene's code directly, I'd be happy to contribute the modification.
+
+-Walt Stoneburner
+ http://www.wwco.com/~wls/blog/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

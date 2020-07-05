@@ -1,0 +1,257 @@
+FROM: Maarten_D <maarten.dir...@gmail.com>
+SUBJECT: Re: Best strategy for reindexing large amount of data
+DATE: 8 Oct 2009
+
+
+Yes it does. Thanks for the tips. I'm going to do some experimenting, and see
+if I can post some results here.
+
+Regards,
+Maarten
+
+
+Jake Mannix wrote:
+> 
+> Hi Maarten,
+> 
+>   Five minutes is not tremendously frequently, and I imagine should be
+> pretty
+> fine, but again: it depends on how big your index is, how fast your
+> grandfathering
+> events are trickling in, how fast your new events are coming in, and how
+> heavy
+> your query load is.
+> 
+>   All of those factors can play a role, but in general you can
+> accomodate them by tweaking the one of those factors you have control
+> over:
+> the grandfathering rate.  If performance is bad: lower the rate!
+> 
+>   And if you do need to open your indexes more frequently, if you're using
+> IndexReader.reopen(), it should help, as it'll only reload the newer
+> segments
+> (including what's recently been deleted).
+> 
+>   Does that make sense?
+> 
+>   -jake
+> 
+> On Wed, Oct 7, 2009 at 2:30 PM, Maarten_D <maarten.dirkse@gmail.com>
+> wrote:
+> 
+>>
+>> Hi Jake,
+>> Thanks for your answer. I hadn't realised that doing the updates in
+>> reverse
+>> chronological order actually plays well with the IO cache and the way
+>> Lucene
+>> writes its indices to disk. Good to hear.
+>>
+>> One question though, if you don't mind: you say that updating can work as
+>> long as I don't reopen my index all too often. Problem is, since we're
+>> constantly updating the index with new info, we're also reopening it very
+>> frequently to make the new info appear in query results. Would that
+>> disqualify the update method? And what do you mean by "not very
+>> frequently".
+>> Is every 5 min too much?
+>>
+>> Thanks again,
+>> Maarten
+>>
+>>
+>> Jake Mannix wrote:
+>> >
+>> > I think a Hadoop cluster is maybe a bit overkill for this kind of
+>> > thing - it's pretty common to have to do "grandfathering" of an
+>> > index when you have new features, and just doing it in place
+>> > with IndexWriter.update() can work just fine as long as you
+>> > are not very frequently reopening your index.
+>> >
+>> > The fact that you want to update in reverse chronological order
+>> > means good things in terms of your index: I'm assuming you
+>> > don't have a fully optimized index, in which case the newer
+>> > documents are going to live in the smallest segments, so
+>> > updating those documents in reverse order will add a lot
+>> > of deletes to those segments, and then write new segments
+>> > to disk with those updated docs in it.  As merges happen, the
+>> > newer deletes will get resolved as the younger segments
+>> > merge together, gradually working your way up to the
+>> > biggest segments - the whole time pretty much only deleting
+>> > from one segment at a time.
+>> >
+>> > This should play pretty nicely with your system's IO cache,
+>> > so as long as  you're not hammering your CPU with
+>> > excessive indexing rate (and it looks like you're throttled
+>> > on some outside-of-lucene process anyways, so you're not
+>> > indexing as fast as you could: so just make sure you're not
+>> > being too bursty about it [unless the burstiness is during
+>> > off-hours at night]).
+>> >
+>> > But play with it!  Try doing in place in your test / performance
+>> > cluster, and see what your query latency is like while running
+>> > at a couple of different update rates, in comparison to baseline.
+>> > You'll probably find that that even pretty fast indexing doesn't
+>> > degrade performance if a) you're not already close to being
+>> > at CPU saturation, and b) you're not reopening your disk index
+>> > too terribly frequently.
+>> >
+>> >   -jake
+>> >
+>> > On Wed, Oct 7, 2009 at 11:35 AM, Jason Rutherglen <
+>> > jason.rutherglen@gmail.com> wrote:
+>> >
+>> >> Maarten,
+>> >>
+>> >> Depending on the hardware available you can use a Hadoop cluster
+>> >> to reindex more quickly. With Amazon EC2 one can spin up several
+>> >> nodes, reindex, then tear them down when they're no longer
+>> >> needed. Also you can simply update in place the existing
+>> >> documents in the index, though you'd need to be careful not to
+>> >> overload the server with indexing calls such that queries would
+>> >> not be responsive. Number 3 (batches) could be used to create an
+>> >> index on the side (like a Solr master), record deletes into a
+>> >> file, then merge the newly created index in, apply deletes, then
+>> >> commit to see the changes.
+>> >>
+>> >> There's advantages and disadvantages to each strategy.
+>> >>
+>> >> -J
+>> >>
+>> >> On Wed, Oct 7, 2009 at 11:15 AM, Maarten_D <maarten.dirkse@gmail.com>
+>> >> wrote:
+>> >> >
+>> >> > Hi,
+>> >> > I've searched the mailinglists and documentation for a clear answer
+>> to
+>> >> the
+>> >> > following question, but haven't found one, so here goes:
+>> >> >
+>> >> > We use Lucene to index and search a constant stream of messages: our
+>> >> index
+>> >> > is always growing. In the past, if we added new features to the
+>> >> software
+>> >> > that required the index to be rebuilt (adopting an
+>> accent-insensitive
+>> >> > analyzer for instance, or adding a field to every lucene Document),
+>> we
+>> >> would
+>> >> > build an entirely new index out of all the messages we had stored,
+>> and
+>> >> then
+>> >> > swap out the old one with the new one. Recently, we've had a couple
+>> of
+>> >> > clients whose message stores are so large that our strategy is no
+>> >> longer
+>> >> > viable: building a new index from scratch takes, for various reasons
+>> >> not
+>> >> > related to lucene, upwards of 48 hours, and that period will only
+>> >> increase
+>> >> > when client message stores grow bigger and bigger.
+>> >> >
+>> >> > What I would like is to update the index piecemeal, starting with
+>> the
+>> >> most
+>> >> > recently added document (ie the most recent messages, since clients
+>> >> usually
+>> >> > care about those the most). Then, most of the users will see the new
+>> >> > functionality in their searches fairly quickly, and the older stuff,
+>> >> which
+>> >> > doesn't matter so much, will get reindexed at a later date. However,
+>> >> I'm
+>> >> > unclear as to what would be the best/most performant way to
+>> accomplish
+>> >> this.
+>> >> >
+>> >> > There are a few strategies I've thought of, and I was wondering if
+>> >> anyone
+>> >> > could help me out as to which would be the best idea (or if there
+>> are
+>> >> other,
+>> >> > better methods that I haven't thought of). I should also say that
+>> every
+>> >> > message in the system has a unique identifier (guid) that can be
+>> used
+>> >> to
+>> >> see
+>> >> > whether two different lucene documents represent the same message.
+>> >> >
+>> >> > 1. Simply iterate over all message in the message store, convert
+>> them
+>> >> to
+>> >> > lucene documents, and call IndexWriter.update() for each one (using
+>> the
+>> >> > guid).
+>> >> >
+>> >> > 2. Iterate over all messages in small steps (say 1000 at a time),
+>> and
+>> >> the
+>> >> > for each batch delete the existing documents from the index, and
+>> then
+>> >> do
+>> >> > Indexwriter.insert() for all messages (this is essentially step 1,
+>> >> split
+>> >> up
+>> >> > into small parts and with the delete and insert part batched).
+>> >> >
+>> >> > 3. Iterate over all messages in small steps, and for each batch
+>> create
+>> >> a
+>> >> > separate index (lets say a RAM index), delete all the old documents
+>> >> from
+>> >> the
+>> >> > main index, and merge the seperate index into the main one.
+>> >> >
+>> >> > 4. Same as 3, except merge first, and then remove the old
+>> duplicates.
+>> >> >
+>> >> > Any help on this issue would be much appreciated.
+>> >> >
+>> >> > Thanks in advance,
+>> >> > Maarten
+>> >> > --
+>> >> > View this message in context:
+>> >>
+>> http://www.nabble.com/Best-strategy-for-reindexing-large-amount-of-data-tp25791659p25791659.html
+>> >> > Sent from the Lucene - Java Users mailing list archive at
+>> Nabble.com.
+>> >> >
+>> >> >
+>> >> >
+>> ---------------------------------------------------------------------
+>> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >
+>> >> >
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>> >
+>>
+>> --
+>> View this message in context:
+>> http://www.nabble.com/Best-strategy-for-reindexing-large-amount-of-data-tp25791659p25794821.html
+>> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> 
+> 
+
+-- 
+View this message in context: http://www.nabble.com/Best-strategy-for-reindexing-large-amount-of-data-tp25791659p25799577.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

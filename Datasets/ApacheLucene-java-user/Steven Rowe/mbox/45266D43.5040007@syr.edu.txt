@@ -1,0 +1,62 @@
+FROM: Steven Rowe <sar...@syr.edu>
+SUBJECT: Re: Case sensitive / insensitive
+DATE: 6 Oct 2006
+
+Marcus Falck wrote:
+> Any good approaches for allowing case sensitive and case insensitive
+> searches?
+>
+> Except adding an additional field and skipping the LowerCaseFilter.
+> Since this severely increases the index size (and the index already
+> is around 1 TB).
+
+Hi Marcus,
+
+How about a filter that emits two token for non-fully-lowercase tokens:
+first the original, and then the downcased version, and places both at
+the same position.  This should minimize index growth.
+
+Something like this (WARNING: Not Tested!!):
+
+-----------begin DualCaseFilter.java-------------
+
+package org.apache.lucene.analysis;
+
+import java.io.IOException;
+
+public final class DualCaseFilter extends TokenFilter {
+  String downcasedPreviousToken = null;
+
+  public DualCaseFilter(TokenStream input) {
+    super(input);
+  }
+
+  public final Token next() throws IOException {
+    if (downcasedPreviousToken != null) {
+      Token t = downcasedPreviousToken;
+      downcasedPreviousToken = null;
+      return t;
+    }
+    Token t = input.next();
+    if (t != null) {
+      String downcased = t.termText.toLowerCase();
+      if ( ! t.termText.equals(downcased)) {
+        downcasedPreviousToken = t.clone();
+        downcasedPreviousToken.termText = downcased;
+        downcasedPreviousToken.setPositionIncrement(0);
+      }
+    }
+    return t;
+  }
+}
+
+-----------end DualCaseFilter.java-------------
+
+Hope it helps,
+Steve
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

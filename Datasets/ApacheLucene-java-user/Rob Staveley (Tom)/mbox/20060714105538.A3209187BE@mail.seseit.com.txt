@@ -1,0 +1,68 @@
+FROM: "Rob Staveley (Tom)" <rstave...@seseit.com>
+SUBJECT: Date ranges - getting the approach right
+DATE: 14 Jul 2006
+
+For the sake of date ranges, I'm storing dates as YYYYMMDD in my e-mail
+indexing application. 
+
+My users typically want to limit their queries to ranges of dates, which
+include today. The application is indexing in real time.
+
+I gather I should prefer RangeQuery to ConstantScoreQuery+RangeFilter,
+because it is faster not to use a Filter. However, I sometimes have to
+combine my RangeQuery with a PrefixQuery and of course TooManyClauses
+exceptions arise, when I exceed BooleanQuery.getMaxClauseCount(), which I've
+currently left at the default 1024 value.
+
+In a year of 365 days with e-mail messages arriving every day, can I assume
+that an inclusive date range of 20050713-20060713 in a RangeQuery is going
+to contribute 365 clauses to a BooleanQuery? Can I assume that 5 years would
+mean 5 x 365 = 1825 clauses?
+
+If so, how can I figure out how expensive is it in terms of memory
+requirement to adjust the maximum clause count to deal with 5 year ranges?
+
+i.e.
+
+	// Increase the maximum clause count to cope with date ranges
+	// up to 5 years - my worst case
+	
+BooleanQuery.setMaxClauseCount(BooleanQuery.getMaxClauseCount()+1825);
+
+Do I need to consider whether this would significantly degrade performance
+too?
+
+An alternative would be to assume that my users are mostly going to ask for
+e-mail arriving within the last day, two days, week, fortnight, month,
+quarter, year, 5 years and pre-cache filters for these typical usage ranges
+every time the clock rolls over, using a CachingWrapperFilter with
+RangeFilter and to BooleanQuery that with a term query on today's date.
+
+e.g.
+
+	// Get the cache for predetermined (i.e. already cached) date range,
+
+	// which doesn't include today, because we are indexing all the
+time.
+	// These ranges were pre-cached at midnight.
+	CachingWrapperFilter wrapper = /*  ... */;
+
+	BooleanQuery dateRangeBooleanQuery = new BooleanQuery();
+	dateRangeBooleanQuery.add(
+		new ConstantScoreQuery(new RangeFilter(wrapper))
+		,BooleanClause.Occur.SHOULD
+		);
+	dateRangeBooleanQuery.add(
+		new TermQuery("20060714")	// i.e. today
+		,BooleanClause.Occur.SHOULD
+		);
+
+	BooleanQuery mainQuery = new BooleanQuery();
+	mainQuery.add(
+		dateRangeBooleanQuery
+		,BooleanClause.Occur.MUST
+		);
+
+How can I figure out how expensive is it in terms of memory requirement to
+retain CachingWrappeFilters for a set of date ranges?
+

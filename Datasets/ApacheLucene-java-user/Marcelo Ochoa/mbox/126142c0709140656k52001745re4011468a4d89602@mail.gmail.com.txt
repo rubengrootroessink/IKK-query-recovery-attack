@@ -1,0 +1,166 @@
+FROM: "Marcelo Ochoa" <marcelo.oc...@gmail.com>
+SUBJECT: Fwd: Oracle-Lucene integration (OJVMDirectory and Lucene Domain Index) - LONG
+DATE: 14 Sep 2007
+
+From: J. Delgado <jdelgado@lendingclub.com>
+Date: Sep 13, 2007 7:27 PM
+Subject: Oracle-Lucene integration (OJVMDirectory and Lucene Domain
+Index) - LONG
+To: java-dev@lucene.apache.org
+Cc: solr-dev@lucene.apache.org
+
+
+I'm very happy to announce the partial rework and extension to
+LUCENE-724 (Oracle-Lucene Integration), primarily based on new
+requirements from LendingClub.com, who commissioned the work to
+Marcelo Ochoa, the contributer of the original patch (great job
+Marcelo!). As contribution of LendingClub.com to the Lucene community
+we have posted the code on a public CVS (sourceforge) as explained
+below.
+
+Here at Lending Club ( www.lendingclub.com) we have very specific
+needs regarding the indexing of both structured and unstructured data,
+most of it transactional in nature and siting in our Oracle !0gR2 DB,
+with a highly complex schema. Our "ranking" of loans in the inventory
+includes components of exact, textual and hardcore mathematical
+calculations including time, amount and spatial constraints. This
+integration of Lucene into Oracle as a Domain Index will now allow us
+to query this inventory in real-time. Going against the Lucene index,
+created on "synthetic documents" comprised of fields being populated
+from diverse tables (user data store), eliminates the need to create
+very complex joins to link data from different tables at query time.
+This, along with the support of the full Lucene query language, makes
+this a great alternative to:
+
+Using Lucene outside the database which requires "crawling" the data
+and storing the index outside the database, loosing all the benefits
+of a fully transactional system and a secure environment.
+
+Using Oracle Text, which is very powerful but lacks the extensibility
+and flexibility that Lucene offers (for example, being able to query
+directly the index from the Java layer or implementing our our ranking
+algorithm), though to be completely fair some of it is addressed in
+the new Oracle DB 11g version. If anyone is interested in learning
+more how we are going to use this within Lending Club, please drop me
+a line. BTW, please make sure you check us out: "Lending Club (
+http://www.lendingclub.com/), the rapidly growing people-to-people
+(P2P) lending service that launched as a Facebook application in May
+2007, today announced the public availability of its services with the
+launch of LendingClub.com. Lending Club connects lenders and borrowers
+based upon shared affinities, enabling them to bypass banks to secure
+better interest rates on loans"... more about the announcement here
+http://www.sys-con.com/read/428678.htm. We have seen man entrepreneurs
+applying for loans and being helped by regular people to build their
+business with the money obtained at very low interest.
+
+OK, without further marketing stuff (sorry for that), here is the
+original note sent to me by Marcelo that summarizes all the new cool
+functionalities:
+
+OJVMDirectory, a Lucene Integration running inside the Oracle JVM is
+going one step further.
+
+This new release includes:
+
+Synchronized with latest Lucene 2.2.0 production
+Replaced in memory storage using Vector based implementation by direct
+BLOB IO, reducing memory usage for large index.
+Support for user data stores, it means you can not only index one
+column at time (limited by Data Cartridge API on 10g), now you can
+index multiples columns at base table and columns on related tabled
+joined together.
+User Data Stores can be customized by the user, it means writing a
+simple Java Class users can control which column are indexed, padding
+used or any other functionality previous to document adding step.
+There is a DefaultUserDataStore which gets all columns of the query
+and built a Lucene Document with Fields representing each database
+columns these fields are automatically padded if they have NUMBER or
+rounded if they have DATE data, for example.
+lcontains() SQL operator support full Lucene's QueryParser syntax to
+provide access to all columns indexed, see examples below.
+Support for DOMAIN_INDEX_SORT and FIRST_ROWS hint, it means that if
+you want to get rows order by lscore() operator (ascending,descending)
+the optimizer hint will assume that Lucene Domain Index will returns
+rowids in proper order avoided an inline-view to sort it.
+Automatic index synchronization by using AQ's Call Back.
+Lucene Domain Index creates extra tables named IndexName$T and an
+Oracle AQ named IndexName$Q with his storage table IndexName$QT at
+user's schema, so you can alter storage's preference if you want.
+ ojvm project is at SourceForge.net CVS, so anybody can get it and
+collaborate ;)
+Tested against 10gR2 and 11g database.
+Some sample usages:
+
+create table t2 (
+  f4 number primary key,
+  f5 VARCHAR2(200));
+create table t1 (
+  f1 number,
+  f2 CLOB,
+  f3 number,
+  CONSTRAINT t1_t2_fk FOREIGN KEY (f3)
+      REFERENCES t2(f4) ON DELETE cascade);
+create index it1 on t1(f3) indextype is lucene.LuceneIndex
+  parameters('Analyzer:org.apache.lucene.analysis
+.SimpleAnalyzer;ExtraCols:f2');
+
+alter index it1
+parameters('ExtraCols:f2,t2.f5;ExtraTabs:t2;WhereCondition:t1.f3=t2.f4;DecimalFormat:000');
+
+Lucene domain index will store f2 and f3 columns of table t1 plus f5
+of table t2.
+
+So you can query then with:
+
+ select lscore(1),f2 from t1 where lcontains(f3, 'f2:test',1) > 0;
+or
+ select lscore(1),f2 from t1 where lcontains(f3, 'f2:test and f3:[001
+to 200]',1) > 0;
+
+ select /*+ DOMAIN_INDEX_SORT */ lscore(1),f2,t2.f5
+  from t1,t2
+  where lcontains(f3, 'f2:test1 and f3:[001 to 200] and t2.f5:test2',1) > 0
+  and t1.f3=t2.f4
+  order by lscore(1) asc;
+
+In latest example Oracle's optimizer will assume that Lucene Domain
+Index will resolve first a set of rowid matching "f2:test1 and f3:[001
+to 200] and t2.f5:test2" then will direct access by by index rowid on
+table t1 and perform the join with t2.
+
+More examples and information can be found at:
+ http://dbprism.cvs.sourceforge.net/dbprism/ojvm/Readme.txt?revision=1.10&view=markup
+
+--
+Marcelo F. Ochoa
+http://marcelo.ochoa.googlepages.com/home
+
+Cheers!
+
+Joaquin Delgado, PhD
+CTO, Lending Club
+www.lendingclub.com
+
+
+
+-- 
+Marcelo F. Ochoa
+http://marceloochoa.blogspot.com/
+http://marcelo.ochoa.googlepages.com/home
+______________
+Do you Know DBPrism? Look @ DB Prism's Web Site
+http://www.dbprism.com.ar/index.html
+More info?
+Chapter 17 of the book "Programming the Oracle Database using Java &
+Web Services"
+http://www.amazon.com/gp/product/1555583296/
+Chapter 21 of the book "Professional XML Databases" - Wrox Press
+http://www.amazon.com/gp/product/1861003587/
+Chapter 8 of the book "Oracle & Open Source" - O'Reilly
+http://www.oreilly.com/catalog/oracleopen/
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

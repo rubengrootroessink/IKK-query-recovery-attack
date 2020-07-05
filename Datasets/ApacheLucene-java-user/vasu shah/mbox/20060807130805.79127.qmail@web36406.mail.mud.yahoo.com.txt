@@ -1,0 +1,70 @@
+FROM: vasu shah <vasusha...@yahoo.com>
+SUBJECT: Re: Modify index on database update
+DATE: 7 Aug 2006
+
+Thanks Michael.
+   
+  You explained it very nice. I will look into the third approach. The first and second approach
+are not feasible for me.
+   
+  Thanks again.
+  -Vasu
+
+Michael McCandless <lucene@mikemccandless.com> wrote:
+  
+> My application database can be updated outside the application also. Whenever there is
+a change in database by some other source, I want to update my index.
+> 
+> Is there any way to do so?
+> 
+> I am using Java and the database is DB2. I saw the DB2 UDF. But I have to put the jar
+inside the DB2 installation directory. I dont know how to communicate with my application/update
+index.
+
+Yes, this certainly is possible.
+
+The simplest approach would be to rebuild the entire index periodically, 
+however, this is not very efficient.
+
+A better approach is to reindex just the rows that have changed since 
+you last indexed.
+
+To do this, first, you need to implement your own method of tracking 
+which rows of which tables have changed inside DB2. Perhaps you could 
+use a timestamp column and then issue a SELECT WHERE timestamp > 
+last-index-time. Make sure last-index-time is DB2's timestamp to avoid 
+clock skew issues.
+
+Then, for each changed document, you need to add the new doc and remove 
+the old one (Lucene doesn't have a "replace document" ). Typically you 
+would index the primary key into Lucene, and then use IndexReader's or 
+IndexModifier's 'deleteDocuments(Term term)' to delete the document by 
+its primary key. Then add the new document. If you have a group of 
+documents that need re-indexing, it's best to first delete all of them, 
+and then re-add all of them (ie, bunch the deletes & adds). This gives 
+better performance.
+
+The third (and likely best, depending on tradeoffs) approach is to have 
+some sort of "push" or "triggers" coming out of DB2 that notifies you 
+whenever a row is changed. If UDF inside DB2 allows for this that would 
+be great (I don't know anything about UDF -- likely you'd need to roll 
+your own such communication coming out of DB2). Then, you re-index each 
+document when it's changed instead of polling periodically.
+
+In any case, make sure you close/re-open your IndexSearchers 
+periodically so that they see the newly deleted/added documents. And 
+make sure the lock directory is the same directory across all of your 
+processes, and, it is a directory in a locally mounted file system (ie 
+not NFS or Samba) as there known issues for those.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+ 		
+---------------------------------
+How low will we go? Check out Yahoo! Messengers low  PC-to-Phone call rates.

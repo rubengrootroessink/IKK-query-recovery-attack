@@ -1,0 +1,266 @@
+FROM: Darren Govoni <dar...@ontrenet.com>
+SUBJECT: Re: SpanQuery problem
+DATE: 15 Sep 2008
+
+Interesting thought there Erik.
+
+I guess I'm confused about the semantics of SpanFirstQuery with
+SpanNearQuery. The documentation suggests that it applies to tokenized
+fields. However, the number of different values for a given field in a
+document shouldn't affect the result set for Span queries, but it does.
+In my opinion, its a bug. I will work up a specific test to demonstrate
+the change in behavior.
+
+Darren
+
+On Mon, 2008-09-15 at 00:54 -0400, Erik Hatcher wrote:
+> Ah, ok...  so I basically replied and said "why don't you try what  
+> you're already said you were trying, because i didn't read clearly  
+> enough".  mea culpa.
+> 
+> So yeah, that is an awkward situation that Lucene doesn't currently  
+> address quite as intuitively as one might think.  Multivalued fields  
+> come in different varieties, the ones that want a continuously  
+> incrementing term position offset, and one that wants to overlay  
+> multiple values.  Seems like it could be done by being clever with the  
+> position increment and the order terms are emitted, allowing multiple  
+> valued fields to "stack".   Now am I making sense?
+> 
+> Kinda the inverse of a tee - folding multiple values together, *zip*.
+> 
+> Seems do-able... anything like this already out there?
+> 
+> Maybe somehow adding a field should make this explicit then, what to  
+> do with increments across multiple values.  Or can position increment  
+> be changed dynamically, based on the number of terms in the previous  
+> field instance, and set backwards?
+> 
+> Just rambling out loud...
+> 
+> 	Erik
+> 
+> 
+> On Sep 15, 2008, at 12:26 AM, Darren Govoni wrote:
+> 
+> > Hi Erik,
+> >
+> > I used SpanFirstQuery as well.
+> > Basically, I create SpanTermQuery for each word I want to find in
+> > succession in the word: field.
+> >
+> > I apply those to a SpanNearQuery with a slop of 1 (meaning the terms
+> > have to be next to each other - successive words) and then
+> > embed that in a SpanFirstQuery to indicate the terms should come first
+> > in the field.
+> >
+> > It does not seem to return the correct results per my example below.
+> > Documents with multiple values for the field being searched where some
+> > of the values do not match the span, the document is NOT returned.
+> >
+> > Darren
+> >
+> > On Sun, 2008-09-14 at 22:51 -0400, Erik Hatcher wrote:
+> >> SpanFirstQuery - is that what you're looking for?  A SpanOrQuery of  
+> >> an
+> >> expanded set of SpanFirstQuery's for all Terms that start with
+> >> "car" (via a TermEnum).
+> >>
+> >> However, in this specialized case where you know exactly what you  
+> >> want
+> >> to index upon (the first word of a string), then one nice solution to
+> >> consider is indexing that first word as its very own field.
+> >>
+> >>   Document 1
+> >>     word: blue bird
+> >>     word: blue card
+> >>     first_word: blue (term frequency = 2)
+> >>
+> >>   Document 2
+> >>     word: sky blue
+> >>     word: sea blue
+> >>     first_word: sea
+> >>     first_word: sky
+> >>
+> >> The tee token filter stuff would be a clever way to implement it  
+> >> via a
+> >> single tokenization pass, though not the only way.
+> >>
+> >> 	Erik
+> >>
+> >> On Sep 14, 2008, at 9:52 PM, <darren@ontrenet.com> wrote:
+> >>
+> >>> Yes, return the document, but the problem is with SpanNearQuery it
+> >>> does not return the documents I expect.
+> >>> Sorry I did not explain it well. Consider 2 documents each with
+> >>> "word" fields.
+> >>>
+> >>> Document 1
+> >>>
+> >>> word: blue bird
+> >>> word: blue car
+> >>>
+> >>> Document 2
+> >>>
+> >>> word: sky blue
+> >>> word: sea blue
+> >>>
+> >>> I want to search for 'blue' and ONLY return Document 1 as I already
+> >>> know
+> >>> that the term 'blue' MUST appear at the front of the field word:
+> >>>
+> >>> SpanNearQuery with slop of 0 or 1 won't do this if Document 1 has
+> >>> other fields
+> >>> like this.
+> >>>
+> >>> Document 1 - IS NOT FOUND WITH SPAN NEAR 0 or 1
+> >>>
+> >>> word: some blue
+> >>> word: another blue
+> >>> word: blue bird
+> >>> word: blue car
+> >>>
+> >>> Expanding the Span slop to 3 will find Document 1 above this line,
+> >>> however
+> >>> I thought the slop meant within the field terms. It seems to refer
+> >>> to the list of fields rather than terms. This is unexpected behavior
+> >>> to me. But I'm no lucene expert.
+> >>>
+> >>> Thanks for any thoughts.
+> >>>
+> >>> Darren
+> >>>
+> >>>
+> >>> darren@ontrenet.com wrote:
+> >>>> Thanks Paul. I will study your response more, as I don't fully
+> >>>> understand it yet - specifically "You'll need to expand the prefix
+> >>>> into indexed terms".
+> >>>>
+> >>>> But what I want to do is so simple I'm surprised it cannot be done.
+> >>>>
+> >>>> You are saying that I cannot find all fields across all documents
+> >>>> that begin with a string or space bounded word? Consider 1 document
+> >>>> with:
+> >>>>
+> >>>> word: blue car
+> >>>> word: red car
+> >>>> word: car door
+> >>>> word: car wheel
+> >>>>
+> >>>> Using whitespace analyzer I simply want to query all fields in all
+> >>>> documents
+> >>>> where 'car' is the at the very front of the field.
+> >>>>
+> >>>> word: car door
+> >>>> word: car wheel
+> >>>>
+> >>>> This cannot be done? I don't want to retrieve all of them and prune
+> >>>> the results myself because it will consume lots of resources.
+> >>>>
+> >>>> thanks so much!
+> >>>>
+> >>>> Darren
+> >>>>
+> >>>> On Sun Sep 14 16:36 , Paul Elschot  sent:Op Sunday 14 September
+> >>>> 2008 19:36:38 schreef Darren Govoni:
+> >>>>
+> >>>>> Hi,
+> >>>>> I am seeing odd behavior with SpanNearQuery.
+> >>>>>
+> >>>>> The problem is that with multiple fields, all fields beyond the
+> >>>>> first
+> >>>>> one 'car' are not seen by the span. I didn't think the span  
+> >>>>> meant to
+> >>>>> sets of the same field, but rather to terms within a given field.
+> >>>>>
+> >>>>> Document 1. 1 field (word)
+> >>>>>
+> >>>>> word: car
+> >>>>> word: cars
+> >>>>> word: cars wash
+> >>>>> word: cars lot
+> >>>>>
+> >>>>>
+> >>>>> SpanNearyQuery with slop of 0. Wrapped by SpanFirstQuery with slop
+> >>>>> of
+> >>>>> 1. Term query within is "word","cars*". No results found.
+> >>>>>
+> >>>>
+> >>>> There is no SpanPrefixQuery for cars* in Lucene. You'll need to
+> >>>> expand the prefix into indexed terms to create a SpanOrQuery
+> >>>> yourself. This is fairly straightforward from PrefixQuery and
+> >>>> SpanOrQuery.
+> >>>> Alternatively, have a look at the surround query parser in contrib
+> >>>> for a working example.
+> >>>>
+> >>>> Regards,
+> >>>> Paul Elschot
+> >>>>
+> >>>>
+> >>>>> If I remove the first field word: car, it works. Also, if I  
+> >>>>> increase
+> >>>>> the slop, it will return results from only the first amount of
+> >>>>> fields
+> >>>>> in the slop rather than terms within the field value.
+> >>>>>
+> >>>>> Is what I am seeing the correct behavior? Doesn't seem like it.
+> >>>>>
+> >>>>> What I am trying to do is span _within_ EACH field and match  
+> >>>>> phrases
+> >>>>> that begin with "cars*". Shouldn't be too hard to do I thought.
+> >>>>>
+> >>>>> Darren
+> >>>>>
+> >>>>>
+> >>>>> ---------------------------------------------------------------------
+> >>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>>
+> >>>>
+> >>>>
+> >>>>
+> >>>> ---------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>
+> >>>>
+> >>>>
+> >>>> ---------------------------------------------------------------------
+> >>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>>
+> >>>>
+> >>>
+> >>>
+> >>> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>>
+> >>>
+> >>>
+> >>> ---------------------------------------------------------------------
+> >>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >>> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

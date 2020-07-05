@@ -1,0 +1,63 @@
+FROM: Doug Cutting <cutt...@apache.org>
+SUBJECT: Re: indexing help
+DATE: 7 Jul 2004
+
+John Wang wrote:
+>      While lucene tokenizes the words in the document, it counts the
+> frequency and figures out the position, we are trying to bypass this
+> stage: For each document, I have a set of words with a know frequency,
+> e.g. java (5), lucene (6) etc. (I don't care about the position, so it
+> can always be 0.)
+> 
+>      What I can do now is to create a dummy document, e.g. "java java
+> java java java lucene lucene lucene lucene lucene" and pass it to
+> lucene.
+> 
+>      This seems hacky and cumbersome. Is there a better alternative? I
+> browsed around in the source code, but couldn't find anything.
+
+Write an analyzer that returns terms with the appropriate distribution.
+
+For example:
+
+public class VectorTokenStream extends TokenStream {
+   private int term;
+   private int freq;
+   public VectorTokenStream(String[] terms, int[] freqs) {
+     this.terms = terms;
+     this.freqs = freqs;
+   }
+   public Token next() {
+     if (freq == 0) {
+       term++;
+       if (term >= terms.length)
+         return null;
+       freq = freqs[term];
+     }
+     freq--;
+     return new Token(terms[term], 0, 0);
+   }
+}
+
+Document doc = new Document();
+doc.add(Field.Text("content", ""));
+indexWriter.addDocument(doc, new Analyzer() {
+   public TokenStream tokenStream(String field, Reader reader) {
+     return new VectorTokenStream(new String[] {"java","lucene"},
+                                  new int[] {5,6});
+   }
+});
+
+>       Too bad the Field class is final, otherwise I can derive from it
+> and do something on that line...
+
+Extending Field would not help.  That's why it's final.
+
+Doug
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

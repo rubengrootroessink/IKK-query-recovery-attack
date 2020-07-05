@@ -1,0 +1,106 @@
+FROM: Ken McCracken <ken.mccrac...@gmail.com>
+SUBJECT: Re: Similarity score computation documentation
+DATE: 15 Sep 2004
+
+Hi Doug,
+
+Thanks for the reply.  
+
+idf is a function of the individual terms in the query.  I think that
+the grouping in the Similarity formula would be off with it at the
+end.  It currently looks like
+    ( SUM_t in q ( tf * idf * getBoost * lengthNorm ) ) * coord * queryNorm
+whereas I think what you are describing is
+    ( SUM_t in q ( tf * idf * getBoost * lengthNorm ) ) * coord *
+queryNorm * idf
+This doesn't make sense, since idf is a function of each t in q, and
+it is outside the sum.
+
+Since coord and queryNorm are computed across the query, maybe the
+formula should then look like
+    ( SUM_t in q ( tf * idf * getBoost * lengthNorm * coord *
+queryNorm * idf ) )
+or 
+    ( SUM_t in q ( tf * idf * getBoost * lengthNorm * idf ) ) * coord
+* queryNorm
+These are equivalent formulas.  coord and queryNorm are functions of
+the entire query and can appear either inside or outside the sigma
+SUM.  I'm shaky on what would be the best or most-easily-understood
+ordering.
+
+Cheers,
+-Ken
+
+On Tue, 14 Sep 2004 14:49:00 -0700, Doug Cutting <cutting@apache.org> wrote:
+> Your analysis sounds correct.
+> 
+> At base, a weight is a normalized tf*idf.  So a document weight is:
+> 
+>   docTf * idf * docNorm
+> 
+> and a query weight is:
+> 
+>   queryTf * idf * queryNorm
+> 
+> where queryTf is always one.
+> 
+> So the product of these is (docTf * idf * docNorm) * (idf * queryNorm),
+> which indeed contains idf twice.  I think the best documentation fix
+> would be to add another idf(t) clause at the end of the formula, next to
+> queryNorm(q), so this is clear.  Does that sound right to you?
+> 
+> Doug
+> 
+> 
+> 
+> Ken McCracken wrote:
+> > Hi,
+> >
+> > I was looking through the score computation when running search, and
+> > think there may be a discrepancy between what is _documented_ in the
+> > org.apache.lucene.search.Similarity class overview Javadocs, and what
+> > actually occurs in the code.
+> >
+> > I believe the problem is only with the documentation.
+> >
+> > I'm pretty sure that there should be an idf^2 in the sum.  Look at
+> > org.apache.lucene.search.TermQuery, the inner class TermWeight.  You
+> > can see that first sumOfSquaredWeights() is called, followed by
+> > normalize(), during search.  Further, the resulting value stored in
+> > the field "value" is set as the "weightValue" on the TermScorer.
+> >
+> > If we look at what happens to TermWeight, sumOfSquaredWeights() sets
+> > "queryWeight" to idf * boost.  During normalize(), "queryWeight" is
+> > multiplied by the query norm, and "value" is set to queryWeight * idf
+> > == idf * boost * query norm * idf == idf^2 * boost * query norm.  This
+> > becomes the "weightValue" in the TermScorer that is then used to
+> > multiply with the appropriate tf, etc., values.
+> >
+> > The remaining terms in the Similarity description are properly
+> > appended.  I also see that the queryNorm effectively "cancels out"
+> > (dimensionally, since it is a 1/ square root of a sum of squares of
+> > idfs) one of the idfs, so the formula still ends up being roughly a
+> > TF-IDF formula.  But the idf^2 should still be there, along with the
+> > expansion of queryNorm.
+> >
+> > Am I mistaken, or is the documentation off?
+> >
+> > Thanks for your help,
+> > -Ken
+> > 
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> >
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

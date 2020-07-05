@@ -1,0 +1,395 @@
+FROM: "John Powers" <jpow...@configureone.com>
+SUBJECT: RE: problem updating a document: no segments file?
+DATE: 27 Jan 2006
+
+The lucene info is:
+Manifest-Version: 1.0
+Ant-Version: Apache Ant 1.6.1
+Created-By: Apache Jakarta
+
+Name: org/apache/lucene
+Specification-Title: Lucene Search Engine
+Specification-Version: 1.4.3
+Specification-Vendor: Lucene
+Implementation-Title: org.apache.lucene
+Implementation-Version: build 2004-11-29 15:13:05
+Implementation-Vemdpr: Lucene
+
+
+Its still not keeping the segments file around.     Is that necessary?
+It must be because the update is failing with "can't find segements
+file" warning.    Can I grab the segments file while the indexing is
+going on before it gets deleted?    Does the segments file change
+through the indexing process?   
+
+
+Here is a code snippet..     any problems here?     This works fine on
+my box.   Its mostly database stuff..   but something is causing this
+problem.   
+
+
+
+    public static void index() throws Exception {
+
+	    String newPath = getIndexLocation() + File.separator +
+System.currentTimeMillis();
+
+	   
+	    IndexWriter writer = new IndexWriter(new File(newPath),
+analyzer, true);
+	    writer.setUseCompoundFile(false);
+
+	    DBMgr dbm = new DBMgr();
+	    DBMgr dbm2 = new DBMgr();
+	    ResultSet rs = null, rs2=null;
+        
+	    Document doc=null;
+        int cnt = 0;
+        String lastID="-1", thisID;
+        String p;
+        int CNT=0;
+        
+        String catTmp;//Cable Pathway[980455819]{0}|Bolts and
+Installation[980455820]{1}|Carriage Bolts[980455821]{1}|
+
+	
+
+	String priceBook;
+	String priceTMP = "";
+	
+
+        try {
+
+		dbm.runUpdate("update co_item_cat_assc set ancestry =
+dbo.makeCatTag2(category)");
+		dbm.runUpdate("update co_category_products set ancestry
+= dbo.makeCatTag2(category)");
+		dbm.runUpdate("update co_category_products set
+ndAncestry = dbo.makeCatTag2ND(category)");//for NEW Design
+		
+		rs2 = dbm2.runQuery("select priceBook from
+co_cart_prefs");
+		
+		if (rs2.next()) {
+			priceBook = rs2.getString("priceBook");
+		} else {
+			priceBook = "Sell_Price";
+		}
+		
+				
+				
+		
+		rs = dbm.runQuery("select i.smartpart_num as id,
+i.cartable, i.item_num, i.keyword, i.description, i.shortdesc,
+i.ecatlongdesc, c.description as cDesc, c.keywords as cKey, a.ancestry,
+a.seq, i.price, i.image, i.ecatlink from co_item_master i,
+co_item_cat_assc a, co_prod_cat c where i.salable_ind = 'Y' and
+i.smartpart_num = a.item and c.category_id = a.category order by
+item_num");
+		while (rs.next()) {
+			thisID = rs.getString("id");
+		
+			if (!thisID.equals(lastID)) {
+				if (!lastID.equals("-1")) {
+					writer.addDocument(doc);
+				}
+			
+			
+				doc = new Document();
+				
+				doc.add(Field.Keyword(CARTABLE,
+rs.getString("cartable")));
+				
+				doc.add(Field.Keyword(IDENTITY,
+thisID));
+				doc.add(Field.Text(NAME,
+rs.getString("item_num")));
+				doc.add(Field.Text(KW,
+StringFormat.processString(rs.getString("keyword"),
+StringFormat.WEB_DISPLAY)));
+				doc.add(Field.Text(STND_DESC,
+StringFormat.processString(rs.getString("description"),
+StringFormat.WEB_DISPLAY)));
+				doc.add(Field.Text(SD,
+StringFormat.processString(rs.getString("shortdesc"),
+StringFormat.WEB_DISPLAY)));
+				doc.add(Field.Text(LD,
+StringFormat.processString(rs.getString("ecatlongdesc"),
+StringFormat.WEB_DISPLAY)));
+				
+				doc.add(Field.Text(CATNAME,
+StringFormat.processString(rs.getString("cDesc"))));
+				doc.add(Field.Text(CATKEY,
+StringFormat.processString(rs.getString("cKey"))));
+				doc.add(Field.Text(CAT,
+StringFormat.processString(rs.getString("ancestry"))));
+		
+				
+				
+				p = rs.getString("seq");
+				
+				try {
+					doc.add(Field.Keyword(SEQ, p));
+				} catch (Exception ep) {
+					doc.add(Field.Keyword(SEQ,
+"0"));
+				}
+				
+			/*
+				p = rs.getString("price");
+				try {
+					doc.add(Field.Keyword(PRICE, ""
++ Float.parseFloat(p)));
+				} catch (Exception ep) {
+					doc.add(Field.Keyword(PRICE,
+"0"));
+				}
+				*/
+				doc.add(Field.UnIndexed(PRODUCT, "0"));
+				doc.add(Field.UnIndexed(IMAGE,
+StringFormat.processString(rs.getString("image"))));
+				doc.add(Field.UnIndexed(LINK,
+StringFormat.processString(rs.getString("ecatlink"))));
+				
+
+
+
+
+
+
+
+
+		
+
+				priceTMP = "";
+		
+				if (priceBook.equals("Price") ||
+priceBook.equals("Cost") || priceBook.equals("Sell_Price")) {
+				    rs2 = dbm2.runQuery("select " +
+priceBook + " as blue from co_item_master where smartpart_num = '" +
+thisID + "'");
+				    if (rs2.next()) {
+					priceTMP =
+rs2.getString("blue");
+				    }
+		
+				} else {
+				    rs2 = dbm2.runQuery("select
+pim.price from CO_PRICE_ITEM_MASTER pim, co_cart_prefs p, co_item_master
+i where pim.smartpart_num = i.smartpart_num and i.smartpart_num = '" +
+thisID + "' and convert(varchar, pim.price_book_id) = p.priceBook");
+				    if (rs2.next()) {
+					priceTMP =
+rs2.getString("price");
+				    }
+				}
+		
+				try {
+					doc.add(Field.Keyword(PRICE, ""
++ Float.parseFloat(priceTMP)));
+				} catch (Exception e) {
+					doc.add(Field.Keyword(PRICE,
+"0"));
+				}
+				
+		
+		
+		
+		
+		
+				
+			
+			} else {
+			
+				doc.add(Field.Text(CATNAME,
+StringFormat.processString(rs.getString("cDesc"))));
+				doc.add(Field.Text(CATKEY,
+StringFormat.processString(rs.getString("cKey"))));
+				doc.add(Field.Text(CAT,
+StringFormat.processString(rs.getString("ancestry"))));
+
+			
+				p = rs.getString("seq");
+			
+				try {
+					doc.add(Field.Keyword(SEQ, p));
+				} catch (Exception ep) {
+					doc.add(Field.Keyword(SEQ,
+"0"));
+				}
+				
+			}
+		
+			lastID = thisID;
+		}
+			
+
+		writer.addDocument(doc);
+		lastID="-1";
+
+		rs = dbm.runQuery("select p.product_id, p.product_desc,
+p.keyword, p.shortdesc, p.longdesc, c.description as cDesc, c.keywords
+as cKey, cp.ancestry, cp.seq, p.product_img_file from co_prod p,
+co_category_products cp, co_prod_cat c where p.saleable = 1 and
+p.product_id = cp.product and cp.category = c.category_id order by
+p.product_id");
+		while (rs.next()) {
+			thisID = rs.getString("product_id");
+			
+			
+			if (!thisID.equals(lastID)) {
+				if (!lastID.equals("-1")) {
+					writer.addDocument(doc);
+				}
+			
+			
+				doc = new Document();
+				doc.add(Field.Keyword(CARTABLE, "1"));
+				doc.add(Field.Text(IDENTITY, thisID));
+				doc.add(Field.Text(NAME,
+StringFormat.processString(rs.getString("product_desc"))));
+				doc.add(Field.Text(KW,
+StringFormat.processString(rs.getString("keyword"))));
+				doc.add(Field.Text(SD,
+StringFormat.processString(rs.getString("shortdesc"))));
+				doc.add(Field.Text(LD,
+StringFormat.processString(rs.getString("longdesc"))));
+
+				doc.add(Field.Text(CATNAME,
+StringFormat.processString(rs.getString("cDesc"))));
+				doc.add(Field.Text(CATKEY,
+StringFormat.processString(rs.getString("cKey"))));
+				doc.add(Field.Text(CAT,
+StringFormat.processString(rs.getString("ancestry"))));
+				
+				p = rs.getString("seq");
+				
+				try {
+					doc.add(Field.Keyword(SEQ, p));
+				} catch (Exception ep) {
+					doc.add(Field.Keyword(SEQ,
+"0"));
+				}
+			
+				doc.add(Field.Keyword(PRICE, "0"));
+				
+				doc.add(Field.UnIndexed(PRODUCT, "1"));
+				doc.add(Field.UnIndexed(IMAGE,
+StringFormat.processString(rs.getString("product_img_file"))));
+
+			} else {
+				doc.add(Field.Text(CATNAME,
+StringFormat.processString(rs.getString("cDesc"))));
+				doc.add(Field.Text(CATKEY,
+StringFormat.processString(rs.getString("cKey"))));
+				doc.add(Field.Text(CAT,
+StringFormat.processString(rs.getString("ancestry"))));
+								
+				p = rs.getString("seq");
+				
+				try {
+					doc.add(Field.Keyword(SEQ, p));
+				} catch (Exception ep) {
+					doc.add(Field.Keyword(SEQ,
+"0"));
+				}
+			
+			}
+			
+			
+			
+			
+			lastID = thisID;
+		}
+
+		writer.addDocument(doc);
+
+
+		dbm.runUpdate("update co_cart_prefs set indexUpdated =
+getDate()");
+
+                rs = dbm.runQuery("select indexUpdated, tablesUpdated
+from co_cart_prefs ");
+                if (rs.next()) {
+                    setIndexUpdated(new
+Date(DateFormat.string_Long(rs.getString("indexUpdated"))));
+                    setTablesUpdated(new
+Date(DateFormat.string_Long(rs.getString("tablesUpdated"))));
+                }
+
+			
+        } catch (Exception e) {
+            System.out.println("Indexer index err: " + e);
+        } finally {
+            try {
+                rs.close();
+            }
+            catch (Exception e) {}
+        }
+			
+			
+
+        writer.optimize();
+        writer.close();
+
+	SearchSO.setSearcher(newPath);
+
+	File[] subFiles;
+	File[] subDirs = new File(getIndexLocation()).listFiles();
+
+	for (int i=0;i<subDirs.length;i++) {
+		if (subDirs[i].isDirectory()) {
+			if (!newPath.equals(subDirs[i].getPath())) {
+				subFiles = subDirs[i].listFiles();
+				for (int j=0;j<subFiles.length;j++) {
+					subFiles[j].delete();	
+				}
+				subDirs[i].delete();
+			}
+		}
+	}
+			
+	
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----Original Message-----
+From: John Powers [mailto:jpowers@configureone.com] 
+Sent: Thursday, January 26, 2006 9:07 PM
+To: java-user@lucene.apache.org
+Subject: problem updating a document: no segments file?
+
+Hello,
+
+I have a couple instances of lucene.  I just altered on implementation
+and now its not keeping a segments file.  while indexing occurs, there
+is a segment file.    but once its done, there isn't.    all the other
+indexes have one.     the problem comes when i try to update a document,
+it says "segments file not found" and that stops it.    this code was
+working fine on my development box, but now i go to production its not
+keeping that segments file.    and, it searches just fine.    i can
+reindex over and over, and it keeps disappearing.
+
+any ideas?
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

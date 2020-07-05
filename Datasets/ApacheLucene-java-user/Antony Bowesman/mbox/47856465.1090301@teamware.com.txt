@@ -1,0 +1,91 @@
+FROM: Antony Bowesman <...@teamware.com>
+SUBJECT: Re: how do I get my own TopDocHitCollector?
+DATE: 10 Jan 2008
+
+Beard, Brian wrote:
+> Question:
+> 
+> The documents that I index have two id's - a unique document id and a
+> record_id that can link multiple documents together that belong to a
+> common record.
+> 
+> I'd like to use something like TopDocs to return the first 1024 results
+> that have unique record_id's, but I will want to skip some of the
+> returned documents that have the same record_id. We're using the
+> ParallelMultiSearcher. 
+> 
+> I read that I could use a HitCollector and throw an exception to get it
+> to stop, but is there a cleaner way?
+
+I'm doing a similar thing.  I have external Ids (equivalent to yout record_id), 
+which have one or more Lucene Documents associated with them.  I wrote a custom 
+HitCollector that uses a Map to hold the so far collected external ids along 
+with the collected document.
+
+I had to write my own priority queue to know when an object was dropped of the 
+bottom of the score sorted queue, but the latest PriorityQueue on the trunk now 
+has insertWithOverflow(), which does the same thing.
+
+Note that ResultDoc extends ScoreDoc, so that the external Id of the item 
+dropped off the queue can be used to remove it from my Map.
+
+Code snippet is somewhat as below (I am caching my external Ids, hence the cache 
+usage)
+
+    protected Map<OfficeId, ScoreDoc> results;
+
+    public void collect(int doc, float score)
+     {
+         if (score > 0.0f)
+         {
+             totalHits++;
+             if (pq.size() < numHits || score > minScore)
+             {
+                 OfficeId id = cache.get(doc);
+                 ResultDoc rd = results.get(id);
+                 //  No current result for this ID yet found
+                 if (rd == null)
+                 {
+                     rd = new ResultDoc(id, doc, score);
+                     ResultDoc added = pq.insert(rd);
+                     if (added == null)
+                     {
+                         //  Nothing dropped of the bottom
+                         results.put(id, rd);
+                     }
+                     else
+                     {
+                         //  Return value dropped of the bottom
+                         results.remove(added.id);
+                         results.put(id, rd);
+                         remaining++;
+                     }
+                 }
+                 //  Already found this ID, so replace high score if necessary
+                 else
+                 {
+                     if (score > rd.score)
+                     {
+                         pq.remove(rd);
+                         rd.score = score;
+                         pq.insert(rd);
+                     }
+                 }
+                 //  Readjust our minimum score again from the top entry
+                 minScore = pq.peek().score;
+             }
+             else
+                 remaining++;
+         }
+     }
+
+HTH
+Antony
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

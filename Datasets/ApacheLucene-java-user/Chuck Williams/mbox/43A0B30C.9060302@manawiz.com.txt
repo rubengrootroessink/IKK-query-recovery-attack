@@ -1,0 +1,82 @@
+FROM: Chuck Williams <ch...@manawiz.com>
+SUBJECT: Re: DistributingMultiFieldQueryParser and DisjunctionMaxQuery
+DATE: 15 Dec 2005
+
+
+----- Original Message -----
+*From:* Miles Barr <miles@runtime-collective.com>
+*To:* java-user@lucene.apache.org
+*Sent:* 12/14/2005 12:43:04 AM
+*Subject:* DistributingMultiFieldQueryParser and DisjunctionMaxQuery
+
+
+>On Tue, 2005-12-13 at 11:51 -0800, Chris Hostetter wrote:
+>  
+>
+>>As i mentioned in the comments for LUCENE-323,
+>>DistributingMultiFieldQueryParser seems to be more of a demo of what's
+>>possible with DisjunctionMaxQuery -- not neccessarily a full fledged
+>>QueryParser.  I think that's why it wasn't commited (even though
+>>DisjunctionMaxQuery was), and the issue was left open.
+>>    
+>>
+It is not intended to be a demo.  I use it for real and believe it is
+complete and correct.  At the moment, it uses a QueryParser api that is
+deprecated in the latest Lucene source, but it still works.  There are a
+couple To Do's marked where it could be improved, but its current
+behavior is acceptable.
+
+>I've only had a quick play with it so this problem is probably down to
+>my misuse of the class but I found that negations weren't handled
+>properly. e.g.
+>
+>fruit AND -apples
+>
+>The DistributingMultiFieldQueryParser would correctly generate a query
+>that would find fruit in one of the fields, but would only ensure that
+>apples did not appear in one field, not not appear in all the fields,
+>which was the behaviour I wanted. Hence negations didn't really work if
+>the term appeared in more than one field.
+>  
+>
+>
+>I just tested putting together a prohibited boolean query with a
+>DisjunctionMaxQuery programmatically rather than via the
+>DistributingMultiFieldQueryParser and it works fine. 
+>  
+>
+Would you mind submitting a test case that shows the problem as I cannot
+replicate this?  E.g the attached test cases runs an equivalent query,
+"fruit AND -plum" and works properly.  Negation should work fine in
+general.  The transformation performed on BooleanQuery's is this:
+  BooleanQuery (q1.occur1 ... qn.occurn) applied to fields (f1 ... fm)
+==> ((q1 applied to f1...fm).occur1 ... ((qn applied to f1...fm).occurn))
+So for MUST_NOT clauses, the NOT is scoped around the OR over the fields
+and so the value can be found in no fields.
+
+If there are bugs in DistributingMultiFieldQueryParser, I will be happy
+to fix them.  If there is some specific reason it is not deemed suitable
+to commit, please let me know.  It is much harder to use
+DisjunctionMaxQuery without this parser.
+
+FYI, here is the output I get from the attached test case (running my
+version of DistributingMultiFieldQueryParser, which is also attached in
+case it is different than what you have):
+
+------------- Standard Output ---------------
+Collection:
+  uid:{doc1}    title:{fruit}    body:{apple, pear, plum}
+  uid:{doc2}    title:{plum fruit}    body:{delicious ripe plum}
+  uid:{doc3}    title:{fruit medley}    body:{peach, banana, pear, cherry}
+
+testParse
+  Query:{fruit AND -plum} ==> +(title:fruit^5.0 | body:fruit)~0.1
+-(title:plum^5.0 | body:plum)~0.1
+
+  title:{fruit medley}    body:{peach, banana, pear, cherry}
+
+------------- ---------------- ---------------
+
+Chuck
+
+

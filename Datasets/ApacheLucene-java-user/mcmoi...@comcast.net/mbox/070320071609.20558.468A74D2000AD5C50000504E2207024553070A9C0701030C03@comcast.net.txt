@@ -1,0 +1,217 @@
+FROM: mcmoi...@comcast.net
+SUBJECT: Re: Pagination
+DATE: 3 Jul 2007
+
+It looks that we may have different cases.
+
+What I do I index my items prior to insert them into the database. When I do a search I get
+the ids that have the best match and then lookup the items from the database. So far worked
+just fine. I have 5000 rows  of items and I think will still work fine later when I'd have
+100K items.
+
+ -------------- Original message ----------------------
+From: mark harwood <markharw00d@yahoo.co.uk>
+> >>I get the ids then I do look the items in the database using select item.* 
+> from item where item.id in ( ids )
+> 
+> Hmm. That's likely to confuse the already confused :)
+> The ids referred to so far are Lucene internal document ids and are typically 
+> only meaningful to Lucene during a single IndexReader session. I wouldn't 
+> recommend storing them in a database because a Lucene document id can point to 
+> an entirely different document after deletes/updates are performed on the Lucene 
+> index and the IndexReader is reopened.
+> 
+> For the avoidance of further confusion I have extended the "main" method in my 
+> previous example (reposted below in full) to include examples of
+> 1) Retrieving document content
+> 2) Retrieving a "next" page (starting from result 11)
+> The values "1" and "11" used below in the calls to HitPageCollector constructor 
+> define the page start. This value is typically something you would get the 
+> client to pass to you e.g. note the number "10" in this URL 
+> http://www.google.com/search?q=lucene&start=10 which is used to select results 
+> from "10" onwards. Note also that this URL 
+> http://www.google.com/search?q=lucene&&start=10000 does not work because Google
+
+> have placed a restriction on the maximum value for "start" - you should too.
+> 
+> Cheers
+> Mark
+> 
+> 
+> package lucene.pagination;
+> 
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.HitCollector;
+> import org.apache.lucene.search.IndexSearcher;
+> import org.apache.lucene.search.Query;
+> import org.apache.lucene.search.ScoreDoc;
+> import org.apache.lucene.search.TermQuery;
+> import org.apache.lucene.util.PriorityQueue;
+> 
+> /**
+>  * A HitCollector that retrieves a specific page of results 
+>  * @author maharwood
+>  */
+> public class HitPageCollector extends HitCollector
+> {
+>     //Demo code showing pagination
+>     public static void main(String[] args) throws Exception
+>     {
+>         IndexSearcher s=new IndexSearcher("/indexes/nasa");
+>         Query q=new TermQuery(new Term("contents","sea"));
+> 
+>         //Retrieve page 1  (hits 1-10)
+>         HitPageCollector hpc=new HitPageCollector(1,10);
+>         s.search(q,hpc);
+>         ScoreDoc[] sd = hpc.getScores();
+>         System.out.println("Hits "+ hpc.getStart()+" - "+ hpc.getEnd()+" of 
+> "+hpc.getTotalAvailable());
+>         for (int i = 0; i < sd.length; i++)
+>         {
+>             Document doc=s.doc(sd[i].doc);
+>             System.out.println(sd[i].score +" "+doc.get("title"));
+>         }
+>         
+>         //Example retrieve page 2 (hits 11-20)
+>         hpc=new HitPageCollector(11,10);
+>         s.search(q,hpc);
+>         sd = hpc.getScores();
+>         System.out.println("Hits "+ hpc.getStart()+" - "+ hpc.getEnd()+" of 
+> "+hpc.getTotalAvailable());
+>         for (int i = 0; i < sd.length; i++)
+>         {
+>             Document doc=s.doc(sd[i].doc);
+>             System.out.println(sd[i].score +" "+doc.get("title"));
+>         }
+>         
+>         
+>         s.close();
+>     }
+> 
+>     int nDocs;
+>     PriorityQueue hq;
+>     float minScore = 0.0f;
+>     int totalHits = 0;
+>     int start;
+>     int maxNumHits;
+>     int totalInThisPage;
+> 
+>     public HitPageCollector(int start, int maxNumHits)
+>     {
+>         this.nDocs = start + maxNumHits;
+>         this.start = start;
+>         this.maxNumHits = maxNumHits;
+>         hq = new HitQueue(nDocs);
+>     }
+> 
+>     public void collect(int doc, float score)
+>     {
+>         totalHits++;
+>         if((hq.size()<nDocs)||(score >= minScore))
+>         {
+>             ScoreDoc scoreDoc = new ScoreDoc(doc,score);
+>             hq.insert(scoreDoc);              // update hit queue
+>             minScore = ((ScoreDoc)hq.top()).score; // reset minScore
+>         }
+>         totalInThisPage=hq.size();
+>     }
+>     
+> 
+>     public ScoreDoc[] getScores()
+>     {
+>         //just returns the number of hits required from the required start point
+>         /*
+>             So, given hits:
+>                 1234567890
+>             and a start of 2 + maxNumHits of 3 should return:
+>                 234
+>             or, given hits
+>                 12
+>             should return
+>                 2
+>             and so, on.
+>         */
+>         if (start <= 0)
+>         {
+>             throw new IllegalArgumentException("Invalid start :" + start+" - 
+> start should be >=1");
+>         }
+>         int numReturned = Math.min(maxNumHits, (hq.size() - (start - 1)));
+>         if (numReturned <= 0)
+>         {
+>             return new ScoreDoc[0];
+>         }
+>         ScoreDoc[] scoreDocs = new ScoreDoc[numReturned];
+>         ScoreDoc scoreDoc;
+>         for (int i = hq.size() - 1; i >= 0; i--) // put docs in array, working 
+> backwards from lowest count
+>         {
+>             scoreDoc = (ScoreDoc) hq.pop();
+>             if (i < (start - 1))
+>             {
+>                 break; //off the beginning of the results array
+>             }
+>             if (i < (scoreDocs.length + (start - 1)))
+>             {
+>                 scoreDocs[i - (start - 1)] = scoreDoc; //within scope of results 
+> array
+>             }
+>         }
+>         return scoreDocs;
+>     }
+> 
+>     public int getTotalAvailable()
+>     {
+>         return totalHits;
+>     }
+> 
+>     public int getStart()
+>     {
+>         return start;
+>     }
+>     
+>     public int getEnd()
+>     {
+>         return start+totalInThisPage-1;
+>     }
+>     
+>     public class HitQueue extends PriorityQueue 
+>     {
+>           public HitQueue(int size) 
+>           {
+>             initialize(size);
+>           }
+>           public final boolean lessThan(Object a, Object b) 
+>           {
+>             ScoreDoc hitA = (ScoreDoc)a;
+>             ScoreDoc hitB = (ScoreDoc)b;
+>             if (hitA.score == hitB.score)
+>               return hitA.doc > hitB.doc;
+>             else
+>               return hitA.score < hitB.score;
+>           }
+>     }
+> }
+> 
+> 
+> 
+> 
+> 
+> 
+>       ___________________________________________________________ 
+> Yahoo! Mail is the world's favourite email. Don't settle for less, sign up for
+> your free account today 
+> http://uk.rd.yahoo.com/evt=44106/*http://uk.docs.yahoo.com/mail/winter07.html 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,74 @@
+FROM: Adam Constabaris <ad...@unc.edu>
+SUBJECT: similar ArrayIndexOutOfBoundsException on searching and optimizing
+DATE: 21 Apr 2006
+
+This is a puzzler, I'm not sure if I'm doing something wrong or whether 
+I have a poisoned document, a corrupted index (failing to close my 
+IndexModifier properly?) or what.  The setup is this: I have two 
+processes (the backend and frontend of a CMS) that run in two different 
+VMs -- both use Lucene 1.9.1 with the PorterStemmerAnalyzer wrapper over 
+the StandardAnalyzer (from lucene-memory AnalyzerUtils).
+
+The backend is responsible for index creation, updates, etc., while the 
+frontend process uses the created index.  What's puzzling is that some 
+queries will die with an ArrayIndexOutOfBoundsException being thrown out 
+of the BitVector class:
+
+Caused by: java.lang.ArrayIndexOutOfBoundsException: 240
+         at org.apache.lucene.util.BitVector.get(BitVector.java:63)
+         at 
+org.apache.lucene.index.SegmentTermDocs.read(SegmentTermDocs.java:133)
+         at org.apache.lucene.search.TermScorer.next(TermScorer.java:105)
+         at 
+org.apache.lucene.search.DisjunctionSumScorer.advanceAfterCurrent(DisjunctionSumScorer.java:151)
+         at 
+org.apache.lucene.search.DisjunctionSumScorer.next(DisjunctionSumScorer.java:125)
+         at 
+org.apache.lucene.search.BooleanScorer2.score(BooleanScorer2.java:290)
+         at 
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:132) 
+      at 
+org.apache.lucene.search.IndexSearcher.search(IndexSearcher.java:99)
+         at org.apache.lucene.search.Hits.getMoreDocs(Hits.java:65)
+         at org.apache.lucene.search.Hits.<init>(Hits.java:44)
+         at org.apache.lucene.search.Searcher.search(Searcher.java:44)
+         at org.apache.lucene.search.Searcher.search(Searcher.java:36)
+
+The only pattern I've been able to discern in queries that cause this 
+problem is that (a) they search the "contents" field (tokenized, 
+unstored, TermVector.YES), and (b) it *seems* that it mostly happens 
+with longer terms in the query.  Although the frontend defaults to a 
+multifield query, the same happens when I use "contents:<<term>>" and 
+does not happen if I specify <<term>> and any other of the default 
+fields used by the MultiFieldQueryParser.
+
+Here's where it gets interesting: I've noticed that calling optimize() 
+on the index as it's created by the server process is also throwing a 
+hissy fit, with an *eerily similar* index:
+
+java.lang.ArrayIndexOutOfBoundsException: 239
+         at org.apache.lucene.util.BitVector.get(BitVector.java:63)
+         at 
+org.apache.lucene.index.SegmentReader.isDeleted(SegmentReader.java:288)
+         at 
+org.apache.lucene.index.SegmentMerger.mergeFields(SegmentMerger.java:185)
+         at 
+org.apache.lucene.index.SegmentMerger.merge(SegmentMerger.java:88)
+         at 
+org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:681)
+         at 
+org.apache.lucene.index.IndexWriter.mergeSegments(IndexWriter.java:658)
+         at 
+org.apache.lucene.index.IndexWriter.optimize(IndexWriter.java:517)
+         at 
+org.apache.lucene.index.IndexWriter.addIndexes(IndexWriter.java:553)
+
+Does anybody have any ideas about what I might be doing wrong, or if 
+I've possibly uncovered a bug?  I'm too new to the scene to know where I 
+ought to start with this.
+
+
+
+
+
+

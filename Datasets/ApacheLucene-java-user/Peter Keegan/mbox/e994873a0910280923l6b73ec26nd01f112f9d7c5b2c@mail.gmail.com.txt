@@ -1,0 +1,165 @@
+FROM: Peter Keegan <peterlkee...@gmail.com>
+SUBJECT: Re: IO exception during merge/optimize
+DATE: 28 Oct 2009
+
+Just to be safe, I ran with the official jar file from one of the mirrors
+and reproduced the problem.
+The debug session is not showing any characters = '\uffff' (checking this in
+Tokenizer).
+The output from the modified CheckIndex follows. There are only a few terms
+with the inconsistency. They are all legitimate terms from the app's
+context. With this info, I might be able to isolate the source documents.
+What should I be looking for when they are indexed?
+
+CheckInput output:
+
+Opening index @ D:\mnsavs\lresumes1\lresumes1.luc\lresumes1.search.main.4
+
+Segments file=segments_2 numSegments=3 version=FORMAT_DIAGNOSTICS [Lucene
+2.9]
+  1 of 3: name=_0 docCount=413585
+    compound=false
+    hasProx=true
+    numFiles=8
+    size (MB)=1,148.817
+    diagnostics = {os.version=5.2, os=Windows 2003, lucene.version=2.9.0
+817268P - 2009-09-21 10:25:09, source=flush, os.arch=amd64,
+java.version=1.6.0_16, java.vendor=Sun Microsystems Inc.}
+    docStoreOffset=0
+    docStoreSegment=_0
+    docStoreIsCompoundFile=false
+    no deletions
+    test: open reader.........OK
+    test: fields..............OK [33 fields]
+    test: field norms.........OK [33 fields]
+    test: terms, freq, prox...OK [7704753 terms; 180326717 terms/docs pairs;
+340244234 tokens]
+    test: stored fields.......OK [1240755 total field count; avg 3 fields
+per doc]
+    test: term vectors........OK [0 total vector count; avg 0 term/freq
+vector fields per doc]
+
+  2 of 3: name=_1 docCount=359068
+    compound=false
+    hasProx=true
+    numFiles=8
+    size (MB)=1,125.161
+    diagnostics = {os.version=5.2, os=Windows 2003, lucene.version=2.9.0
+817268P - 2009-09-21 10:25:09, source=flush, os.arch=amd64,
+java.version=1.6.0_16, java.vendor=Sun Microsystems Inc.}
+    docStoreOffset=413585
+    docStoreSegment=_0
+    docStoreIsCompoundFile=false
+    no deletions
+    test: open reader.........OK
+    test: fields..............OK [33 fields]
+    test: field norms.........OK [33 fields]
+    test: terms, freq, prox...WARNING: term  literals:cfid196$ docFreq=43 !=
+num docs seen 4 + num docs deleted 0
+WARNING: term  literals:cfid196$ docFreq=1 != num docs seen 4 + num docs
+deleted 0
+WARNING: term  literals:cfid196$ docFreq=1 != num docs seen 4 + num docs
+deleted 0
+WARNING: term  literals:cfid196$commandant docFreq=1 != num docs seen 9 +
+num docs deleted 0
+WARNING: term  literals:cfid196$on docFreq=3178 != num docs seen 1 + num
+docs deleted 0
+OK [7137621 terms; 179101847 terms/docs pairs; 346076058 tokens]
+    test: stored fields.......OK [1077204 total field count; avg 3 fields
+per doc]
+    test: term vectors........OK [0 total vector count; avg 0 term/freq
+vector fields per doc]
+
+  3 of 3: name=_2 docCount=304849
+    compound=false
+    hasProx=true
+    numFiles=8
+    size (MB)=962.004
+    diagnostics = {os.version=5.2, os=Windows 2003, lucene.version=2.9.0
+817268P - 2009-09-21 10:25:09, source=flush, os.arch=amd64,
+java.version=1.6.0_16, java.vendor=Sun Microsystems Inc.}
+    docStoreOffset=772653
+    docStoreSegment=_0
+    docStoreIsCompoundFile=false
+    no deletions
+    test: open reader.........OK
+    test: fields..............OK [33 fields]
+    test: field norms.........OK [33 fields]
+    test: terms, freq, prox...WARNING: term  contents:? docFreq=1 != num
+docs seen 246 + num docs deleted 0
+WARNING: term  literals:cfid196$ docFreq=45 != num docs seen 4 + num docs
+deleted 0
+WARNING: term  literals:cfid196$ docFreq=1 != num docs seen 4 + num docs
+deleted 0
+WARNING: term  literals:cfid196$cashier docFreq=1 != num docs seen 37 + num
+docs deleted 0
+WARNING: term  literals:cfid196$interrogation docFreq=181 != num docs seen 1
++ num docs deleted 0
+WARNING: term  literals:cfid196$leader docFreq=1 != num docs seen 353 + num
+docs deleted 0
+WARNING: term  literals:cfid196$microsoft docFreq=3114 != num docs seen 1 +
+num docs deleted 0
+WARNING: term  literals:cfid196$nt docFreq=200 != num docs seen 1 + num docs
+deleted 0
+OK [6497769 terms; 145296880 terms/docs pairs; 293458734 tokens]
+    test: stored fields.......OK [914547 total field count; avg 3 fields per
+doc]
+    test: term vectors........OK [0 total vector count; avg 0 term/freq
+vector fields per doc]
+
+No problems were detected with this index.
+
+Peter
+
+
+On Wed, Oct 28, 2009 at 11:29 AM, Michael McCandless <
+lucene@mikemccandless.com> wrote:
+
+> On Wed, Oct 28, 2009 at 10:58 AM, Peter Keegan <peterlkeegan@gmail.com>
+> wrote:
+> > The only change I made to the source code was the patch for
+> PayloadNearQuery
+> > (LUCENE-1986).
+>
+> That patch certainly shouldn't lead to this.
+>
+> > It's possible that our content contains U+FFFF. I will run in debugger
+> and
+> > see.
+>
+> OK may as well check just so we cover all possibilities.
+>
+> > The data is 'sensitive', so I may not be able to provide a bad segment,
+> > unfortunately.
+>
+> OK, maybe we can modify your CheckIndex instead.  Let's start with
+> this, which prints a warning whenever the docFreq differs but
+> otherwise continues (vs throwing RuntimeException).  I'm curious how
+> many terms show this, and whether the TermEnum keeps working after
+> this term that has different docFreq:
+>
+> Index: src/java/org/apache/lucene/index/CheckIndex.java
+> ===================================================================
+> --- src/java/org/apache/lucene/index/CheckIndex.java    (revision 829889)
+> +++ src/java/org/apache/lucene/index/CheckIndex.java    (working copy)
+> @@ -672,8 +672,8 @@
+>         }
+>
+>         if (freq0 + delCount != docFreq) {
+> -          throw new RuntimeException("term " + term + " docFreq=" +
+> -                                     docFreq + " != num docs seen " +
+> freq0 + " + num docs deleted " + delCount);
+> +          System.out.println("WARNING: term  " + term + " docFreq=" +
+> +                             docFreq + " != num docs seen " + freq0 +
+> " + num docs deleted " + delCount);
+>         }
+>       }
+>
+> Mike
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

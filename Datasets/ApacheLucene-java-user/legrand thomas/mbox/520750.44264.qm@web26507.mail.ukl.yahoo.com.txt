@@ -1,0 +1,195 @@
+FROM: legrand thomas <thomaslegran...@yahoo.fr>
+SUBJECT: Re: Concurrent access IndexReader / IndexWriter -  FileNotFoundException
+DATE: 9 Jan 2010
+
+
+
+Michael,
+
+The exception only occurs when the writer commits. But but the IndexReader can keep on reading.
+The searches are performed by the IndexSearcher using the IndexReader.
+My filesystem is ext2fs.
+
+I give a few details below about the way I use them; the FNF exception occurs in the "commitIndexWriter"
+method.
+
+Thanks,
+Tom
+
+
+// both reader and writer and static
+protected static IndexWriter mAdIndexWriter=null;
+protected static IndexReader mAdIndexReader=null;
+// misc
+protected static IndexSearcher mAdIndexSearcher=null;
+protected static Analyzer mAdIndexAnalyser=null;
+
+
+// create the writer once
+private void initIndexWriter() throws EncheromaxException {
+    Directory adIndexDir=null;
+    
+    // Where is the index ?
+    String indexLocation=mConfigProperties.getProperty(PropertiesEnum.ADVERTISEMENT_INDEX_LOCATION);   
+        
+
+    // Get the ad's analyser
+    Analyzer analyser = getAdvertisementIndexAnalyser(); 
+    
+    // create the writer
+    if(mAdIndexWriter==null){
+        try{
+            adIndexDir=FSDirectory.getDirectory(indexLocation);           
+     
+            boolean isTheIndexNew=true;                
+            mAdIndexWriter = new IndexWriter(adIndexDir, analyser,isTheIndexNew,IndexWriter.MaxFieldLength.
+UNLIMITED) ; 
+            
+            /* ... */    
+        }catch(Exception ex){
+            /*...*/
+        }
+    }    
+}    
+
+
+// get the reader 
+private IndexReader getAdvertisementIndexReader() throws EncheromaxException {
+    String indexLocation=null;
+    Directory adIndexDir=null;
+    
+    // Where is the index ?
+    try{
+        indexLocation=mConfigProperties.getProperty(PropertiesEnum.ADVERTISEMENT_INDEX_LOCATION);   
+
+        adIndexDir=FSDirectory.getDirectory(indexLocation);
+    }catch(Exception direx){
+        /*...*/
+    }
+    
+    // create the reader if it doesn't exist yet
+    if(mAdIndexReader==null){
+        try{
+            mAdIndexReader= IndexReader.open(adIndexDir);             
+        }catch(Exception ex){
+            /*..*/
+        }
+    }else{                    
+        try{
+            /* do we need to re-open it ? */
+            if(mAdIndexReader.isCurrent()==false){
+                // synchronize on the reader
+                synchronized(mAdIndexReader){
+                    mAdIndexReader= IndexReader.open(adIndexDir);
+                }
+            }
+        }catch(Exception ioex){
+            /*...*/
+            throw new EncheromaxException(CommonErrorEnum.INDEX_READER_CREATION_ERROR);
+        }            
+    }
+    return mAdIndexReader;
+}
+
+
+// get the searcher when I want to search
+private IndexSearcher getAdvertisementIndexSearcher() throws EncheromaxException {
+    // create the searcher if it doesn't exist yet
+    try{
+        if(mAdIndexSearcher==null){
+            try{
+                mAdIndexSearcher= new IndexSearcher(getAdvertisementIndexReader());
+
+                
+            }catch(Exception ex){
+                /*...*/
+            }
+        }
+
+        else if(!mAdIndexSearcher.getIndexReader().isCurrent()){
+            synchronized(mAdIndexSearcher){
+                mAdIndexSearcher=new IndexSearcher(getAdvertisementIndexReader());
+            }
+        }
+    }catch(Exception ioex){
+        /*...*/
+    }    
+    return mAdIndexSearcher;
+}
+
+
+
+// whenever I need to commit
+public synchronized void commitIndexWriter() throws EncheromaxException{
+    try{        
+        mAdIndexWriter.commit();    
+            
+    }catch(Exception docex){            
+        /* THE FILE NOT FOUND EXCEPTION OCCURS HERE */
+    }
+}
+
+
+// add a document
+private void addADocument(Document adDoc) throws EncheromaxException{
+    try{
+        mAdIndexWriter.addDocument(adDoc, getAdvertisementIndexAnalyser());
+        commitIndexWriter();    
+            
+    }catch(Exception docex){            
+        /*...*/
+    }
+}
+
+
+--- En date de : Ven 8.1.10, Michael McCandless <lucene@mikemccandless.com> a écrit
+:
+
+De: Michael McCandless <lucene@mikemccandless.com>
+Objet: Re: Concurrent access IndexReader / IndexWriter -  FileNotFoundException
+À: java-user@lucene.apache.org
+Date: Vendredi 8 Janvier 2010, 13h00
+
+Normally, this (using an IndexReader, [re-]opening a new IndexReader
+while an IndexWriter is committing) is perfectly fine.  The reader
+searches the point-in-time snapshot of the index as of when it was
+opened.
+
+But: what filesystem are you using?  NFS presents challenges, for example.
+
+Mike
+
+On Fri, Jan 8, 2010 at 5:35 AM, legrand thomas <thomaslegrand14@yahoo.fr> wrote:
+> Hi,
+>
+> I often get a FileNotFoundException when my single IndexWriter commits while the IndexReader
+also tries to read. My application is multithreaded (Tomcat uses the business APIs); I firstly
+thought the read/write access was thread-safe but I probably forget something.
+>
+>  Please help me to understand my mistakes:
+>
+> - When should I close the IndexWriter ? Each time I add/update a document or never ?
+> - Should my java commit/read methods be synchronized ?
+> - Should I lock the directory and what's the best way to do it ?
+>
+> I referred to the Lucene FAQ ("why do I sometimes get a FileNotFoundException when I
+search and update my index at the same time?") but I did not disable any locking for processes
+searching or updating the index.
+>
+> I use lucene-2.4.1.
+>
+> Thanks in advance,
+> Tom
+>
+>
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+      

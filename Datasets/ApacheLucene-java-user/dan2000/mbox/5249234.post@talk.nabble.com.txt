@@ -1,0 +1,139 @@
+FROM: dan2000 <liu...@ntlworld.com>
+SUBJECT: Re: modify existing non-indexed field
+DATE: 10 Jul 2006
+
+
+Here is the simplified code that causes problem (Lock obtain timed out).
+MyIndexer is used for indexing and searching. IndexTest starts 5 threads for
+indexing and 100 threads for searching.
+
+MyIndexer.java
+public class MyIndexer
+{
+    File m_IndexFile;
+    IndexReader m_IndexReader;
+    Directory m_Directory;
+    Searcher m_Searcher;
+    Analyzer m_Analyzer;
+    ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+
+    public MyIndexer(File a_IndexFile) throws IOException
+    {
+        m_IndexFile = a_IndexFile;
+        m_Analyzer = new StandardAnalyzer();
+        m_Directory = FSDirectory.getDirectory(m_IndexFile, false);
+        m_IndexReader = IndexReader.open(m_Directory);
+        m_Searcher = new IndexSearcher(m_IndexReader);
+    }
+
+    public void addAndIndex(String a_Name) throws IOException
+    {
+        // lock.writeLock().lock();
+        try
+        {
+            IndexWriter indexWriter = new IndexWriter(m_Directory,
+m_Analyzer,
+                    false);
+            Document doc = new Document();
+            doc.add(new Field("name", a_Name, Field.Store.YES,
+                    Field.Index.TOKENIZED));
+            indexWriter.addDocument(doc);
+            indexWriter.optimize();
+            indexWriter.close();
+        }
+        finally
+        {
+            // lock.writeLock().unlock();
+        }
+    }
+
+    public Hits search(String a_Query)
+    {
+        try
+        {
+            // lock.readLock().lock();
+            Query query = new QueryParser("name",
+m_Analyzer).parse(a_Query);
+            Hits hits = m_Searcher.search(query);
+            return hits;
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+        finally
+        {
+            // lock.readLock().unlock();
+        }
+        return null;
+    }
+}
+
+IndexTest.java
+public class IndexTest extends Thread
+{
+    private boolean m_DoIndex = true;
+    static MyIndexer m_IndexEntity;
+
+    public IndexTest(boolean a_DoIndex)
+    {
+        m_DoIndex = a_DoIndex;
+    }
+
+    public static void main(String[] args) throws Exception
+    {
+        m_IndexEntity = new MyIndexer(new File(
+                "C:/mytest/myindex"));
+
+        for (int i = 0; i < 5; i++)
+        {
+            new IndexTest(true).start();
+        }
+
+        for (int i = 0; i < 100; i++)
+        {
+            new IndexTest(false).start();
+        }
+
+    }
+
+    @Override
+    public void run()
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            try
+            {
+                if (m_DoIndex)
+                {
+                    String name = "Nick" + i;
+
+                    System.out.println("Add and Indexing...");
+                    m_IndexEntity.addAndIndex(name);
+                    Thread.sleep(100);
+                }
+                else
+                {
+                    System.out.println("Searching...");
+                    m_IndexEntity.search("name:Nick" + i);
+                    Thread.sleep(20);
+                }
+            }
+            catch (Exception e)
+            {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+-- 
+View this message in context: http://www.nabble.com/modify-existing-non-indexed-field-tf1905726.html#a5249234
+Sent from the Lucene - Java Users forum at Nabble.com.
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

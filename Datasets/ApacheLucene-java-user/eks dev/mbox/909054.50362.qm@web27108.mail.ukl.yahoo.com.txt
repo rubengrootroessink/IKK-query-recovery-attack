@@ -1,0 +1,283 @@
+FROM: eks dev <eks...@yahoo.co.uk>
+SUBJECT: Re: TSDC, TopFieldCollector & co
+DATE: 30 Sep 2009
+
+About clear(Object sentinel) - is it still a question 
+
+no, it is not. Makes no sense with mutable elements :)
+
+
+
+----- Original Message ----
+> From: Shai Erera <serera@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Wednesday, 30 September, 2009 21:02:19
+> Subject: Re: TSDC, TopFieldCollector & co
+> 
+> I was half way through answering the second part when I noticed your second
+> update :).
+> 
+> I don't know about adding reset() to Collector. It makes sense "for
+> completeness" in case other Collectors can be reset() as well. But reset()
+> is a delicate method. It needs to be used cautiously. E.g., if you ask for
+> 100 results, and then want to ask for just 10/20/40, a user might be tempted
+> to think he can call reset() and it will work. But reset() can be called
+> only if you want to ask for 100 results again, at least if we don't want to
+> complicate anything in the code. That's why I think it better exist on TSDC
+> w/ the proper documentation. If anything, reset() is a TSDC-related
+> operation (or TopDocsCollector). If I have my own Collector, its reset()
+> method signature might need to be different, not to speak about
+> documentation.
+> 
+> About clear(Object sentinel) - is it still a question (now that you
+> understood getSentinelValue())? I think we should not make it final anyway.
+> It restricts PQ extensions unnecessarily ...
+> 
+> Shai
+> 
+> On Wed, Sep 30, 2009 at 8:41 PM, eks dev wrote:
+> 
+> > > BTW eks, you asked about reusing TSDC.
+> >
+> > yeah, it is normally not a big deal to allocate everything again, but these
+> > arrays are not necessarily small, I guess it would make sense to open this
+> > possibility.
+> >
+> > do you think where would be better to add reset(),  TSDC or to Collector?
+> >
+> > I would even suggest to change clear method to become clear(Object
+> > sentinel) to PQ instead... or to add such a method (backwards compatibility)
+> > ...
+> >
+> > Another question:
+> > Looking at the code in PQ, it was not really clear to me why sentinels have
+> > to be allocated maxSize times in initialize method? I am talking about:
+> >
+> >    // If sentinel objects are supported, populate the queue with them
+> >    Object sentinel = getSentinelObject();
+> >    if (sentinel != null) {
+> >      heap[1] = sentinel;
+> >      for (int i = 2; i < heap.length; i++) {
+> >        heap[i] = getSentinelObject(); //Why not simply heap[i] = sentinel;
+> >      }
+> >      size = maxSize;
+> >    }
+> >
+> >  getSentinelObject() creates new object every time (HitQueue)
+> >
+> > are these objects mutable?
+> >
+> >
+> >
+> >
+> >
+> >
+> >
+> > ----- Original Message ----
+> > > From: Shai Erera 
+> > > To: java-user@lucene.apache.org
+> > > Sent: Wednesday, 30 September, 2009 18:11:03
+> > > Subject: Re: TSDC, TopFieldCollector & co
+> > >
+> > > BTW eks, you asked about reusing TSDC. PQ has a clear() method, so it can
+> > be
+> > > reused. Only currently it's final and nullifies the array. We'll need to
+> > > un-final it, and then override in HitQueue to just reset the ScoreDoc
+> > > instances to be sentinels again. And of course add a reset() method to
+> > TSDC.
+> > >
+> > > On Wed, Sep 30, 2009 at 5:26 PM, eks dev wrote:
+> > >
+> > > > Thanks Mark, Shai,
+> > > > I was getting confused by so many possibilities to do the "almost the
+> > same
+> > > > thing" ;)
+> > > >
+> > > > But have figured it out by peeking into BoolenQuery code that decides
+> > if
+> > > > "out of order" should be used..., BQ will pick the right TSDC ... I
+> > like it,
+> > > > option 1 it is minimum user code.
+> > > >
+> > > > Cheers, eks
+> > > >
+> > > >
+> > > >
+> > > > ----- Original Message ----
+> > > > > From: Shai Erera
+> > > > > To: java-user@lucene.apache.org
+> > > > > Sent: Wednesday, 30 September, 2009 17:12:38
+> > > > > Subject: Re: TSDC, TopFieldCollector & co
+> > > > >
+> > > > > I agree. If you need sort-by-score, it's better to use the "fast"
+> > search
+> > > > > methods. IndexSearcher will create the appropriate TSDC instance
+for
+> > you,
+> > > > > based on the Query that was passed.
+> > > > >
+> > > > > If you need to create multiple Collectors and pass a kind of
+> > > > Multi-Collector
+> > > > > to IndexSearcher, then you should create TSDC according to Mark's
+> > example
+> > > > > above.
+> > > > >
+> > > > > Shai
+> > > > >
+> > > > > On Wed, Sep 30, 2009 at 4:57 PM, Mark Miller wrote:
+> > > > >
+> > > > > > If you want relevance sorting (Sort.Score not Sort.Relevance
+> > right?),
+> > > > > > I'd think you want to use TopScoreDocCollector, not
+> > TopFieldCollector.
+> > > > > > The only reason to use relevance with TopFieldCollector is if
+you
+> > you
+> > > > > > are doing a nth sort with a field sort as well.
+> > > > > >
+> > > > > > You don't really need to worry about things like turning off
+the
+> > max
+> > > > > > score tracking here - its just going to be the first doc on
+the
+> > queue.
+> > > > > >
+> > > > > > You also do want to specify whether or not to collect docs in
+order
+> > if
+> > > > > > you care about performance:
+> > > > > >
+> > > > > >  public static TopScoreDocCollector create(int numHits, boolean
+> > > > > > docsScoredInOrder)
+> > > > > >
+> > > > > > ie:
+> > > > > >
+> > > > > > TopScoreDocCollector.create(nDocs, !weight.scoresDocsOutOfOrder());
+> > > > > >
+> > > > > > Which means you just want option 1.
+> > > > > >
+> > > > > > --
+> > > > > > - Mark
+> > > > > >
+> > > > > > http://www.lucidimagination.com
+> > > > > >
+> > > > > >
+> > > > > >
+> > > > > > eks dev wrote:
+> > > > > > > Hi All,
+> > > > > > >
+> > > > > > > What is the best way to achieve the following and what
+are the
+> > > > > > differences, if I say "I do not normalize scores, so I do not
+need
+> > max
+> > > > score
+> > > > > > tracking, I do not care if hits are returned in doc id order,
+or
+> > any
+> > > > other
+> > > > > > order. I need only to get maxDocs *best scoring* documents":
+> > > > > > >
+> > > > > > > OPTION 1:
+> > > > > > > TopDocs top = ixSearcher.search(q, filter, maxDocs);
+> > > > > > >
+> > > > > > > OPTION 2:
+> > > > > > >    final TopScoreDocCollector tfc =
+> > > > TopScoreDocCollector.create(maxDocs,
+> > > > > > false);
+> > > > > > >     ixSearcher.search(q, filter, tfc);
+> > > > > > >     TopDocs top = tfc.topDocs();
+> > > > > > >
+> > > > > > >
+> > > > > > > OPTION 3:
+> > > > > > >     final TopFieldCollector tfc =
+> > > > > > TopFieldCollector.create(Sort.RELEVANCE, maxDocs,
+> > > > > > >         false  /* fillFields */,
+> > > > > > >         true   /* trackDocScores */,
+> > > > > > >         false   /* trackMaxScore */,
+> > > > > > >         false  /* docsInOrder */);
+> > > > > > >
+> > > > > > >     ixSearcher.search(q.weight(ixSearcher),filter, tfc);
+> > > > > > >     TopDocs top = tfc.topDocs();
+> > > > > > >
+> > > > > > >
+> > > > > > > what are the pros and cons?
+> > > > > > > If I read javadoc correctly,
+> > > > > > > - OPTION 1 tracks max score and delivers doc Ids in order
+> > (suboptimal
+> > > > > > performance for my case)
+> > > > > > > - OPTION 2 I do not know abut max score tracking, but doc
+Ids are
+> > not
+> > > > > > required to be in order
+> > > > > > > - OPTION 3 looks like exactly what I want, but one performance
+> > > > comment in
+> > > > > > javadoc about Sort.RELEVANCE made me think if that is the fastest
+> > way?
+> > > > > > >
+> > > > > > > What would be recommended here, any other options to achieve
+the
+> > > > fastest
+> > > > > > search with above defined conditions (no max score tracking
+and doc
+> > id
+> > > > order
+> > > > > > irrelevant)?  OPTIN2 looks nice, but as said, I am not sure
+about
+> > max
+> > > > score
+> > > > > > tracking?
+> > > > > > >
+> > > > > > > Thanks,
+> > > > > > > eks
+> > > > > > >
+> > > > > > >
+> > > > > > >
+> > > > > > >
+> > > > > > >
+> > ---------------------------------------------------------------------
+> > > > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > > > > For additional commands, e-mail:
+> > java-user-help@lucene.apache.org
+> > > > > > >
+> > > > > > >
+> > > > > >
+> > > > > >
+> > > > > >
+> > > > > >
+> > > > > >
+> > ---------------------------------------------------------------------
+> > > > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > > > >
+> > > > > >
+> > > >
+> > > >
+> > > >
+> > > >
+> > > >
+> > > > ---------------------------------------------------------------------
+> > > > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > > > For additional commands, e-mail: java-user-help@lucene.apache.org
+> > > >
+> > > >
+> >
+> >
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,81 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: The best way to iterate over document
+DATE: 26 Mar 2008
+
+Why not keep a Filter in memory? It consists of a single bit per document
+and the ordinal position of that bit is the Lucene doc ID. You could create
+this reasonably quickly for the *first* query that came in via HitCollector.
+
+Then each time you wanted another chunk, use the filter to know which
+docs to return. You could either, say, extend the Filter class and add
+some bookeeping or just zero out each bit that you returned to the user.
+
+NOTE: you don't get relevance this way, but for the case of returning all
+docs do you really want it?
+
+About updating the index. Remember that there is no "update in place".
+So you'll only have to check whether any document in the filter has been
+deleted when you are returning. Then you'd have to do something about
+looking for any new additions as you returned the last document in the
+set...
+But remember that until you close/reopen the searcher, you won't see changes
+anyway.....
+
+But you may not need to do any of this. If, each time you return a chunk,
+you're using a Hits object, then this is the first thing I'd change. A Hits
+object re-executes the query every 100th element you look at. So, assume
+you have something like
+
+(bad pseudo code here)
+for (int idx = 0; idx < firstdocinchunk && Hits.next(); ++idx)
+{
+}
+
+for (idx = 0; idx < chunksize && Hits.next(); ++idx)
+{
+    assemble doc for return
+}
+and the first doc you want to return is number 1,000, you'll actually
+be re-executing the query 10 times. Which probably accounts for your
+quadratic time.
+
+So I'd try just using a new HitCollector each time and see if that solves
+your problems before getting fancy. There really shouldn't be any
+noticeable difference between the first and last request unless you're
+doing something like accessing the documents before you get to
+the first one you expect to return. And a TopDocs should even
+preserve scoring.......
+
+Best
+Erick
+
+
+
+On Wed, Mar 26, 2008 at 5:48 AM, Wojtek H <wojtekh2@gmail.com> wrote:
+
+> Hi all,
+>
+> our problem is to choose the best (the fastest) way to iterate over huge
+> set
+> of documents (basic and most important case is to iterate over all
+> documents
+> in the index). Some slow process accesses documents and now it is done via
+> repeating query (for instance MatchAllDocsQuery). It processess first N
+> docs
+> then repeats query and processes next N docs and so on. Repeating query
+> means in fact quadratic time! So we think about changing the way docs are
+> accessed.
+> In case of generic query the only way to speed it up we see is to keep
+> HitCollector in memory between requests for docs. Isn't this approach too
+> memory consuming?
+> In case of iterating over all documents I was wondering if there is a way
+> to
+> determine set of index ids over which we could iterate (and of course
+> control index changes - if index is changed between requests we should
+> probably invalidate 'iterating session').
+> What is the best solution for this problem?
+> Thanks and regards,
+>
+> wojtek
+>
+

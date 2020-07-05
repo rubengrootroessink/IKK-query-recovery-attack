@@ -1,0 +1,59 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Dreaded optimize (again!)
+DATE: 4 Dec 2006
+
+Stanislav Jordanov wrote:
+
+> How much free disk space should be there (with respect to the index 
+> size) in order for the optimize to complete successfully?
+
+Good question!
+
+Really this detail should be included in the Javadoc for optimize (and
+more generally addDocument, addIndexes(*), etc.).  I will update the
+Javadocs of these methods once we work out the answer here.
+
+Optimize actually does a series of IndexWriter.mergeSegments (private
+method) calls.  Each call merges the last mergeFactor (default 10)
+segments into a single segment, and repeats this until there's 1
+segment.  So this question reduces to peak temp disk usage of
+mergeSegments.
+
+That call builds up the new segment by reading all data from each of
+the input segments and writing into a new single segment.  Only once
+the new segment is fully written to disk, does it then "commit",
+meaning it writes a new "segments" or "segments_N" (trunk) file and
+then removes the input segments.  So max temp disk usage of this step
+is:
+
+     (net size of un-merged segments) +
+        (net size of original segments to be merged) +
+        (net size of new segment files)
+
+Then if CFS is enabled it makes a CFS file for this new segment.  Max
+temp usage of this step is:
+
+     (net size of un-merged segments) +
+       2 * (net size of new segment files)
+
+The relative segments sizes are not simple to compute, but I think if
+you have no deletes and no separate norms, then the new segment will
+generally be a bit smaller than the sum of the input segments (but
+this is likely document dependent).
+
+So, with optimize() it's the final call to mergeSegments that will
+peak the temp disk usage, because that is the largest merge.  So, I
+think the overall answer is: you will need a little more (say 10%)
+than 2X your final index size of free space to run optimize.
+
+And expressed instead in terms of size of the index before starting
+optimize the answer is: you need 2X the size of the input index in
+free disk space, to run optimize.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,210 @@
+FROM: Dawid Weiss <dawid.we...@gmail.com>
+SUBJECT: Re: SorterTemplate.quickSort causes StackOverflowError
+DATE: 29 Apr 2011
+
+Don't know if this helps, but debugging stuff like this I simply add a
+(manually inserted or aspectj-injected) recursion count, add a breakpoint
+inside an if checking for recursion count >> X and run the vm with an
+attached socket debugger. This lets you run at (nearly) full speed and once
+you hit the breakpoint, inspect the stack, variables, etc...
+
+Dawid
+
+On Fri, Apr 29, 2011 at 1:40 PM, Otis Gospodnetic <
+otis_gospodnetic@yahoo.com> wrote:
+
+> Hi,
+>
+> OK, so it looks like it's not MemoryIndex and its Comparator that are
+> funky.
+> After switching from quickSort call in MemoryIndex to mergeSort, the
+> problem
+> persists:
+>
+> '1205215856@qtp-684754483-7' Id=18, RUNNABLE on lock=, total cpu
+> time=497060.0000ms user time=495210.0000msat
+> org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:105)
+>
+> at org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:104)
+> at org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:104)
+> at org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:104)
+> So something else is calling quickSort when it gets stuck.  Weirdly, when I
+> get
+> a thread dump and get the above, I don't see the original caller.  Maybe
+> because
+> the stack is already too deep and the printout is limited to N lines per
+> call
+> stack?
+>
+> Otis
+> ----
+> Sematext :: http://sematext.com/ :: Solr - Lucene - Nutch
+> Lucene ecosystem search :: http://search-lucene.com/
+>
+>
+>
+> ----- Original Message ----
+> > From: Uwe Schindler <uwe@thetaphi.de>
+> > To: java-user@lucene.apache.org
+> > Sent: Thu, April 28, 2011 5:54:44 PM
+> > Subject: RE: SorterTemplate.quickSort causes StackOverflowError
+> >
+> > > Thanks for confirming, Javier! :)
+> > >
+> > > Uwe, I assume you are  referring to this line 528 in MemoryIndex?
+> > >
+> > >      528     if (size > 1) ArrayUtil.quickSort(entries,
+>  termComparator);
+> > >
+> > > And this funky Comparator from  MemoryIndex:
+> > >
+> > >     208   private static final  Comparator<Object> termComparator = new
+> > > Comparator<Object>()  {
+> > >     209      @SuppressWarnings("unchecked")
+> > >     210     public  int compare(Object o1, Object o2) {
+> > >     211        if (o1 instanceof Map.Entry<?,?>) o1 =
+>  ((Map.Entry<?,?>)
+> > > o1).getKey();
+> > >     212        if (o2 instanceof Map.Entry<?,?>) o2 =
+>  ((Map.Entry<?,?>)
+> > > o2).getKey();
+> > >     213        if (o1 == o2) return 0;
+> > >     214        return ((Comparable) o1).compareTo((Comparable) o2);
+> > >      215     }
+> > >     216   };
+> > >
+> > >  Will try, thanks!
+> >
+> > Yeah, simply try with mergeSort in line 528. If that  helps, this
+> comparator
+> > is buggy.
+> >
+> > Uwe
+> >
+> >
+> > > ----- Original  Message ----
+> > > > From: Uwe Schindler <uwe@thetaphi.de>
+> > > > To: java-user@lucene.apache.org
+> > >  > Sent: Thu, April 28, 2011 5:36:13 PM
+> > > > Subject: RE:  SorterTemplate.quickSort causes StackOverflowError
+> > > >
+> > > > Hi  Otis,
+> > > >
+> > > > Can you reproduce this somehow and send test  code? I could look
+>  into
+> > > > it. I don't expect the error in the  quicksort algorithm itself as
+> this
+> > > > one is used e.g. BytesRefHash /  TermsHash, if there is a bug we
+> would
+> > > > have  seen it long time  ago.
+> > > >
+> > > > I have not seen this before, but I suspect  a  problem in this very
+> > > > strange comparator in MemoryIndex  (which is very broken,  if you
+> look
+> > > > at its code - it can  compare Strings with Map.Entry and so on,
+> > > > brrrr), maybe the  comparator is not stable? In this case, quicksort
+> > > > can  easily  loop endless and stack overflow. In Lucene 3.0 this used
+> > > > stock  java  sort (which is mergesort), maybe replace the
+> > > >  ArrayUtils.quickSort my  ArrayUtils.mergeSort() and see if problem
+>  is
+> > still
+> > > there?
+> > > >
+> > > > Uwe
+> > > >
+> > >  > -----
+> > > > Uwe Schindler
+> > > > H.-H.-Meier-Allee 63,  D-28213  Bremen
+> > > > http://www.thetaphi.de
+> > > > eMail: uwe@thetaphi.de
+> > > >
+> > >  >
+> > > > > -----Original  Message-----
+> > > > > From:  Otis Gospodnetic [mailto:otis_gospodnetic@yahoo.com]
+> > >  > >  Sent: Thursday, April 28, 2011 11:17 PM
+> > > > > To: java-user@lucene.apache.org
+> > >  > >  Subject: SorterTemplate.quickSort causes  StackOverflowError
+> > > > >
+> > > > >  Hi,
+> > > >  >
+> > > > > I'm looking at some code that uses MemoryIndex (Lucene  3.1)  and
+> > > > > that's exhibiting a strange behaviour - it  slows down over  time.
+> > > > > The MemoryIndex contains 1 doc, of  course, and executes a set of
+a
+> > > > > few thousand queries against  it.  The set of queries does not
+> > > > > change - the
+> > >  > same
+> > > > > set of queries gets executed on all incoming   documents.
+> > > > > This code runs very quickly..... in the  beginning.   But  with
+> time is
+> > gets
+> > > > > slower and  slower.... and slower..... and then I get  this:
+> > > > >
+> > >  > > 4/28/11 10:32:52 PM (S) SolrException.log  :
+> > java.lang.StackOverflowError
+> > > > >     at
+> > >  > >
+> > >
+>  org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:104)
+> > >  > >      at
+> > > > >
+> > >
+>  org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:104)
+> > >  > >      at
+> > > > >
+> > > > >
+>  org.apache.lucene.util.SorterTemplate.quickSort(SorterTemplate.java:
+> > >  > > 104)
+> > > > >
+> > > > > I haven't profiled this code  yet (remote server, firewall in
+> > > > > between,
+> > > > can't  use
+> > > > > YourKit...), but does the above look familiar to   anyone?
+> > > > > I've looked at the code and obviously there is the  recursive  call
+> > > > > that's problematic here - it looks like  the recursion just gets
+> > > > > deeper and deeper
+> > > >  and
+> > > > > "gets stuck", eventually getting too deep for  the  JVM's taste.
+> > > > >
+> > > > > Thanks,
+> > > > >  Otis
+> > > > > ----
+> > > > >  Sematext :: http://sematext.com/ :: Solr -  Lucene - Nutch Lucene
+> > > > > ecosystem  search :: http://search-lucene.com/
+> > > > >
+> > > > >
+> > > >  >
+> > > > >
+>  --------------------------------------------------------------------
+> > >  > > - To  unsubscribe, e-mail:
+> java-user-unsubscribe@lucene.apache.org
+> > >  > >  For additional commands, e-mail:
+> java-user-help@lucene.apache.org
+> > >  >
+> > > >
+> > > >
+> > > >
+>  ---------------------------------------------------------------------
+> > >  > To  unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > >  > For  additional commands, e-mail: java-user-help@lucene.apache.org
+> > >  >
+> > > >
+> > >
+> > >  ---------------------------------------------------------------------
+> > > To  unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > >  For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+> >
+> > ---------------------------------------------------------------------
+> > To  unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For  additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

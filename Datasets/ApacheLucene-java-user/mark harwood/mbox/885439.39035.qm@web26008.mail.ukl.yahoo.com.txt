@@ -1,0 +1,235 @@
+FROM: mark harwood <markharw...@yahoo.co.uk>
+SUBJECT: Re: Question regarding sorting and memory consumption in lucene
+DATE: 10 Oct 2008
+
+Actually looking at this a little deeper maybe Lucene could/should automatically be doing this
+"short" optimisation here?
+
+Given a comparitively small set of unique terms (as in your example) it seems feasible that
+FieldCacheImpl could allocate a short[reader.maxDoc] array rather than an int[reader.maxDoc]
+array to represent values for sorting. 
+That halves the memory required and could support fields with up to 65 thousand unique terms.
+It looks like towards the end of the code where FieldCacheImpl creates a StringIndex it is
+in a position to recognise that this optimisation could be made.
+
+Anyone more familiar with the internal workings of the Sort api care to comment further on
+if that is an option or have I missed something?
+I've not really poked around in this part of the code too much.
+
+Cheers,
+Mark
+
+
+
+
+----- Original Message ----
+From: Aleksander M. Stensby <aleksander.stensby@integrasco.no>
+To: java-user@lucene.apache.org
+Sent: Friday, 10 October, 2008 16:45:02
+Subject: Re: Question regarding sorting and memory consumption in lucene
+
+That's a really good idea Mark! :)
+Thanks! Will try to see if can make a quick change with your suggestion.  
+(Too bad quick isn't really a word in my vocabulary when it's 6 o'clock on  
+a Friday :(
+Guess it'll be a looong night.. :(
+
+Cheers,
+  Aleks
+
+On Fri, 10 Oct 2008 17:07:31 +0200, mark harwood <markharw00d@yahoo.co.uk>  
+wrote:
+
+> Update: The statement "...cost is field size (10 bytes ?) times number  
+> of documents" is wrong.
+> What you actually have is the cost of the unique strings  (estimated at  
+> 10 * 1460  -effectively nothing) BUT you have to add the cost of the  
+> array of object references to those strings so
+>
+>        30m x 8 bytes on 64bit java = 240mb
+> or
+>     30m x 4 bytes on 32bit   = 120mb
+>
+> ....which is where the bulk of the cost comes in.
+>
+> How about using a field cache of "short" which is effectively:
+>
+>      new short[reader.maxDoc]
+> or
+>         2bytes * 30 million = 60 meg.
+>
+> Each short could represent up to 65536 values - capable of representing  
+> a date range of 179 years.
+>
+>
+>
+>
+>
+> ----- Original Message ----
+> From: mark harwood <markharw00d@yahoo.co.uk>
+> To: java-user@lucene.apache.org
+> Sent: Friday, 10 October, 2008 15:43:35
+> Subject: Re: Question regarding sorting and memory consumption in lucene
+>
+> I think you have your memory cost calculation wrong.
+> The cost is field size (10 bytes ?) times number of documents NOT number  
+> of unique terms.
+> The cache is essentially an array of  size reader.maxDoc() which is  
+> indexed directly into on docId to retrieve field values.
+>
+> You are right in needing to factor in the cost of keeping one active  
+> cache while busy warming-up a new one so that effectively doubles the  
+> RAM requirements.
+>
+>
+>
+>
+>
+>
+> ----- Original Message ----
+> From: Aleksander M. Stensby <aleksander.stensby@integrasco.no>
+> To: java-user@lucene.apache.org
+> Sent: Friday, 10 October, 2008 15:25:29
+> Subject: Re: Question regarding sorting and memory consumption in lucene
+>
+> Unfortunately no, since the documents that are added may come form a new
+> "source" containing old documents aswell..:/
+> I tried deploying our webapplication without any searcher objects and it
+> consumes basically ~200mb of memory in tomcat.
+> With 6 searchers the same applications manages to consume over 2.5 GB of
+> memory when warming... :(
+> I might have done some super-idiotic logic in the way I handle searching,
+> but I can seriously not see what that might be...
+>
+> But I assume that people deal with much larger indexes than this, right?
+>
+> cheers,
+>   Aleksander
+>
+>
+> On Fri, 10 Oct 2008 15:18:46 +0200, mark harwood  
+> <markharw00d@yahoo.co.uk>
+> wrote:
+>
+>> Assuming content is added in chronological order and with no updates to
+>> existing docs couldn't you rely on internal Lucene document id to give a
+>> chronological sort order?
+>> That would require no memory cache at all when sorting.
+>>
+>> Querying across multiple indexes simultaneously however may present an
+>> added complication...
+>>
+>>
+>>
+>> ----- Original Message ----
+>> From: Aleksander M. Stensby <aleksander.stensby@integrasco.no>
+>> To: java-user@lucene.apache.org
+>> Sent: Friday, 10 October, 2008 13:51:50
+>> Subject: Re: Question regarding sorting and memory consumption in lucene
+>>
+>> I'll follow up on my own question...
+>> Let's say that we have 4 years of data, meaning that there will be
+>> roughly
+>> 4 * 365 = 1460 unique terms for our sort field.
+>> For one index, lets say with 30 million docs, the cache should use  
+>> approx
+>> 100mb, or am I wrong? and thus for 6 indexes we would need approx 600 mb
+>> for the caches? (and an additional 100mb every time we warm a new
+>> searcher
+>> and swap it out...) As far as the string versus int or long goes, I  
+>> don't
+>> really see any big gain in changig it since 1460 * 10  bytes extra  
+>> memory
+>> doesnt really make much difference. Or?
+>>
+>> I guess we should consider reducing the index size or at least only  
+>> allow
+>> sorted search on a subset of the index (or a pruned version of the
+>> index...) ? Would that be better for us?
+>> But then again, I assume that there are much larger lucene-based indexes
+>> out there than ours, and you guys must have some solution to this issue,
+>> right? :)
+>>
+>> best regards,
+>>   Aleksander
+>>
+>>
+>> On Fri, 10 Oct 2008 14:09:36 +0200, Aleksander M. Stensby
+>> <aleksander.stensby@integrasco.no> wrote:
+>>
+>>> Hello, I've read a lot of threads now on memory consumption and  
+>>> sorting,
+>>> and I think I have a pretty good understanding of how things work, but  
+>>> I
+>>> could still need some input here..
+>>>
+>>> We currently have a system consisting of 6 different lucene indexes  
+>>> (all
+>>> have the same structure, so you could say it is a form of sharding). We
+>>> currently use this approach because we want to be able to give users
+>>> access to different index (but not necessarily  all indexes) etc.
+>>>
+>>> (We are planning to move to a solr-based system, but for now we would
+>>> like to solve this issue with our current lucene-based system.)
+>>>
+>>> The thing is, the indexes are rather big (ranging from 5G to 20G per
+>>> index and 10 - 30 million entries per index.)
+>>> We keep one searcher object open per index, and when the index is
+>>> changed (new documents added in batches several times a day), we update
+>>> the searcher objects.
+>>> In the warmup procedure we did a couple of searches and things work
+>>> fine, BUT i realized that in our application we return hits sorted by
+>>> date by default, and our warmup procedure did non-sorted queries... so
+>>> still the first searches done by the user after an update was slow
+>>> (obviously).
+>>>
+>>> To cope, I changed the warmup procedure to include a sorted search, and
+>>> now the user will not notice slow queries. Good!
+>>> But, the problem at hand is that we are running into memory problems
+>>> (and I understand that sorting does consume a lot of memory...) But is
+>>> there any way that is "best practice" to deal with this? The field we
+>>> sort on is an un_indexed text field representing the date. typically
+>>> "2008-10-10". I am aware that string field sorting consumes a lot of
+>>> memory, so should we change this field to something different? Would
+>>> this help us with the memory problems?
+>>>
+>>> As a sidenote / couriosity question: Does it matter if we use the  
+>>> search
+>>> method returning Hits versus the search method returning TopFieldDocs?
+>>> (we are not iterating them in any way when this memory issue occurs)
+>>>
+>>> Thanks in advance for any guidance we may get.
+>>>
+>>> Best regards,
+>>>   Aleksander M. Stensby
+>>>
+>>>
+>>>
+>>
+>>
+>>
+>
+>
+>
+
+
+
+-- 
+Aleksander M. Stensby
+Senior Software Developer
+Integrasco A/S
++47 41 22 82 72
+aleksander.stensby@integrasco.no
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

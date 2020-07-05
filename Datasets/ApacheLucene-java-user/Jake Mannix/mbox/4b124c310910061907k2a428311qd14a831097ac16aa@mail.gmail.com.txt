@@ -1,0 +1,73 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: How to setup a scalable deployment?
+DATE: 7 Oct 2009
+
+Hi Chris,
+
+  Answering your question depends in part whether your kind of scalability
+is dependent on sharding (your index size is expected to grow to very large)
+or just replication (your query load is large, and you need failover).  It
+sounds like you're mostly thinking about the latter.
+
+1) Each web server indexes the content separately. This will potentially
+> cause different web servers to have slightly different indexes at any given
+> time and also duplicates the work load of indexing the content
+>
+
+  If your indexing throughput is small enough, this can be a perfectly
+simple
+way to do this.  Just make sure you're not DOS'ing your DB if you're
+indexing
+via direct DB queries (ie. if you have a message queue or something else
+firing off indexing events, instead of all web servers firing off
+simultaneous
+identical DB queries from different places.  DB caching will deal with this
+pretty well, but you still need to be careful).
+
+
+> 2) Using rsync (or a similar tool) to regularly update a local lucene index
+> directory on each web server. I imagine there will be locking issues that
+> need to be resolved here.
+>
+
+  rsync can work great, and and as Jason said, it is how Solr works and it
+scales great.  Locking isn't really a worry, because in this setup, the
+slaves
+are read-only in this case, so they won't compete with rsync for write
+access.
+
+
+> 3) Using a network file system that all the web servers can access. I don't
+> have much experience in this area, but potentially latency on searches will
+> be high?
+>
+
+  Generally this is a really bad idea, and can lead to really hard-to-debug
+performance problems.
+
+
+> 4) Some alternative lucene specific solution that I haven't found in the
+> wiki / lucene documentation.
+
+
+> The indexes aim to be as real-time as possible, I currently update my
+> IndexReaders in a background thread every 20 seconds.
+>
+
+This is where things diverge from common practice, especially if you at some
+point decide to lower that to 10 or 5 seconds.
+
+In this case, I'd say that if you have a reliable, scalable queueing system
+for
+getting indexing events distributed to all of your servers, then indexing on
+all replicas simultaneously can be the best way to have maximally realtime
+search, either using the very new feature of "near realtime search" in
+Lucene 2.9, by using something home-brewed which indexes in memory
+and on disk simultaneously, or using Zoie ( http://zoie.googlecode.com ),
+an open-source realtime search library built on top of Lucene which we at
+LinkedIn built and have been using in production for serving tens of
+millions of queries a day in real time (meaning milliseconds, even under
+fairly high indexing load) for the past year.
+
+  -jake mannix
+

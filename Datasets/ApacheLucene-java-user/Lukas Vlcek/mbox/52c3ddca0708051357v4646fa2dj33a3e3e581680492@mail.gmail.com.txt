@@ -1,0 +1,223 @@
+FROM: "Lukas Vlcek" <lukas.vl...@gmail.com>
+SUBJECT: Re: Bug in Lucene 2.2.0 code? Simple code included (StringIndexOutOfBoundsException).
+DATE: 5 Aug 2007
+
+Mark,
+
+thanks a lot. Based on my first tests it seems that I will be able to finish
+my initial goal.
+I will be doing something like the following:
+
+            for (int i = 0; i < hits.length(); i++) {
+
+                String[] texts = hits.doc(i).getValues("lotid");
+
+                for (String text: texts) {
+
+                    TokenStream tokenStream = analyzer.tokenStream("lotid",
+new StringReader(text));
+                    String result = highlighter.getBestFragment
+(tokenStream,text);
+
+                }
+            }
+
+This works very well for me. The only disadvantage is that I can use neither
+term vector not positioning information thus I am loosing performance I
+guess.
+
+Thanks,
+Lukas
+
+On 7/30/07, Mark Miller <markrmiller@gmail.com> wrote:
+>
+> Hey Lukas,
+>
+> I was being simplistic when I said that the text and TokenSteam must be
+> exactly the same. It's difficult to think of a reason why you would not
+> want them to be the same though. Each Token records the offsets where it
+> can be found in the original text -- that is how the Highlighter knows
+> where to highlight in the original text with the only the Tokens to
+> inspect. So if a Token is scored >0, then the offsets for that Token
+> must be valid indexes into the text String (In the case of the
+> HTMLFormmatter, which only marks Tokens that score >0).
+>
+> Now an issue I see you having:
+>
+> The TokenStream for "example long text" is:
+> (term,startoffset,endoffset)
+>
+> (example,0,7)
+> (long,8,12)
+> (text,13,17)
+>
+> So for the query "example long" the Highlighter will highlight offsets
+> 0-7 and 8-12 in the source text. In your example, with the text only
+> being "example", the attempt to highlight the Token "long" will index
+> into the source text 8 and cause an outofbounds.
+>
+> In your case you are even worse off because you are building the
+> TokenStream from a field that was added more than once. This gives you
+> seemingly wrong offsets of:
+>
+> (example,0,7)
+> (long,14,18)
+> (text,22,26)
+>
+> Each word has its space accounted for twice. Maybe there is a reason for
+> this, but it looks wrong. I have not investigated enough to know if
+> TokenSources is responsible for this, or if core Lucene is the culprit.
+> Even if it was done differently though, there would still seem to be
+> possible issues with the possible spacing between words when you are
+> adding the words one at a time with no spacing in the same field.
+>
+> Looking at your original email though, you may be trying to do something
+> that is best done without the Highlighter.
+>
+> In summary , you should use Document.getFields (more efficient if you
+> are getting more than one field anyway) and get around the offset issues
+> above.
+>
+> - Mark
+>
+> Lukas Vlcek wrote:
+> > Mark,
+> > thank you for this. I will wait for your other responses.
+> > This will keep me going on :-)
+> >
+> > I didn't know that there is a design restriction in Lucene that the text
+> and
+> > TokenStream must be exactly the same (still this seems redundant, I will
+> > dive into Lucene API more).
+> >
+> > BR
+> > Lukas
+> >
+> > On 7/29/07, Mark Miller <markrmiller@gmail.com> wrote:
+> >
+> >> I'm am going to try and write up some more info for you tomorrow, but
+> >> just to point out: I do think there is a bug in the way offsets are
+> >> being handled. I don't think this is causing your current problem (what
+> >> I mentioned is) but it will prob cause you problems down the road. I
+> >> will look into this further.
+> >>
+> >> - Mark
+> >>
+> >> Lukas Vlcek wrote:
+> >>
+> >>> Hi Lucene experts,
+> >>>
+> >>> The following is a simple Lucene code which generates
+> >>> StringIndexOutOfBoundsException exception. I am using Lucene
+> 2.2.0official
+> >>> releasse. Can anyone tell me what is wrong with this code? Is this a
+> bug
+> >>>
+> >> or
+> >>
+> >>> a feature of Lucene? Any comments/hits highly welcommed!
+> >>>
+> >>> In a nutshell I have a document with two (or four) fileds:
+> >>> 1) all
+> >>> 2-4) small
+> >>>
+> >>> I use [all] for searching and [small] for highlighting.
+> >>>
+> >>> [packkage and imports truncated...]
+> >>>
+> >>> public class MemoryIndexCase {
+> >>>     static public void main(String[] arg) {
+> >>>
+> >>>         Document doc = new Document();
+> >>>
+> >>>         doc.add(new Field("all","example long text",
+> >>>                 Field.Store.NO, Field.Index.TOKENIZED));
+> >>>         doc.add(new Field("small","example",
+> >>>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> >>> Field.TermVector.WITH_POSITIONS_OFFSETS));
+> >>>         doc.add(new Field("small","long",
+> >>>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> >>> Field.TermVector.WITH_POSITIONS_OFFSETS));
+> >>>         doc.add(new Field("small","text",
+> >>>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> >>> Field.TermVector.WITH_POSITIONS_OFFSETS));
+> >>>
+> >>>         try {
+> >>>             Directory idx = new RAMDirectory();
+> >>>             IndexWriter writer = new IndexWriter(idx, new
+> >>> StandardAnalyzer(), true);
+> >>>
+> >>>             writer.addDocument(doc);
+> >>>             writer.optimize();
+> >>>             writer.close();
+> >>>
+> >>>             Searcher searcher = new IndexSearcher(idx);
+> >>>
+> >>>             QueryParser qp = new QueryParser("all", new
+> >>>
+> >> StandardAnalyzer());
+> >>
+> >>>             Query query = qp.parse("example text");
+> >>>             Hits hits = searcher.search(query);
+> >>>
+> >>>             Highlighter highlighter =    new Highlighter(new
+> >>> QueryScorer(query));
+> >>>
+> >>>             IndexReader ir = IndexReader.open(idx);
+> >>>             for (int i = 0; i < hits.length(); i++) {
+> >>>
+> >>>                 String text = hits.doc(i).get("small");
+> >>>
+> >>>                 TermFreqVector tfv = ir.getTermFreqVector(hits.id(i),
+> >>> "small");
+> >>>                 TokenStream tokenStream=
+> >>> TokenSources.getTokenStream((TermPositionVector)
+> >>> tfv);
+> >>>
+> >>>                 String result =
+> >>>                     highlighter.getBestFragment(tokenStream,text);
+> >>>                 System.out.println(result);
+> >>>             }
+> >>>
+> >>>         } catch (Throwable e) {
+> >>>             e.printStackTrace();
+> >>>         }
+> >>>     }
+> >>> }
+> >>>
+> >>> The exception is:
+> >>> java.lang.StringIndexOutOfBoundsException: String index out of range:
+> 11
+> >>>     at java.lang.String.substring(String.java:1935)
+> >>>     at
+> >>>
+> >> org.apache.lucene.search.highlight.Highlighter.getBestTextFragments(
+> >>
+> >>> Highlighter.java:235)
+> >>>     at org.apache.lucene.search.highlight.Highlighter.getBestFragments
+> (
+> >>> Highlighter.java:175)
+> >>>     at org.apache.lucene.search.highlight.Highlighter.getBestFragment(
+> >>> Highlighter.java:101)
+> >>>     at org.lucenetest.MemoryIndexCase.main(MemoryIndexCase.java:70)
+> >>>
+> >>> Best regards,
+> >>> Lukas
+> >>>
+> >>>
+> >>>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >>
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

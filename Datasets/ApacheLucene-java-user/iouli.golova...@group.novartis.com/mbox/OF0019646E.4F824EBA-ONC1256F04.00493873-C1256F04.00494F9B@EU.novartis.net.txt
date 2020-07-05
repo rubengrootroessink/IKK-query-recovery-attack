@@ -1,0 +1,229 @@
+FROM: iouli.golova...@group.novartis.com
+SUBJECT: RE: memory leek in lucene?
+DATE: 3 Sep 2004
+
+Terence,
+
+still had not not time to prepare a test case, but... I worked around it:
+
+The idea is to replace the score with timestamp on populating hits (in 
+case You are not interesting too much in real score), where the field_sort 
+is in "yyyyMMddHHmm" etc. format.
+Works fine, at least no outOfMemory crush until now.
+
+
+
+  public TopDocs search(Query query, Filter filter, final int nDocs, final String field_sort)
+       throws IOException {
+    Scorer scorer = query.weight(this).scorer(reader);
+    if (scorer == null)
+      return new TopDocs(0, new ScoreDoc[0]);
+
+    final BitSet bits = filter != null ? filter.bits(reader) : null;
+    final HitQueue hq = new HitQueue(nDocs);
+    final int[] totalHits = new int[1];
+    scorer.score(new HitCollector() {
+        public final void collect(int doc, float score) {
+        // this bloody piece of code fakes scorer to deliver results sorted by 
+date 
+        // because valid way runs into outOfMemory problem:( JGO 2004/08/31
+        // note: modules touched - 
+        // 
+Searcher,Searchable,Hits,ParallelMultiSearcher,MultiSearcher,RemoteSearchable 
+(these for new field field_sort)
+        // ScoreDoc, FieldSortedHitQueue,Hits,FieldScore (these for float -> 
+double)
+          double new_score = score;
+          String fval="";
+          if (field_sort!=null){      //if null, just sort as usual by real score
+                try {
+                        new_score= new Double("0."+reader.document(doc).get(field_sort)+"d").doubleValue();
+
+                } catch (IOException e) {
+                        e.printStackTrace();
+                }
+          } 
+                if (score > 0.0f &&                         // ignore zeroed buckets
+              (bits==null || bits.get(doc))) {     // skip docs not in bits
+            totalHits[0]++;
+            hq.insert(new ScoreDoc(doc, new_score));
+          }
+        }
+      });
+
+    ScoreDoc[] scoreDocs = new ScoreDoc[hq.size()];
+    for (int i = hq.size()-1; i >= 0; i--)    // put docs in array
+      scoreDocs[i] = (ScoreDoc)hq.pop();
+
+    return new TopDocs(totalHits[0], scoreDocs);
+  }
+ 
+
+
+
+
+
+
+Hi Iouli,
+
+Sorry, I am having a very tight schedule at work right now. I don't have 
+time to come up the test case. The problem is really related to the 
+search(query,sort) method call. If you can come up the test case, that 
+would be great.
+
+Thanks,
+Terence
+
+
+> back to biz.
+> 
+> Terence,
+> 
+> probably u prepared it already or should I do it?
+> 
+> Otis,
+> 
+> actually it's just a common way to execute a query.
+> 
+> If  the code is like 
+> 
+> hits = ms.search(query);
+> 
+> or
+> 
+>   sort = new Sort(SortField.FIELD_DOC);
+>   hits = ms.search(query,sort);
+> 
+> or even 
+> 
+>   filter = DateFilter("published",stamp_from,stamp_to);
+>   sort = new Sort(SortField.FIELD_DOC);
+>   hits = ms.search(query,filter,sort);
+> 
+> everything is ok, memory is getting free (you see it with top -p pid)
+> 
+> The problem starts only in case:
+> 
+>   sort = new Sort(new SortField("published_short",SortField.FLOAT, 
+true));
+>   hits = ms.search(query,sort);
+> 
+> The memory never comes back  and grows up with every iteration even You 
+> start garbage collector explicitly and code runs somehow into finalize()
+> 
+> Regards
+> J.
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> Iouli & Terence,
+> 
+> Could you create a self-sufficient test case that demonstrates the
+> memory leak?  If you can do that, please open a new bug entry in
+> Bugzilla (the link to it is on Lucene's home page), and then attach
+> your test case to it.
+> 
+> Thanks!
+> Otis
+> 
+> --- iouli.golovatyi@group.novartis.com wrote:
+> 
+> > Yes Terence, it's exactly what I do
+> > 
+> > 
+> > 
+> > 
+> > 
+> > 
+> > Terence Lai <tlai@trekspace.com>
+> > 21.08.2004 01:50
+> > Please respond to "Lucene Users List"
+> > 
+> > 
+> >         To:     Lucene Users List <lucene-user@jakarta.apache.org>
+> >         cc: 
+> >         Subject:        RE: memory leek in lucene?
+> >         Category: 
+> > 
+> > 
+> > 
+> > Are you calling ParallelMultiSearcher.search(Query query, Sort sort)
+> > to do 
+> > your search? If so, I am currently having a similar problem.
+> > 
+> > Terence
+> > 
+> > > 
+> > > Doing query against lucene  I run into memomry problem, i.e. it's
+> > look 
+> > like
+> > > it's not giving memory back after the
+> > > query have been  executed.
+> > > 
+> > > I use ParallelMultiSearcher ant call close method after results are
+> > > displayed.
+> > > ....
+> > > hits=null; // Hits class
+> > > if (ms!=null) ms.close(); //ParallelMultiSearcher
+> > > ....
+> > > Doesn't help. The memory getting not free. On queries like "No*" I
+> > get
+> > > incremental memory consume of c. 20-70mb. per query.
+> > > Imagine what happens with my web server...
+> > > 
+> > > I tried also from command line and got the similar result.
+> > > 
+> > > Am I doing wrong or miss something?
+> > > 
+> > > Please help, I use 1.4.1 on linux box.
+> > > Joel
+> > > 
+> > > 
+> > > 
+> > > 
+> > > 
+> > >
+> > ---------------------------------------------------------------------
+> > > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > > For additional commands, e-mail:
+> > lucene-user-help@jakarta.apache.org
+> > > 
+> > 
+> > 
+> > 
+> > 
+> > ----------------------------------------------------------
+> > Get your free email account from http://www.trekspace.com
+> >           Your Internet Virtual Desktop!
+> > 
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> > For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> > 
+> > 
+> > 
+> > 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+> 
+> 
+> 
+
+
+
+
+----------------------------------------------------------
+Get your free email account from http://www.trekspace.com
+          Your Internet Virtual Desktop!
+
+
+
+

@@ -1,0 +1,52 @@
+FROM: Jake Mannix <jake.man...@gmail.com>
+SUBJECT: Re: faceted search performance
+DATE: 12 Oct 2009
+
+Hey Chris,
+
+On Mon, Oct 12, 2009 at 10:30 AM, Christoph Boosz <
+christoph.boosz@googlemail.com> wrote:
+
+> Thanks for your reply.
+> Yes, it's likely that many terms occur in few documents.
+>
+> If I understand you right, I should do the following:
+> -Write a HitCollector that simply increments a counter
+> -Get the filter for the user query once: new CachingWrapperFilter(new
+> QueryWrapperFilter(userQuery));
+> -Create a TermQuery for each term
+> -Perform the search and read the counter of the HitCollector
+>
+> I did that, but it didn't get faster. Any ideas why?
+>
+
+This killer is the "TermQuery for each term" part - this is huge. You need
+to invert this process,
+and use your query as is, but while walking in the HitCollector, on each doc
+which matches
+your query, increment counters for each of the terms in that document (which
+means you need
+an in-memory forward lookup for your documents, like a multivalued
+FieldCache - and if you've
+got roughly the same number of terms as documents, this cache is likely to
+be as large as
+your entire index - a pretty hefty RAM cost).
+
+But a good thing to keep in mind is that doing this kind of faceting
+(massively multivalued
+on a huge term-set) requires a lot of computation, even if you have all the
+proper structures
+living in memory:
+
+For each document you look at (which matches your query), you need to look
+at all
+of the terms in that document, and increment a counter for that term.  So
+however much
+time it would normally take for you to do the driving query, it can take as
+much as that
+multiplied by the average number of terms in a document in your index.  If
+your documents
+are big, this could be a pretty huge latency penalty.
+
+  -jake
+

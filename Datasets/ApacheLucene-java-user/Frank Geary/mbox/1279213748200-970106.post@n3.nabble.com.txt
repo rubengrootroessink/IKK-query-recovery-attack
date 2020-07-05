@@ -1,0 +1,58 @@
+FROM: Frank Geary <fge...@acquiremedia.com>
+SUBJECT: Re: Index corruption using Lucene 2.4.1 - thread safety issue?
+DATE: 15 Jul 2010
+
+
+Just to conclude this issue, it seems that my theory below was correct.  I
+implemented code at the time of my previous posting to "delete the last
+IndexReader used whenever we re-create a new RAMDir IW" and we have not seen
+the ArrayOutOfBounds Exception since.  Thus, the lesson here is never to
+reopen an IndexReader from one RAMDir index to use for a different RAMDir
+index.  It sometimes works, but will fail some of the time.
+
+Frank Geary  
+
+
+Frank Geary wrote:
+> 
+> For the record - I haven't proven this yet - but here's my current theory
+> of what is causing the problem:
+> 
+> 1) We start with a new RAMDir IW[0] and do some deletes and adds.
+> 2) We create at least one IndexReader based on that IW. The last of which
+> we'll call IndexReader[A].
+> 3) Then we switch to using the other RAMDir IW[1].
+> 4) While using IW[1], we clear out IW[0] and create a new IW[0].  However,
+> the last IndexReader, IndexReader[A], is left around.
+> 5) Eventually, we switch to using the other newly re-created RAMDir IW[0]
+> again.
+> 6) The first search that comes in against RAMDir IW[0] trys to reopen
+> IndexReader[A].  But IndexReader[A] has nothing to do with the newly
+> re-created RAMDir index[0].  
+> 
+> So my theory is that this confuses the IndexReader.reopen() code.  
+> Therefore, we can perhaps fix the problem by deleting the last IndexReader
+> used whenever we re-create any RAMDir IW.  Furthermore, this problem may
+> be so infrequent because:
+> a) It can only happen the first time after two RAMDir swaps.
+> b) It may depend on what state IndexReader[A] was in when it was created.
+> c) It may also depend on what state the new RAMDir IW is in when that
+> first reopen() call is made using the old IndexReader[A].  
+> d) If the first reopen for a new IW succeeds, we're fine until the next
+> swap.
+> e) If it fails, it could fail repeatedly or only once.
+> 
+> I'll let you know when I determine if this theory is correct or not.
+> 
+> Frank
+> 
+
+-- 
+View this message in context: http://lucene.472066.n3.nabble.com/Index-corruption-using-Lucene-2-4-1-thread-safety-issue-tp564099p970106.html
+Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

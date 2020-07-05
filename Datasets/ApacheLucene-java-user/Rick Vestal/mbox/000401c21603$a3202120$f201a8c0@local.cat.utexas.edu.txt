@@ -1,0 +1,200 @@
+FROM: "Rick Vestal" <r...@cat.utexas.edu>
+SUBJECT: Deleting documents from index question.
+DATE: 17 Jun 2002
+
+Good morning all,
+
+I'm trying to delete a set of documents from an index,
+and am running into a problem where all the documents are
+not deleted.  My problem is either the way I am using the API
+or it is a bug in lucene...I'm not sure which one it is.
+
+I've included a sample program here that shows the problem.  Note
+that you will have to change the path at the top to a valid set
+of files on your machine.  If anybody has any ideas on why I
+am not removing the files correctly, please let me know.
+
+Thanks,
+
+-- Rick
+
+/*
+ * Created by IntelliJ IDEA.
+ * User: rvestal
+ * Date: Jun 16, 2002
+ * Time: 10:23:51 PM
+ * To change template for new class use
+ * Code Style | Class Templates options (Tools | IDE Options).
+ */
+package org.intellij.plugins.docPlugin;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.queryParser.QueryParser;
+import org.apache.lucene.search.*;
+import org.apache.lucene.store.*;
+
+import java.io.*;
+import java.util.Vector;
+
+public class IndexTest {
+
+    // path to ant 1.4.1 docs
+    private static String mDirToIndex = "c:/utils/ant/docs/manual/api/";
+
+    private static String INDEX_DIR = "indexTest";
+
+
+    static private void collectFiles( File dir, Vector files ) {
+        File[] children = dir.listFiles();
+        for ( int ix = 0; ix < children.length; ix++ ) {
+            File child = children[ix];
+            if ( child.isDirectory() ) {
+                collectFiles( child, files );
+            } else {
+                files.add( child );
+            }
+        }
+    }
+
+
+    public static void main( String[] args ) {
+        File indexDir = new File( INDEX_DIR );
+        if ( !indexDir.exists() ) {
+            indexDir.mkdirs();
+        }
+
+        Vector files = new Vector();
+        collectFiles( new File( mDirToIndex ), files );
+
+        try {
+            IndexWriter writer = new IndexWriter( INDEX_DIR, new 
+StandardAnalyzer(), true );
+
+            for ( int ix = 0; ix < files.size(); ix++ ) {
+                File file = ( File ) files.get( ix );
+                writer.addDocument( IndexTestDocument.createDocument(
+file ) );
+            }
+            System.out.println( "Added: " + files.size() + " files." );
+
+            writer.optimize();
+            writer.close();
+            writer = null;
+
+            Searcher searcher = new IndexSearcher( INDEX_DIR );
+            Analyzer analyzer = new StandardAnalyzer();
+            Query query = QueryParser.parse( "Ant", "contents", analyzer
+);
+
+            Hits hits = searcher.search( query );
+            System.out.println( "Hits after add: " + hits.length() );
+            searcher.close();
+
+            Directory directory = FSDirectory.getDirectory( INDEX_DIR,
+false );
+            IndexReader reader = IndexReader.open( directory );
+
+            int count = 0;
+            for ( int ix = 0; ix < files.size(); ix++ ) {
+                String path = IndexTestDocument.normalizePath( ( ( File
+) 
+files.get( ix ) ).getAbsolutePath().replace( '\\', '/' ) );
+
+                int numDocs = reader.numDocs();
+                boolean bDeleted = false;
+                for ( int ndx = 0; ndx < numDocs; ndx++ ) {
+                    if ( !reader.isDeleted( ndx ) ) {
+                        String docPath = IndexTestDocument.getPath( 
+reader.document( ndx ) );
+                        if ( docPath.equals( path ) ) {
+                            count++;
+                            reader.delete( ndx );
+                            bDeleted = true;
+                            break;
+                        }
+                    }
+                }
+                if ( !bDeleted ) {
+                    System.out.println( "  Not Deleted: " + path );
+                    for( int ndx = 0; ndx < numDocs; ndx++ ) {
+                        if ( !reader.isDeleted( ndx ) ) {
+                            String docPath = IndexTestDocument.getPath( 
+reader.document( ndx ) );
+                            System.out.println( "      path " + ndx + ":
+" + 
+docPath );
+                        }
+                    }
+                }
+            }
+            System.out.println( "Removed " + count + " documents of (" +
+
+files.size() + ")" );
+            reader.close();
+
+            searcher = new IndexSearcher( INDEX_DIR );
+            analyzer = new StandardAnalyzer();
+            query = QueryParser.parse( "Ant", "contents", analyzer );
+
+            hits = searcher.search( query );
+            System.out.println( "Hits after remove: " + hits.length() );
+
+        } catch ( Exception ex ) {
+            ex.printStackTrace();
+        }
+    }
+
+
+    static class IndexTestDocument {
+
+        static public Document createDocument( File f )
+            throws FileNotFoundException {
+            Document doc = new Document();
+            doc.add( Field.Text( "path", normalizePath( f.getPath() ) )
+);
+            Reader reader = new BufferedReader( new InputStreamReader(
+new 
+FileInputStream( f ) ) );
+            doc.add( Field.Text( "contents", reader ) );
+            return doc;
+        }
+
+
+        static public String getPath( Document doc ) {
+            return ( String ) doc.get( "path" );
+        }
+
+        static public String normalizePath( String path ) {
+            if ( path == null || path.length() == 0 ) {
+                return "";
+            }
+            path = path.replace( '\\', '/' );
+            File f = new File( path );
+            if ( f.isDirectory() ) {
+                if ( path.charAt( path.length() - 1 ) != '/' ) {
+                    path = path + "/";
+                }
+            }
+            return path;
+        }
+    }
+}
+
+
+
+-- 
+Center for Agile Technology          phone: 512.232.4399
+The University of Texas at Austin    fax: 512.232.6413
+3925 West Braker Lane                email: rick@cat.utexas.edu
+MCC Suite 3.11040 CAT                http://cat.utexas.edu/
+Austin, TX   78759-5316
+
+
+--
+To unsubscribe, e-mail:   <mailto:lucene-user-unsubscribe@jakarta.apache.org>
+For additional commands, e-mail: <mailto:lucene-user-help@jakarta.apache.org>
+
+

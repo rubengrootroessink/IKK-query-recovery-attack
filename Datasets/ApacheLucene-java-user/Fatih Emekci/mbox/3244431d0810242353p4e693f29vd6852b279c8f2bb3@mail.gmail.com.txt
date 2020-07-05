@@ -1,0 +1,217 @@
+FROM: "Fatih Emekci" <fatiheme...@gmail.com>
+SUBJECT: Possible payload bug in lucene
+DATE: 25 Oct 2008
+
+Hi all,
+I am getting the below exception when try to read the payload data:
+   [java] java.lang.NullPointerException
+     [java]     at
+org.apache.lucene.index.MultiSegmentReader$MultiTermPositions.nextPosition(MultiSegmentReader.java:631)
+
+However, if I optimize the index before reading the payload, it just works
+fine.
+This seems like a bug. Pasting the code below. please let me know if I am
+doing something wrong.
+
+thanks
+
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.lucene.analysis.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermPositions;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.store.FSDirectory;
+
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.index.Payload;
+import java.io.IOException;
+
+public class Experiment
+{
+
+  /**
+   * TOkenStream for the anet ids' payload
+   */
+  private static class IDArrayPayloadStream extends TokenStream
+  {
+    private final Token _token;
+    private boolean _returnToken = false;
+
+    public IDArrayPayloadStream(Term term)
+    {
+      _token = new Token(term.text(), 0, 0);
+    }
+
+
+    /**
+     * Output the ids into the payload
+     * @param ids the list of ids.
+     */
+    void setIDs(List<Integer> ids)
+    {
+      byte[] buffer = new byte[ (ids.size()) * 4];
+      for (int i = 0; i < ids.size(); i++)
+      {
+        buffer = intToByteArray(ids.get(i));
+      }
+      _token.setPayload(new Payload(buffer));
+      _returnToken = true;
+    }
+
+
+    /**
+     * Return the single token created.
+     * @return token if it's already been set, null otherwise.
+     * @throws IOException
+     */
+    public Token next() throws IOException
+    {
+      if (_returnToken)
+      {
+        _returnToken = false;
+        return _token;
+      }
+      else
+      {
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Helper method to add payload (list of integers) to the term in the
+document.
+   * @param document given document
+   * @param term term to use to add payload
+   * @param data payload content
+   */
+  private static void  addPayload(Document document, Term term,
+List<Integer> data)
+  {
+    if (data.size() > 0)
+    {
+      // add a payload for the anet ids
+      IDArrayPayloadStream aps = new IDArrayPayloadStream(term);
+      aps.setIDs(data);
+      Field f = document.getField(term.field());
+      if (f == null)
+      {
+        f = new Field(term.field(), aps);
+        document.add(f);
+      }
+      else
+      {
+        f.setValue(aps);
+      }
+    }
+  }
+
+  public static byte[] intToByteArray(int value) {
+    byte[] b = new byte[4];
+    for (int i = 0; i < 4; i++) {
+      int offset = (b.length - 1 - i) * 8;
+      b[i] = (byte) ((value >>> offset) & 0xFF);
+    }
+    return b;
+  }
+
+  public static final int byteArrayToInt(byte [] b) {
+    return (b[0] << 24)
+    + ((b[1] & 0xFF) << 16)
+    + ((b[2] & 0xFF) << 8)
+    + (b[3] & 0xFF);
+  }
+  /**
+   * @param args
+   */
+  public static void main(String[] args) throws Exception
+  {
+    int TOTDOC = 100000;
+    IndexWriter writer = new IndexWriter("/Users/femekci/lucene/deneme3",
+new WhitespaceAnalyzer(),
+                                         true);
+    try {
+      int ll =0;
+      while( ll < TOTDOC){
+        try {
+          String state   =  (ll*ll%10)+"123";
+          String email = ll*2 +"s";
+
+          String last_tran = ll*3+"67";
+          String memid = ll +"0";
+          String fname = ll + " " + ll*101;
+          String lname = ll + " " + ll*1001;;
+
+          Document doc = new Document();
+          doc.add(new Field("state", state, Field.Store.NO,
+Field.Index.TOKENIZED));
+
+          doc.add(new Field("email", email, Field.Store.NO,
+Field.Index.TOKENIZED));
+          doc.add(new Field("last_tran", last_tran, Field.Store.NO,
+Field.Index.TOKENIZED));
+          doc.add(new Field("memid", memid.trim(), Field.Store.NO,
+Field.Index.TOKENIZED));
+          doc.add(new Field("fname", fname.trim(), Field.Store.NO,
+Field.Index.TOKENIZED));
+          doc.add(new Field("lname", lname.trim(), Field.Store.NO,
+Field.Index.TOKENIZED));
+
+
+          Term t = new Term("dids", "did");
+          List<Integer> l = new ArrayList<Integer>();
+          l.add(new Integer(ll));
+          addPayload(doc, t, l);
+          System.out.println(memid);
+          doc.add(new Field("row", email + " " + fname + " " + lname +" "
++memid, Field.Store.NO,   Field.Index.TOKENIZED));
+          writer.addDocument(doc);
+          ll++;
+        } catch(Exception e) {System.out.println("except" + e.toString());
+
+        }
+      }
+      //writer.optimize(); /***************Removing the comment and
+optimizing fixes the problem *********/
+      writer.close();
+    } catch (Exception e)
+    {
+      //writer.optimize();
+      writer.close();
+      System.out.println("exception in indexing " +e.toString());
+    }
+
+    try {
+      IndexReader reader=
+IndexReader.open(FSDirectory.getDirectory("/Users/femekci/lucene/deneme3",
+false));
+
+      //System.out.println("docnum: " + is.maxDoc());
+      Term t2 = new Term("dids", "did");
+      TermPositions tp =reader.termPositions(t2);
+      byte [] data = new byte[4];
+      tp.nextPosition();
+      for(int i = 0; i < TOTDOC; i++)
+      {
+        if(tp != null && tp.isPayloadAvailable())
+        {
+          tp.getPayload(data, 0);
+        }
+        tp.nextPosition();
+      }
+    } catch(Exception e) {
+      System.out.println("exception in payload ");
+      e.printStackTrace();
+    }
+ }
+
+}
+

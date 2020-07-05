@@ -1,0 +1,83 @@
+FROM: Paul Elschot <paul.elsc...@xs4all.nl>
+SUBJECT: Re: Fastest way to fetch N documents with unique keys within large numbers of indexes..
+DATE: 7 Jun 2005
+
+On Tuesday 07 June 2005 07:17, Kevin Burton wrote:
+> Matt Quail wrote:
+> 
+> >> We have a system where I'll be given 10 or 20 unique keys.
+> >
+> >
+> > I assume you mean you have one unique-key field, and you are given  
+> > 10-20 values to find for this one field?
+> >
+> >>
+> >> Internally I'm creating a new Term and then calling  
+> >> IndexReader.termDocs() on this term.  Then if termdocs.next()  
+> >> matches then I'll return this document.
+> >
+> >
+> > Are you calling reader.termDocs() inside a (tight) loop? It might be  
+> > better to create one TermEnum, and use "seek". Something like this:
+> 
+> Yes.. this is another approach I was thinking of taking.  I was thinking 
+> of building up a list of indexes which had a high probability of holding 
+> the given document and then searching for each of them.
+> 
+> What I'm worried about though is that it would be a bit slower...  I'm 
+> just going to have to test out different implementations to see....
+> 
+> <snip>
+> 
+> >
+> >
+> > I'm pretty sure that will work. And if you can avoid the multi- 
+> > threading issues, you might try and use the same TermDocs object for  
+> > as long as possible (that is, move it up out of as many tight loops  
+> > as you can).
+> 
+> Well... that doesn't look like the biggest overhead.  The bottleneck 
+> seens to be in seek() and the fact that its using an InputStream to read 
+> bytes off disk.  I actually tried to speed that up by crainking 
+> InputSteam.BUFFER_SIZE var higher but that didn't work either though I'm 
+> not sure if its a caching issue.  I sent an email to the list about this 
+> earlier but no one responded.
+> 
+> So it seems like my bottleneck is in seek() so It would make sense to 
+> figure out how to limit this.
+> 
+> Is this O(log(N))  btw or is it O(N) ?
+
+Seeking terms should be O(log(N)), and the fastest way to do that
+is by sorting the terms first, but that does not really help much.
+
+The biggest increase in performance that I had for a similar problem
+was to first collect all the document numbers, then sort them, and
+then fetch all the corresponding docs. See also the file formats.
+This avoids the disk head going between the terms and the stored docs,
+and it also minimizes the head movement for retrieving the docs.
+
+For a single term, the document numbers are already ordered, for
+multiple terms the sort is needed.
+
+For a large number of indexes, it may be necessary to do this over
+multiple indexes by first getting the doc numbers for all indexes,
+then sorting these per index, then retrieving them
+from all indexes, and repeating the whole thing using terms determined
+from the retrieved docs.
+
+With the indexes on multiple discs, some parallellism can be introduced.
+A thread per disk could be used.
+In case there are multiple requests pending, they can be serialized just 
+before the sorting of the terms, and just before the sorting of the document
+numbers.
+
+Regards,
+Paul Elschot
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

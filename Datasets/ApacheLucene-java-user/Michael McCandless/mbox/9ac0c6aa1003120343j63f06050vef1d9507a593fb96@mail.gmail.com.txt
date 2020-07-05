@@ -1,0 +1,221 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: File descriptor leak in ParallelReader.reopen()
+DATE: 12 Mar 2010
+
+Really, your app should not drop things on the floor and hope for the
+best.... you should explicitly close your IRs when you're done with
+them.
+
+I think the relevant change here was the removal of finalizers, under
+this issue:
+
+    http://issues.apache.org/jira/browse/LUCENE-1715
+
+[Simple]FSDir's IndexInput in 2.4 had a finalizer that closed the
+underlying fd.  In 2.9, this finalizer (and others) were removed.
+
+So even if you use SimpleFSDir and drop things on the floor you'll see
+descriptors leak.
+
+Mike
+
+On Thu, Mar 11, 2010 at 11:31 PM, Alexey Lef <alexey@sciquest.com> wrote:
+> I believe there is in fact a difference between 2.4.1 and 3.0.1 as far as leaking file
+descriptors is concerned. When sharing an IndexSearchere among multiple threads, instead of
+closing an old IndexSearcher/IndexReader, we used to follow the good old advice to "just drop
+it on the floor and let it get garbage collected. Its files will be closed when this happens."
+(quoting Doug Cutting: http://www.mail-archive.com/lucene-user@jakarta.apache.org/msg05880.html).
+And it worked great.
+> In 3.0 the recommended API for opening a directory changed to FSDirectory.open() which
+returns either a SimpleFSDirectory or NIOFSDirectory. Since we are on Linux, we now get NIOFSDirectory.
+And with NIOFSDirectory, "drop it on the floor and let it garbage collected" approach no longer
+works. It leaks descriptors like crazy. Using SimpleFSDirectory explicitly works fine.
+>
+> So my conclusion is, if you don't want to keep track of active IndexSearchers/IndexReaders,
+use SimpleFSDirectory.
+>
+> Alexey
+>
+> -----Original Message-----
+> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+> Sent: Tuesday, March 09, 2010 1:41 AM
+> To: java-user@lucene.apache.org
+> Subject: Re: File descriptor leak in ParallelReader.reopen()
+>
+> You don't have to close, immediately.  Ie you can use more than one at
+> once.  And in fact in a typical app, where in-flight queries may be
+> using the old reader, you can't close that old reader until all the
+> queries are done.
+>
+> But you must eventually close them else you'll leak descriptors.
+>
+> Mike
+>
+> On Mon, Mar 8, 2010 at 2:52 PM, Justin <crynax@yahoo.com> wrote:
+>> So I learned that IndexReader objects must be closed immediately following a reopen.
+ But what is the guidance after using IndexWriter.getReader()?  Does one reader need closed
+before getting and using another, or can one use 2 or more readers simultaneously?  I don't
+see any guidance at the following references, although there is mention that reopen() will
+forward back to getReader().
+>>
+>> http://lucene.apache.org/java/3_0_1/api/core/org/apache/lucene/index/IndexWriter.html#getReader%28%29
+>>
+>> http://wiki.apache.org/lucene-java/NearRealtimeSearch
+>>
+>>
+>>
+>>
+>> ----- Original Message ----
+>> From: Justin <crynax@yahoo.com>
+>> To: java-user@lucene.apache.org
+>> Sent: Fri, March 5, 2010 10:24:20 AM
+>> Subject: Re: File descriptor leak in ParallelReader.reopen()
+>>
+>> Out of curiosity, I downloaded 2.4.1 and made the necessary source code modifications
+(attached).  There used to be some sort of file descriptor cleanup.  With the explicit close,
+the descriptor count stayed under 100.  Without the explicit close, the count hit peaks around
+3000 by the time 50,000 documents are added (still under our increased limit).  Hopefully
+our problems didn't extend past leaking file descriptors by omitting the explicit close.
+>>
+>>
+>>
+>>
+>> ----- Original Message ----
+>> From: Justin <crynax@yahoo.com>
+>> To: java-user@lucene.apache.org
+>> Sent: Thu, March 4, 2010 6:29:25 PM
+>> Subject: Re: File descriptor leak in ParallelReader.reopen()
+>>
+>> We must have been getting lucky.  Thanks Mark and Uwe!
+>>
+>>
+>>
+>>
+>> ----- Original Message ----
+>> From: Uwe Schindler <uwe@thetaphi.de>
+>> To: java-user@lucene.apache.org
+>> Sent: Thu, March 4, 2010 6:20:56 PM
+>> Subject: RE: File descriptor leak in ParallelReader.reopen()
+>>
+>> That was always the same with reopen(). Its documented in the javadocs, with a short
+example:
+>> http://lucene.apache.org/java/3_0_1/api/all/org/apache/lucene/index/IndexReader.html#reopen()
+>>
+>> also in 2.4.1:
+>> http://lucene.apache.org/java/2_4_1/api/org/apache/lucene/index/IndexReader.html#reopen()
+>>
+>> Uwe
+>>
+>> -----
+>> Uwe Schindler
+>> H.-H.-Meier-Allee 63, D-28213 Bremen
+>> http://www.thetaphi.de
+>> eMail: uwe@thetaphi.de
+>>
+>>
+>>> -----Original Message-----
+>>> From: Justin [mailto:crynax@yahoo.com]
+>>> Sent: Friday, March 05, 2010 1:17 AM
+>>> To: java-user@lucene.apache.org
+>>> Subject: Re: File descriptor leak in ParallelReader.reopen()
+>>>
+>>> Has this changed since 2.4.1?  Our application didn't explicitly close
+>>> with 2.4.1 and that combination never had this problem.
+>>>
+>>>
+>>>
+>>> ----- Original Message ----
+>>> From: Mark Miller <markrmiller@gmail.com>
+>>> To: java-user@lucene.apache.org
+>>> Sent: Thu, March 4, 2010 6:00:02 PM
+>>> Subject: Re: File descriptor leak in ParallelReader.reopen()
+>>>
+>>> On 03/04/2010 06:52 PM, Justin wrote:
+>>> > Hi Mike and others,
+>>> >
+>>> > I have a test case for you (attached) that exhibits a file descriptor
+>>> leak in ParallelReader.reopen().  I listed the OS, JDK, and snapshot of
+>>> Lucene that I'm using in the source code.
+>>> >
+>>> > A loop adds just over 4000 documents to an index, reopening the index
+>>> after each, before my system hits an already increased file descriptor
+>>> limit of 8192.  I've also got a thread that reports the number of
+>>> documents in the index and warms a searcher using the reader.  To
+>>> simulate continued use by my application the searchers are not
+>>> discarded.
+>>> >
+>>> > Let me know if you need help reproducing the problem or can help
+>>> identify it.
+>>> >
+>>> > Thanks!
+>>> > Justin
+>>> >
+>>> >
+>>> >
+>>> >
+>>> >
+>>> >
+>>> > ---------------------------------------------------------------------
+>>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>>> Doesn't look like you are closing your old reader - reopen will return
+>>> a
+>>> new one when there are changes to the index and the old one must be
+>>> closed.
+>>>
+>>> --
+>>> - Mark
+>>>
+>>> http://www.lucidimagination.com
+>>>
+>>>
+>>>
+>>>
+>>> ---------------------------------------------------------------------
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

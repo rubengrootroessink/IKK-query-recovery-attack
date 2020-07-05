@@ -1,0 +1,149 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: ConcurrentMergeScheduler, Exception and transaction
+DATE: 23 Nov 2009
+
+IndexWriter will try the merge again, the next time it checks merges
+(eg after flushing a new segment, but not after adding a new
+document).
+
+You'll only get an exception out of addDocument/commit/flush if they
+hit the problem, eg, if on flushing a new segment it runs out of
+space.
+
+But often merges will fail first since they can require alot more
+temporary free space than flushing.
+
+Mike
+
+On Mon, Nov 23, 2009 at 12:40 PM, Teruhiko Kurosaka <Kuro@basistech.com> wrote:
+> Thank you, Mike, for explanation.
+>
+> So I understand that all the data is kept even if any of these
+> merging threads fail.  Will Lucene keep attempting merge every
+> time addDocument is called afterwards once this happened
+> (and the error is persistent - such as filesystem full)?
+> Will IndexWriter.addDocument, commit(), or flush() eventually
+> throw an IOException?
+>
+> -kuro
+>
+>> -----Original Message-----
+>> From: Michael McCandless [mailto:lucene@mikemccandless.com]
+>> Sent: Saturday, November 21, 2009 2:10 AM
+>> To: java-user@lucene.apache.org
+>> Subject: Re: ConcurrentMergeScheduler, Exception and transaction
+>>
+>> An exception during merging does not affect what's stored in
+>> the index, because merging is a functional no-op.  The same
+>> docs are present before and after the merge.
+>>
+>> So I would think that an app involving Lucene in a 2-phased
+>> commit does not need to rollback the transaction if CMS hits
+>> an exception, as long as the prepareCommit/commit calls succeed.
+>>
+>> That said, it's of course no good if your CMS is out throwing
+>> exceptions... so you should in general get to the bottom of it.
+>>
+>> If you really want to rollback your transaction on CMS
+>> hitting an exception, you can subclass
+>> ConcurrentMergeScheduler, override the handleMergeException
+>> and do something.
+>>
+>> Mike
+>>
+>> On Fri, Nov 20, 2009 at 7:49 PM, Teruhiko Kurosaka
+>> <Kuro@basistech.com> wrote:
+>> > Jason,
+>> > Even if there is no harm to the index, I think the error
+>> needs to be
+>> > reported back to the caller.  I am assuming a system error like a
+>> > filesystem error (filesystem full etc.) that causes Lucene
+>> not be able
+>> > to write new docs.
+>> > If this happens, the caller needs to be reported of the
+>> error so that
+>> > it can ask Lucene and other participants of transaction to
+>> roll back.
+>> > Am I missing something?
+>> >
+>> > -kuro
+>> >
+>> >> -----Original Message-----
+>> >> From: Jason Rutherglen [mailto:jason.rutherglen@gmail.com]
+>> >> Sent: Friday, November 20, 2009 4:14 PM
+>> >> To: java-user@lucene.apache.org
+>> >> Subject: Re: ConcurrentMergeScheduler, Exception and transaction
+>> >>
+>> >> Teruhiko,
+>> >>
+>> >> The index remains consistent even when a background merge fails,
+>> >> meaning commit truly represents a valid index after it's called.
+>> >> You can share merge schedulers, though in practice it's
+>> not going to
+>> >> improve anything.
+>> >>
+>> >> Jason
+>> >>
+>> >> 2009/11/20 Teruhiko Kurosaka <Kuro@basistech.com>:
+>> >> > I was experimenting how Lucene handles 2-phase commit.
+>> >> > Then I noticed I am not catching all Exceptions from
+>> Lucene.  And I
+>> >> > think this is because Lucene's default MergeScheduler is
+>> >> > ConcurrentMergeScheduler, which spawns threads to its job, and
+>> >> > Exceptions thrown in child threads are never reported to
+>> the parent.
+>> >> >
+>> >> > Isn't this problematic when Lucene participates in the
+>> >> 2-phase commit?
+>> >> > Becuause the application doesn't get an Exception when
+>> >> something bad
+>> >> > happened at merge time, it proceeds as normal and will ask other
+>> >> > parties in transaction to commit their writes.  If I changed the
+>> >> > MergeScheduler to SerialMergeScheduler, my code could catch the
+>> >> > Exceptions.  I'd like to hear what others think.
+>> >> >
+>> >> > By the way, do I need a new instance of SerialMergeScheduler for
+>> >> > each call to setMergeScheduler on an IndexWriter?
+>> >> > Or can I just share a single instance of
+>> SerialMergeScheduler with
+>> >> > multiple IndexWriters?
+>> >> >
+>> >> > -kuro
+>> >> >
+>> >> >
+>> >>
+>> ---------------------------------------------------------------------
+>> >> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >> >
+>> >> >
+>> >>
+>> >>
+>> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>> ---------------------------------------------------------------------
+>> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> > For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,253 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Multiword Highlighting
+DATE: 16 Feb 2007
+
+Here is my initial attempt...I believe it might be sufficient:
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.search.spans.Spans;
+
+import java.io.IOException;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+
+public class QuerySpansExtractor {
+    public Spans[] extractSpans(Query query, IndexReader reader)
+        throws IOException {
+        List spans = getSpans(query, reader);
+
+        return (Spans[]) spans.toArray(new Spans[spans.size()]);
+    }
+
+    private List getSpans(Query query, IndexReader reader)
+        throws IOException {
+        Spans spans = null;
+
+        if (query instanceof BooleanQuery) {
+            return getSpansFromBooleanQuery((BooleanQuery) query, reader);
+        } else if (query instanceof PhraseQuery) {
+            spans = getSpansFromPhraseQuery((PhraseQuery) query, reader);
+        } else if (query instanceof TermQuery) {
+            spans = getSpansFromTermQuery((TermQuery) query, reader);
+        } else if (query instanceof SpanQuery) {
+            spans = getSpansFromSpanQuery((SpanQuery) query, reader);
+        }
+
+        List spanList = new ArrayList(1);
+        spanList.add(spans);
+
+        return spanList;
+    }
+
+    private List getSpansFromBooleanQuery(BooleanQuery query, 
+IndexReader reader)
+        throws IOException {
+        BooleanClause[] queryClauses = query.getClauses();
+        int i;
+        boolean useQuery = true;
+        List possibleSpans = new ArrayList();
+
+        for (i = 0; i < queryClauses.length; i++) {
+            if (queryClauses[i].isProhibited()) {
+                List prohibSpans = getSpans(queryClauses[i].getQuery(), 
+reader);
+
+                if (((Spans) prohibSpans.get(0)).next()) {
+                    useQuery = false;
+                } else {
+                    possibleSpans.addAll(prohibSpans);
+                }
+            } else if (queryClauses[i].isRequired()) {
+                List reqSpans = getSpans(queryClauses[i].getQuery(), 
+reader);
+
+                if (((Spans) reqSpans.get(0)).next()) {
+                    useQuery = false;
+                } else {
+                    possibleSpans.addAll(reqSpans);
+                }
+            } else {
+                
+possibleSpans.addAll(getSpans(queryClauses[i].getQuery(), reader));
+            }
+        }
+
+        if (!useQuery) {
+            possibleSpans = Collections.EMPTY_LIST;
+        }
+
+        return possibleSpans;
+    }
+
+    private Spans getSpansFromPhraseQuery(PhraseQuery query, IndexReader 
+reader)
+        throws IOException {
+        Term[] queryTerms = query.getTerms();
+        int i;
+        SpanQuery[] clauses = new SpanQuery[queryTerms.length];
+
+        for (i = 0; i < queryTerms.length; i++) {
+            clauses[i] = new SpanTermQuery(queryTerms[i]);
+        }
+
+        SpanNearQuery sp = new SpanNearQuery(clauses, query.getSlop(), 
+false);
+        sp.setBoost(query.getBoost());
+
+        return sp.getSpans(reader);
+    }
+
+    private Spans getSpansFromTermQuery(TermQuery query, IndexReader reader)
+        throws IOException {
+        SpanTermQuery stq = new SpanTermQuery(query.getTerm());
+        stq.setBoost(query.getBoost());
+
+        return stq.getSpans(reader);
+    }
+
+    private Spans getSpansFromSpanQuery(SpanQuery query, IndexReader reader)
+        throws IOException {
+        return query.getSpans(reader);
+    }
+}
+
+
+
+Erick Erickson wrote:
+> Mark:
+>
+> Thanks, that reassures me that I'm not hallucinating. If it gets on my
+> priority list I can certainly share the code, since I stole it in the 
+> first
+> place <G>. I have a semi-solution for now that gets me out from under the
+> immediate problem, but it really wants a more robust solution than the 
+> one
+> I'm using.
+>
+> Thanks
+> Erick
+>
+> On 2/15/07, Mark Miller <markrmiller@gmail.com> wrote:
+>>
+>> Good catch Erick! I'll have to tackle this as well. Mark H is the
+>> originator of that code so maybe he will chime in, but what I am think
+>> is this:
+>>
+>> In the getSpansFromBooleanquery, keep track of which clauses are
+>> required. Then based on if any Spans are actually returned from
+>> getSpansFromTerm for each required clause, add only the correct spans to
+>> the returned spans. If you get what I mean <g>. I am sure there are some
+>> more cases than that to consider, but I think the direction might work.
+>>
+>> If you don't tackle it or can't share I'll be doing it myself.
+>>
+>> - Mark
+>>
+>> Erick Erickson wrote:
+>> > I hope you're all following this old thread, because I've just run 
+>> into
+>> > something I don't quite know what to do about with the SpansExtractor
+>> > code
+>> > that I shamelessly stole.
+>> >
+>> > Let's say my text is "a b c d e f g h" and my query is "a AND z". The
+>> > implementation I stole for SpansExtractor (mentioned several times in
+>> > this
+>> > thread) returns a span for "a" which doesn't preserve the sense of the
+>> > query. The root of the problem is that when it gets down to assembling
+>> > the
+>> > getSpansFromTermQuery, the sense of "AND" is lost and I get span for
+>> > the "a"
+>> > in the query.
+>> >
+>> > The rest of the kinds of spans don't seem to have the same issue. OR
+>> > should
+>> > return the "a" in the example above. Any phrase queries that come
+>> through
+>> > work fine. In fact, our application requires that we have an implied
+>> > proximity, mostly anyway, so I haven't had to deal with this until
+>> > now.....
+>> >
+>> > One way, it seems to me, to handle this would be to transform the 
+>> query
+>> > above into a span query with a limit of 10,000, where 10,000 is a 
+>> magic
+>> > number that I'm confident is OK in my application because of the
+>> > PositionIncrementGaps I set up during indexing.
+>> >
+>> > Is there a more elegant way of doing this? Or am I missing the boat
+>> > entirely? Or did I mess up when I stole the code?
+>> >
+>> > Or, and this would be the easiest for me at least, has this work 
+>> already
+>> > been done and all I really need to do is get a different
+>> > implementation of
+>> > SpansExtractor <G>?
+>> >
+>> > Thanks
+>> > Erick
+>> >
+>> >
+>> > On 2/2/07, Mark Miller <markrmiller@gmail.com> wrote:
+>> >>
+>> >>
+>> >>
+>> >> mark harwood wrote:
+>> >> > Hi Mark,
+>> >> > Have you looked at the returned spans from any other potential
+>> problem
+>> >> scenarios (other than the 3 word one you suggest) e.g. complex nested
+>> >> "SpanOr" or "SpanNot" logic?
+>> >> >
+>> >> Nothing super intense, but I haved look at some semi complex nesting
+>> and
+>> >> it all looks great if you use the full span 
+>> highlighting...highlighting
+>> >> the first and last word of the span only works great if your 
+>> limited to
+>> >> word to word proximity searching (like in my parser <G> works 
+>> great for
+>> >> my sentence and paragraph proximity searching, though i had to add 
+>> the
+>> >> option of hiding my index marker tokens from the output)
+>> >>
+>> >> Perhaps you know of something that I haven't run into that may not
+>> >> highlight correctly ?
+>> >> > Can you attach your code to a new Jira entry so I can have a play?
+>> >> >
+>> >> >
+>> >> I certainly will.
+>> >>
+>> >> - Mark
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

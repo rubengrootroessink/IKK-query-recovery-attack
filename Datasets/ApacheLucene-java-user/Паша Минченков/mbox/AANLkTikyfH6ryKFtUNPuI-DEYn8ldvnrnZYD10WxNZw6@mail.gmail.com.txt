@@ -1,0 +1,110 @@
+FROM: Паша Минченков <char...@gmail.com>
+SUBJECT: PerParentLimitedQuery and index updating
+DATE: 31 May 2010
+
+Hi,
+It seems that PerParentLimitedQuery analyzes the old data before
+update. Here's an example. If remove documents updates - everything
+works. Thanks.
+
+public void testPerParent()
+		throws IOException {
+
+	dir = new RAMDirectory();
+	Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_29);
+	IndexWriter writer = new IndexWriter(dir, analyzer, MaxFieldLength.UNLIMITED);
+
+	addDocument(writer, "1", "A", "one", "parent");
+	addDocument(writer, "2", "A", "two", "child");
+	addDocument(writer, "3", "A", "three", "child");
+	addDocument(writer, "4", "B", "four", "parent");
+	addDocument(writer, "5", "B", "five", "child");
+	addDocument(writer, "6", "B", "two", "child");
+	addDocument(writer, "7", "B", "two", "child");
+	addDocument(writer, "8", "B", "two", "child");
+
+
+	writer.close();
+
+
+	writer = new IndexWriter(dir, analyzer, MaxFieldLength.UNLIMITED);
+
+	searcher = new IndexSearcher(dir);
+
+	// if i comment update block (no data updates, it just updates index)
+-- test is passed
+	updateDocument(writer, "1", "A", "one", "parent");
+	updateDocument(writer, "2", "A", "two", "child");
+	updateDocument(writer, "3", "A", "three", "child");
+	updateDocument(writer, "4", "B", "four", "parent");
+	updateDocument(writer, "5", "B", "five", "child");
+	updateDocument(writer, "6", "B", "two", "child");
+	updateDocument(writer, "7", "B", "two", "child");
+	updateDocument(writer, "8", "B", "two", "child");
+
+	// if i dno't comment update block, i recive exception:
+	// java.lang.IllegalArgumentException:
+org.apache.lucene.search.PerParentLimitedQuery$PerParentLimitedScorer
+	// Parent filter produced a bitset with no parent doc for child doc #1
+
+	// It seems that PerParentLimitedQuery analyzes old data too.
+
+	writer.commit();
+	writer.close();
+
+	searcher = new IndexSearcher(dir);
+	TopDocs topResults = searcher.search(new TermQuery(new Term("filter",
+"two")), 10);
+
+
+	assertEquals("Filtered hits before grouping", 4, topResults.totalHits);
+
+	PerParentLimitedQuery perParentLimitQuery = new
+PerParentLimitedQuery(new TermQuery(new Term("filter", "two")),
+			new QueryWrapperFilter(new TermQuery(new Term("type", "parent"))), 1);
+
+	topResults = searcher.search(perParentLimitQuery, 10);
+
+	assertEquals("Filtered hits after grouping", 2, topResults.totalHits);
+}
+
+private void addDocument(IndexWriter writer, String id, String group,
+String filter, String type)
+		throws IOException {
+
+
+	Document doc = new Document();
+	doc.add(new Field("id", id, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("group", group, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("filter", filter, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("type", type, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+
+	writer.addDocument(doc);
+}
+
+private void updateDocument(IndexWriter writer, String id, String
+group, String filter, String type)
+		throws IOException {
+
+	Document doc = new Document();
+	doc.add(new Field("id", id, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("group", group, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("filter", filter, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+	doc.add(new Field("type", type, Field.Store.YES,
+Field.Index.NOT_ANALYZED_NO_NORMS));
+
+	writer.updateDocument(new Term("id", id), doc);
+}
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

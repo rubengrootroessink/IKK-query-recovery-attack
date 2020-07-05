@@ -1,0 +1,128 @@
+FROM: John Wang <john.w...@gmail.com>
+SUBJECT: Re: Faceting, Sort and DocIDSet
+DATE: 22 Apr 2009
+
+Karsten:
+
+    Yes, you kinda need that for faceting to work. Take a look at
+FacetDataCache class.
+
+-John
+
+On Wed, Apr 22, 2009 at 3:06 AM, Karsten F.
+<karsten-lucene@fiz-technik.de>wrote:
+
+>
+> Hi Dave,
+>
+> facets:
+> in you case a solution with one
+> int[IndexReader.maxDoc()]
+> fits. For each document number you can store an integer which represents
+> the
+> facet value.
+> This is what org.apache.solr.request.UnInvertedField will store in your
+> case.
+> (*John* : is there something similar in com.browseengine ? )
+>
+> But UnInvertedField is designed for fields with more then one value per
+> doc.
+> Possible to implement directly the solution with int[IndexReader.maxDoc()]
+> is more easy.
+> The implementation with int[IndexReader.maxDoc()] should be 150 times
+> faster
+> then your current solution (and use only 16:300 of your main memory).
+> But I still wonder that your solution is slow, did you ever use a profiler?
+> Enough Xmx? Swapping? Possible your implementation of htFacetResults.get is
+> slow? Possible same waiting because of synchronized code?
+> But btw.: Your implementation is not thread save: Think about two
+> htFacetResults.get before one htFacetResults.put
+>
+> INDEXORDER:
+> For INDEXORDER the MultiSearcher and ParallelMultiSearcher use the
+> docNumber
+> for each index as score.
+> So the result is
+> 1. Doc with docNum 1 from first Index
+> 2. Doc with docNum 1 from second Index
+> ..
+> n. Doc with docNum m from first Index
+> n+1. Doc with docNum m from second Index
+> ..
+>
+> I did not know this before. And I was surprised, because the docNum use the
+> "starts"-Array but the score does not.
+> So you can use a BitSet to collect the hits. The bits itself are in correct
+> order.
+> (and you could index and search without frequencies).
+>
+> Best regrads
+>  Karsten
+>
+>
+> David Seltzer wrote:
+> >
+> > Karsten,
+> >
+> > You're right, 300 facets would be a lot. Hehe. I have one facet with
+> > about three hundred potential values. What I've done is create an
+> > FacetManager who, in another thread, sets up an map of ~300 OpenBitSets.
+> > One bitset for each possible value of the facet.
+> >
+> > Then, rather than using an iterative cardinality comparison, I use a
+> > HitCollector to create an set of counters.
+> >
+> > public void collect(int doc, float score) {
+> >    //we don't care about score, all we care about is docID;
+> >    //we need to find out if this document is in any of our facets... if
+> > it is, increment a counter
+> >    for(SearchFacet sfTemp : arrayOfSearchFacetsValues) {
+> >       if(sfTemp.getBitSet().fastGet(doc)) {
+> >          //this is a hit!
+> >          long lCount = htFacetResults.get(sfTemp.getTerm().text());
+> >          htFacetResults.put(sfTemp.getTerm().text(), lCount+1);
+> >
+> >          //this code is designed for mutually exclusive
+> >          //facet values... in that scenario, a hit here means
+> >          //that we can't have a hit anywhere else, so we should
+> >          //break.
+> >          break;
+> >       }
+> >    }
+> > }
+> >
+> > Here I seem to be running into a performance issue. It seems that when a
+> > resultset is small (~10,000) this method greatly outperforms the
+> > iterating cardinality check. However, when the resultset is large
+> > (300,000) the HitCollector takes twice as long to process the resultset
+> > as the other solution.
+> >
+> > Our total index typically contains about 100M documents. This is broken
+> > up into four monthly indexes each containing 250K documents. And a
+> > typical search returns < 120,000 results. Lousy searches return more
+> > results (IE "obama" returns nearly 800,000 documents).
+> >
+> > At the moment we're using ParalellMultiSearcher. When I do a search,
+> > across four montly indexes, ordered by INDEXORDER what I get is all of
+> > the hits that happened on the first of any month, then all the hits that
+> > happened on the second of any month. Does 'starts' behave the same way
+> > in ParallelMultiSearcher?
+> >
+> > Thanks for all your input!
+> >
+> > -Dave
+> >
+> >
+>
+> --
+> View this message in context:
+> http://www.nabble.com/Faceting%2C-Sort-and-DocIDSet-tp23099854p23173324.html
+> Sent from the Lucene - Java Users mailing list archive at Nabble.com.
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

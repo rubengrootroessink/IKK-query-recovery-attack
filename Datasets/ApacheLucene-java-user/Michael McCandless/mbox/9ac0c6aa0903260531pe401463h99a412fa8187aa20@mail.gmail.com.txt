@@ -1,0 +1,162 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: Deadlock with concurrent merges and IndexWriter [Lucene 2.4]
+DATE: 26 Mar 2009
+
+OK I like this theory, and I think it can cause a spin loop in doWait
+(do you see one CPU pegged?), and starvation in the merging thread.
+
+Do you know who called Thread.interrupt() in your case?  Does your
+code do that explicitly somewhere?
+
+IndexWriter is not doing the right thing when the thread is
+interrupted.  I think it should simply throw InterruptedException, ie,
+you should in theory be able to abort close() if it's taking too long
+by interrupting it.
+
+But, unfortunately, to preserve back compat I think we'll have to wrap
+that in an unchecked exception when it escapes the Lucene entry API.
+
+I'll open an issue.
+
+Mike
+
+Jeremy Volkman <jvolkman@gmail.com> wrote:
+> Hi Michael,
+>
+> I originally wasn't thinking correctly about the doWait() method releasing
+> the monitor. I was thinking about it more of a sleep method instead (which
+> would not release the monitor).
+>
+> Regardless, I think I've pinpointed the problem. In my stacktrace, "Indexing
+> Thread" had been interrupted. It's not totally clear to me from the
+> Object.wait() docs, but it appears that a thread previously interrupted is
+> thrown out of Object.wait immediately with an InterruptedException, and
+> without ever releasing the wait monitor.
+>
+> When InterruptedException is thrown from the wait() method, the docs say
+> that the thread's interrupteded state is cleared, which would allow the
+> thread to wait successfully next time around. The problem is that
+> IndexWriter.doWait() catches this exception and re-interrupts the thread in
+> the exception handler, effectively guaranteeing that the call to wait() will
+> fail the next time around.
+>
+> If doWait() was the only synchronized method in the stack, the merge would
+> get a chance after doWait() returned (it would be a very contentious
+> situation). However, in this case the method that is calling doWait(),
+> finishMerges, is also synchronized. finishMerges never returns, and never
+> gives up the monitor.
+>
+> This whole theory hinges on whether or not Object.wait releases and
+> reacquires its monitors before it throws out immediately when called in an
+> interrupted state. The docs for java.lang.Object don't seem clear on this
+> point.
+>
+> I've attached a simple test. It doesn't actually use any Lucene code, but it
+> mimics the players in this scenario. I believe it effectively shows the
+> deadlock possibility.
+>
+> -Jeremy
+>
+> On Thu, Mar 26, 2009 at 6:17 AM, Michael McCandless
+> <lucene@mikemccandless.com> wrote:
+>>
+>> Are there any other threads running?  Can you post their stack traces too?
+>>
+>> Are you sure nothing is happening?  EG, if you look in the index, do
+>> you see files slowly increasing in size (indicating there is a merge
+>> running).
+>>
+>> These two traces are actually normal.  The ArticleIngestor thread is
+>> trying to close, but will not return until all BG merges have
+>> completed.  It calls IndexWriter.wait, which releases the lock and
+>> waits for the BG merges to notify completion.
+>>
+>> The Lucene Merge Thread #0 is trying to commit the merge and needs to
+>> acquire IndexWriter lock to do so, but the ArticleIngestor thread will
+>> not prevent it from acquiring the lock (since it releases the lock
+>> while inside wait()).  Though I'm not sure why this thread is blocked
+>> (unless there are other threads that hold the lock).
+>>
+>> Do you have a small test case where the deadlock always happens?
+>>
+>> Mike
+>>
+>> Jeremy Volkman <jvolkman@gmail.com> wrote:
+>> > Just ran into this. I'm using Lucene 2.4 in the following manner:
+>> >
+>> > 1. Open IndexWriter
+>> > 2. Add documents
+>> > 3. Delete documents
+>> > 4. Close IndexWriter
+>> >
+>> > I haven't touched the out-of-the-box settings WRT merging. A JVM
+>> > stacktrace
+>> > shows the following:
+>> >
+>> > "Lucene Merge Thread #0" daemon prio=10 tid=0x0000000050cb0c00
+>> > nid=0x44ce
+>> > waiting for monitor entry [0x0000000047a90000..0x0000000047a90b90]
+>> >   java.lang.Thread.State: BLOCKED (on object monitor)
+>> >        at
+>> > org.apache.lucene.index.IndexWriter.commitMerge(IndexWriter.java:3751)
+>> >        - waiting to lock <0x00002aab25254cc8> (a
+>> > org.apache.lucene.index.IndexWriter)
+>> >        at
+>> > org.apache.lucene.index.IndexWriter.mergeMiddle(IndexWriter.java:4240)
+>> >        at
+>> > org.apache.lucene.index.IndexWriter.merge(IndexWriter.java:3877)
+>> >        at
+>> >
+>> > org.apache.lucene.index.ConcurrentMergeScheduler.doMerge(ConcurrentMergeScheduler.java:205)
+>> >        at
+>> >
+>> > org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run(ConcurrentMergeScheduler.java:260)
+>> >
+>> > "Indexing thread [ArticleIngestor]" prio=10 tid=0x000000004fd8d800
+>> > nid=0x320f waiting on condition [0x0000000042d43000..0x0000000042d43c10]
+>> >  java.lang.Thread.State: RUNNABLE
+>> >       at
+>> > org.apache.lucene.index.IndexWriter.doWait(IndexWriter.java:4491)
+>> >       - locked <0x00002aab25254cc8> (a
+>> > org.apache.lucene.index.IndexWriter)
+>> >       at
+>> > org.apache.lucene.index.IndexWriter.finishMerges(IndexWriter.java:2790)
+>> >       - locked <0x00002aab25254cc8> (a
+>> > org.apache.lucene.index.IndexWriter)
+>> >       at
+>> > org.apache.lucene.index.IndexWriter.closeInternal(IndexWriter.java:1632)
+>> >       at
+>> > org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1588)
+>> >       at
+>> > org.apache.lucene.index.IndexWriter.close(IndexWriter.java:1562)
+>> >
+>> > finishMerges is a synchronized method, and commitMerge is also a
+>> > synchronized method. finishMerges is waiting for the "runningMerges"
+>> > collection to empty out before returning and subsequently giving up the
+>> > monitor it holds on the IndexWriter object. That collection won't ever
+>> > empty, however, because the merge thread is waiting for the IndexWriter
+>> > monitor.
+>> >
+>> > Am I missing something here? Could this be user error?
+>> >
+>> > Thanks,
+>> > Jeremy
+>> >
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

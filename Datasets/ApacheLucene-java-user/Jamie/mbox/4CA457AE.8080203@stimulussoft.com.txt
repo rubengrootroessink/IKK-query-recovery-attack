@@ -1,0 +1,41 @@
+FROM: Jamie <ja...@stimulussoft.com>
+SUBJECT: Re: File Handle Leaks During Lucene 3.0.2 Merge
+DATE: 30 Sep 2010
+
+  Uwe
+
+If I recall correctly when you call writer.getReader(), the returned 
+IndexReader can consume alot of memory with large indexes. To ensure 
+that the same index reader is reused across multiple search threads, I 
+keep a cached copy of the reader and return it. If a search thread 
+closes the reader, then it will be closed for the other search threads 
+and the search will fail. From my test, the finalize method in 
+VolumeIndexReader example I gave you is called. The file handle leaks 
+are coming from the core index loop, where I call .commit() as opposed 
+to closing the index. Since the writer stays open, handles left by merge 
+operations are never deleted. A solution is too close the index 
+periodically to force the handles to be swept up by the OS.
+
+Jamie
+
+On 2010/09/30 10:55 AM, Uwe Schindler wrote:
+> The finalize() thing does not work correctly, as the reader holds still
+> references to other stuff when not explicitely closed. As it references
+> them, the finalizer() is never called, as it is not to be gc'd.
+>
+> You must close the reader explicit, that's all. So just close it afterusing.
+> With Near Realtime Search, you normally get an IR, then wrap it with
+> IndexSearcher, do your search, and close it after that. You can even call
+> writer.getReader() from different threads, refcounting will close the
+> readers correctly. So for each request, take a new one and close after
+> usage.
+>
+> Uwe
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

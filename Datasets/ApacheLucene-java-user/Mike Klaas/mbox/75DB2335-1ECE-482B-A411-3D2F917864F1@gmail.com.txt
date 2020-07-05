@@ -1,0 +1,621 @@
+FROM: Mike Klaas <mike.kl...@gmail.com>
+SUBJECT: Re: product based term combination for BooleanQuery?
+DATE: 4 Jul 2007
+
+On 3-Jul-07, at 4:43 PM, Tim Sturge wrote:
+
+> Here's the explain output I currently get for "George Bush" "George  
+> W Bush", "John Kerry" "John Denver" and "John Bush". (there are  
+> others in between, but they follow very much the same pattern; an  
+> enormous score for one of "John" or "Bush" and a very small score  
+> for the other being better than an average score for both.
+>
+> As you can see I have a lot of fields, some very important (name,  
+> alias, title, anchor) and others much less important (text,  
+> surround, content, body).
+
+It is definitely not necessary to jack up the field boosts to such  
+high levels (and better to do so at query-time, regardless).  Fields  
+like title in particularly get huge boosts from the lengthNorm and  
+idf.  This is part of the problem.
+
+> I will experiment with DisjunctionMaxQuery, but it honestly seems  
+> like ProductQuery is what I want at the outer layer with  
+> BooleanQuery inside.
+
+Give it a shot: I'd be interested in usecases for multiplicative  
+query scoring.
+
+I think that you are being too hasty in dismissing the implicit  
+sloppy phrase query approach.  You can apply this even in the  
+presence of user phrase queries (the difference being that those are  
+_required_ matches).  All major search engines implement some form or  
+another of term-proximity scoring (the huge importance of this factor  
+has been obscured by the hype about pagerank, but it should not be  
+ignored).
+
+good luck, I'm interested in your results,
+-Mike
+
+> Tim
+>
+> Grant Ingersoll wrote:
+>> When you do an explain on these results, what are all the factors  
+>> that contribute to the score?
+>>
+>> Could you increase the coord() factor in a custom Similarity  
+>> implementation, to give a bigger boost to documents that have more  
+>> matching terms? The point of coord is to give a little bump to  
+>> those docs that have more terms from the query in a given  
+>> document. Sounds like you want a bigger bump once you have  
+>> multiple query terms in a document. Would this work for you?
+>>
+>> Also, below...
+>>
+>> On Jul 3, 2007, at 3:20 PM, Tim Sturge wrote:
+>>
+>>> That's true, but it's not clear that I want phrase matches.  
+>>> Consider for example:
+>>>
+>>> "Lucene Download" as a query. I want something that strongly  
+>>> references "Lucene" (in the title) and strongly references  
+>>> "Download" but "Download Lucene" or "Lucene Project Download" are  
+>>> better than some page that happens to contain the exact phrase.
+>>
+>> Not sure I follow you here. By strongly references, do you mean  
+>> there are multiple occurrences of Download? Why would those  
+>> alternatives be better than an exact phrase match?
+>>
+>>>
+>>> Other examples are "camera review" or "Gonzales scandal"; there's  
+>>> a whole class of "subject <modifier>" queries that are not really  
+>>> phrase based, and my corpus isn't large enough to necessarily  
+>>> contain the phrase anyway.
+>>>
+>>> I agree that many two or three word queries are really best  
+>>> matched by phrases, but not all. Is it common to use a phrase  
+>>> query with high slop to overcome the unequal weighting problem?
+>>>
+>>> Also, my interface does support "\"John Bush\"" (ie the user can  
+>>> quote the phrase if they like) and I would prefer not to infer  
+>>> automatically that they meant to do so.
+>>>
+>>> Tim
+>>>
+>>> Jason Pump wrote:
+>>>> You're not using any type of phrase search. Try ->
+>>>>
+>>>> ( (title:"John Bush"^4.0) OR (body:"John Bush") ) AND  
+>>>> ( (title:John^4.0 body:John) AND (title:Bush^4.0 body:Bush) )
+>>>>
+>>>> or maybe
+>>>>
+>>>> ( (title:"John Bush"~4^4.0) OR (body:"John Bush"~4) ) AND  
+>>>> ( (title:John^4.0 body:John) AND (title:Bush^4.0 body:Bush) )
+>>>>
+>>>>
+>>>>
+>>>> Tim Sturge wrote:
+>>>>> I'm following myself up here to ask if anyone has experience or  
+>>>>> code with a BooleanQuery that weights the terms it encounters  
+>>>>> on a product basis rather than a sum basis.
+>>>>>
+>>>>> This would effectively compute the geometric mean of the term  
+>>>>> score (rather than the arithmetic mean) and would give me more  
+>>>>> "middle bias". It also has the great advantage that it  
+>>>>> automatically implements AND (as something without the term has  
+>>>>> a score of 0.0 which causes the query to go to 0.0 as well.)
+>>>>>
+>>>>> I'm curious though why this doesn't already exist. Is it a bad  
+>>>>> idea in general (that I will discover once I implement it and  
+>>>>> look at the results?) or does it make searching a lot slower?
+>>>>>
+>>>>> Thanks,
+>>>>>
+>>>>> Tim
+>>>>>
+>>>>> Tim Sturge wrote:
+>>>>>> I have an index with two different sources of information, one  
+>>>>>> small but of high quality (call it "title"), and one large,  
+>>>>>> but of lower quality (call it "body"). I give boosts to  
+>>>>>> certain documents related to their popularity (this is very  
+>>>>>> similar to what one would do indexing the web).
+>>>>>>
+>>>>>> The problem I have is a query like "John Bush". I translate  
+>>>>>> that into " (title:John^4.0 body:John) AND (title:Bush^4.0  
+>>>>>> body:Bush) ". But the results I get are:
+>>>>>>
+>>>>>> 1. George Bush
+>>>>>> ...
+>>>>>> 4. John Kerry
+>>>>>> ...
+>>>>>> 10. John Bush
+>>>>>>
+>>>>>> The reason is (looking at explain) that George Bush is scored:
+>>>>>> 169 = sum(
+>>>>>> 1 = <match in body with tiny norm for "John">
+>>>>>> )
+>>>>>> 168 = sum(
+>>>>>> 160 = <title match for "Bush">
+>>>>>> 8 = <body match for "Bush">
+>>>>>> )
+>>>>>> )
+>>>>>>
+>>>>>> and John Kerry is similar but reversed. Poor old "John Bush"  
+>>>>>> only scores:
+>>>>>>
+>>>>>> 72 = sum(
+>>>>>> 40 = (<title match for "John">+<body match>)
+>>>>>> 32 = (<title match for "Bush">+ <body match>)
+>>>>>> )
+>>>>>>
+>>>>>> because his initial boost was only 1/4 of George's.
+>>>>>>
+>>>>>> The question I have is, how can tell the searcher to care  
+>>>>>> about "balance"? I really want the score over 2 terms to be  
+>>>>>> more like (sqrt(X)+sqrt(Y))^2 or maybe even exp(log(X)+log(Y))  
+>>>>>> rather than just X+Y. Is that supported in some obvious way,  
+>>>>>> or is there some other way to phrase my query to say "I want  
+>>>>>> both terms but they should both be important if possible?"
+>>>>>>
+>>>>>> Thanks,
+>>>>>>
+>>>>>> Tim
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>>
+>>>>>> -----------------------------------------------------------------
+
+>>>>>> -- --
+>>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>>
+>>>>>
+>>>>>
+>>>>> ------------------------------------------------------------------ 
+>>>>> -- -
+>>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>>
+>>>>
+>>>>
+>>>>
+>>>> ------------------------------------------------------------------- 
+>>>> --
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>
+>>>
+>>> -------------------------------------------------------------------- 
+>>> -
+>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>
+>>
+>> ------------------------------------------------------
+>> Grant Ingersoll
+>> http://www.grantingersoll.com/
+>> http://lucene.grantingersoll.com
+>> http://www.paperoftheweek.com/
+>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+> [
+>   {
+>     "explain" : "169.71423 = (MATCH) sum of:
+>   0.033628028 = (MATCH) product of:
+>     0.23539619 = (MATCH) sum of:
+>       0.23539619 = (MATCH) weight(body:john in 1673743), product of:
+>         0.12947647 = queryWeight(body:john), product of:
+>           5.0118046 = idf(docFreq=185620)
+>           0.025834301 = queryNorm
+>         1.8180615 = (MATCH) fieldWeight(body:john in 1673743),  
+> product of:
+>           3.3166249 = tf(termFreq(body:john)=11)
+>           5.0118046 = idf(docFreq=185620)
+>           0.109375 = fieldNorm(field=wikipedia, doc=1673743)
+>     0.14285715 = coord(1\/7)
+>   169.6806 = (MATCH) product of:
+>     197.9607 = (MATCH) sum of:
+>       51.99727 = (MATCH) weight(name:bush in 1673743), product of:
+>         0.25916338 = queryWeight(name:bush), product of:
+>           10.0317545 = idf(docFreq=1225)
+>           0.025834301 = queryNorm
+>         200.63509 = (MATCH) fieldWeight(name:bush in 1673743),  
+> product of:
+>           1.0 = tf(termFreq(name:bush)=1)
+>           10.0317545 = idf(docFreq=1225)
+>           20.0 = fieldNorm(field=name, doc=1673743)
+>       51.013706 = (MATCH) weight(alias:bush in 1673743), product of:
+>         0.3630294 = queryWeight(alias:bush), product of:
+>           14.052224 = idf(docFreq=21)
+>           0.025834301 = queryNorm
+>         140.52225 = (MATCH) fieldWeight(alias:bush in 1673743),  
+> product of:
+>           1.0 = tf(termFreq(alias:bush)=1)
+>           14.052224 = idf(docFreq=21)
+>           10.0 = fieldNorm(field=alias, doc=1673743)
+>       33.15815 = (MATCH) weight(title:bush in 1673743), product of:
+>         0.29268032 = queryWeight(title:bush), product of:
+>           11.329136 = idf(docFreq=334)
+>           0.025834301 = queryNorm
+>         113.29136 = (MATCH) fieldWeight(title:bush in 1673743),  
+> product of:
+>           1.0 = tf(termFreq(title:bush)=1)
+>           11.329136 = idf(docFreq=334)
+>           10.0 = fieldNorm(field=title, doc=1673743)
+>       41.10021 = (MATCH) weight(anchor:bush in 1673743), product of:
+>         0.30437908 = queryWeight(anchor:bush), product of:
+>           11.781975 = idf(docFreq=212)
+>           0.025834301 = queryNorm
+>         135.02968 = (MATCH) fieldWeight(anchor:bush in 1673743),  
+> product of:
+>           36.67424 = tf(termFreq(anchor:bush)=1345)
+>           11.781975 = idf(docFreq=212)
+>           0.3125 = fieldNorm(field=anchor, doc=1673743)
+>       18.274998 = (MATCH) weight(text:bush in 1673743), product of:
+>         0.25839525 = queryWeight(text:bush), product of:
+>           10.002022 = idf(docFreq=1262)
+>           0.025834301 = queryNorm
+>         70.724976 = (MATCH) fieldWeight(text:bush in 1673743),  
+> product of:
+>           1.4142135 = tf(termFreq(text:bush)=2)
+>           10.002022 = idf(docFreq=1262)
+>           5.0 = fieldNorm(field=text, doc=1673743)
+>       2.4163725 = (MATCH) weight(body:bush in 1673743), product of:
+>         0.19234328 = queryWeight(body:bush), product of:
+>           7.445267 = idf(docFreq=16284)
+>           0.025834301 = queryNorm
+>         12.562812 = (MATCH) fieldWeight(body:bush in 1673743),  
+> product of:
+>           15.427249 = tf(termFreq(body:bush)=238)
+>           7.445267 = idf(docFreq=16284)
+>           0.109375 = fieldNorm(field=wikipedia, doc=1673743)
+>     0.85714287 = coord(6\/7)
+> ",
+>     "name" : "George W. Bush",
+>   },
+>   {
+>     "explain" : "154.83218 = (MATCH) sum of:
+>   0.02267201 = (MATCH) product of:
+>     0.15870407 = (MATCH) sum of:
+>       0.15870407 = (MATCH) weight(body:john in 14947), product of:
+>         0.12947647 = queryWeight(body:john), product of:
+>           5.0118046 = idf(docFreq=185620)
+>           0.025834301 = queryNorm
+>         1.2257367 = (MATCH) fieldWeight(body:john in 14947),  
+> product of:
+>           2.236068 = tf(termFreq(body:john)=5)
+>           5.0118046 = idf(docFreq=185620)
+>           0.109375 = fieldNorm(field=wikipedia, doc=14947)
+>     0.14285715 = coord(1\/7)
+>   154.80951 = (MATCH) product of:
+>     180.6111 = (MATCH) sum of:
+>       41.597813 = (MATCH) weight(name:bush in 14947), product of:
+>         0.25916338 = queryWeight(name:bush), product of:
+>           10.0317545 = idf(docFreq=1225)
+>           0.025834301 = queryNorm
+>         160.50807 = (MATCH) fieldWeight(name:bush in 14947),  
+> product of:
+>           1.0 = tf(termFreq(name:bush)=1)
+>           10.0317545 = idf(docFreq=1225)
+>           16.0 = fieldNorm(field=name, doc=14947)
+>       61.216446 = (MATCH) weight(alias:bush in 14947), product of:
+>         0.3630294 = queryWeight(alias:bush), product of:
+>           14.052224 = idf(docFreq=21)
+>           0.025834301 = queryNorm
+>         168.6267 = (MATCH) fieldWeight(alias:bush in 14947),  
+> product of:
+>           1.0 = tf(termFreq(alias:bush)=1)
+>           14.052224 = idf(docFreq=21)
+>           12.0 = fieldNorm(field=alias, doc=14947)
+>       26.526522 = (MATCH) weight(title:bush in 14947), product of:
+>         0.29268032 = queryWeight(title:bush), product of:
+>           11.329136 = idf(docFreq=334)
+>           0.025834301 = queryNorm
+>         90.63309 = (MATCH) fieldWeight(title:bush in 14947),  
+> product of:
+>           1.0 = tf(termFreq(title:bush)=1)
+>           11.329136 = idf(docFreq=334)
+>           8.0 = fieldNorm(field=title, doc=14947)
+>       30.758215 = (MATCH) weight(anchor:bush in 14947), product of:
+>         0.30437908 = queryWeight(anchor:bush), product of:
+>           11.781975 = idf(docFreq=212)
+>           0.025834301 = queryNorm
+>         101.05233 = (MATCH) fieldWeight(anchor:bush in 14947),  
+> product of:
+>           34.307434 = tf(termFreq(anchor:bush)=1177)
+>           11.781975 = idf(docFreq=212)
+>           0.25 = fieldNorm(field=anchor, doc=14947)
+>       18.274998 = (MATCH) weight(text:bush in 14947), product of:
+>         0.25839525 = queryWeight(text:bush), product of:
+>           10.002022 = idf(docFreq=1262)
+>           0.025834301 = queryNorm
+>         70.724976 = (MATCH) fieldWeight(text:bush in 14947),  
+> product of:
+>           1.4142135 = tf(termFreq(text:bush)=2)
+>           10.002022 = idf(docFreq=1262)
+>           5.0 = fieldNorm(field=text, doc=14947)
+>       2.237126 = (MATCH) weight(body:bush in 14947), product of:
+>         0.19234328 = queryWeight(body:bush), product of:
+>           7.445267 = idf(docFreq=16284)
+>           0.025834301 = queryNorm
+>         11.630903 = (MATCH) fieldWeight(body:bush in 14947),  
+> product of:
+>           14.282857 = tf(termFreq(body:bush)=204)
+>           7.445267 = idf(docFreq=16284)
+>           0.109375 = fieldNorm(field=wikipedia, doc=14947)
+>     0.85714287 = coord(6\/7)
+> ",
+>     "name" : "George H. W. Bush",
+>   },
+>   {
+>     "explain" : "92.35373 = (MATCH) sum of:
+>   92.255936 = (MATCH) product of:
+>     107.63193 = (MATCH) sum of:
+>       29.974728 = (MATCH) weight(name:john in 2198385), product of:
+>         0.17962648 = queryWeight(name:john), product of:
+>           6.9530225 = idf(docFreq=26641)
+>           0.025834301 = queryNorm
+>         166.87254 = (MATCH) fieldWeight(name:john in 2198385),  
+> product of:
+>           1.0 = tf(termFreq(name:john)=1)
+>           6.9530225 = idf(docFreq=26641)
+>           24.0 = fieldNorm(field=name, doc=2198385)
+>       34.876133 = (MATCH) weight(alias:john in 2198385), product of:
+>         0.27401346 = queryWeight(alias:john), product of:
+>           10.606575 = idf(docFreq=689)
+>           0.025834301 = queryNorm
+>         127.2789 = (MATCH) fieldWeight(alias:john in 2198385),  
+> product of:
+>           1.0 = tf(termFreq(alias:john)=1)
+>           10.606575 = idf(docFreq=689)
+>           12.0 = fieldNorm(field=alias, doc=2198385)
+>       17.689255 = (MATCH) weight(title:john in 2198385), product of:
+>         0.19514729 = queryWeight(title:john), product of:
+>           7.5538054 = idf(docFreq=14609)
+>           0.025834301 = queryNorm
+>         90.64566 = (MATCH) fieldWeight(title:john in 2198385),  
+> product of:
+>           1.0 = tf(termFreq(title:john)=1)
+>           7.5538054 = idf(docFreq=14609)
+>           12.0 = fieldNorm(field=title, doc=2198385)
+>       14.100239 = (MATCH) weight(anchor:john in 2198385), product of:
+>         0.20842676 = queryWeight(anchor:john), product of:
+>           8.06783 = idf(docFreq=8737)
+>           0.025834301 = queryNorm
+>         67.65081 = (MATCH) fieldWeight(anchor:john in 2198385),  
+> product of:
+>           13.416408 = tf(termFreq(anchor:john)=180)
+>           8.06783 = idf(docFreq=8737)
+>           0.625 = fieldNorm(field=anchor, doc=2198385)
+>       10.557128 = (MATCH) weight(text:john in 2198385), product of:
+>         0.1792826 = queryWeight(text:john), product of:
+>           6.9397116 = idf(docFreq=26998)
+>           0.025834301 = queryNorm
+>         58.885403 = (MATCH) fieldWeight(text:john in 2198385),  
+> product of:
+>           1.4142135 = tf(termFreq(text:john)=2)
+>           6.9397116 = idf(docFreq=26998)
+>           6.0 = fieldNorm(field=text, doc=2198385)
+>       0.43445155 = (MATCH) weight(body:john in 2198385), product of:
+>         0.12947647 = queryWeight(body:john), product of:
+>           5.0118046 = idf(docFreq=185620)
+>           0.025834301 = queryNorm
+>         3.3554478 = (MATCH) fieldWeight(body:john in 2198385),  
+> product of:
+>           7.1414285 = tf(termFreq(body:john)=51)
+>           5.0118046 = idf(docFreq=185620)
+>           0.09375 = fieldNorm(field=wikipedia, doc=2198385)
+>     0.85714287 = coord(6\/7)
+>   0.097795136 = (MATCH) product of:
+>     0.6845659 = (MATCH) sum of:
+>       0.6845659 = (MATCH) weight(body:bush in 2198385), product of:
+>         0.19234328 = queryWeight(body:bush), product of:
+>           7.445267 = idf(docFreq=16284)
+>           0.025834301 = queryNorm
+>         3.559084 = (MATCH) fieldWeight(body:bush in 2198385),  
+> product of:
+>           5.0990195 = tf(termFreq(body:bush)=26)
+>           7.445267 = idf(docFreq=16284)
+>           0.09375 = fieldNorm(field=wikipedia, doc=2198385)
+>     0.14285715 = coord(1\/7)
+> ",
+>     "name" : "John Kerry",
+>   },
+>   {
+>     "explain" : "81.16132 = (MATCH) sum of:
+>   81.13575 = (MATCH) product of:
+>     94.65837 = (MATCH) sum of:
+>       24.978941 = (MATCH) weight(name:john in 66053), product of:
+>         0.17962648 = queryWeight(name:john), product of:
+>           6.9530225 = idf(docFreq=26641)
+>           0.025834301 = queryNorm
+>         139.06046 = (MATCH) fieldWeight(name:john in 66053),  
+> product of:
+>           1.0 = tf(termFreq(name:john)=1)
+>           6.9530225 = idf(docFreq=26641)
+>           20.0 = fieldNorm(field=name, doc=66053)
+>       29.063442 = (MATCH) weight(alias:john in 66053), product of:
+>         0.27401346 = queryWeight(alias:john), product of:
+>           10.606575 = idf(docFreq=689)
+>           0.025834301 = queryNorm
+>         106.06575 = (MATCH) fieldWeight(alias:john in 66053),  
+> product of:
+>           1.0 = tf(termFreq(alias:john)=1)
+>           10.606575 = idf(docFreq=689)
+>           10.0 = fieldNorm(field=alias, doc=66053)
+>       14.741047 = (MATCH) weight(title:john in 66053), product of:
+>         0.19514729 = queryWeight(title:john), product of:
+>           7.5538054 = idf(docFreq=14609)
+>           0.025834301 = queryNorm
+>         75.538055 = (MATCH) fieldWeight(title:john in 66053),  
+> product of:
+>           1.0 = tf(termFreq(title:john)=1)
+>           7.5538054 = idf(docFreq=14609)
+>           10.0 = fieldNorm(field=title, doc=66053)
+>       16.475775 = (MATCH) weight(anchor:john in 66053), product of:
+>         0.20842676 = queryWeight(anchor:john), product of:
+>           8.06783 = idf(docFreq=8737)
+>           0.025834301 = queryNorm
+>         79.04827 = (MATCH) fieldWeight(anchor:john in 66053),  
+> product of:
+>           2.4494898 = tf(termFreq(anchor:john)=6)
+>           8.06783 = idf(docFreq=8737)
+>           4.0 = fieldNorm(field=anchor, doc=66053)
+>       8.797606 = (MATCH) weight(text:john in 66053), product of:
+>         0.1792826 = queryWeight(text:john), product of:
+>           6.9397116 = idf(docFreq=26998)
+>           0.025834301 = queryNorm
+>         49.071167 = (MATCH) fieldWeight(text:john in 66053),  
+> product of:
+>           1.4142135 = tf(termFreq(text:john)=2)
+>           6.9397116 = idf(docFreq=26998)
+>           5.0 = fieldNorm(field=text, doc=66053)
+>       0.60155636 = (MATCH) weight(body:john in 66053), product of:
+>         0.12947647 = queryWeight(body:john), product of:
+>           5.0118046 = idf(docFreq=185620)
+>           0.025834301 = queryNorm
+>         4.646067 = (MATCH) fieldWeight(body:john in 66053), product  
+> of:
+>           7.4161983 = tf(termFreq(body:john)=55)
+>           5.0118046 = idf(docFreq=185620)
+>           0.125 = fieldNorm(field=wikipedia, doc=66053)
+>     0.85714287 = coord(6\/7)
+>   0.025572272 = (MATCH) product of:
+>     0.17900589 = (MATCH) sum of:
+>       0.17900589 = (MATCH) weight(body:bush in 66053), product of:
+>         0.19234328 = queryWeight(body:bush), product of:
+>           7.445267 = idf(docFreq=16284)
+>           0.025834301 = queryNorm
+>         0.9306584 = (MATCH) fieldWeight(body:bush in 66053),  
+> product of:
+>           1.0 = tf(termFreq(body:bush)=1)
+>           7.445267 = idf(docFreq=16284)
+>           0.125 = fieldNorm(field=wikipedia, doc=66053)
+>     0.14285715 = coord(1\/7)
+> ",
+>     "name" : "John Denver",
+>   },
+>   {
+>     "explain" : "72.412 = (MATCH) sum of:
+>   23.203518 = (MATCH) product of:
+>     32.484924 = (MATCH) sum of:
+>       12.4894705 = (MATCH) weight(name:john in 535045), product of:
+>         0.17962648 = queryWeight(name:john), product of:
+>           6.9530225 = idf(docFreq=26641)
+>           0.025834301 = queryNorm
+>         69.53023 = (MATCH) fieldWeight(name:john in 535045),  
+> product of:
+>           1.0 = tf(termFreq(name:john)=1)
+>           6.9530225 = idf(docFreq=26641)
+>           10.0 = fieldNorm(field=name, doc=535045)
+>       5.8964186 = (MATCH) weight(title:john in 535045), product of:
+>         0.19514729 = queryWeight(title:john), product of:
+>           7.5538054 = idf(docFreq=14609)
+>           0.025834301 = queryNorm
+>         30.215221 = (MATCH) fieldWeight(title:john in 535045),  
+> product of:
+>           1.0 = tf(termFreq(title:john)=1)
+>           7.5538054 = idf(docFreq=14609)
+>           4.0 = fieldNorm(field=title, doc=535045)
+>       8.737598 = (MATCH) weight(anchor:john in 535045), product of:
+>         0.20842676 = queryWeight(anchor:john), product of:
+>           8.06783 = idf(docFreq=8737)
+>           0.025834301 = queryNorm
+>         41.921673 = (MATCH) fieldWeight(anchor:john in 535045),  
+> product of:
+>           3.4641016 = tf(termFreq(anchor:john)=12)
+>           8.06783 = idf(docFreq=8737)
+>           1.5 = fieldNorm(field=anchor, doc=535045)
+>       4.9766784 = (MATCH) weight(text:john in 535045), product of:
+>         0.1792826 = queryWeight(text:john), product of:
+>           6.9397116 = idf(docFreq=26998)
+>           0.025834301 = queryNorm
+>         27.758846 = (MATCH) fieldWeight(text:john in 535045),  
+> product of:
+>           1.0 = tf(termFreq(text:john)=1)
+>           6.9397116 = idf(docFreq=26998)
+>           4.0 = fieldNorm(field=text, doc=535045)
+>       0.38475677 = (MATCH) weight(body:john in 535045), product of:
+>         0.12947647 = queryWeight(body:john), product of:
+>           5.0118046 = idf(docFreq=185620)
+>           0.025834301 = queryNorm
+>         2.9716346 = (MATCH) fieldWeight(body:john in 535045),  
+> product of:
+>           3.1622777 = tf(termFreq(body:john)=10)
+>           5.0118046 = idf(docFreq=185620)
+>           0.1875 = fieldNorm(field=wikipedia, doc=535045)
+>     0.71428573 = coord(5\/7)
+>   49.208485 = (MATCH) product of:
+>     68.89188 = (MATCH) sum of:
+>       25.998634 = (MATCH) weight(name:bush in 535045), product of:
+>         0.25916338 = queryWeight(name:bush), product of:
+>           10.0317545 = idf(docFreq=1225)
+>           0.025834301 = queryNorm
+>         100.31754 = (MATCH) fieldWeight(name:bush in 535045),  
+> product of:
+>           1.0 = tf(termFreq(name:bush)=1)
+>           10.0317545 = idf(docFreq=1225)
+>           10.0 = fieldNorm(field=name, doc=535045)
+>       13.263261 = (MATCH) weight(title:bush in 535045), product of:
+>         0.29268032 = queryWeight(title:bush), product of:
+>           11.329136 = idf(docFreq=334)
+>           0.025834301 = queryNorm
+>         45.316544 = (MATCH) fieldWeight(title:bush in 535045),  
+> product of:
+>           1.0 = tf(termFreq(title:bush)=1)
+>           11.329136 = idf(docFreq=334)
+>           4.0 = fieldNorm(field=title, doc=535045)
+>       18.634373 = (MATCH) weight(anchor:bush in 535045), product of:
+>         0.30437908 = queryWeight(anchor:bush), product of:
+>           11.781975 = idf(docFreq=212)
+>           0.025834301 = queryNorm
+>         61.220936 = (MATCH) fieldWeight(anchor:bush in 535045),  
+> product of:
+>           3.4641016 = tf(termFreq(anchor:bush)=12)
+>           11.781975 = idf(docFreq=212)
+>           1.5 = fieldNorm(field=anchor, doc=535045)
+>       10.3379 = (MATCH) weight(text:bush in 535045), product of:
+>         0.25839525 = queryWeight(text:bush), product of:
+>           10.002022 = idf(docFreq=1262)
+>           0.025834301 = queryNorm
+>         40.008087 = (MATCH) fieldWeight(text:bush in 535045),  
+> product of:
+>           1.0 = tf(termFreq(text:bush)=1)
+>           10.002022 = idf(docFreq=1262)
+>           4.0 = fieldNorm(field=text, doc=535045)
+>       0.65770966 = (MATCH) weight(body:bush in 535045), product of:
+>         0.19234328 = queryWeight(body:bush), product of:
+>           7.445267 = idf(docFreq=16284)
+>           0.025834301 = queryNorm
+>         3.4194574 = (MATCH) fieldWeight(body:bush in 535045),  
+> product of:
+>           2.4494898 = tf(termFreq(body:bush)=6)
+>           7.445267 = idf(docFreq=16284)
+>           0.1875 = fieldNorm(field=wikipedia, doc=535045)
+>     0.71428573 = coord(5\/7)
+> ",
+>     "name" : "John Bush",
+>   }
+> ]
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

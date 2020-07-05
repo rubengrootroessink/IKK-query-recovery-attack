@@ -1,0 +1,92 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: 2.1-dev memory leak?
+DATE: 30 Nov 2006
+
+Hi,
+
+Is anyone running Lucene trunk/HEAD version in a serious production system?  Anyone noticed
+any memory leaks?
+
+I'm asking because I recently bravely went from 1.9.1 to 2.1-dev (trunk from about a week
+ago) and all of a sudden my application that was previosly consuming about 1.5GB (-Xmx1500m)
+now consumes 2.2GB, and blows up after it exhausts the whole heap and the GC can't make any
+more room there after running for about 3-6 hours and handling several tens of thousands of
+queries.
+
+I'd love to go back to 2.0.0, or even back to 1.9.1 and run that for a while and just double-check
+that it really is the the Lucene upgrade that is the source of the leak, but unfortunately
+because of LUCENE-701 (lockless commits), I can't go back that easily without reindexing...
+
+Moreover, I just looked at CHANGES.txt from 1.9.1 to present, and I think the biggest change
+since then was LUCENE-701.
+LUCENE-672 (segment merge policy) was also pretty big, but from what I can tell, the memory
+leak is somewhere in the search part, not indexing part.  There have been a number of other
+search-time optimizations since 2.0.0, so it's hard to tell what the cause is.  Of course,
+it could turn out to be a leak in my own code, but I'm pretty sure my changes were limited
+to removal of deprecated methods, so I can start using 2.1.
+
+        IndexDescriptor indexDescriptor = getIndexDescriptorFromCache(indexID);
+
+        try {
+            // if this is a known index
+            if (indexDescriptor != null) {
+                cacheHits++;
+                // if the index has changed since this Searcher was created, make a new Searcher
+                long currentVersion = IndexReader.getCurrentVersion(indexID);
+                if (currentVersion > indexDescriptor.lastKnownVersion) {
+                    hitButChanged++;
+                    // modified index detected
+                    indexDescriptor.lastKnownVersion = currentVersion;
+                    indexDescriptor.searcher = new LuceneSearcher(new File(indexID));
+                }
+                else {
+                    // index not modified, reusing searcher
+                }
+            }
+            // if this is a new index
+            else {
+                cacheMisses++;
+                File indexDir = validateIndex(indexID);
+                indexDescriptor = new IndexDescriptor();
+                indexDescriptor.indexDir = indexDir;
+                indexDescriptor.lastKnownVersion = IndexReader.getCurrentVersion(indexDir);
+                indexDescriptor.searcher = new LuceneSearcher(indexDir);
+            }
+            return cacheIndexDescriptor(indexDescriptor);
+        }
+        catch (IOException e) {
+            throw new SearcherException("Cannot open index: " + indexID, e);
+        }
+
+So this is just caching of "IndexDescriptor" objects, which have "LuceneSearcher" objects
+in them.
+The cache is a small LRU cache with max size of 37.  The app actually consists of a few tens
+of thousands of Lucene indices, so this small cache results in only 20% cache hit ratio.
+
+And then the LuceneSearcher ctor looks like this:
+
+    LuceneSearcher(File indexDir) throws IOException {
+        _indexDir = FSDirectory.getDirectory(indexDir, false);
+        _searcher = new IndexSearcher(_indexDir);
+    }
+
+This _searcher (IndexSearcher) is then used in various search methods of this class.
+There are no close() calls anywhere.  In other words, I don't explicitly close IndexSearchers,
+I just let them get GC collected. 
+This stuff has been working for well for 1-2 years, and I just started exhausting the JVM
+heap about a week ago when I went from 1.9.1 to 2.1-dev.
+Any other overly brave/crazy souls out there who are running the bleeding edge version in
+production environment?
+This is running on FedoraCore3 under JDK 1.5_09 (latest 1.5).
+
+Thanks,
+Otis
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

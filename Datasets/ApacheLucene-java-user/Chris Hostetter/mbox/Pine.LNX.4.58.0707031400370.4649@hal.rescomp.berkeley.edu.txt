@@ -1,0 +1,59 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: product based term combination for BooleanQuery?
+DATE: 3 Jul 2007
+
+
+: "Lucene Download" as a query. I want something that strongly references
+: "Lucene" (in the title) and strongly references "Download" but "Download
+: Lucene" or "Lucene Project Download" are better than some page that
+: happens to contain the exact phrase.
+:
+: Other examples are "camera review" or "Gonzales scandal"; there's a
+: whole class of "subject <modifier>" queries that are not really phrase
+: based, and my corpus isn't large enough to necessarily contain the
+: phrase anyway.
+
+You should take a look at the DisjunctionMaxQuery class ... it's whole
+purpose for existing is to provide an alternative to BooleanQuery in which
+multiple clause queries request in a score dominated by the highest
+scoring subclause -- not all subclauses.  They can be combined in
+BooleanQueries in such a way that matching title:John and title:Bush will
+vastly overshadow docs that match title:John body:Bush ... but it doesn't
+really help in situations where the title is "George Bush vs John Kerry"
+... for stuff like that you have to use a sloppy PhraseQuery (you can make
+it optional so it only increases the score, and doesn't prevent matches
+when the phrase just doesn't exist)
+
+if you take a look at the DisMaxRequestHandler in solr, you can see a
+parser that converts queries like:   John Bush   ..into structions like
+this...
+
+  +(  ( DisjunctionMaxQuery((body:john | title:john^3.0)~0.01)
+        DisjunctionMaxQuery((body:bush | title:bush^3.0)~0.01) )~2 )
+   DisjunctionMaxQuery((text:"john bush"~100 | name:"john bush"~100^2.0)~0.01)
+
+...based on configuration information.
+
+I also second another suggestion (from grant maybe?) about considering
+your coordFactory carefully ... if you use straight boolean queries and
+have a query like you describe...
+    +(title:John^4.0 body:John) +(title:Bush^4.0 body:Bush)
+
+...then a document with "John Bush" in the title but only refrences to "Mr
+Bush" in the body is going to be heavily penalized by the lack of any
+occurances of "John" in the body ... you probably want to eliminate he
+coord in your qub queries and only have it in the top most query.
+
+(assuming you want to keep using plain boolean queries and don't totally
+fall in love with dismax queries they way i have)
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

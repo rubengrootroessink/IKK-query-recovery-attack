@@ -1,0 +1,134 @@
+FROM: Mark Miller <markrmil...@gmail.com>
+SUBJECT: Re: Bug in Lucene 2.2.0 code? Simple code included (StringIndexOutOfBoundsException).
+DATE: 28 Jul 2007
+
+Hey Lukas,
+
+Sorry I havn't gotten back to you on this sooner. Been meaning too, but 
+I have been busy. Still am a little, but here is some to get you started:
+
+The token stream you send to the highlighter must match the text you 
+send to the highlighter.
+
+Your token stream is this:
+
+(example,0,7)
+(long,14,18)
+(text,22,26)
+
+but your text is: example
+
+if you look at hits.get(i) it returns a document. Getting the field off 
+the document:
+
+    for (int i = 0; i < fields.size(); i++) {
+      Fieldable field = (Fieldable)fields.get(i);
+      if (field.name().equals(name) && (!field.isBinary()))
+        return field.stringValue();
+    }
+    return null;
+
+as you can see, you will only get the stored value of the first "small" 
+field. Not the other two.
+
+I have more for you, but hopefully that will get you started.
+
+In the end, the tokenstream must exactly match the text you are passing 
+to the highlighter...this is why you are getting the exception.
+
+- Mark
+
+Lukas Vlcek wrote:
+> Hi Lucene experts,
+>
+> The following is a simple Lucene code which generates
+> StringIndexOutOfBoundsException exception. I am using Lucene 2.2.0 official
+> releasse. Can anyone tell me what is wrong with this code? Is this a bug or
+> a feature of Lucene? Any comments/hits highly welcommed!
+>
+> In a nutshell I have a document with two (or four) fileds:
+> 1) all
+> 2-4) small
+>
+> I use [all] for searching and [small] for highlighting.
+>
+> [packkage and imports truncated...]
+>
+> public class MemoryIndexCase {
+>     static public void main(String[] arg) {
+>
+>         Document doc = new Document();
+>
+>         doc.add(new Field("all","example long text",
+>                 Field.Store.NO, Field.Index.TOKENIZED));
+>         doc.add(new Field("small","example",
+>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> Field.TermVector.WITH_POSITIONS_OFFSETS));
+>         doc.add(new Field("small","long",
+>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> Field.TermVector.WITH_POSITIONS_OFFSETS));
+>         doc.add(new Field("small","text",
+>                 Field.Store.YES, Field.Index.UN_TOKENIZED,
+> Field.TermVector.WITH_POSITIONS_OFFSETS));
+>
+>         try {
+>             Directory idx = new RAMDirectory();
+>             IndexWriter writer = new IndexWriter(idx, new
+> StandardAnalyzer(), true);
+>
+>             writer.addDocument(doc);
+>             writer.optimize();
+>             writer.close();
+>
+>             Searcher searcher = new IndexSearcher(idx);
+>
+>             QueryParser qp = new QueryParser("all", new StandardAnalyzer());
+>             Query query = qp.parse("example text");
+>             Hits hits = searcher.search(query);
+>
+>             Highlighter highlighter =    new Highlighter(new
+> QueryScorer(query));
+>
+>             IndexReader ir = IndexReader.open(idx);
+>             for (int i = 0; i < hits.length(); i++) {
+>
+>                 String text = hits.doc(i).get("small");
+>
+>                 TermFreqVector tfv = ir.getTermFreqVector(hits.id(i),
+> "small");
+>                 TokenStream tokenStream=
+> TokenSources.getTokenStream((TermPositionVector)
+> tfv);
+>
+>                 String result =
+>                     highlighter.getBestFragment(tokenStream,text);
+>                 System.out.println(result);
+>             }
+>
+>         } catch (Throwable e) {
+>             e.printStackTrace();
+>         }
+>     }
+> }
+>
+> The exception is:
+> java.lang.StringIndexOutOfBoundsException: String index out of range: 11
+>     at java.lang.String.substring(String.java:1935)
+>     at org.apache.lucene.search.highlight.Highlighter.getBestTextFragments(
+> Highlighter.java:235)
+>     at org.apache.lucene.search.highlight.Highlighter.getBestFragments(
+> Highlighter.java:175)
+>     at org.apache.lucene.search.highlight.Highlighter.getBestFragment(
+> Highlighter.java:101)
+>     at org.lucenetest.MemoryIndexCase.main(MemoryIndexCase.java:70)
+>
+> Best regards,
+> Lukas
+>
+>   
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

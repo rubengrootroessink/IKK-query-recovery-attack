@@ -1,0 +1,84 @@
+FROM: "Kevin A. Burton" <bur...@newsmonster.org>
+SUBJECT: Real time indexing and distribution to lucene on separate boxes (long)
+DATE: 11 Mar 2004
+
+
+I'm curious to find out what others are doing in this situation.
+
+I have two boxes... the indexer and the searcher.  The indexer is taking
+documents and indexing them and creating indexes in a RAMDirectory (for
+efficiency) and is then writing these indexes to disk as we begin to run 
+out of
+memory.  Usually these aren't very big... 15->100M or so.
+
+Obviously I'm dividing the indexing and searching onto dedicated boxes to
+improve efficiency.  The real issue though is that the searchers need to 
+be live
+all the time as indexes are being added at runtime.
+
+So if that wasn't clear.  I actually have to push out fresh indexes 
+WHILE users
+are searching them.  Not a very easy thing to do.
+
+Here's my question.  What are the optimum ways to then distribute these 
+index
+segments to the secondary searcher boxes.  I don't want to use the 
+MultiSearcher
+because it's slow once we have too many indexes (see my PS)
+
+Here's what I'm currently thinking:
+
+1.  Have the indexes sync'd to the searcher as shards directly.  This 
+doesn't
+scale as I would have to use the MultiSearcher which is slow when it has too
+many indexes.  (And ideally we would want an optimized index).
+
+2. Merge everything into one index on the indexer.  Lock the searcher, 
+then copy
+over the new index via rsync.  The problem here is that the searcher 
+would need
+to lock up while the sync is happening to prevent reads on the index.  
+If I do
+this enough and the system is optimzed I think I would only have to 
+block for 5
+seconds or so but that's STILL very long.
+
+3. Have two directories on the searcher.  The indexer would then sync to 
+a tmp
+directory and then at run time swap them via a rename once the sync is over.
+The downside here is that this will take up 2x disk space on the 
+searcher.  The
+upside is that the box will only slow down while the rsync is happening.
+
+4. Do a LIVE index merge on the production box.  This might be an 
+interesting
+approach.  The major question I have is whether you can do an 
+optimize/merge on
+an index that's currently being used.  I *think* it might be possible 
+but I'm
+not sure.  This isn't as fast as performing the merge on the indexer 
+before hand
+but it does have the benefits of both worlds.
+
+If anyone has any other ideas I would be all ears...
+
+PS.. Random question.  The performance of the MultiSearcher is Mlog(N) 
+correct?
+Where N is the number of documents in the index and M is the number of 
+indexes?
+Is this about right?
+
+-- 
+
+Please reply using PGP.
+
+    http://peerfear.org/pubkey.asc    
+    
+    NewsMonster - http://www.newsmonster.org/
+    
+Kevin A. Burton, Location - San Francisco, CA, Cell - 415.595.9965
+       AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+  IRC - freenode.net #infoanarchy | #p2p-hackers | #newsmonster
+
+

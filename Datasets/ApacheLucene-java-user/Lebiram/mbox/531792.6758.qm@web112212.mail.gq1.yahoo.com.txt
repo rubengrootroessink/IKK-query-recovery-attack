@@ -1,0 +1,144 @@
+FROM: Lebiram <lebi...@ymail.com>
+SUBJECT: Re: Optimize and Out Of Memory Errors
+DATE: 27 Dec 2008
+
+Hello, 
+
+As an update to this problem:
+
+It seems Luke is also failing on a segment with so much documents in it (norms enabled). 
+I was probably too tired to notice that the hits i was getting was coming from a very small
+segment not the big segment.
+
+So I was back at square one; For testing I created a file without norms in it and luke did
+not throw any exception. 
+
+Knowing that, I proceeded to investigate any other ways to avoid the norms problem without
+having to regenerate the new index with norms disabled.
+
+So far, in my local testing the following query code does not seem to fail.
+The main thing being ConstantScoreQuery. 
+Using this query, processing of norms does not seem to be invoked.
+I'll still have to check more on this in detail..
+
+Filter dateFilter = new RangeFilter("timestamp", DateTools.dateToString(start, DateTools.Resolution.SECOND),
+                         DateTools.dateToString(end, DateTools.Resolution.SECOND), true, true);
+ConstantScoreQuery dateQuery = new ConstantScoreQuery(dateFilter);
+        
+BooleanQuery.setMaxClauseCount(1024); 
+BooleanQuery query = new BooleanQuery();        
+query.add(dateQuery, BooleanClause.Occur.MUST);
+        
+Analyzer analyzer = new StandardAnalyzer();
+
+QueryParser parser;
+        if (!isEmpty(content)) {
+            try {
+                parser = new QueryParser("content", analyzer);                
+                ConstantScoreQuery contentQuery = new ConstantScoreQuery(new QueryWrapperFilter(parser.parse(content)));
+               
+                query.add(contentQuery, BooleanClause.Occur.MUST);                
+            } catch (ParseException pe) {
+                log.error("content could not be parsed.");
+            }
+        }
+
+
+
+
+________________________________
+From: Lebiram <lebiram@ymail.com>
+To: java-user@lucene.apache.org
+Sent: Wednesday, December 24, 2008 2:43:12 PM
+Subject: Re: Optimize and Out Of Memory Errors
+
+
+Hello Mark, 
+
+As of the moment the index could not be rebuilt to remove norms.
+
+Right now, I'm trying to figure out what luke is doing by going through source code.
+
+Using whatever settings I find, create a very small app just to do a bit of search.
+This small app has 1600 mb heapspace while luke just has 256 max for heap space.
+
+On reading the same big 1 segment index with 166 million docs, 
+luke fails during checkIndex when it checks the norms, but searching is okay as long as I
+limit it to say a few thousand documents.
+However it's not the same for my app, been trying to limit it It still reads way too much
+data.
+
+I'm wondering if this has anything to do with Similarity and Scoring. 
+I was wondering if you could lead me to some settings or any clever tweaks. 
+
+This problem will haunt me this christmas. :O
+
+
+
+
+________________________________
+From: Mark Miller <markrmiller@gmail.com>
+To: java-user@lucene.apache.org
+Sent: Wednesday, December 24, 2008 2:20:23 PM
+Subject: Re: Optimize and Out Of Memory Errors
+
+We don't know those norms are "the" problem. Luke is loading norms if its searching that index.
+But what else is Luke doing? What else is your App doing? I suspect your app requires more
+RAM than Luke? How much RAM do you have and much are you allocating to the JVM?
+
+The norms are not necessarily the problem you have to solve - but it would appear they are
+taking up over 2 gig of memory. Unless you have some to spare (and it sounds like you may
+not), it could be a good idea to turn them off for particular fields.
+
+- Mark
+
+Lebiram wrote:
+> Is there away to not factor in norms data in scoring somehow?
+> 
+> I'm just stumped as to how Luke is able to do a seach (with limit) on the docs but in
+my code it just dies with OutOfMemory errors.
+> How does Luke not allocate these norms?
+> 
+> 
+> 
+> 
+> ________________________________
+> From: Mark Miller <markrmiller@gmail.com>
+> To: java-user@lucene.apache.org
+> Sent: Tuesday, December 23, 2008 5:25:30 PM
+> Subject: Re: Optimize and Out Of Memory Errors
+> 
+> Mark Miller wrote:
+>  
+>> Lebiram wrote:
+>>    
+>>> Also, what are norms      
+>> Norms are a byte value per field stored in the index that is factored into the score.
+Its used for length normalization (shorter documents = more important) and index time boosting.
+If you want either of those, you need norms. When norms are loaded up into an IndexReader,
+its loaded into a byte[maxdoc] array for each field - so even if one document out of 400 million
+has a field, its still going to load byte[maxdoc] for that field (so a lot of wasted RAM).
+ Did you say you had 400 million docs and 7 fields? Google says that would be:
+>> 
+>> 
+>>    **400 million x 7 byte = 2 670.28809 megabytes**
+>> 
+>> On top of your other RAM usage.
+>>    
+> Just to avoid confusion, that should really read a byte per document per field. If I
+remember right, it gives 255 boost possibilities, limited to 25 with length normalization.
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+> 
+> 
+>        
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+      

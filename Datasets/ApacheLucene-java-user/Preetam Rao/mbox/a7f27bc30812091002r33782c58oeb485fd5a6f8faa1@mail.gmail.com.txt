@@ -1,0 +1,140 @@
+FROM: "Preetam Rao" <blogathan....@gmail.com>
+SUBJECT: Re: Problem with PorterStemFilter
+DATE: 9 Dec 2008
+
+Thanks Eric. Looking at Luke output helped.
+
+The problem was that I had overridden tokenStream() of the StandardAnalyzer
+but did not override the reusableTokenStream().
+
+The IndexWriter was using reusableTokenStream() and QueryParser
+was using tokenStream() and hence the mismatch. So looks like one should be
+careful to override both.
+
+-----------
+Preetam
+
+On Mon, Dec 8, 2008 at 7:34 PM, Erick Erickson <erickerickson@gmail.com>wrote:
+
+> your output says you couldn't find "ugli", but you indexed "ugly". I
+> assume that's just a typo, and the stemmer probably makes it moot
+> anyway....
+>
+> I don't see anything obvious in the code, but here's what I'd suggest...
+>
+> 1> write this out to a FSDir rather than a RAMDir, get a copy of Luke
+>    (google "lucene luke") and examine what's actually in your index.
+> 2> query.toString is your friend to find out how the query is actually
+>     passed to the searcher.
+> 3> You are explicitly doing phrase queries by quoting the string, but
+>      that should be OK.
+>
+> FWIW
+> Erick
+>
+> On Sun, Dec 7, 2008 at 1:26 PM, Preetam Rao <blogathan.rao@gmail.com>
+> wrote:
+>
+> > Hi,
+> >
+> > I am indexing three words in a document.
+> > Then I run a phrase query on that document searching for two words at a
+> > time
+> > and three words at a time.
+> > I use PorterStemFilter for both searching and indexing. I am getting very
+> > inconsistent results. Am I doing something incorrectly ?
+> > The way I use PorterStemmer is by overriding tokenStream() method of
+> > StandardAnalyzer and adding PorterStemFiler to the chain.
+> > If I use StandardAnalyzer everything works fine. I am suspecting the way
+> I
+> > am creating the analyzer.
+> > I printed position increments, offsets etc for both cases and did not see
+> > any difference.
+> >
+> > Below are the tests I am running and the full code.
+> >
+> > tests:
+> > Indexed content : "one two three"  search : "one two" no documents found
+> > Indexed content : "one two three"  search : "one two three" no documents
+> > found
+> >
+> > Indexed content : "first second third"  search : "first second" one
+> > documents found
+> > Indexed content : "first second third"  search :"first second third" one
+> > documents found
+> >
+> > Indexed content : "good bad ugly"  search : "good bad" one documents
+> found
+> > Indexed content : "good bad ugly"  search :"good bad ugly" no documents
+> > found
+> >
+> >
+> > The below is the code:
+> >
+> > import org.apache.lucene.store.RAMDirectory;
+> > import org.apache.lucene.index.IndexWriter;
+> > import org.apache.lucene.analysis.TokenStream;
+> > import org.apache.lucene.analysis.PorterStemFilter;
+> > import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> > import org.apache.lucene.document.Document;
+> > import org.apache.lucene.document.Field;
+> > import org.apache.lucene.search.IndexSearcher;
+> > import org.apache.lucene.search.Query;
+> > import org.apache.lucene.search.Hits;
+> > import org.apache.lucene.queryParser.QueryParser;
+> > import org.apache.lucene.queryParser.ParseException;
+> > import java.io.Reader;
+> > import java.io.IOException;
+> >
+> >
+> > public class TestPorterStemmer {
+> >    public static void main(String[] args) throws IOException,
+> > ParseException {
+> >        RAMDirectory index = new RAMDirectory();
+> >        IndexWriter writer = new IndexWriter(index, getAnalyzer(), true,
+> > IndexWriter.MaxFieldLength.UNLIMITED);
+> >        Document doc = new Document();
+> >        doc.add(new Field("content", "good bad ugly", Field.Store.YES,
+> > Field.Index.ANALYZED));
+> >        writer.addDocument(doc);
+> >        writer.optimize();
+> >        writer.close();
+> >        IndexSearcher searcher = new IndexSearcher(index);
+> >        QueryParser parser = new QueryParser("content", getAnalyzer());
+> >
+> >        Query query = parser.parse("\"" + "good bad" + "\"");
+> >        Hits hits = searcher.search(query);
+> >        System.out.println("searched for " + query.toString() + " matched
+> :
+> > " + hits.length() + " documents ");
+> >
+> >        query = parser.parse("\"" + "good bad ugly" + "\"");
+> >        hits = searcher.search(query);
+> >        System.out.println("searched for " + query.toString() + " matched
+> :
+> > " + hits.length() + " documents ");
+> >    }
+> >
+> >    public static StandardAnalyzer getAnalyzer() {
+> >        return new StandardAnalyzer() {
+> >            public TokenStream tokenStream(String fieldName, Reader
+> reader)
+> > {
+> >                TokenStream result = super.tokenStream(fieldName, reader);
+> >                return new PorterStemFilter(result);
+> >            }
+> >        };
+> >    }
+> > }
+> >
+> > output:
+> > searched for content:"good bad" matched : 1 documents
+> > searched for content:"good bad ugli" matched : 0 documents
+> >
+> > Any help is greatly appreciated...
+> >
+> > Thanks
+> > Preetam
+> >
+>
+

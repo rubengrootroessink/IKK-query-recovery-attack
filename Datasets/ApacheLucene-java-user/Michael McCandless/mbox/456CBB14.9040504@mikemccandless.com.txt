@@ -1,0 +1,58 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: StackOverflowError while calling IndexReader.deleteDocuments(new Term())
+DATE: 28 Nov 2006
+
+Suman Ghosh wrote:
+> The search functionality must be available during the index build. Since a
+> relatively small number of documents are being affected (and also we 
+> plan to
+> perform the build during a period of time we know to be relatively quiet
+> from last 2 years site access data) during the build process, we hope that
+> the build process will not cause any search issue.
+> 
+> If you have any advice as to a better approach for incremental build and
+> index optimization, I'll really appreciate if you could share it.
+
+OK a few more questions/notes :)
+
+Is your index mounted on a local filesystem (and searchers are running
+in the same JVM, or different JVM on the same machine)?  Or is index
+in a remote filesystem like NFS?  If it's NFS you should look at this
+issue:
+
+   http://issues.apache.org/jira/browse/LUCENE-673
+
+What's your policy on reopening the readers (so they see the latest
+changes to the index)?  You should probably take care not to re-open
+"at a bad time" (eg, after the deletes were done but before the new
+docs were added) else that searcher will be missing those 200 docs
+until it next re-opens...
+
+Actually I'm still confused: at what point do you see an index with
+5000 segments?  Is it your initial full build of the index?  In this
+case, you are not doing any deletes, and, you are using a single
+IndexWriter (with multiple threads), just calling "addDocument" many
+times?
+
+Oh I see: are you using that loop to build your initial index as well?
+
+In which case, you re-open the writer every 200 docs.  One simple
+thing you could do instead is: if this is the first full build of your
+index, deletes should not be necessary, so you can skip the deletes
+and use a single writer instance (ie, don't close/open it every 200
+docs).  Likely this will work around the 5000+ segments issue and not
+require you to try running with the trunk (still I'd like to know if
+upgrading to trunk correctly fixes the 5000+ segments).
+
+Since you don't have many docs changing per day, once you get your
+full index built (and get through the 5000+ segments issue) I think
+you won't hit that issue again since you optimize after adding a few
+hundred docs.
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

@@ -1,0 +1,230 @@
+FROM: Otis Gospodnetic <otis_gospodne...@yahoo.com>
+SUBJECT: Re: Fwd: File name searching
+DATE: 28 Mar 2005
+
+Super-cursory look over the code... the following doesn't look good:
+
+        try {
+          writer.addDocument(FileDocument.Document(file));
+        }
+        // at least on windows, some temporary files raise this 
+exception with an "access denied" message
+        // checking if the file can be read doesn't help
+        catch (FileNotFoundException fnfe) {
+          ;
+        }
+
+Who knows, maybe some files are skipped here.  Code that comes with
+Lucene in Action includes a working file indexer application.  You can
+get the code from lucenebook.com.
+
+Otis
+
+
+--- Sushil Sureka <sushil.sureka@gmail.com> wrote:
+
+> I am trying to learn Lucene by going through tutorials and article. I
+> took  a sample program and modified it a little to index all the file
+> names on my local file system to allow me to search for a file
+> quickly.
+> 
+> I am not sure what's happening, for some file names the search is
+> working where as for others it does not work. I had let the program
+> run all the way to the end meaning I am sure it should have indexed
+> all the files on my local hard drive. Is there a way to debug the
+> issue in any way. The sample programs are attached.
+> 
+> --
+> Thanks
+> Sushil
+> 
+> 
+> 
+> 
+> -- 
+> Thanks
+> Sushil
+> > 
+> import java.io.File;
+> import java.io.Reader;
+> import java.io.FileInputStream;
+> import java.io.BufferedReader;
+> import java.io.InputStreamReader;
+> 
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.document.Field;
+> import org.apache.lucene.document.DateField;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.search.*;
+> 
+> /** A utility for making Lucene Documents from a File. */
+> 
+> public class FileDocument {
+> 
+>     public static Document Document(File f)
+>             throws java.io.FileNotFoundException {
+> 
+>         // make a new, empty document
+>         Document doc = new Document();
+> 
+>         doc.add(Field.Text("path", f.getPath()));
+>         doc.add(Field.Text("filename", f.getName()));
+> 
+>         return doc;
+>     }
+> 
+>     private FileDocument() {
+>     }
+> }
+> 
+> 
+> > 
+> import java.io.File;
+> import java.io.FileNotFoundException;
+> import java.io.IOException;
+> import java.util.Date;
+> 
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.index.IndexWriter;
+> 
+> class FileNameIndexer {
+>   public static void main(String[] args) throws IOException {
+>     String usage = "java " + FileNameIndexer.class + "
+> <root_directory>";
+>     if (args.length == 0) {
+>       System.err.println("Usage: " + usage);
+>       System.exit(1);
+>     }
+> 
+>     Date start = new Date();
+>     try {
+>       IndexWriter writer = new IndexWriter("filepath", new
+> WhitespaceAnalyzer(), true);
+>       indexDocs(writer, new File(args[0]));
+> 
+>       writer.optimize();
+>       writer.close();
+> 
+>       Date end = new Date();
+> 
+>       System.out.print(end.getTime() - start.getTime());
+>       System.out.println(" total milliseconds");
+> 
+>     } catch (IOException e) {
+>       System.out.println(" caught a " + e.getClass() +
+>        "\n with message: " + e.getMessage());
+>     }
+>   }
+> 
+>   public static void indexDocs(IndexWriter writer, File file)
+>     throws IOException {
+>     // do not try to index files that cannot be read
+>     if (file.canRead()) {
+>       if (file.isDirectory()) {
+>         String[] files = file.list();
+>         // an IO error could occur
+>         if (files != null) {
+>           for (int i = 0; i < files.length; i++) {
+>             indexDocs(writer, new File(file, files[i]));
+>           }
+>         }
+>       } else {
+>         try {
+>           writer.addDocument(FileDocument.Document(file));
+>         }
+>         // at least on windows, some temporary files raise this
+> exception with an "access denied" message
+>         // checking if the file can be read doesn't help
+>         catch (FileNotFoundException fnfe) {
+>           ;
+>         }
+>       }
+>     }
+>   }
+> }
+> 
+> > 
+> import java.io.BufferedReader;
+> import java.io.InputStreamReader;
+> 
+> import org.apache.lucene.analysis.Analyzer;
+> import org.apache.lucene.analysis.WhitespaceAnalyzer;
+> import org.apache.lucene.analysis.standard.StandardAnalyzer;
+> import org.apache.lucene.document.Document;
+> import org.apache.lucene.index.Term;
+> import org.apache.lucene.queryParser.QueryParser;
+> import org.apache.lucene.search.*;
+> 
+> class SearchFileName {
+>     public static void main(String[] args) {
+>         try {
+>             Searcher searcher = new IndexSearcher("filepath");
+>             BufferedReader in = new BufferedReader(new
+> InputStreamReader(
+>                     System.in));
+>             while (true) {
+>                 System.out.print("filename: ");
+>                 String line = in.readLine();
+> 
+>                 if (line.length() == -1)
+>                     break;
+> 
+>                 System.out.println("line <<" + line + ">>");
+>                 // Query query = new WildcardQuery(new
+> Term("filename", line));
+>                 Query query = QueryParser.parse(line, "filename", new
+> StandardAnalyzer());
+> 
+>                 Hits hits = searcher.search(query);
+>                 System.out.println(hits.length() + " total matching
+> documents");
+> 
+>                 final int HITS_PER_PAGE = 10;
+>                 for (int start = 0; start < hits.length(); start +=
+> HITS_PER_PAGE) {
+>                     int end = Math.min(hits.length(), start +
+> HITS_PER_PAGE);
+>                     for (int i = start; i < end; i++) {
+>                         Document doc = hits.doc(i);
+>                         String path = doc.get("path");
+>                         if (path != null) {
+>                             System.out.println(i + ". " + path);
+>                         } else {
+>                             System.out.println("file not found");
+>                         }
+>                     }
+>                     if (hits.length() > end) {
+>                         System.out.print("more (y/n) ? ");
+>                         line = in.readLine();
+>                         if (line.length() == 0 || line.charAt(0) ==
+> 'n')
+>                             break;
+>                     }
+>                 }
+>                 if(hits.length() == 0)
+>                   System.out.println("file " + line + "  not found");
+>         	      
+> 
+> 
+>             }
+>             searcher.close();
+> 
+>         } catch (Exception e) {
+>             e.printStackTrace();
+>             System.out.println(" caught a " + e.getClass()
+>                     + "\n with message: " + e.getMessage());
+>         }
+>     }
+> }
+> 
+> >
+---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

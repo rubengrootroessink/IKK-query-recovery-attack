@@ -1,0 +1,74 @@
+FROM: "Michael McCandless" <luc...@mikemccandless.com>
+SUBJECT: Re: Optimization and commit
+DATE: 2 Jan 2009
+
+Lucene implements ACID (like modern databases), with the restriction
+that only one transaction may be open at a time.
+
+So, once commit (your step 4) is called and succeeds, Lucene
+guarantees that any prior changes (eg your step 2) are written to
+stable storage and will not be lost ("durability").
+
+Meaning, after commit, if the OS or machine were to crash or lose
+power, upon reboot your index will be intact and will contain all
+prior changes.
+
+There are some caveats:
+
+  * Lucene is only "forwarding" a promise it obtained from the IO
+    system via the OS's "sync" call, which is supposed to block until
+    all parts of the file are written to "stable" storage.  If your IO
+    system's sync call lies, eg sync is a no-op, all bets are off.
+
+  * We are only talking about those failures that do not affect your
+    IO system; if your IO system experiences some internal failure
+    that causes it to actually lose sync'd data (eg file system
+    corruption, or a comet strikes your data center, etc), all bets
+    are off.  Examples of "valid" failures are OS crashes, machine has
+    hardware failure (other than IO system), machine suddenly loses
+    power, etc.
+
+The commit call is also atomic, meaning if something bad happens, upon
+reboot your index will either be in its starting state or will contain
+all changes done prior to commit, never something in between (assuming
+IndexWriter is opened with autoCommit=false).
+
+Mike
+
+Mindaugas Žakšauskas <mindas@gmail.com> wrote:
+
+> Hi,
+>
+> I was reading the 2.4 javadoc as well as other sources but couldn't
+> find clear answer.
+> I need to know whether the sequence
+>   (1) open index writer -> (2) write something to index -> (3)
+> optimize index -> (4) commit
+> can corrupt the index / lose the data written at the point of (2)
+> after (4) is called.
+>
+> LUCENE-1335 is quite close to what I was looking for, but it only
+> addresses the point of concurrency - e.g. what happens if one thread
+> is in the middle of commit() while another thread requests optimize(),
+> although it doesn't say what happens if optimize() is finished. The
+> concurrency here is also relevant, the most complex case being when
+> (2), (3) and (4) are executed multiple times from different threads.
+>
+> By unable to find the requirement to commit() before optimize() I
+> assume the API guarantees the index consistency (but not the freshness
+> before commit()).
+> Some basic tests I've done showed my assumption is correct, however I
+> would like to get a confirmation.
+>
+> I also think it would make sense to add this to the
+> IndexWriter#optimize() Javadoc, wouldn't it?
+>
+> Regards,
+> Mindaugas
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

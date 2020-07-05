@@ -1,0 +1,98 @@
+FROM: Daniel Noll <dan...@nuix.com>
+SUBJECT: Re: Questions about the new query parser framework
+DATE: 4 May 2010
+
+On Mon, May 3, 2010 at 15:11, Adriano Crestani
+<adrianocrestani@gmail.com> wrote:
+> I actually never liked how QueryNode -> query string is done today, using
+> QueryNode.toQueryString(...) method. A QueryNode shouldn't be responsible
+> for converting itself back to the string format, because different
+> SyntaxParser(s) may create, e.g., an ORQueryNode from a <OR(a, b)> or <a OR
+> b> syntax, so what should orQueryNode.toQueryString(...) return? So a
+> QuerySyntaxFormatter makes sense, now we need to start working on how this
+> interface should look like, so SyntaxParser implementors can start
+> implementing equivalent QuerySyntaxFormatter(s).
+
+Essentially I have started doing this for the few queries we are
+already building programmatically (full support isn't in there yet for
+anything a user might type in though.)
+
+The interface itself is dead simple:
+
+    public interface SyntaxFormatter {
+        CharSequence format(QueryNode node, CharSequence field);
+    }
+
+Internal to our particular implementation I have a
+PartialQueryFormatter<N extends QueryNode> interface which I implement
+for each type of query and have been slowly building these up.  Most
+of the tricky implementation has been making it spit out an
+aesthetically pleasing format, and what is aesthetically pleasing to
+people will wildly differ so I'm imagining that any future
+StandardSyntaxFormatter which appears in Lucene will have options for
+a bunch of things (e.g. do you prefer to group booleans under a single
+field or not, do you put spaces inside parentheses, do you use + style
+booleans or OR/AND style, ...)
+
+>  3. I have been parsing a lot of boolean queries, and have noticed
+> that there is *always* a GroupQueryNode around any BooleanQueryNode.
+> Is this really required, given that BooleanQueryNode is already
+> implicitly a grouping type of query?
+>
+>  4. If GroupQueryNode is specifically a cue to whether the user
+> specified parentheses or not (i.e. if it is supposed to be cosmetic,
+> for the purposes of getting back to what the user typed in) then why
+> is it that "tag:a tag:b" and "tag:(a b)" both parse to the same node
+> structure (making it impossible to figure out which the user actually
+> used)?
+>
+> Yes, it's created when parentheses are defined. The standard query
+> processors needs to know where parentheses were typed, so they can enforce
+> Lucene operator precedence, which is not that trivial and rely on some
+> conditions on whether the user typed or not the parentheses.
+
+I see, so from my perspective where I am manually creating an
+OrQueryNode - the node is already a group so I didn't insert any
+GroupQueryNode.  And if I understand correctly, not inserting one
+isn't actually a problem either (correct formatting code has to
+generate the right parentheses whether it came from the user or not.)
+
+> StandardSyntaxParser generate <tag:a tag:b> and <tag:(a b)> different query
+> node trees for these two queries, one with GroupQueryNode and the other
+> without. However, after the query node tree is sent through the
+> StandardQueryNodeProcessorPipeline, the query node tree is optimized and
+> usually GroupQueryNode(s) are removed.
+
+Aha.  That explains why I had to write my own little piece of code to
+strip them out again, because my code doesn't go through the rest of
+the pipeline.
+
+It doesn't explain why these two queries generate the same node tree, however:
+
+   tag:a AND (tag:b OR tag:c)
+
+   tag:a AND tag:(b OR c)
+
+For me these both parse with a "group" around the "or" node.  This is
+probably fine anyway, as I don't really want to encourage the former
+way of formatting it as the latter is more concise.  Actually it could
+even be...
+
+   tag:(a AND (b OR c))
+
+But I don't think my formatting logic is quite smart enough for that yet.
+
+Daniel
+
+
+-- 
+Daniel Noll                            Forensic and eDiscovery Software
+Senior Developer                              The world's most advanced
+Nuix                                                email data analysis
+http://nuix.com/                                and eDiscovery software
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

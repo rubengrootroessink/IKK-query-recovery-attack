@@ -1,0 +1,140 @@
+FROM: Yan Pujante <ypuja...@linkedin.com>
+SUBJECT: document ID and performance
+DATE: 27 Oct 2004
+
+Hello
+
+I wrote the following test programs:
+
+I index 150,000 documents in Lucene and I build each document using 
+this method.
+
+private Document buildDocument(String documentID, String body)
+{
+     Document document = new Document();
+     document.add(Field.Keyword("docID", documentID));
+     document.add(Field.UnStored("body", body));
+     return document;
+}
+
+I then run a search using the following method:
+
+int search(String word) throws IOException
+{
+   IndexSearcher searcher = new IndexSercher(_indexDirectory);
+   try
+   {
+       Query q = new TermQuery(new Term("body", word));
+
+       Hits hits = searcher.search(q);
+
+       return hits.length();
+   }
+   finally
+   {
+     searcher.close();
+   }
+}
+
+when I run this method on the word 'software' I get about 20,000 
+results and it takes an average of 22ms per search which is very good.
+
+If I run the following method:
+
+List search2(String word) throws IOException
+{
+   IndexSearcher searcher = new IndexSercher(_indexDirectory);
+   try
+   {
+       Query q = new TermQuery(new Term("body", word));
+
+       Hits hits = searcher.search(q);
+       ArrayList res = new ArrayList(hits.length());
+       for(int i = 0; i < res.size(); i++)
+       {
+         res.add(hits.doc(i).get("docID");
+       }
+
+       return res;
+   }
+   finally
+   {
+     searcher.close();
+   }
+}
+
+I get of course the same number of results but the performances really 
+drop: I get a time which varies from 300ms to 700ms per query and it is 
+not consistent.. it varies a lot from one run to the other.
+
+If I run this other method:
+
+List search2(String word) throws IOException
+{
+   IndexSearcher searcher = new IndexSercher(_indexDirectory);
+   try
+   {
+       Query q = new TermQuery(new Term("body", word));
+
+       MyHitCollector collector = new MyHitCollector();
+
+       searcher.search(q, collector);
+
+       return collector.getDocumentIDs();
+   }
+   finally
+   {
+     searcher.close();
+   }
+}
+
+with
+
+   public class MyHitCollector extends HitCollector
+   {
+     ArrayList res = new ArrayList();
+
+     public void collect(int i, float v)
+     {
+       res.add(String.valueOf(i));
+     }
+
+    public List getDocumentIDs()
+   {
+     return res;
+   }
+   }
+
+I get the same kind of results I was getting the first time: about 22ms 
+to run the query.
+
+This clearly shows that the action of searching the documents is 
+extremely fast. And it is the action of actually accessing the 
+documents which makes the performance drop (hits(i)...)
+
+I know that there is no relationship between the document id returned 
+in the collect method and the document id I store myself in the docID 
+field, but technically that is the only thing I care about:
+
+I want to run a very fast search that simply returns the matching 
+document id. Is there any way to associate the document id returned in 
+the hit collector to the internal document ID stored in the index ? 
+Anybody has any idea how to do that ? Ideally you would want to be able 
+to write something like this:
+
+     document.add(Field.ID(documentID));
+
+and then in the HitCollector API:
+
+collect(String documentID, float score) with the documentID being the 
+one you stored (but which would be returned very efficiently)
+
+Thanks for your help
+Yan Pujante
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

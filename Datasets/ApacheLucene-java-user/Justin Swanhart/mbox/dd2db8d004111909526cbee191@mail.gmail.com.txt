@@ -1,0 +1,160 @@
+FROM: Justin Swanhart <greenl...@gmail.com>
+SUBJECT: Re: java.io.FileNotFoundException: ... (No such file or directory)
+DATE: 19 Nov 2004
+
+Is it possible that while my searcher process is reading the directory
+that the index writer process performs a merge?  If that is so, then
+the I think that the merge could remove segment files before they are
+read by the
+reader.  When the reader tries to read one of the now missing segment
+files it throws the IOException.  That file was in the segments file
+when the RAMDirectory started loading the directory, but now it is
+missing because of the merge.  This would most likely not affect small
+indexes, but large indexes like mine, especially over a network file
+system could definitely be affected.
+
+If this is what is happening, a way around it would be to open all the
+files in the segment file when the segment file is read.  Then valid
+file handles will be maintained for all the files that need to be
+read.  If the index writer process removes a segment, then the file
+handle should still be valid.  This might only work for local
+filesystems though, I'm not sure if NFS works that way or not.
+
+
+
+On Thu, 18 Nov 2004 19:16:46 -0500, Will Allen <wallen@cyveillance.com> wrote:
+> I have gotten this a few times.  I am also using a NFS mount, but have seen it in cases
+where a mount wasn't involved.
+> 
+> I cannot speak to why this is happening, but I have posted to this forum before a way
+of repairing your index by modifying the segments file.  Search for "wallen".
+> 
+> The other thing I have done, is use code to copy the documents that can be read by a
+reader to a new index.  I suppose I should submit those tools to open source!
+> 
+> Anyway, this error will break the searcher, but the index can still be read with an indexreader.
+> 
+> -Will
+> 
+> Here is the source of a method that should get you started (logger is a log4j object):
+> 
+>     public void transferDocuments()
+>     throws IOException
+>     {
+>         IndexReader reader = IndexReader.open(brokenDir);
+>         logger.debug(reader.numDocs() + "");
+>         IndexWriter writer = new IndexWriter(newIndexDir, PopIndexer.popAnalyzer(),true);
+>         writer.minMergeDocs = 50;
+>         writer.mergeFactor = 200;
+>         writer.setUseCompoundFile(true);
+>         int docCount = reader.numDocs();
+>         Date start = new Date();
+>         //docCount = Math.min(docCount, 500);
+>         for(int x=0; x < docCount; x++)
+>         {
+>             try
+>             {
+>                 if(!reader.isDeleted(x))
+>                 {
+>                     Document doc = reader.document(x);
+>                     if(x % 1000 == 0)
+>                     {
+>                         logger.debug(doc.get("subject"));
+>                     }
+>                     //remove the new fields if they exist, and add new value
+>                     //TODO test not having this in
+>                     /*
+>                     for ( Enumeration newFields = doc.fields(); newFields.hasMoreElements();
+)
+>                     {
+>                         Field newField = (Field) newFields.nextElement();
+>                         doc.removeFields( newField.name() );
+>                         doc.add( newField );
+>                     }
+>                     */
+>                     doc.removeFields("counter");
+>                     doc.add(Field.Keyword("counter", "counter"));
+>                     //  reinsert old document
+>                     writer.addDocument( doc );
+>                 }
+>             }
+>             catch(IOException ioe)
+>             {
+>                 logger.error("doc:" + x + " failed, " + ioe.getMessage());
+>             }
+>             catch(IndexOutOfBoundsException ioobe)
+>             {
+>                 logger.error("INDEX OUT OF BOUNDS!" + ioobe.getMessage());
+>                 ioobe.printStackTrace();
+>             }
+>         }
+>         reader.close();
+>         //logger.debug("done, about the optimize");
+>         //writer.optimize();
+>         writer.close();
+>         long time = ((new Date()).getTime() - start.getTime())/1000;
+>         logger.info("done optimizing: " + time + " seconds or " + (docCount / time) +
+" rec/sec");
+> 
+> 
+>     }
+> 
+> -----Original Message-----
+> From: Justin Swanhart [mailto:greenlion@gmail.com]
+> Sent: Thursday, November 18, 2004 5:00 PM
+> To: Lucene Users List
+> Subject: java.io.FileNotFoundException: ... (No such file or directory)
+> 
+> I have two index processes.  One is an index server, the other is a
+> search server.  The processes run on different machines.
+> 
+> The index server is a single threaded process that reads from the
+> database and adds
+> unindexed rows to the index as needed.  It sleeps for a couple minutes
+> between each
+> batch to allow newly added/updated rows to accumulate.
+> 
+> The searcher process keeps an open cache of IndexSearcher objects and
+> is multithreaded.
+> It accepts connections on a tcp port, runs the query and stores the
+> results in a database.
+> After a set interval, the server checks to see if the index on disk is
+> a newer version.  If it is,
+> it loads the index into a new IndexSearcher as a RAMDirectory.
+> 
+> Every once in awhile, the index reader process gets a FileNotFoundException:
+> 20041118 1378 1383  (index number, old version, new version)
+> [newer version found] Loading index directory into RAM: 20041118
+> java.io.FileNotFoundException:
+> /path/omitted/for/obvious/reasons/_4zj6.cfs (No such file or
+> directory)
+>         at java.io.RandomAccessFile.open(Native Method)
+>         at java.io.RandomAccessFile.<init>(RandomAccessFile.java:204)
+>         at org.en.lucene.store.FSInputStream$Descriptor.<init>(FSDirectory.java:376)
+>         at org.en.lucene.store.FSInputStream.<init>(FSDirectory.java:405)
+>         at org.en.lucene.store.FSDirectory.openFile(FSDirectory.java:268)
+>         at org.en.lucene.store.RAMDirectory.<init>(RAMDirectory.java:60)
+>         at org.en.lucene.store.RAMDirectory.<init>(RAMDirectory.java:89)
+>         at org.en.global.searchserver.UpdateSearchers.createIndexSearchers(Search.java:89)
+>         at org.en.global.searchserver.UpdateSearchers.run(Search.java:54)
+> 
+> the code being called at that point is:
+> //add the directory to the HashMap of IndexSearchers (dir# => IndexSearcher)
+> indexSearchers.put(subDirs[i],new IndexSearcher(new
+> RAMDirectory(indexDir + "/" + subDirs[i])));
+> 
+> The indexes are located on a NFS mountpoint. Could this be the
+> problem?  Or should I be looking elsewhere...  Should i just check for
+> an IOException, and try reloading the index if I get an error?
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+> For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+> 
+>
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

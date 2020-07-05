@@ -1,0 +1,247 @@
+FROM: Gaston <g...@artentis.com>
+SUBJECT: Re: cache persistent Hits
+DATE: 26 Sep 2006
+
+Hi Erick,
+
+the problem was this piece of code I don't need anymore.
+
+for(int i=0;i<hits.length();i++)
+ {
+
+          Document doc=hits.doc(i);
+
+
+  }
+
+Now it is very fast, thank you very much for your email that is written  
+in detail.
+Here is my application, that still is in development phase.
+http://www.suchste.de
+
+Greetings Gaston
+
+P.S. The search for 'web' delivers over 5000 hits...
+
+
+Erick Erickson schrieb:
+
+> See below.
+>
+> On 9/26/06, Gaston <gasi@artentis.com> wrote:
+>
+>>
+>> hi,
+>>
+>> first thank you for the fast reply.
+>>
+>> I use MultiSearcher that opens 3 indexes, so this makes the whole
+>> operation surly slower, but 20seconds for 5260 results out of an 212MB
+>> index  is  much too slow.
+>> Another reason can of course be my ISP.
+>>
+>> Here is my code:
+>>
+>>         IndexSearcher[] searchers;
+>>         searchers=new IndexSearcher[3];
+>>         String path="/home/sn/public_html/";
+>>         searchers[0]=new IndexSearcher(path+"index1");
+>>         searchers[1]=new IndexSearcher(path+"index2");
+>>         searchers[2]=new IndexSearcher(path+"index3");
+>>         MultiSearcher saercher=new MultiSearcher(searchers);
+>
+>
+>
+>
+> Above you've opened the searcher for each search, exactly as I feared. 
+> This
+> is a major hit. Don't do this, but keep the searchers open between calls.
+> You can demonstrate this to yourself by returning time intervals in your
+> HTML page. Take one timestamp right here, one after a new dummy query 
+> that
+> you make up and hard-code, and one after the "real" query you already 
+> have
+> below. Return them all in your HTML page and take a look. I think 
+> you'll see
+> that the first query takes a while, and the second is very fast. And 
+> don't
+> iterate over all the hits (more below).
+>
+>
+>        QueryParser parser=new QueryParser("content",new
+>
+>> StandardAnalyzer());
+>>             parser.setOperator(QueryParser.DEFAULT_OPERATOR_AND);
+>>
+>>             Query query=parser.parse("urlName:"+userInput+" OR
+>> "+"content:"+userInput);
+>>
+>>             Hits hits=searcher.search(query);
+>>
+>>             for(int i=0;i<hits.length();i++)
+>>             {
+>>
+>>                 Document doc=hits.doc(i);
+>>
+>>
+>>             }
+>
+>
+>
+> what is the purpose of iteration above? This does nothing except waste 
+> time.
+> I'd just remove it (unless there's something else you're doing here 
+> that you
+> left out). If you're trying to get to the startPoint below, well, 
+> there's no
+> reason to iterate above, just to directly to the loop below. For 5000 
+> hits,
+> you're repeating the search 50 times or so, as has been discussed in 
+> these
+> archives repeatedly. See my previous mail.....
+>
+>
+>       // Outprint only 10 results per page
+>
+>>
+>>     for(int i=startPoint;i<startPoint+10;i++)
+>>             {
+>>
+>>                 Document doc=hits.doc(i);
+>>
+>>                     
+>> out.println(escapeHTML(doc.get("description"))+"<p>");
+>>                     out.println("<a
+>> href="+doc.get("url")+">"+doc.get("url").substring(7)+"</a>");
+>>                     out.println("<p><p><p>");
+>>
+>>             }
+>>
+>> Perhaps somebody see the reason why it is so slow.
+>>
+>> Thank you in advance
+>>
+>> Greetings Gaston
+>
+>
+>
+> I'm assuming that your ISP comment is just where you're getting your page
+> from, and that your searchers and indexes are at least on the same 
+> network
+> and NOT separated by the web, as that would be slow and hard to fix.
+>
+> To get a sense of where you're really spending your time, I'd actually 
+> get
+> the system time at various points in the process and send the *times* 
+> back
+> in your HTML page. That'll give you a much better sense of where you're
+> actually spending time. You can't really tell anything by measuring 
+> now long
+> it takes to get your HTML page back, you've *got* to measure at discreet
+> points in the code and return those.
+>
+> 5,000+ results should not be taking 20 seconds. I strongly suspect 
+> that the
+> fact that you're opening your searchers every time and uselessly 
+> iterating
+> through all the hits is the culprit. If I remember correctly, and you 
+> have
+> 5,000 documents, you're executing the query about 50 times when you 
+> iterate
+> through all the hits. Under the covers, Hits is optimized for about 100
+> results. As you iterate through, each "next 100" re-executes the 
+> query. You
+> could search the mail archive for this topic, maybe "hits slow" or 
+> some such
+> for greater explications.
+>
+> Hope this helps
+> Erick
+>
+>
+> Erick Erickson schrieb:
+>
+>>
+>> > Well, my index is over 1.4G, and others are reporting very large
+>> > indexes in
+>> > the 10s of gigabytes. So I suspect your index size isn't the issue.
+>> > I'd be
+>> > very, very, very surprised if it was.
+>> >
+>> > Three things spring immediately to mind.
+>> >
+>> > First, opening an IndexSearcher is a slow operation. Are you opening a
+>> > new
+>> > IndexSearcher for each query? If so, don't <G>. You can re-use the 
+>> same
+>> > searcher across threads without fear and you should *definitely* 
+>> keep it
+>> > open between queries.
+>> >
+>> > Second, your query could just be very, very interesting. It would be
+>> more
+>> > helpful if you posted an example of the code where you take your 
+>> timings
+>> > (including opening the IndexSearcher).
+>> >
+>> > Third, if you're using a Hits object to iterate over many 
+>> documents, be
+>> > aware that it re-executes the query every hundred results or so. You
+>> > want to
+>> > use one of the  HitCollector/TopDocs/TopDocsCollector classes if 
+>> you are
+>> > iterating over all the returned documents. And you really *don't* want
+>> > to do
+>> > an IndexReader.doc(doc#) or Searcher.doc(doc#) on every document.
+>> >
+>> > If none of this helps, please post some code fragments and I'm sure
+>> > others
+>> > will chime in.
+>> >
+>> > Best
+>> > Erick
+>> >
+>> > On 9/26/06, Gaston <gasi@artentis.com> wrote:
+>> >
+>> >>
+>> >> Hi,
+>> >>
+>> >> Lucene has itself  volatile caching mechanism provided by a weak
+>> >> HashMap. Is there a possibilty to serialize the Hits Object? I 
+>> think of
+>> >> a HashMap that for each found result, caches the first 100 
+>> results. Is
+>> >> it possible to implement such a feature or is there such an 
+>> extension?
+>> >> My problem is that the searching of my application with an index with
+>> >> the size of 212MB takes to much time, despite I set the 
+>> BooleanOperator
+>> >> from OR to AND
+>> >>
+>> >> I am happy about every suggestion.
+>> >>
+>> >> Greetings
+>> >>
+>> >> Gaston.
+>> >>
+>> >> ---------------------------------------------------------------------
+>> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+>> >>
+>> >>
+>> >
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>>
+>
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

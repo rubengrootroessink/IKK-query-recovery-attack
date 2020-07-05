@@ -1,0 +1,141 @@
+FROM: Shai Erera <ser...@gmail.com>
+SUBJECT: Re: Doc IDs via IndexReader?
+DATE: 24 Jul 2009
+
+There are a couple of things I can think of:
+
+1) From IndexReader's javadoc (
+http://lucene.apache.org/java/2_4_0/api/org/apache/lucene/index/IndexReader.html#deleteDocument%28int%29):
+"An IndexReader can be opened on a directory for which an IndexWriter is
+opened already, but it cannot be used to delete documents from the index
+then."
+Do you have an IndexWriter open when you delete a document via IndexReader?
+
+2) Is it possible that you delete a document from one IndexReader instance,
+but search through another? If the IndexSearcher's instance was opened
+before the one which you use to delete the docs, it will not "see" the
+deletes.
+
+Also, can you verify that after you delete a document, it was indeed
+deleted? You can call reader.document(idThatWasJustDeleted) to verify that.
+
+BTW, I don't want what's the purpose of the code snippet you've pasted
+(i.e., whether it's production code or just some test code), but:
+* You call reader.document() twice, once to print and once to get the
+filename to delete. It may be an expensive operation (depends on how many
+fields the document has, so I have two suggestions:
+   1) Assign the first call to a member and use it instead of the second
+call.
+   2) Use FieldSelector to load just the filename field, since that's what
+you need. It will not load whatever other stored fields you have.
+* You call file.delete() w/o checking its return value. I've run into
+several cases where this call failed (because some other process just
+scanned the file - like AV, or Backup or who knows what). I think it'd be
+better if you check it's return value and do something if it fails.
+IndexReader has an undeleteAll(), but not undeleteDoc(), which is
+unfortunate since you could have rolled back that particular delete. (I'll
+check if it's doable and open an issue for that).
+
+Shai
+
+On Thu, Jul 23, 2009 at 10:45 PM, Anuj Bhatt <anuj.bhatt@gmail.com> wrote:
+
+> Hi,
+>
+> Thanks Shai and Mike for your suggestions. I went with Shai's second
+> approach. However, I'm confronted with this now:
+>
+> After deleting that document from the index, I also delete it from a
+> copy of the directory that contained the original documents. With
+> this, I expected that both the directory as well as the index, both
+> shouldn't have had the document. More precisely, I have taken this
+> updated directory and take each document in that directory and convert
+> it to a query. I then send this query to the index via IndexSearcher
+> and examine the hits for each document. For some reason, I get a
+> document which I had deleted from the index (via IndexReader). Is
+> there any valid explanation for this? How can I be assured that the
+> index will not contain that document. Here's the code snippet I am
+> experimenting this with (hopefully things are self explanatory):
+>
+>
+>        System.out.println("Documents which are in the whitelist :
+> "+docsEncounteredNames.toString());
+>        IndexReader reader = IndexReader.open(indexDir);
+>
+>        for(int doc_itr=0; doc_itr < reader.maxDoc(); doc_itr++)
+>        {
+>                if(docsEncountered.contains(doc_itr))
+>                {
+>                       //skip if I encountered this document
+>                        continue;
+>                }
+>                else if (!reader.isDeleted(doc_itr))
+>                {
+>                        System.out.println("Deleting document with name:
+> "+reader.document(doc_itr).get("filename"));
+>                        File docToDelete = new
+> File(orgDocsDir+"/"+reader.document(doc_itr).get("filename"));
+>                        reader.deleteDocument(doc_itr);
+>                        System.out.println("Also deleting original document
+> "+docToDelete.getCanonicalPath());
+>                        docToDelete.delete();
+>                }
+>        }
+>
+> Best,
+> Anuj
+>
+>
+> On Thu, Jul 23, 2009 at 6:24 AM, Michael
+> McCandless<lucene@mikemccandless.com> wrote:
+> > I think you could also delete by Query (using IndexWriter), concocting
+> > a single large query that's something like MatchAllDocsQuery AND NOT
+> > (Q1 OR Q2 OR Q3...) where Q1, Q2, Q3 are the queries that identify the
+> > docs you want to keep.
+> >
+> > Mike
+> >
+> > On Wed, Jul 22, 2009 at 10:58 PM, Anuj Bhatt<anuj.bhatt@gmail.com>
+> wrote:
+> >> Hi,
+> >>
+> >> I'm relatively new to Lucene. I have the following case: I have
+> >> indexed a bunch of documents. I then, query the index using
+> >> IndexSearcher and retrieve the documents using Hits (I do know this is
+> >> deprecated -- I'm using v 2.4.1). So, I do this for a set of queries
+> >> and maintain which documents are returned to each one. In the end of
+> >> it all, I have a list of documents maintained (more specifically, the
+> >> hits.id(some_iterator_int) associated with the doc). Now, I wish to
+> >> delete the documents which have not been returned for any query, from
+> >> the index. How can I do this?
+> >>
+> >> My initial assumption was that I could retrieve all the doc ids from
+> >> IndexReader and just traverse the list that I have maintained, if it
+> >> is in the list, I don't delete it otherwise I do. Looking around
+> >> didn't yield anything, and hence the mail.
+> >>
+> >>
+> >> Any suggestions?
+> >>
+> >>
+> >> Regards,
+> >> Anuj
+> >>
+> >> ---------------------------------------------------------------------
+> >> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> >> For additional commands, e-mail: java-user-help@lucene.apache.org
+> >>
+> >>
+> >
+> > ---------------------------------------------------------------------
+> > To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> > For additional commands, e-mail: java-user-help@lucene.apache.org
+> >
+> >
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+>
+

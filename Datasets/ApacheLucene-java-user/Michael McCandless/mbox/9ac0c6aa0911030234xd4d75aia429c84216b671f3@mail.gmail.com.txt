@@ -1,0 +1,69 @@
+FROM: Michael McCandless <luc...@mikemccandless.com>
+SUBJECT: Re: deleteDocuments() does not work
+DATE: 3 Nov 2009
+
+On Tue, Nov 3, 2009 at 5:21 AM, Dinh <pcdinh@gmail.com> wrote:
+> Hi Michael,
+>
+>> Does that mean you no longer see the original problem (changes not
+>> being reflected)?
+>
+> Yes. The deleted documents do not appear in search results any more. I am
+> not sure that if they are flushed to disk
+> at that time yet but at least there is a sign that they are "deleted". I
+> have stopped and started the servlet engine to ensure
+> that deleted document is no longer there. I think that Lucene requires the
+> previously opened IndexReader be closed before changes
+> can be reflected.
+
+Hmmm: closing the old IndexReader shouldn't be necessary in order for
+a newly opened IndexReader to see changes.  Something else must've
+been fixed at the same time (and I'm glad you got it fixed!).
+
+>> You get the entrySet from the Map, you then iterate over its
+>> Map.Entry, then you replace in your original map some entries (the
+>> ones that are opened).  So, you are modifying a Java collection while
+>> iterating over elements from its Set view... I just don't know if
+>> that's safe (anyone?)
+>
+> I am a bit skeptical about my approach. Because the IndexSearchers can be
+> used by other threads (requests) at the same time.
+
+That's definitely a problem.  [Shameless plug:] the next rev of Lucene
+in Action has a class (SearcherManager) which gracefully handles
+reopening in the presence of multiple threads still using the old
+IndexSearcher.  It uses the reference counting already builtin to
+IndexReader to keep track of how many queries are still using the old
+reader.
+
+> Also, because reload() is synchronized so there is a single thread accessing
+> it only. So I think that there will be no ConcurrentModificationException
+
+Right, but your one thread is both iterating over and modifying the
+Map, at once.  That's what concerns me (but it could very well be
+safe).
+
+>> Would be good to instrument/debug and confirm
+>> that the precise IndexReader that's searching the Directory your
+>> IndexWriter just committed to, is in fact reopened.
+>
+> Do you think that these code are enough
+>
+> IndexReader oldReader = searcher.getIndexReader();
+> IndexReader newReader = oldReader.reopen(true);
+>
+> if (newReader != oldReader) {
+>    oldReader.close();
+>    searcher.close();
+>    searchers.put(entry.getKey(), new IndexSearcher(newReader));
+> }
+
+Yes, this code looks fine!
+
+Mike
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

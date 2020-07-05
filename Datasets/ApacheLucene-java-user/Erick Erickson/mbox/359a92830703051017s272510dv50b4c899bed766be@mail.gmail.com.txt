@@ -1,0 +1,206 @@
+FROM: "Erick Erickson" <erickerick...@gmail.com>
+SUBJECT: Re: Soliciting Design Thoughts on Date Searching
+DATE: 5 Mar 2007
+
+See below...
+
+On 3/5/07, Walt Stoneburner <walt.stoneburner@gmail.com> wrote:
+
+> Erick / Steve,
+>
+> Thank you both (as well as everyone else who weighed in) on helping get to
+> a far more optimal solution well before any code was ever slung.
+>
+> Since we all know that someone else is going to find this in the archives
+> some day, I'd like to unveil the rest of my ignorance and misconceptions,
+> on
+> the off chance that others following in these footsteps may be under the
+> same delusions about how Lucene operates under the hood.  Please forgive
+> any
+> moronic questions, no matter how gross in error.
+>
+> First, the very existence of the DateField in past versions of Lucene
+> subtly gave me the impression that Lucene was actually data-type
+> aware.  So
+> its sudden deprecation was a shocking loss.  What I quickly gathered was
+> that DateField was nothing more than a helper class, and that it's only
+> function in the universe was to inject properly formatted text dates into
+> the token stream.  If I'm mistaken or have a nuance wrong, please correct
+> me, as big errors compound from little misunderstandings.
+
+
+Right on as far as I understand. And DateTools is the preferred class now.
+
+
+
+
+> Second, and along the same lines because of the data-type goof, I was
+> operating under the impression that a document hand a single token stream
+> and that the meta data (the other fields) that were added to the documents
+> were name/value pairs (e.g. creation date, version number, author name).
+> What I'm picking up is that each field is its own token stream, and this
+> is
+> why I can have a list of dates.  Am I still on track so far?
+
+
+Sure looks good to me. This notion goes pretty deep. For instance, have
+you looked at PerFieldAnalyzerWrapper? With that class, you can
+specify different analyzers for each field (and establish a default Analyzer
+for fields you don't specify). Both at index time and query time. So you
+can specify, say, your customized DateAnalyzer for field a, StandardAnalyzer
+for field b and by specifying WhitespaceAnalyzer as a default have that
+used for fields c, d, e, ..... I mention this as another window into how
+many token streams you can think of in a document. One per field works
+for me.
+
+And then there are stored but not indexed fields. So your comment about
+field/data pairs is almost right, but not in the way you meant. If I add
+a field to a document as Field.Store.YES, Field.Index.NO, I can't search
+on the field, but I can get the value back from the document. Skipping
+COMPRESSED, UN_TOKENIZED, etc and just thinking of the 2x2
+matrix of Stored.YES/NO, Indexed.TOKENIZED/NO, you can see
+that there are four kinds of data.
+Stored.YES Index.TOKENIZED you can search AND retrieve from the doc
+NO/TOKENIZED search but the document won't have it
+YES/NO you can't search,but you can get it from a document. Say a properly
+capitalized title.
+NO/NO really doesn't make much sense.
+
+
+
+> Third, I read from the documentation that the .add() method is simply
+> appending.  At this point, I'm wondering if add is doing tokenizing at
+> each
+> add(), or when the document is indexed.  This is a matter of slight
+> importance, especially if one's understanding of the token stream is a
+> little shaky.
+>
+> Document's add() method is described like this:  "Several fields may be
+> added with the same name. In this case, if the fields are indexed, their
+> text is treated as though appended for the purposes of search."  The catch
+> here is in understanding the behavior of "append".  Lucene's documentation
+> would benefit from an example.
+>
+> document.add( Field.Text("somefield", "hot" ) );
+> document.add( Field.Text("somefield", "dog" ) );
+>
+> Did I just add "hotdog" to my document, or two tokens, "hot" and "dog"?
+
+
+You just added "hot" at offset 0 and "dog" at offset 1. You won't get a hit
+for
+"hotdog". There is one subtlte point here though, just to confuse you. Each
+time you call call to document.add() you have the chance (but not the
+obligation) to affect the offset. See getPositionIncrementGap(). So, in your
+example, you have the chance to have "hot" at postion 0 and "dog" at postion
+10,000. Why should you care? Because sometimes it's useful <G>. Imagine
+indexing the contents of a book and using SpanNear queries to find Erick
+and Erickson within 10 terms of each other. I can call document.add for each
+page
+of text and find Erick as the last term on one page and Erickson on the
+first line of the next page. But it doesn't fit my desired behavior to have
+Erick as the last term in a chapter, and Erickson as the first term of the
+next chapter be a hit. So I can set the IncrementGap to 1,000 for the first
+page of each chapter at index time.
+
+
+
+> The reason this is important to wrap one's mind around is when adding
+> multiple dates.  It had been suggested that I add dates with a separator.
+>
+> document.add( Field.Text("interestingdates", "17760704,20010911,20070305"
+> )
+> );
+>
+> If add() is tokening up front, then three calls would be the logical
+> equivalent, and I wouldn't need to artificially add separators while doing
+> a
+> looping construct.
+>
+> document.add( Field.Text("interestingdates", "17760704" ) );
+> document.add( Field.Text("interestingdates", "20010911" ) );
+> document.add( Field.Text("interestingdates", "20070305" ) );
+>
+> Are the three adds shown here the same as the one large add above `with
+> commas to Lucene?
+
+
+Yes, ASSUMING you use a tokenizer that splits the input stream for
+that field on commas. And throws them away.
+This last may seem nit-picking, but it's actually
+important. WhitspaceAnalyzer would NOT produce equivalent indexing
+for instance since (let's assume that there are no spaces in your example)
+WhitespaceAnalyzer would produce only one token. Or if there is a space
+after each comma, WhitespaceAnalyzer would produce
+17760704,
+20010911,
+20070305
+as tokens (note the comma in the first two). Which would actually
+work at least part of the time but you'd sort kinda weird <G>...
+
+Really, really, really get a copy of Luke and play around with examining
+the effects of different analyzers on your index (google Luke Lucene). It'll
+also help you see how queries parse using different analyzers. It's
+invaluable.
+
+
+
+
+
+>   And finally, the question that pulls all three of these diverse issues
+> together:  If Lucene is really just looking a stream of tokenified text,
+> and
+> dates/text are tokens no different from one another, and I can inject
+> properly formatted dates into the stream without requiring an honest to
+> goodness data type or artificial list -- what would prevent one from
+> detecting a date looking "thing" in a stream and injecting a date-looking
+> token at that place in the document?
+
+
+Nothing.
+
+
+For example, if "December 25th, 2007" was in the text stream, replace that
+> block of text with "20071225" and let the tokenizer do its thing as
+> normal,
+> none the wiser.  In theory, wouldn't this let the user be able to search
+> the
+> regular text body for words and dates at the same time?
+
+
+Yes, assuming you did the same thing with the query string. You'd have
+to transform December 25th, 2007 into 20071225 at query time as well.
+
+But, letting it stay in the text stream and not putting it in a separate
+date
+field would give you some trouble with ranges because things that
+weren't dates could mess you up. But that's a question of intended
+behavior of the app that only you can answer. For instance, the token
+1weird would be in the range of dates between 1900 and 2000. So a
+search on date ranges would generate a false hit.
+
+
+What I'm hoping you'll say is, yes, you could do that, ...but you wouldn't
+> want to for performance reasons.
+
+
+Performance, well, only measurement can tell. But I predict you don't
+want to do such a thing for behavior reasons, so performance doesn't
+even enter into it yet <G>.
+
+But I suspect you're at the point more design will get in your way.
+I think you can put together simple index/search applications in
+1/2 day, get Luke (google Luke, lucene), and experiment and
+get a much better feel for what all this means now that you have
+noodled on it for a while. Much of what people have said still probably
+sounds like gibberish, but looking at the results will generate
+"ahhhh, *that's* what they meant" moments...
+
+Best
+Erick
+
+
+Thanks again,
+> -wls
+>
+

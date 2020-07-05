@@ -1,0 +1,186 @@
+FROM: "Kristian Ottosen" ...@yawah.com>
+SUBJECT: RE: Lucene on Linux problem...
+DATE: 12 Apr 2005
+
+Hi,
+
+Thank you for the comments and hints.
+
+It seems like we finally solved this problem - but unfortunately without
+being able to pinpoint the exact cause. 
+
+Our application did in fact follow all the Lucene concurrency rules. I
+checked, double checked, bought "Lucene in Action" (that I highly recommend
+by the way), read chapter 2.9 twice, triple checked and it just didn't do
+anything illegal at all. Everything was closed correctly etc.
+
+This was also backed by the fact that it worked absolutely perfect when
+using a RAMDirectory instead of an FSDirectory on top of the Linux file.
+
+Further the application also worked perfectly on all Windows, Mac OS X,
+Solaris, AS/400 as well as almost all Linux system. But in a handful of
+Linux cases (different distributions by the way) it simply behaved very,
+very strange causing two possible symptoms:
+
+1) After adding an amount of documents we sometimes got exceptions like this
+one:
+
+java.io.FileNotFoundException:
+/srv/www/tomcat/demoserver/webapps/erez3/WEB-INF/private/index/_35.fnm
+(No such file or directory)
+        at java.io.RandomAccessFile.open(Native Method)
+        at java.io.RandomAccessFile.<init>(RandomAccessFile.java:204)
+        at
+org.apache.lucene.store.FSInputStream$Descriptor.<init>(FSDirectory.java:376
+)
+        at
+org.apache.lucene.store.FSInputStream.<init>(FSDirectory.java:405)
+        at
+org.apache.lucene.store.FSDirectory.openFile(FSDirectory.java:268)
+        at org.apache.lucene.index.FieldInfos.<init>(FieldInfos.java:53)
+        at
+org.apache.lucene.index.SegmentReader.initialize(SegmentReader.java:110)
+        at
+org.apache.lucene.index.SegmentReader.<init>(SegmentReader.java:95)
+        at
+org.apache.lucene.index.IndexReader$1.doBody(IndexReader.java:122)
+        at org.apache.lucene.store.Lock$With.run(Lock.java:109)
+        at org.apache.lucene.index.IndexReader.open(IndexReader.java:111)
+        at org.apache.lucene.index.IndexReader.open(IndexReader.java:95)
+        at
+org.apache.lucene.search.IndexSearcher.<init>(IndexSearcher.java:38)
+ 
+while Lucene tried to read a segment which it had already deleted while
+merging it with other segments.
+
+2) And also very often:
+
+java.io.IOException: Lock obtain timed out:
+Lock@/usr/local/tomcat/current/temp/lucene-4e8e9515c104fa3aef765398cfa76815-
+write.lock
+        at org.apache.lucene.store.Lock.obtain(Lock.java:58)
+        at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:223)
+        at org.apache.lucene.index.IndexWriter.<init>(IndexWriter.java:213)
+
+The frequency of this second exception was highly dependent on the value of
+the writeLockTimeout. The table below shows the number of timeouts
+encountered during a single run (add some thousand documents) for different
+values of writeLockTimeout:
+
+  20  =    1
+ 500  =    1
+ 995  =    1
+ 999  =    1 
+1000  = 3600
+1100  = 3252
+1500  = 3645 
+2000  =  116 
+3000  =   66 
+4000  =   57 
+10000 =   15 
+30000 =    7 
+
+Strange isn't it? Mind you that only a single thread is involved. No other
+threads are reading or writing to the index. All files including the locks
+are stored on a local file system (no NFS or anything).
+
+What we did to finally work around the problem was to stop creating a new
+IndexSearcher to check for duplicates before adding each document and
+instead re-use it during batch updates. That required some deal of extra
+care and management on the part of the application - but as a side effect
+also improved performance a bit (I guess).
+
+But it is still a puzzle to me why things didn't work on these Linux boxes
+in the first place. It almost seems like the Linux file system sometimes got
+"overwhelmed" by the frequent modifications and started returning "stale"
+data and/or file status to the application. 
+
+It seems to work now - but I would still love to see a good explanation.
+
+Best Regards from Denmark
+Kristian Ottosen
+http://www.yawah.com
+
+
+> -----Original Message-----
+> From: Miles Barr [mailto:miles@runtime-collective.com]
+> Sent: 4. april 2005 10:25
+> To: Lucene User
+> Subject: Re: Lucene on Linux problem...
+> 
+> On Sat, 2005-04-02 at 10:29 +0200, Kristian Ottosen wrote:
+> > I wonder if there is general problem running Lucene on top of some of
+> the
+> > journaling file systems like ReiserFS or Ext3?
+> 
+> I haven't had any problems running Lucene on either of those file
+> systems. I've done updates to the index while people are still searching
+> and it all worked fine.
+> 
+> > The problem may not appear immediately - but only after several
+> > thousand documents have been indexed in a row using a combination of
+> > IndexSearcher (check for duplicates) and IndexWriter (add document)
+> > operations.
+> 
+> Are you deleting the duplicates as you find them? i.e. are you closing
+> and opening reader/writers all the time? If you are, besides
+> recommending switching to batch updates, I suggest being really thorough
+> with closing everything, e.g.
+> 
+> IndexReader reader = null;
+> IndexWriter writer = null;
+> 
+> try {
+>     reader = IndexReader.open(/* Path to index */);
+> 
+>     ... do the deletes ...
+> 
+>     reader.close();
+>     reader = null;
+> 
+>     writer = new IndexWriter(index, /* Your analyzer */, false);
+> 
+>     ... do the deletes ....
+> 
+>     writer.optimize();
+>     writer.close();
+>     writer = null;
+> }
+> catch (IOException e) {
+>     ... do any error processing ...
+> }
+> finally {
+>     // We can do both these closes in the same finally block because if
+>     // reader is not null then writer is null, so we don't need to worry
+>     // about reader.close() throwing another IOException
+>     if (reader != null) {
+>         reader.close();
+>         reader = null;
+>     }
+> 
+>     if (writer != null) {
+>         writer.optimize();
+>         writer.close();
+>         writer = null;
+>     }
+> }
+> 
+> 
+> 
+> --
+> Miles Barr <miles@runtime-collective.com>
+> Runtime Collective Ltd.
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

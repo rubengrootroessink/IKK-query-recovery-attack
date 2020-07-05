@@ -1,0 +1,125 @@
+FROM: "Uwe Schindler" <...@thetaphi.de>
+SUBJECT: RE: Question about custom Analyzer
+DATE: 4 Nov 2010
+
+The problem with your implementatio n of reuseableTokenStream is that it does not set a new
+reader when it reuses. Reset() is the wrong method. Attempt b is also wrong, as it does not
+reuse the whole analyzer chain. The correct way is to make some utility class that you use
+for storing the TokenStream and the Tokenizer:
+
+class ReuseableTS {  Tokenizer tok; TokenStream ts }
+
+In reuseableTokenStream you create the tokenizer, store it in this instance and also create
+all filters on top. The final TokenStream you also store in this instance. Save the instance
+use setPreviousTokenStream().
+
+When getPreviousTokenStream() returns non-null for later calls, simply cast to above class,
+and then call tok.reset(reader) and after that return ts;
+
+In Lucene 3.x branch there is a class called ReusabeAnalyzerBase that helps to correctly implement
+reusing. The implementation you did is wrong.
+
+-----
+Uwe Schindler
+H.-H.-Meier-Allee 63, D-28213 Bremen
+http://www.thetaphi.de
+eMail: uwe@thetaphi.de
+
+
+> -----Original Message-----
+> From: heikki [mailto:tropicano@gmail.com]
+> Sent: Thursday, November 04, 2010 10:07 AM
+> To: java-user@lucene.apache.org
+> Subject: Question about custom Analyzer
+> 
+> hello Lucene list,
+> 
+> I have a question about a custom Analyzer we're trying to write. The intention
+> is that it tokenizes on whitespace, and abstracts over upper/lowercase and
+> accented characters. It is used both when indexing documents, and before
+> creating lucene queries from search terms.
+> 
+> I have 2 implementations. The first one seems to work only correctly if the
+> index is rebuilt after we add something to the index. If we do not rebuild, the
+> newly added document is not found when you search for it. I've no idea what
+> could cause this behaviour. I'm posting its code below, called "Attempt A".
+> 
+> The second implementation seems to work better. Using it, newly indexed
+> documents are immediately findable, without first rebuilding the index. It also
+> seems to abstract over upper/lowercase, and in my colleague's tests (but not in
+> mine) seems to abstract over accented characters. I'm posting its code below,
+> called "Attempt B".
+> 
+> We do not understand why our first implementation "Attempt A" behaves like it
+> does. We also do not understand why the second implementation "Attempt B"
+> improves on that, and whether that implementation actually fulfills our goals
+> (seeing the different test results we got).
+> 
+> So I'd very much appreciate it if someone could help us understand this, and
+> tell us if we're taking the right approach here to achieve this seemingly simple
+> goal.
+> 
+> 
+> Kind regards
+> Heikki Doeleman
+> 
+> ===============================================
+> Attempt A :
+> 
+> public final class GeoNetworkAnalyzer extends Analyzer {
+> 
+>          @Override
+>          public TokenStream tokenStream(String fieldName, Reader reader) {
+>              TokenStream ts = new WhitespaceTokenizer(reader);
+>              ts = new LowerCaseFilter(ts);
+>              ts = new ASCIIFoldingFilter(ts);
+>              return ts;
+>          }
+> 
+>          @Override
+>          public TokenStream reusableTokenStream(String fieldName, Reader
+> reader) throws IOException {
+>            TokenStream ts = (TokenStream) getPreviousTokenStream();
+>            if (ts == null) {
+>              ts = tokenStream(null, reader);
+>              setPreviousTokenStream(ts);
+>            }
+>            else {
+>              ts.reset();
+>            }
+>            return ts;
+>          }
+> }
+> 
+> =================================================
+> Attempt B :
+> 
+> public final class GeoNetworkAnalyzer extends Analyzer {
+> 
+>     @Override
+>     public TokenStream tokenStream(String fieldName, Reader reader) {
+>         return new ASCIIFoldingFilter(new LowerCaseFilter(new
+> WhitespaceTokenizer(reader)));
+>     }
+> 
+>     @Override
+>     public TokenStream reusableTokenStream(String fieldName, Reader reader)
+> throws IOException {
+>         Tokenizer tokenizer = (Tokenizer) getPreviousTokenStream();
+>         if (tokenizer == null) {
+>             tokenizer = new WhitespaceTokenizer(reader);
+>             setPreviousTokenStream(tokenizer);
+>         } else
+>             tokenizer.reset(reader);
+>         return tokenizer;
+>     }
+> }
+> 
+> =================================================
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

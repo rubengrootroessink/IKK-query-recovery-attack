@@ -1,0 +1,45 @@
+FROM: Robert Muir <rcm...@gmail.com>
+SUBJECT: Re: Search returning documents matching a NOT range
+DATE: 10 Nov 2010
+
+On Wed, Nov 10, 2010 at 1:04 PM, Uwe Schindler <uwe@thetaphi.de> wrote:
+> I know where the bug is...
+>
+> The problem has nothing to to with MultiSearcher at all, its just the rewritten query.
+Because (as Robert said) MultiSearcher rewrites per index, the rewritten query is different
+for each sub-index. The problems, Robert mentioned only affect scoring (which is different).
+As Range is ConstantScore it should still return same documents.
+>
+
+I disagree, it really is because of how MultiSearcher combine()s the
+queries from the subsearchers.
+
+and the problems again don't affect scoring:
+
+* you might hit boolean max clause count with AUTO if you use
+MultiSearcher (e.g. 5 subs return 250 terms each and the total unique
+across all in combine() is > 1024). In this case the query won't work
+at all, but it works with MultiReader. And this is really bad, because
+i think we document you will not hit this boolean max clause count
+with AUTO, and we default to it for this reason.
+
+* fuzzyquery etc will return completely different documents, or if you
+manually use TopTermsRewrite for some other query.
+
+none of these problems happen if you use MultiReader. This is why i
+suggested removing MultiSearcher, at the least, if you use this thing
+i think you should explicitly set FILTER_REWRITE.
+
+> The problem here seems to be that in the first searcher der Boolean rewrites to an empty
+BooleanQuery(), which is fine for ranges that hit no terms at all (this is also supported
+and works). The problem seems to be that a SHOULD_NOT clause on an empty Boolean query produces
+this bug!
+
+yes, i'm not sure this is the "problem", i think the problem is in
+combine(), but this is the root cause.
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

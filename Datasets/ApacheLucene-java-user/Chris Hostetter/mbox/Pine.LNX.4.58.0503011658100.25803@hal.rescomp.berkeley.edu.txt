@@ -1,0 +1,110 @@
+FROM: Chris Hostetter <hossman_luc...@fucit.org>
+SUBJECT: Re: Best Practices for Distributing Lucene Indexing and Searching
+DATE: 2 Mar 2005
+
+: We have a requirement for a new version of our software that it run in a
+: clustered environment. Any node should be able to go down but the
+: application must keep functioning.
+
+My application is looking at similar problems.  We aren't yet live, but
+the only practicle solution we have implimented so far is the "apply all
+adds/deletes to all instances in parallel or sequence" model which we
+don't really like very much.  I don't consider it a viable option for our
+launch given the volume of updates we need to be able to handle in a
+timely manor.
+
+I'm also curious as to what ideas people on this list have about realiable
+index replication.  I've included my thoughts on some of the possible
+solutions below...
+
+
+: 2. Don't distribute indexing. Searching is distributed by storing the
+: index on NFS. A single indexing node would process all requests.
+: However, using Lucene on NFS is *not* recommended. See:
+
+I don't really consider reading/writing to an NFS mounted FSDirectory to
+be viable for the very reasons you listed; but I haven't really found any
+evidence of problems if you take they approach that a single "writer"
+node indexes to local disk, which is NFS mounted by all of your other
+nodes for doing queries.  concurent updates/queries may still not be safe
+(i'm not sure) but you could have the writer node "clone" the entire index
+into a new directory, apply the updates and then signal the other nodes to
+stop using the old FSDirectory and start using the new one.
+
+: 3. Distribute indexing and searching into separate indexes for each
+: node. Combine results using ParallelMultiSearcher. If a box went down, a
+: piece of the index would be unavailable. Also, there would be serious
+
+I haven't really considered this option because it would be unacceptable
+for my application.
+
+: 4. Distribute indexing and searching, but index everything at each node.
+: Each node would have a complete copy of the index. Indexing would be
+: slower. We could move to a 5 or 15 minute batch approach.
+
+As i said, tis is our current "last resort" but there are some serious
+issues i worry baout with this under high concurrent update/query load.
+they are the same issues you would face if you only had one box -- but
+frankly one of the main oals i see for a distributed solution is to reduce
+the total amount of processing that needs to be done -- not multiply it by
+the number of boxes, so i'm trying to find something better.
+
+: 5. Index centrally and push updated indexes to search nodes on a
+: periodic basis. This would be easy and might avoid the problems with
+: using NFS.
+:
+: 6. Index locally and synchronize changes periodically. This is an
+: interesting idea and bears looking into. Lucene can combine multiple
+: indexes into a single one, which can be written out somewhere else, and
+: then distributed back to the search nodes to replace their existing
+: index.
+
+Agreed.  These are two of the most promising ideas we're currently
+considering, but we haven't acctually tried implimenting yet.  The other
+thing we have considered is having a pool of "updater" nodes which process
+batches of additions into a small index, which is then copied out to all
+of hte other nodes.  these nodes can then either Multisearch between their
+existing index and the new one, or they can acctally merge the new one
+in (based on their current load).
+
+The concern i have with approaches like this, is that they still require
+the individual nodes to all duplicate work of merging, and ultimately:
+optimizing.  that's something i don't wnat them to have to do, especially
+under potentially heavy query load.
+
+What i'd really like is a single "primary indexer" box, that builds up
+lots of small RAMDirectory indexes as updates come in, and periodically
+writes them to files to be copied over to "warm standby indexer" boxes.
+All of the indexer boxes eventually merge these small indexes into the
+master, which is versioned on a regular basis.  The primary indexer would
+also be the main guy to decide how often to do an optimize()
+
+if the primary indexer goes down, and of the warm standy indexers can take
+over with minimal loss of updates.
+
+Then the various "query boxes" can periodically copy the most recent rev
+of the index over whenever they want, close their existing IndexReader and
+open a new one poited at the new rev.
+
+Problems that come up:
+
+  1) for indexes big enough to warant these kinds of realiability
+     concerns, you need a lot of bandwidth to copy that much data arround.
+  2) our application has an expecation that issuing the same query to two
+     different nodes in the cluster at the same time should give you the
+     same results.  In order for that to be true, in an approach like the
+     one i described would reuire some coordination mechanism to know what
+     the highest rev# of the index had been copied to all of boxes and
+     then signal them all to start using that rev at the same time.
+
+
+
+
+-Hoss
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: lucene-user-unsubscribe@jakarta.apache.org
+For additional commands, e-mail: lucene-user-help@jakarta.apache.org
+
+

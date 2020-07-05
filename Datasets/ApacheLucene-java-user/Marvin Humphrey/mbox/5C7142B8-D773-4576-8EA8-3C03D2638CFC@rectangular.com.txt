@@ -1,0 +1,86 @@
+FROM: Marvin Humphrey <mar...@rectangular.com>
+SUBJECT: Re: NO_NORMS and TOKENIZED?
+DATE: 19 Feb 2007
+
+
+On Feb 19, 2007, at 8:45 AM, Yonik Seeley wrote:
+
+> If I had to do it over again, I'd be tempted to further restrict the
+> patterns so that they could be looked up from a Map rather than
+> linearly.
+
+Awesome.  I know exactly how I'm going to implement this now.
+
+> This hasn't proved to be a problem so far though, as the
+> number of field-types for dynamic fields normally remains small.
+
+For KS, there will be only one abstract class dedicated to multi- 
+dimensional data.  Users will subclass to provide their own arbitrary  
+field definitions.  The field definition itself won't be dynamic --  
+only the suffix on the field name will be.
+
+For a hashmap lookup, a prefix pattern could be restricted one of two  
+ways: fixed length, or terminal character.  I'm inclined to go with a  
+terminating underscore in the field name -- that allows the users to  
+choose their own prefix for maximum readability, at the cost of an  
+additional scan.
+
+Here's how the schema for your CNET index might look.
+
+    # ./CNETSchema.pm
+
+    package CNETSchema::name;
+    use base 'KinoSearch::Schema::FieldSpec';
+
+    package CNETSchema::description;
+    use base 'KinoSearch::Schema::FieldSpec';
+    sub similarity {
+        return KinoSearch::Contrib::LongFieldSim->new;
+    }
+
+    package CNETSchema::product_id;
+    use base 'KinoSearch::Schema::FieldSpec';
+    sub analyzed { 0 }
+
+    package CNETSchema::attr;
+    use base 'KinoSearch::Schema::DeepFieldSpec';
+    sub analyzed { 0 }
+    sub stored   { 0 }
+
+    package CNETSchema;
+    use base 'KinoSearch::Schema';
+    use KinoSearch::Analyzer::PolyAnalyzer;
+    sub analyzer {
+        return KinoSearch::Analysis::PolyAnalyzer->new( language =>  
+'en' );
+    }
+    __PACKAGE__->load_fields(qw( name description product_id attr ));
+
+    1;
+
+Then, at index time, you'll be able to do this:
+
+    $index_writer->add_doc({
+        name                         => 'Acme LT-1 Laptop',
+        description                  => 'blah blah blah...',
+        product_id                   => 'acme-lt-1',
+        attr_weight                  => 6.3,
+        attr_heat_dissipation_factor => 20,
+    });
+
+I'll need to make a few backend tweaks, but this API pretty much  
+solves the multi-dimensional data problem. :)
+
+Thoughts?
+
+Marvin Humphrey
+Rectangular Research
+http://www.rectangular.com/
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

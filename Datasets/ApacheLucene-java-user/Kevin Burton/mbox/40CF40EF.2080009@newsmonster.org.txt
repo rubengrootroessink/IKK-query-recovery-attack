@@ -1,0 +1,173 @@
+FROM: Kevin Burton <bur...@newsmonster.org>
+SUBJECT: [Fwd: PROPOSAL: Lucene external content store for stored fields]
+DATE: 15 Jun 2004
+
+Sent from the wrong email account and bounced :-/
+
+-------- Original Message --------
+Subject: 	PROPOSAL: Lucene external content store for stored fields
+Date: 	Mon, 14 Jun 2004 17:42:19 -0700
+From: 	Kevin Burton <burton@sofari.com>
+To: 	Lucene Users List <lucene-user@jakarta.apache.org>
+
+
+
+I created this proposal because we need this fixed at work. I want to go 
+ahead and work on a vertical fix for our version of lucene and then 
+submit this back to Jakarta. 
+
+There seems to be a lot of interest here and I wanted to get feedback 
+from the list before moving forward ...
+
+Should I put this in the wiki?!
+
+Kevin
+
+** OVERVIEW **
+
+Currently Lucene supports 'stored fields; where the content of these 
+fields are
+kept within the lucene index for use in the future.
+
+While acceptable for small indexes, larger amounts of stored fields prevent:
+
+- Fast index merges since the full content has to be continually merged.
+
+- Storing the indexes in memory (since a LOT of memory would be required and
+ this is cost prohibitive)
+
+- Fast queries since block caching can't be used on the index data.
+
+For example in our current setup our index size is 20G.  Nearly 90% of 
+this is
+content.  If we could store the content outside of Lucene our merges and
+searches would be MUCH faster.  If we could store the index in MEMORY 
+this could
+be orders of magnitude faster.
+
+** PROPOSAL **
+
+Provide an external field storage mechanism which supports legacy indexes
+without modification.  Content is stored in a "content segment". The only
+changes would be a field with 3(or 4 if checksum enabled) values.
+
+ - CS_SEGMENT
+
+       Logical ID of the content segment.  This is an integer value.  
+There is
+       a global Lucene property named CS_ROOT which stores all the content.
+       The segments are just flat files with pointers.  Segments are broken
+       into logical pieces by time and size.  Usually 100M of content 
+would be
+       in one segment.
+
+ - CS_OFFSET
+
+       The byte offset of the field.
+
+ - CS_LENGTH
+
+       The length of the field.
+
+ - CS_CHECKSUM
+
+       Optional checksum to verify that the content is correct when fetched
+       from the index.
+
+ - The field value here would be exactly 'N:O:L' where N is the segment 
+number,
+   O is the offset, and L is the length.  O and L are 64bit values.  N 
+is a 32
+   bit value (though 64bit wouldn't really hurt).
+
+This mechanism allows for the external storage of any named field.
+  
+CS_OFFSET, and CS_LENGTH allow use with RandomAccessFile and new NIO 
+code for
+efficient content lookup.  (Though filehandle caching should probably be 
+used).
+
+Since content is broken into logical 100M segments the underlying 
+filesystem can
+orgnize the file into contiguous blocks for efficient non-fragmented lookup.
+
+File manipulation is easy and indexes can be merged by simply 
+concatenating the
+second file to the end of the first.  (Though the segment, offset, and 
+length
+need to be updated).  (FIXME: I think I need to think about this more 
+since I
+will have < 100M per syncs)
+
+Supporting full unicode is important.  Full java.lang.String storage is used
+with String.getBytes() so we should be able to avoid unicode issues.  If 
+Java
+has a correct java.lang.String representation it's possible easily add 
+unicode
+support just by serializing the byte representation. (Note that the JDK says
+that the DEFAULT system char encoding is used so if this is ever changed it
+might break the index)
+
+While Linux and modern versions of Windows (not sure about OSX) support 
+64bit
+filesystems the 4G storage boundary of 32bit filesystems (ext2 is an 
+example)
+are an issue.  Using smaller indexes can prevent this but eventually segment
+lookup in the filesystem will be slow.  This will only happen within 
+terabyte
+storage systems so hopefully the developer has migrated to another (modern)
+filesystem such as XFS.
+
+** FEATURES **
+
+   - Must be able to replicate indexes easily to other hosts.
+
+   - Adding content to the index must be CHEAP
+
+   - Deletes need to be cheap (these are cheap for older content.  Just 
+discard
+     older indexes)
+
+   - Filesystem needs to be able to optimize storage
+
+   - Must support UNICODE and binary content (images, blobs, byte arrays,
+     serialized objects, etc)
+
+   - Filesystem metadata operations should be fast.  Since content is 
+kept in
+     LARGE indexes this is easy to avoid.
+
+   - Migration to the new system from legacy indexes should be fast and
+     painless for future developers
+  
+
+-- 
+
+Please reply using PGP.
+
+   http://peerfear.org/pubkey.asc    
+   
+   NewsMonster - http://www.newsmonster.org/
+   
+Kevin A. Burton, Location - San Francisco, CA, Cell - 415.595.9965
+      AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+ IRC - freenode.net #infoanarchy | #p2p-hackers | #newsmonster
+
+
+
+
+-- 
+
+Please reply using PGP.
+
+    http://peerfear.org/pubkey.asc    
+    
+    NewsMonster - http://www.newsmonster.org/
+    
+Kevin A. Burton, Location - San Francisco, CA, Cell - 415.595.9965
+       AIM/YIM - sfburtonator,  Web - http://peerfear.org/
+GPG fingerprint: 5FB2 F3E2 760E 70A8 6174 D393 E84D 8D04 99F1 4412
+  IRC - freenode.net #infoanarchy | #p2p-hackers | #newsmonster
+
+

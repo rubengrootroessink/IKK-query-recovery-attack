@@ -1,0 +1,105 @@
+FROM: "Ganesh" <emailg...@yahoo.co.in>
+SUBJECT: Re: External sort
+DATE: 17 Dec 2009
+
+
+Thanks Toke. I worried to use  long[] inverted = new long[reader.maxDoc]; as the memory consumption
+will be high for millions of document.
+
+Any idea of building external sort cache?  
+
+Regards
+Ganesh
+ 
+----- Original Message ----- 
+From: "Toke Eskildsen" <te@statsbiblioteket.dk>
+To: <java-user@lucene.apache.org>
+Sent: Thursday, December 17, 2009 6:07 PM
+Subject: Re: External sort
+
+
+> On Thu, 2009-12-17 at 07:48 +0100, Ganesh wrote:
+>> I am using v2.9.1 I am having multiple shards and i need to do only 
+>> date time sorting. Sorting consumes 50% of RAM.
+> 
+> I'm guessing that your date-times are representable in 32 bits (signed
+> seconds since epoch or such - that'll work until 2038)? If so, it should
+> be possible to do very efficient sorting, both memory- and
+> performance-wise.
+> 
+> Make your own sorter by implementing SortComparatorSource.
+> 
+> The SortComparatorSource returns a ScoreDocComparator which contains an
+> array of longs, in which the first 32 bits designates the order of the
+> document at the given index (docID) and the last 32 bits holds the date
+> time.
+> 
+> The ScoreDocComparator's methods are trivial:
+>  public int compare (ScoreDoc i, ScoreDoc j) {
+>    return order[i.doc] - order[j.doc];
+>    // Or is it the other way? I always mix them up
+>  }
+>  public Comparable sortValue (ScoreDoc i) {
+>    return Integer.valueOf((int)(order[i.doc] & 0xFFFFFFFF));
+>  }
+>  public int sortType(){
+>    return SortField.CUSTOM;
+>  }
+> 
+> Now, for generating the order-array, we do something like this in the
+> SortComparatorSource:
+> 
+>  TermDocs termDocs = reader.termDocs();
+>  // inverted[docID] == datetime | docID
+>  long[] inverted = new long[reader.maxDoc];
+>  TermEnum termEnum = reader.terms(new Term(fieldname, ""));
+> 
+>  do {
+>    Term term = termEnum.term();
+>    if (term == null || !fieldname.equals(term.field())) {
+>      break;
+>    }
+>    long dateTime = (long)stringDateTimeToInt(term.text()) << 32;
+>    termDocs.seek(termEnum);
+>    while (termDocs.next()) {
+>      inverted[termDocs.doc()] = dateTime | termDocs.doc();
+>    }
+>  } while (termEnum.next());
+>  termEnum.close();
+> 
+>  // inverted[order] == datetime | docID
+>  Arrays.sort(inverted); // works for date time 1970+
+> 
+>  // order[docID] == order | datetime
+>  long[] order = new long[inverted.length];
+>  for (long o = 0 ; o < inverted.length ; o++) {
+>    int docID = (int)(inverted[o] & 0xFFFFFFFF);
+>    order[docID] = (o << 32) | (inverted[o] >>> 32);
+>  }
+> 
+> It would be nice to avoid the extra array needed for reordering, but I'm
+> fresh out of ideas. Still, the memory-overhead is just
+>  8 bytes (long) * 2 (arrays) * maxDoc
+> and performance should high as Arrays.sort(long[]) is fast and
+> everything runs without taxing the garbage collector.
+> 
+> 
+> Caveat lector: I haven't implemented the stuff above, so it's just an
+> idea written in not-so-pseudo code.
+> 
+> Regards,
+> Toke Eskildsen
+> 
+> 
+> 
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+>
+Send instant messages to your online friends http://in.messenger.yahoo.com 
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

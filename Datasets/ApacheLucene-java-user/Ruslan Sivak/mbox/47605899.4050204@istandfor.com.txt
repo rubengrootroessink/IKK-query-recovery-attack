@@ -1,0 +1,218 @@
+FROM: Ruslan Sivak <rsi...@istandfor.com>
+SUBJECT: Re: Refreshing RAMDirectory
+DATE: 12 Dec 2007
+
+This seems to be problematic though.  There are other things that depend 
+on the reader that is not so obvious.  For example,
+
+IndexReader reader=getReader();
+IndexSearcher searcher=new IndexSearcher(reader);
+Hits hits=searcher.search(query);
+searcher.close();
+reader.close();
+Iterator i=hits.iterator();
+if (i.hasNext())
+    Hit h=(Hit) i.next();
+
+This, for example, would not work, as accessing the hits after the 
+reader is closed will throw a "this reader is closed" exception.  You 
+need to have the reader open for the hits to retrieve data.
+
+Since my app would be multithreaded, there could be multiple threads 
+accessing the reader, while i'm reloading it.  This means that if I 
+close the reader, and another thread is using it, it might get an 
+exception.  This forces me to use a new reader for every method 
+invocation.  This shouldn't be that bad, since it's accessing a 
+RAMDirectory, correct?  The overhead should be minimal.
+
+Russ
+
+
+Michael McCandless wrote:
+>
+> You need to keep a reader open so long as you plan to use any of its 
+> methods from any thread.
+>
+> The reader does close exactly when you ask it to (when you call 
+> reader.close()).
+>
+> You should not have to "open a new reader for every method call" -- 
+> you only need to open a new reader (and in your case, RAMDirectory) 
+> whenever the underlying index has changed.
+>
+> Mike
+>
+> Ruslan Sivak wrote:
+>
+>> Thank you to everyone for your comments.  I didn't realize that 
+>> readers need to be kept open and won't close exactly when you ask 
+>> them too.  I have restructured my code to keep the RamDirectory 
+>> cached, and to open a new reader for every method call.  This seems 
+>> to be working fine.
+>>
+>> Russ
+>>
+>> Erick Erickson wrote:
+>>> Even if you could tell a reader is closed, you'd wind up with
+>>> unmaintainable code. I envision you have a bunch of places
+>>> where you'd do something like
+>>>
+>>> if (reader.isClosed()) {
+>>>      reader = create a new reader.
+>>> }
+>>>
+>>> But practically, you'd be opening a new reader someplace,
+>>> closing it someplace else, opening it in another place......
+>>>
+>>> This just leads to maintenance nightmares. For instance, how
+>>> could you determine what the state of a particular reader was
+>>> when trying to figure out why your searches didn't work if you don't
+>>> have a clue where/when it was opened?
+>>>
+>>> Perhaps the easiest thing to do if you can't restructure your code
+>>> as Michael suggested is just employ a singleton pattern to give you
+>>> complete control over when/where a reader is opened.....
+>>>
+>>> Best
+>>> Erick
+>>>
+>>> On Dec 12, 2007 5:36 AM, Michael McCandless <lucene@mikemccandless.com>
+>>> wrote:
+>>>
+>>>
+>>>> Ruslan Sivak wrote:
+>>>>
+>>>>
+>>>>> Michael McCandless wrote:
+>>>>>
+>>>>>> Ruslan Sivak wrote:
+>>>>>>
+>>>>>>
+>>>>>>> I have an index of about 10mb.  Since it's so small, I would
+like
+>>>>>>> to keep it loaded in memory, and reload it about every minute
+or
+>>>>>>> so, assuming that it has changed on disk.  I have the following
+>>>>>>> code, which works, except it doesn't reload the changes.
+>>>>>>> protected String indexName;
+>>>>>>> protected IndexReader reader;
+>>>>>>> private long lastCheck=0;
+>>>>>>> ...
+>>>>>>> protected IndexReader getReader() throws CorruptIndexException,
+>>>>>>> IOException
+>>>>>>>    {
+>>>>>>>        if (reader==null || System.currentTimeMillis() > lastCheck
+>>>>>>> +60000)
+>>>>>>>        {
+>>>>>>>            lastCheck=System.currentTimeMillis();
+>>>>>>>            if (reader==null || !reader.isCurrent())
+>>>>>>>            {
+>>>>>>>                if (reader!=null)
+>>>>>>>                    reader.close();
+>>>>>>>                              Directory dir = new RAMDirectory
+>>>>>>> (indexName);
+>>>>>>>                reader = IndexReader.open(dir);
+>>>>>>>                searcher = new IndexSearcher(reader);
+>>>>>>>            }
+>>>>>>>        }
+>>>>>>>        return reader;
+>>>>>>> }
+>>>>>>>
+>>>>>>>
+>>>>>>> Apparently reader.isCurrent() won't tell you if the underlying
+>>>>>>> FSDirectory has changed.
+>>>>>>>
+>>>>>> That's right: your reader is only searching the RAMDirectory; it
+>>>>>> has no idea that your RAMDirectory was copied from an FSDirectory
+>>>>>> that has now changed.  (That ctor for RAMDirectory makes a full
+>>>>>> copy of what's currently in the FSDirectory and thereafter
+>>>>>> maintains no link to that FSDirectory).
+>>>>>>
+>>>>>>
+>>>>>>> I also had the following code before:
+>>>>>>> instead of
+>>>>>>> if (reader==null || !reader.isCurrent())
+>>>>>>> I had
+>>>>>>> if (reader==null || reader.getVersion() !=
+>>>>>>> IndexReader.getCurrentVersion(indexName))
+>>>>>>>
+>>>>>> That 2nd line seems like it should have worked.  What version of
+>>>>>> Lucene are you using?  Are you really sure it's not showing the
+>>>>>> changes?  Can you print the two versions?  Every commit to the
+>>>>>> index (by IndexWriter) should increment that version number.
+>>>>>>
+>>>>>>
+>>>>> The 2nd line was working fine, however I was getting errors in
+>>>>> other places saying that the indexReader is closed.
+>>>>>
+>>>> Can you restructure your code, such that you open a new reader
+>>>> without first closing the old one, and then only once the open is
+>>>> complete, you swap the new reader in as "reader", wait for threads to
+>>>> finish using the old reader, then call close on the old one?
+>>>>
+>>>>
+>>>>>>> I was getting a bunch of this indexreader is closed errors, and
+>>>>>>> I'm not sure why there's no method like reader.isClosed().
+>>>>>>>
+>>>>>> That's spooky: can you explain why you're accidentally using a
+>>>>>> closed reader?  Your code above seems to replace reader after
+>>>>>> closing it.  Are there other threads that are using the reader
+>>>>>> while you are doing this re-opening?
+>>>>>>
+>>>>>>
+>>>>> There could be other threads using this, and there are other places
+>>>>> in the code that open and close readers.  My main problem I guess
+>>>>> is that I can't tell when a reader is closed.  Is there some method
+>>>>> I can use?  I basically want to do something like this.
+>>>>> if (reader==null || reader.isClosed || reader.getVersion() !=
+>>>>> IndexReader.getCurrentVersion(indexName))
+>>>>>
+>>>> There is currently no way to ask a reader if it's closed.  I suppose
+>>>> you could do something like:
+>>>>
+>>>>   try {
+>>>>     version = reader.getVersion();
+>>>>     isClosed = false;
+>>>>   } catch (AlreadyClosedException e) {
+>>>>     isClosed = true;
+>>>>   }
+>>>>
+>>>> However this is somewhat bad form.  It's better to restructure your
+>>>> code such that it's not possible to accidentally use a reader you had
+>>>> closed.
+>>>>
+>>>>
+>>>>> Is reader threadsafe?  Should each invocation open it's own reader?
+>>>>>
+>>>> Reader is definitely thread safe, so you should share 1 reader across
+>>>> all threads.  You just need to take care in your app to not close a
+>>>> reader if other threads are still using it or will continue using it.
+>>>>
+>>>> Mike
+>>>>
+>>>> ---------------------------------------------------------------------
+>>>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>>>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>>>
+>>>>
+>>>>
+>>>
+>>>
+>>
+>>
+>> ---------------------------------------------------------------------
+>> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+>> For additional commands, e-mail: java-user-help@lucene.apache.org
+>>
+>
+>
+> ---------------------------------------------------------------------
+> To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+> For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+

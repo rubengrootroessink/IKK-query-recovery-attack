@@ -1,0 +1,126 @@
+FROM: Erik Hatcher <e...@ehatchersolutions.com>
+SUBJECT: Re: Lucene removing some words while searching
+DATE: 27 Dec 2005
+
+
+On Dec 27, 2005, at 3:27 AM, M å n i s h wrote:
+> Suppose I search “lucene user forum” it should give correct continuous
+> occurrence of full text ,
+>
+>
+>
+> But if I search for “when they occur” lucene is searching for “when  
+> occur”
+> also.
+>
+> I think lucene is treating “they”  as stopword and removing it from  
+> the
+> search string.
+>
+> But If I use double quotes it should not happen.
+
+As always, the analyzer is at the heart of the situation.  Below is  
+the output of running AnalyzerDemo (from Lucene in Action's code at  
+http://www.lucenebook.com).  It shows that "they" is a stop word.  
+(note: the output shown may not be the exact output given by LIA's  
+code as I tweak my local version to toy with analyzers when this type  
+of thing crops on the list, but the StandardAnalyzer output is  
+accurate).
+
+If you use a stop word removing analyzer at indexing time,  
+"they" (with the default StopFilter list) is not indexed, period.  So  
+searching for the exact phrase "when they occur" would yield no  
+results even if it was in the original text.  Stop words removed  
+during indexing need to be removed during searching.  What is indexed  
+is what is searchable.
+
+It is possible to be a bit more clever with stop word removal and at  
+least have positional holes left during indexing (which is not done  
+by the default StopFilter currently, even in the latest codebase) and  
+have QueryParser obey those holes (which was not the case in 1.4.3,  
+but is the case in the latest codebase).
+
+So you have some decisions to make on whether you want to keep stop  
+words or remove them.  Generally I recommend against removing stop  
+words, which can be done like this with StandardAnalyzer:
+
+	 new StandardAnalyzer(new String[] {})
+
+But every scenario varies with this sort of thing, so you'll need to  
+decide how that fits with your project.
+
+There is an even more interesting solution to stop words which Nutch  
+employs, and that is to bi-gram stop words during indexing.  During  
+searching, if no quotes are used the stop words are removed from the  
+query, but once quotes are used the bi-gramming happens.  Bi-gramming  
+makes far more unique terms and thus improving performance  
+dramatically for the extremely large indexes that are typical with  
+Nutch usage.  The analyzer and query parser used by Nutch are quite  
+custom, and unfortunately a bit difficult to tease out to use  
+standalone because of some static configuration that ties to the rest  
+of Nutch (though that situation is now being discussed and improved,  
+I believe).
+
+	Erik
+
+
+$ ant AnalyzerDemo
+Buildfile: build.xml
+
+check-environment:
+
+compile:
+     [javac] Compiling 1 source file to /Users/erik/dev/ 
+LuceneInAction/temp/LuceneInAction/build/classes
+
+build-test-index:
+
+build-perf-index:
+
+prepare:
+
+AnalyzerDemo:
+      [echo]
+      [echo]       Demonstrates analysis of sample text.
+      [echo]
+      [echo]       Refer to the "Analysis" chapter for much more on this
+      [echo]       extremely crucial topic.
+      [echo]
+     [input] Press return to continue...
+
+     [input] String to analyze: [This string will be analyzed.]
+when they occur
+      [echo] Running lia.analysis.AnalyzerDemo...
+      [java] Analyzing "when they occur"
+      [java]   WhitespaceAnalyzer:
+      [java]     [when] [they] [occur]
+
+      [java]   SimpleAnalyzer:
+      [java]     [when] [they] [occur]
+
+      [java]   StopAnalyzer:
+      [java]     [when] [occur]
+
+      [java]   StandardAnalyzer:
+      [java]     [when] [occur]
+
+      [java]   SnowballAnalyzer:
+      [java]     [when] [they] [occur]
+
+      [java]   SnowballAnalyzer:
+      [java]     [when] [they] [occur]
+
+      [java]   SnowballAnalyzer:
+      [java]     [when] [thei] [occur]
+
+
+BUILD SUCCESSFUL
+Total time: 28 seconds
+
+
+
+---------------------------------------------------------------------
+To unsubscribe, e-mail: java-user-unsubscribe@lucene.apache.org
+For additional commands, e-mail: java-user-help@lucene.apache.org
+
+
