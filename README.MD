@@ -81,7 +81,7 @@ The project root contains the following folders/files:
    * ```similarity_calculation.py``` calculates the similarity between two matrices, used for finding a correlation between the input matrices of the IKK attack and the results obtained
    * ```word_extraction.py``` processes and stems the words of a single (email) file
 * ```Results``` contains folders for each simulation so simulation results can be found easily. When adding a new simulation (folder) you might want to add a ```placeholder``` file in that new folder so .git sees it). The ```Test``` folder contains test simulation results which are invoked by the test method in one of the simulations
-* ```StemmedDatasets``` can contain datasets which were already extracted/stemmed as this process can be quite lengthy for large(r) dataset. ```dataset_extraction.py``` by default saves a specific extracted dataset and reuses that dataset the next simulation│
+* ```StemmedDatasets``` can contain datasets which were already extracted/stemmed as this process can be quite lengthy for large(r) dataset. ```dataset_extraction.py``` by default saves a specific extracted dataset and reuses that dataset the next simulation
 * ```test``` contains two test files (used by ```test_word_extraction.py```) to simulate emails of respectively the ENRON/ApacheLucene-java-user dataset and 5 test files corresponding to the files in the ```ikk``` folder.
 * ```config.py``` contains system specific parameters
 * ```main.py``` is the main instance of the system
